@@ -3,6 +3,8 @@ import unittest
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     ClientConnectedFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InterruptionFrame,
     MetricsFrame,
     UserStoppedSpeakingFrame,
@@ -462,6 +464,85 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(len(first_speech_latencies), 0)
+
+    async def test_function_call_latency_in_breakdown(self):
+        """Test that function call duration appears in the latency breakdown."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        breakdowns = []
+
+        @observer.event_handler("on_latency_breakdown")
+        async def on_breakdown(obs, breakdown):
+            breakdowns.append(breakdown)
+
+        tool_call_id = "call_abc123"
+
+        frames_to_send = [
+            VADUserStoppedSpeakingFrame(),
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id=tool_call_id,
+                arguments={"location": "Atlanta"},
+            ),
+            SleepFrame(sleep=0.1),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id=tool_call_id,
+                arguments={"location": "Atlanta"},
+                result={"temperature": "75"},
+            ),
+            BotStartedSpeakingFrame(),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(breakdowns), 1)
+        self.assertEqual(len(breakdowns[0].function_calls), 1)
+        fc = breakdowns[0].function_calls[0]
+        self.assertEqual(fc.function_name, "get_weather")
+        self.assertGreaterEqual(fc.duration_secs, 0.1)
+
+    async def test_function_call_reset_on_interruption(self):
+        """Test that function call metrics are cleared on interruption."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        breakdowns = []
+
+        @observer.event_handler("on_latency_breakdown")
+        async def on_breakdown(obs, breakdown):
+            breakdowns.append(breakdown)
+
+        frames_to_send = [
+            VADUserStoppedSpeakingFrame(),
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="call_1",
+                arguments={},
+            ),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="call_1",
+                arguments={},
+                result={},
+            ),
+            InterruptionFrame(),
+            BotStartedSpeakingFrame(),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(breakdowns), 1)
+        self.assertEqual(len(breakdowns[0].function_calls), 0)
 
 
 if __name__ == "__main__":

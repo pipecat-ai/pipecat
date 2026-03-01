@@ -15,11 +15,13 @@ is measured. Optionally collects per-service latency breakdown metrics
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     ClientConnectedFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InterruptionFrame,
     MetricsFrame,
     UserStoppedSpeakingFrame,
@@ -32,6 +34,19 @@ from pipecat.metrics.metrics import (
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
+
+
+@dataclass
+class FunctionCallMetrics:
+    """Latency for a single function call execution.
+
+    Parameters:
+        function_name: Name of the function that was called.
+        duration_secs: Time in seconds from execution start to result.
+    """
+
+    function_name: str
+    duration_secs: float
 
 
 @dataclass
@@ -52,11 +67,14 @@ class LatencyBreakdown:
             VAD silence detection, STT finalization, and any turn analyzer
             wait. ``None`` if no ``UserStoppedSpeakingFrame`` was observed
             (e.g. no turn analyzer configured).
+        function_calls: Latency for each function call executed during
+            this cycle. Empty if no function calls occurred.
     """
 
     ttfb: List[TTFBMetricsData] = field(default_factory=list)
     text_aggregation: Optional[TextAggregationMetricsData] = None
     user_turn_secs: Optional[float] = None
+    function_calls: List[FunctionCallMetrics] = field(default_factory=list)
 
 
 class UserBotLatencyObserver(BaseObserver):
@@ -113,6 +131,8 @@ class UserBotLatencyObserver(BaseObserver):
         # Per-cycle metric accumulators
         self._ttfb: List[TTFBMetricsData] = []
         self._text_aggregation: Optional[TextAggregationMetricsData] = None
+        self._function_call_starts: Dict[str, tuple[str, float]] = {}
+        self._function_call_metrics: List[FunctionCallMetrics] = []
 
         self._register_event_handler("on_latency_measured")
         self._register_event_handler("on_latency_breakdown")
@@ -171,6 +191,21 @@ class UserBotLatencyObserver(BaseObserver):
         elif isinstance(data.frame, InterruptionFrame):
             # Discard stale metrics from cancelled LLM/TTS cycles
             self._reset_accumulators()
+        elif isinstance(data.frame, FunctionCallInProgressFrame):
+            self._function_call_starts[data.frame.tool_call_id] = (
+                data.frame.function_name,
+                time.time(),
+            )
+        elif isinstance(data.frame, FunctionCallResultFrame):
+            start = self._function_call_starts.pop(data.frame.tool_call_id, None)
+            if start is not None:
+                function_name, start_time = start
+                self._function_call_metrics.append(
+                    FunctionCallMetrics(
+                        function_name=function_name,
+                        duration_secs=time.time() - start_time,
+                    )
+                )
         elif isinstance(data.frame, MetricsFrame):
             self._handle_metrics_frame(data.frame)
         elif isinstance(data.frame, BotStartedSpeakingFrame):
@@ -198,6 +233,7 @@ class UserBotLatencyObserver(BaseObserver):
                 ttfb=list(self._ttfb),
                 text_aggregation=self._text_aggregation,
                 user_turn_secs=self._user_turn,
+                function_calls=list(self._function_call_metrics),
             )
             await self._call_event_handler("on_latency_breakdown", breakdown)
             self._reset_accumulators()
@@ -229,3 +265,5 @@ class UserBotLatencyObserver(BaseObserver):
         self._ttfb = []
         self._text_aggregation = None
         self._user_turn = None
+        self._function_call_starts = {}
+        self._function_call_metrics = []
