@@ -129,7 +129,7 @@ class AssemblyAIConnectionParams(BaseModel):
         formatted_finals: Whether to enable transcript formatting. Defaults to True.
         word_finalization_max_wait_time: Maximum time to wait for word finalization in milliseconds.
         end_of_turn_confidence_threshold: Confidence threshold for end-of-turn detection.
-        min_end_of_turn_silence_when_confident: Minimum silence duration when confident about end-of-turn.
+        min_turn_silence: Minimum silence duration when confident about end-of-turn.
         max_turn_silence: Maximum silence duration before forcing end-of-turn.
         keyterms_prompt: List of key terms to guide transcription. Will be JSON serialized before sending.
         prompt: Optional text prompt to guide the transcription. Only used when speech_model is "u3-rt-pro".
@@ -148,7 +148,7 @@ class AssemblyAIConnectionParams(BaseModel):
     formatted_finals: bool = True
     word_finalization_max_wait_time: Optional[int] = None
     end_of_turn_confidence_threshold: Optional[float] = None
-    min_end_of_turn_silence_when_confident: Optional[int] = None
+    min_turn_silence: Optional[int] = None
     max_turn_silence: Optional[int] = None
     keyterms_prompt: Optional[List[str]] = None
     prompt: Optional[str] = None

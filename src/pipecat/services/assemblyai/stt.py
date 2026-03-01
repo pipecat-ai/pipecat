@@ -127,8 +127,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             vad_force_turn_endpoint: Controls turn detection mode.
                 When True (Pipecat mode, default): Forces AssemblyAI to return finals ASAP
                 so Pipecat's turn detection (e.g., Smart Turn) decides when the user is done.
-                - min_end_of_turn_silence_when_confident defaults to 100ms (user can override)
-                - max_turn_silence is ALWAYS set equal to min_end_of_turn_silence_when_confident
+                - min_turn_silence defaults to 100ms (user can override)
+                - max_turn_silence is ALWAYS set equal to min_turn_silence
                 - VAD stop sends ForceEndpoint as ceiling
                 - No UserStarted/StoppedSpeakingFrame emitted from STT
                 When False (STT mode, u3-rt-pro only): AssemblyAI's model controls turn endings.
@@ -172,10 +172,11 @@ class AssemblyAISTTService(WebsocketSTTService):
         # Warn if user sets a custom prompt (recommend testing without one first)
         if connection_params.prompt is not None:
             logger.warning(
-                "Custom prompt detected. We recommend testing with no prompt first, as this "
-                "will use our optimized default prompt for voice agents. Bad prompts may lead "
-                "to bad results. If you'd like to create your own prompt, check out our "
-                "prompting guide at: https://www.assemblyai.com/docs/streaming/prompting"
+                "Custom prompt detected. Prompting is a beta feature. We recommend testing "
+                "with no prompt first, as this will use our optimized default prompt for "
+                "voice agents. Bad prompts may lead to bad results. If you'd like to create "
+                "your own prompt, check out our prompting guide at: "
+                "https://www.assemblyai.com/docs/streaming/prompting"
             )
 
         # When vad_force_turn_endpoint is enabled, configure connection params
@@ -223,15 +224,15 @@ class AssemblyAISTTService(WebsocketSTTService):
         when the user is done speaking. VAD stop is the absolute ceiling.
 
         u3-rt-pro:
-        - min_end_of_turn_silence_when_confident defaults to 100ms (user can override)
-        - max_turn_silence is ALWAYS set equal to min_end_of_turn_silence_when_confident
+        - min_turn_silence defaults to 100ms (user can override)
+        - max_turn_silence is ALWAYS set equal to min_turn_silence
           to avoid double turn detection (AssemblyAI + Pipecat both analyzing)
         - If user sets max_turn_silence, it's ignored with a warning
         - end_of_turn_confidence_threshold: not set (API default)
 
         universal-streaming-*:
         - end_of_turn_confidence_threshold=0.0 (disable semantic turn detection)
-        - min_end_of_turn_silence_when_confident=160
+        - min_turn_silence=160
         - max_turn_silence: not set (API default)
 
         Args:
@@ -244,8 +245,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         updates = {}
 
         if is_u3_pro:
-            # u3-rt-pro: Synchronize max_turn_silence with min_end_of_turn_silence_when_confident
-            min_silence = connection_params.min_end_of_turn_silence_when_confident
+            # u3-rt-pro: Synchronize max_turn_silence with min_turn_silence
+            min_silence = connection_params.min_turn_silence
             if min_silence is None:
                 min_silence = 100
 
@@ -254,20 +255,20 @@ class AssemblyAISTTService(WebsocketSTTService):
                 logger.warning(
                     f"Your max_turn_silence value ({connection_params.max_turn_silence}ms) will be "
                     f"OVERRIDDEN in Pipecat mode (vad_force_turn_endpoint=True). It will be set to "
-                    f"{min_silence}ms (matching min_end_of_turn_silence_when_confident) and SENT to "
+                    f"{min_silence}ms (matching min_turn_silence) and SENT to "
                     f"AssemblyAI to avoid double turn detection. To use your max_turn_silence as-is, "
                     f"switch to STT mode (vad_force_turn_endpoint=False)."
                 )
 
             updates = {
-                "min_end_of_turn_silence_when_confident": min_silence,
+                "min_turn_silence": min_silence,
                 "max_turn_silence": min_silence,
             }
         else:
             # universal-streaming: Different configuration (works differently)
             updates = {
                 "end_of_turn_confidence_threshold": 0.0,
-                "min_end_of_turn_silence_when_confident": 160,
+                "min_turn_silence": 160,
             }
 
         # Apply updates if any
@@ -292,7 +293,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         - keyterms_prompt: List of terms to boost (can be empty array to clear)
         - prompt: Custom prompt text (u3-rt-pro only)
         - max_turn_silence: Maximum silence before forcing turn end
-        - min_end_of_turn_silence_when_confident: Silence before EOT check
+        - min_turn_silence: Silence before EOT check
 
         Args:
             delta: A :class:`STTSettings` (or ``AssemblyAISTTSettings``) delta.
@@ -351,18 +352,18 @@ class AssemblyAISTTService(WebsocketSTTService):
                             f"Updating max_turn_silence to: {conn_params.max_turn_silence}ms"
                         )
 
-            if hasattr(conn_params, "min_end_of_turn_silence_when_confident"):
+            if hasattr(conn_params, "min_turn_silence"):
                 if (
                     old_conn_params is None
-                    or conn_params.min_end_of_turn_silence_when_confident
-                    != old_conn_params.min_end_of_turn_silence_when_confident
+                    or conn_params.min_turn_silence
+                    != old_conn_params.min_turn_silence
                 ):
-                    if conn_params.min_end_of_turn_silence_when_confident is not None:
-                        update_config["min_end_of_turn_silence_when_confident"] = (
-                            conn_params.min_end_of_turn_silence_when_confident
+                    if conn_params.min_turn_silence is not None:
+                        update_config["min_turn_silence"] = (
+                            conn_params.min_turn_silence
                         )
                         logger.info(
-                            f"Updating min_end_of_turn_silence_when_confident to: {conn_params.min_end_of_turn_silence_when_confident}ms"
+                            f"Updating min_turn_silence to: {conn_params.min_turn_silence}ms"
                         )
 
             # Send update if we have parameters to update

@@ -66,7 +66,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
        - More natural turn detection based on speech patterns and pauses
 
     2. Advanced Turn Detection Tuning (STT Mode)
-       - `min_end_of_turn_silence_when_confident`: Minimum silence (ms) when confident
+       - `min_turn_silence`: Minimum silence (ms) when confident
          about end-of-turn. Lower values = faster responses. Default: 200ms
        - `max_turn_silence`: Maximum silence (ms) before forcing end-of-turn.
          Prevents long pauses. Default: 1000ms
@@ -96,7 +96,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         connection_params=AssemblyAIConnectionParams(
             speech_model="u3-rt-pro",
             # Optional: Tune turn detection timing (defaults shown below)
-            # min_end_of_turn_silence_when_confident=100,  # Default
+            # min_turn_silence=100,  # Default
             # max_turn_silence=1000,  # Default
             # Optional: Boost accuracy for specific names/terms
             # prompt="Names: Xiomara, Saoirse, Krzystof. Technical terms: API, OAuth.",
