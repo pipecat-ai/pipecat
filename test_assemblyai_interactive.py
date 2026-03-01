@@ -52,11 +52,11 @@ async def run_bot(
     test_dynamic_updates: Optional[callable] = None,
 ):
     """Run the voice bot with specified configuration."""
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info(f"TEST: {test_name}")
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info("Starting bot... Speak into your microphone after you hear the greeting!")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
     # Create local audio transport
     transport = LocalAudioTransport(
@@ -150,6 +150,7 @@ async def run_bot(
 
 # === BASIC CONFIGURATION (1-3) ===
 
+
 async def test_01_basic_100ms():
     """Test 1: Basic default configuration (100ms)."""
     connection_params = AssemblyAIConnectionParams(
@@ -178,6 +179,7 @@ async def test_03_custom_500ms():
 
 
 # === PROMPTING & WARNINGS (4-7) ===
+
 
 async def test_04_max_warning():
     """Test 4: max_turn_silence warning (should be overridden)."""
@@ -230,6 +232,7 @@ async def test_07_keyterms_difficult():
 
 # === DIARIZATION (8-9) ===
 
+
 async def test_08_diarization_basic():
     """Test 8: Basic diarization (speaker IDs logged)."""
     connection_params = AssemblyAIConnectionParams(
@@ -258,6 +261,7 @@ async def test_09_diarization_xml():
 
 # === DYNAMIC UPDATES - SINGLE PARAMETER (10-13) ===
 
+
 async def test_10_dynamic_keyterms():
     """Test 10: Dynamic keyterms update with difficult names."""
     connection_params = AssemblyAIConnectionParams(
@@ -265,16 +269,16 @@ async def test_10_dynamic_keyterms():
     )
 
     async def dynamic_update(task):
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("PHASE 1: No keyterms boosting")
         logger.info("  Try saying: Xiomara, Saoirse, Krzystof")
         logger.info("  (May not transcribe correctly)")
-        logger.info("="*80)
+        logger.info("=" * 80)
         await asyncio.sleep(15)
 
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("🔄 UPDATING: Adding keyterms boost")
-        logger.info("="*80)
+        logger.info("=" * 80)
         await task.queue_frame(
             STTUpdateSettingsFrame(
                 delta=AssemblyAISTTSettings(
@@ -284,11 +288,11 @@ async def test_10_dynamic_keyterms():
                 )
             )
         )
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("PHASE 2: Keyterms NOW boosted")
         logger.info("  Say the same names again: Xiomara, Saoirse, Krzystof")
         logger.info("  (Should transcribe better now!)")
-        logger.info("="*80)
+        logger.info("=" * 80)
 
     logger.info("🔄 This test has 2 phases:")
     logger.info("   Phase 1 (15s): No boosting - names may be wrong")
@@ -308,29 +312,27 @@ async def test_11_dynamic_silence():
     )
 
     async def dynamic_update(task):
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("PHASE 1: Quick responses (100ms silence threshold)")
         logger.info("  Speak normally - bot responds quickly")
-        logger.info("="*80)
+        logger.info("=" * 80)
         await asyncio.sleep(10)
 
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("🔄 UPDATING: Changing silence from 100ms → 3000ms (3 seconds!)")
-        logger.info("="*80)
+        logger.info("=" * 80)
         await task.queue_frame(
             STTUpdateSettingsFrame(
                 delta=AssemblyAISTTSettings(
-                    connection_params=AssemblyAIConnectionParams(
-                        min_turn_silence=3000
-                    )
+                    connection_params=AssemblyAIConnectionParams(min_turn_silence=3000)
                 )
             )
         )
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("PHASE 2: Patient responses (3 second silence threshold)")
         logger.info("  Bot will wait 3 full seconds before responding")
         logger.info("  Try pausing mid-sentence - bot should NOT interrupt")
-        logger.info("="*80)
+        logger.info("=" * 80)
 
     logger.info("🔄 Dramatic change: 100ms → 3000ms after 10 seconds")
     await run_bot(
@@ -347,16 +349,16 @@ async def test_12_dynamic_prompt():
     )
 
     async def dynamic_update(task):
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("PHASE 1: Default prompt (no keyterms)")
         logger.info("  Try saying: Xiomara, Saoirse, Krzystof")
         logger.info("  (May not transcribe correctly)")
-        logger.info("="*80)
+        logger.info("=" * 80)
         await asyncio.sleep(15)
 
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("🔄 UPDATING: Adding custom prompt with keyterms")
-        logger.info("="*80)
+        logger.info("=" * 80)
         custom_prompt = """Transcribe verbatim. Rules:
 1) Always include punctuation in output.
 2) Use period/question mark ONLY for complete sentences.
@@ -368,17 +370,15 @@ Pay special attention to these names and transcribe them exactly: Xiomara, Saoir
         await task.queue_frame(
             STTUpdateSettingsFrame(
                 delta=AssemblyAISTTSettings(
-                    connection_params=AssemblyAIConnectionParams(
-                        prompt=custom_prompt
-                    )
+                    connection_params=AssemblyAIConnectionParams(prompt=custom_prompt)
                 )
             )
         )
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("PHASE 2: Prompt with keyterms NOW active")
         logger.info("  Say the same names again: Xiomara, Saoirse, Krzystof")
         logger.info("  (Should transcribe better now!)")
-        logger.info("="*80)
+        logger.info("=" * 80)
 
     logger.info("🔄 This test has 2 phases:")
     logger.info("   Phase 1 (15s): Default prompt - names may be wrong")
@@ -403,9 +403,7 @@ async def test_13_dynamic_clear_keyterms():
         await task.queue_frame(
             STTUpdateSettingsFrame(
                 delta=AssemblyAISTTSettings(
-                    connection_params=AssemblyAIConnectionParams(
-                        keyterms_prompt=[]
-                    )
+                    connection_params=AssemblyAIConnectionParams(keyterms_prompt=[])
                 )
             )
         )
@@ -420,6 +418,7 @@ async def test_13_dynamic_clear_keyterms():
 
 
 # === DYNAMIC UPDATES - MULTIPLE PARAMETERS (14-15) ===
+
 
 async def test_14_multi_param_update():
     """Test 14: Update multiple parameters at once."""
@@ -464,9 +463,7 @@ async def test_15_complex_sequence():
         await task.queue_frame(
             STTUpdateSettingsFrame(
                 delta=AssemblyAISTTSettings(
-                    connection_params=AssemblyAIConnectionParams(
-                        keyterms_prompt=["Pipecat"]
-                    )
+                    connection_params=AssemblyAIConnectionParams(keyterms_prompt=["Pipecat"])
                 )
             )
         )
@@ -476,9 +473,7 @@ async def test_15_complex_sequence():
         await task.queue_frame(
             STTUpdateSettingsFrame(
                 delta=AssemblyAISTTSettings(
-                    connection_params=AssemblyAIConnectionParams(
-                        min_turn_silence=200
-                    )
+                    connection_params=AssemblyAIConnectionParams(min_turn_silence=200)
                 )
             )
         )
@@ -505,6 +500,7 @@ async def test_15_complex_sequence():
 
 
 # === MODE COMPARISON (16-17) ===
+
 
 async def test_16_pipecat_mode():
     """Test 16: Pipecat mode (VAD + Smart Turn controls turns)."""
@@ -537,6 +533,7 @@ async def test_17_stt_mode():
 
 
 # === STT MODE TIMING EXPERIMENTS (18-20) ===
+
 
 async def test_18_stt_long_max_short_min():
     """Test 18: STT mode - Long max_turn_silence + Short min (5000ms + 100ms)."""
@@ -596,6 +593,7 @@ async def test_20_stt_both_short():
 
 # === EDGE CASES (21-23) ===
 
+
 async def test_21_very_long_silence():
     """Test 21: Very long silence threshold (STT mode only)."""
     connection_params = AssemblyAIConnectionParams(
@@ -645,9 +643,9 @@ async def test_23_keyterms_plus_diarization():
 
 def show_menu():
     """Display the comprehensive test menu."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("AssemblyAI u3-rt-pro Comprehensive Test Suite")
-    print("="*80)
+    print("=" * 80)
     print("\n📋 BASIC CONFIGURATION (1-3)")
     print("  1. Basic Default (100ms)")
     print("  2. Custom Silence (200ms)")
@@ -688,7 +686,7 @@ def show_menu():
     print(" 23. Keyterms + Diarization Combined")
 
     print("\n  0. Exit")
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
 
 
 async def main():
@@ -735,6 +733,7 @@ async def main():
             except Exception as e:
                 logger.error(f"Test failed with error: {e}")
                 import traceback
+
                 traceback.print_exc()
 
             input("\n\nPress Enter to return to menu...")

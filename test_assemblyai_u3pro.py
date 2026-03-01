@@ -50,6 +50,7 @@ from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransp
 
 load_dotenv()
 
+
 # Test configuration
 class TestConfig:
     """Centralized test configuration."""
@@ -205,9 +206,7 @@ async def test_custom_min_silence():
     logger.info("TEST 2: Custom min_turn_silence")
     logger.info("=" * 80)
 
-    connection_params = AssemblyAIConnectionParams(
-        speech_model="u3-rt-pro", min_turn_silence=200
-    )
+    connection_params = AssemblyAIConnectionParams(speech_model="u3-rt-pro", min_turn_silence=200)
 
     task, transport = await create_basic_voice_agent(connection_params)
 
@@ -307,9 +306,7 @@ async def test_diarization_no_format():
     logger.info("TEST 10: Diarization Enabled (No Formatting)")
     logger.info("=" * 80)
 
-    connection_params = AssemblyAIConnectionParams(
-        speech_model="u3-rt-pro", speaker_labels=True
-    )
+    connection_params = AssemblyAIConnectionParams(speech_model="u3-rt-pro", speaker_labels=True)
 
     task, transport = await create_basic_voice_agent(connection_params)
 
@@ -327,9 +324,7 @@ async def test_diarization_xml_format():
     logger.info("TEST 11: Diarization with XML Formatting")
     logger.info("=" * 80)
 
-    connection_params = AssemblyAIConnectionParams(
-        speech_model="u3-rt-pro", speaker_labels=True
-    )
+    connection_params = AssemblyAIConnectionParams(speech_model="u3-rt-pro", speaker_labels=True)
 
     task, transport = await create_basic_voice_agent(
         connection_params, speaker_format="<{speaker}>{text}</{speaker}>"
@@ -516,9 +511,7 @@ def main():
         "prompt_keyterms_conflict, keyterms, diarization, diarization_xml, "
         "dynamic_keyterms, dynamic_silence, multi_param, all)",
     )
-    parser.add_argument(
-        "--interactive", action="store_true", help="Run in interactive mode"
-    )
+    parser.add_argument("--interactive", action="store_true", help="Run in interactive mode")
 
     args = parser.parse_args()
 

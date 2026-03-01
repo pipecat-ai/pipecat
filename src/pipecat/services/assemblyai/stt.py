@@ -355,13 +355,10 @@ class AssemblyAISTTService(WebsocketSTTService):
             if hasattr(conn_params, "min_turn_silence"):
                 if (
                     old_conn_params is None
-                    or conn_params.min_turn_silence
-                    != old_conn_params.min_turn_silence
+                    or conn_params.min_turn_silence != old_conn_params.min_turn_silence
                 ):
                     if conn_params.min_turn_silence is not None:
-                        update_config["min_turn_silence"] = (
-                            conn_params.min_turn_silence
-                        )
+                        update_config["min_turn_silence"] = conn_params.min_turn_silence
                         logger.info(
                             f"Updating min_turn_silence to: {conn_params.min_turn_silence}ms"
                         )

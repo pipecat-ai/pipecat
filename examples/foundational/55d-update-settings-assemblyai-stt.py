@@ -102,7 +102,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        logger.info("Phase 1: No keyterms boosting - try saying 'Xiomara', 'Saoirse', or 'Krzystof'")
+        logger.info(
+            "Phase 1: No keyterms boosting - try saying 'Xiomara', 'Saoirse', or 'Krzystof'"
+        )
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
