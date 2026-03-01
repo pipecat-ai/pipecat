@@ -1,10 +1,11 @@
 import asyncio
 import unittest
 
-from pipecat.frames.frames import Frame, StartFrame, TextFrame
+from pipecat.frames.frames import ClientConnectedFrame, Frame, StartFrame, TextFrame
 from pipecat.observers.startup_timing_observer import (
     StartupTimingObserver,
     StartupTimingReport,
+    TransportReadinessReport,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import run_test
@@ -180,6 +181,79 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
                     t.processor_name,
                     f"Internal processor {t.processor_name} should be excluded by default",
                 )
+
+    async def test_transport_readiness_measured(self):
+        """Test that ClientConnectedFrame after startup emits on_transport_readiness_measured."""
+        observer = StartupTimingObserver()
+        processor = FastProcessor()
+
+        readiness_reports = []
+
+        @observer.event_handler("on_transport_readiness_measured")
+        async def on_readiness(obs, report):
+            readiness_reports.append(report)
+
+        frames_to_send = [ClientConnectedFrame(), TextFrame(text="hello")]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[ClientConnectedFrame, TextFrame],
+            observers=[observer],
+        )
+
+        self.assertEqual(len(readiness_reports), 1)
+        report = readiness_reports[0]
+        self.assertIsInstance(report, TransportReadinessReport)
+        self.assertGreater(report.readiness_secs, 0)
+
+    async def test_transport_readiness_only_first(self):
+        """Test that only the first ClientConnectedFrame triggers the event."""
+        observer = StartupTimingObserver()
+        processor = FastProcessor()
+
+        readiness_reports = []
+
+        @observer.event_handler("on_transport_readiness_measured")
+        async def on_readiness(obs, report):
+            readiness_reports.append(report)
+
+        frames_to_send = [
+            ClientConnectedFrame(),
+            ClientConnectedFrame(),
+            TextFrame(text="hello"),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[ClientConnectedFrame, ClientConnectedFrame, TextFrame],
+            observers=[observer],
+        )
+
+        self.assertEqual(len(readiness_reports), 1)
+
+    async def test_transport_readiness_without_start_frame(self):
+        """Test that ClientConnectedFrame before StartFrame does not crash."""
+        observer = StartupTimingObserver()
+
+        # Directly call on_push_frame with a ClientConnectedFrame before any
+        # StartFrame has been seen. This should be a no-op (no crash).
+        from pipecat.observers.base_observer import FramePushed
+
+        processor = FastProcessor()
+        destination = FastProcessor()
+        data = FramePushed(
+            source=processor,
+            destination=destination,
+            frame=ClientConnectedFrame(),
+            direction=FrameDirection.DOWNSTREAM,
+            timestamp=1000,
+        )
+        await observer.on_push_frame(data)
+
+        # No event should have been emitted.
+        self.assertFalse(observer._transport_readiness_measured)
 
 
 if __name__ == "__main__":

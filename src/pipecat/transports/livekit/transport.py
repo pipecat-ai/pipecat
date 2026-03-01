@@ -24,6 +24,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     ImageRawFrame,
     OutputAudioRawFrame,
@@ -1143,6 +1144,8 @@ class LiveKitTransport(BaseTransport):
     async def _on_participant_connected(self, participant_id: str):
         """Handle participant connected events."""
         await self._call_event_handler("on_participant_connected", participant_id)
+        if self._input:
+            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_participant_disconnected(self, participant_id: str):
         """Handle participant disconnected events."""

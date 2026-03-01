@@ -12,6 +12,10 @@ when a ``StartFrame`` arrives at a processor (``on_process_frame``) versus
 when it leaves (``on_push_frame``), giving the exact ``start()`` duration
 for each processor in the pipeline.
 
+It also measures transport readiness — the time from ``StartFrame`` to the
+first ``ClientConnectedFrame`` — via a separate ``on_transport_readiness_measured``
+event.
+
 Example::
 
     observer = StartupTimingObserver()
@@ -21,6 +25,10 @@ Example::
         for t in report.processor_timings:
             print(f"{t.processor_name}: {t.duration_secs:.3f}s")
 
+    @observer.event_handler("on_transport_readiness_measured")
+    async def on_readiness(observer, report):
+        print(f"Transport ready in {report.readiness_secs:.3f}s")
+
     task = PipelineTask(pipeline, observers=[observer])
 """
 
@@ -29,11 +37,11 @@ from typing import Dict, List, Optional, Tuple, Type
 
 from loguru import logger
 
-from pipecat.frames.frames import StartFrame
+from pipecat.frames.frames import ClientConnectedFrame, StartFrame
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import PipelineSink, PipelineSource
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameProcessor
 
 # Internal pipeline types excluded from tracking by default.
 _INTERNAL_TYPES = (PipelineSink, PipelineSource, BasePipeline)
@@ -65,6 +73,17 @@ class StartupTimingReport:
     processor_timings: List[ProcessorStartupTiming] = field(default_factory=list)
 
 
+@dataclass
+class TransportReadinessReport:
+    """Time from pipeline start to first client connection.
+
+    Parameters:
+        readiness_secs: Seconds from StartFrame to first ClientConnectedFrame.
+    """
+
+    readiness_secs: float
+
+
 class StartupTimingObserver(BaseObserver):
     """Observer that measures processor startup times during pipeline initialization.
 
@@ -72,6 +91,10 @@ class StartupTimingObserver(BaseObserver):
     time between when a ``StartFrame`` arrives at a processor and when it is
     pushed downstream. This captures WebSocket connections, API authentication,
     model loading, and other initialization work.
+
+    Also measures transport readiness — the time from ``StartFrame`` to the
+    first ``ClientConnectedFrame`` — indicating how long it takes for a client
+    to connect after the pipeline starts.
 
     By default, internal pipeline processors (``PipelineSource``, ``PipelineSink``,
     ``Pipeline``) are excluded from the report. Pass ``processor_types`` to
@@ -81,6 +104,8 @@ class StartupTimingObserver(BaseObserver):
 
     - on_startup_timing_report: Called once after startup completes with the full
       timing report.
+    - on_transport_readiness_measured: Called once when the first client connects with the
+      transport readiness timing.
 
     Example::
 
@@ -92,6 +117,10 @@ class StartupTimingObserver(BaseObserver):
         async def on_report(observer, report):
             for t in report.processor_timings:
                 logger.info(f"{t.processor_name}: {t.duration_secs:.3f}s")
+
+        @observer.event_handler("on_transport_readiness_measured")
+        async def on_readiness(observer, report):
+            logger.info(f"Transport ready in {report.readiness_secs:.3f}s")
 
         task = PipelineTask(pipeline, observers=[observer])
 
@@ -125,10 +154,17 @@ class StartupTimingObserver(BaseObserver):
         # Lock onto the first StartFrame we see (by frame ID).
         self._start_frame_id: Optional[str] = None
 
-        # Whether we've already emitted the report.
-        self._reported = False
+        # Whether we've already emitted the startup timing report.
+        self._startup_timing_reported = False
+
+        # Whether we've already measured transport readiness.
+        self._transport_readiness_measured = False
+
+        # Timestamp (ns) when we first see a StartFrame arrive at a processor.
+        self._start_frame_arrival_ns: Optional[int] = None
 
         self._register_event_handler("on_startup_timing_report")
+        self._register_event_handler("on_transport_readiness_measured")
 
     def _should_track(self, processor: FrameProcessor) -> bool:
         """Check if a processor should be tracked for timing.
@@ -153,18 +189,16 @@ class StartupTimingObserver(BaseObserver):
         Args:
             data: The frame processing event data.
         """
-        if self._reported:
+        if self._startup_timing_reported:
             return
 
         if not isinstance(data.frame, StartFrame):
             return
 
-        if data.direction != FrameDirection.DOWNSTREAM:
-            return
-
         # Lock onto the first StartFrame.
         if self._start_frame_id is None:
             self._start_frame_id = data.frame.id
+            self._start_frame_arrival_ns = data.timestamp
         elif data.frame.id != self._start_frame_id:
             return
 
@@ -182,16 +216,19 @@ class StartupTimingObserver(BaseObserver):
     async def on_push_frame(self, data: FramePushed):
         """Record when a StartFrame leaves a processor and compute the delta.
 
+        Also handles ``ClientConnectedFrame`` to measure transport readiness.
+
         Args:
             data: The frame push event data.
         """
-        if self._reported:
+        if isinstance(data.frame, ClientConnectedFrame):
+            await self._handle_client_connected(data)
+            return
+
+        if self._startup_timing_reported:
             return
 
         if not isinstance(data.frame, StartFrame):
-            return
-
-        if data.direction != FrameDirection.DOWNSTREAM:
             return
 
         if self._start_frame_id is not None and data.frame.id != self._start_frame_id:
@@ -212,11 +249,22 @@ class StartupTimingObserver(BaseObserver):
             )
         )
 
+    async def _handle_client_connected(self, data: FramePushed):
+        """Measure transport readiness on first client connection."""
+        if self._transport_readiness_measured or self._start_frame_arrival_ns is None:
+            return
+
+        self._transport_readiness_measured = True
+        delta_ns = data.timestamp - self._start_frame_arrival_ns
+        readiness_secs = delta_ns / 1e9
+        report = TransportReadinessReport(readiness_secs=readiness_secs)
+        await self._call_event_handler("on_transport_readiness_measured", report)
+
     async def _emit_report(self):
         """Build and emit the startup timing report."""
-        if self._reported:
+        if self._startup_timing_reported:
             return
-        self._reported = True
+        self._startup_timing_reported = True
 
         total = sum(t.duration_secs for t in self._timings)
 
@@ -224,9 +272,5 @@ class StartupTimingObserver(BaseObserver):
             total_duration_secs=total,
             processor_timings=self._timings,
         )
-
-        logger.debug(f"Pipeline startup completed in {total:.3f}s")
-        for t in self._timings:
-            logger.debug(f"  {t.processor_name}: {t.duration_secs:.3f}s")
 
         await self._call_event_handler("on_startup_timing_report", report)

@@ -111,6 +111,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         for timing in report.processor_timings:
             logger.info(f"  {timing.processor_name}: {timing.duration_secs:.3f}s")
 
+    @startup_observer.event_handler("on_transport_readiness_measured")
+    async def on_transport_readiness_measured(observer, report):
+        logger.info(f"Transport readiness: {report.readiness_secs:.3f}s")
+
     turn_observer = task.turn_tracking_observer
     if turn_observer:
 

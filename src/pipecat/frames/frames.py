@@ -1911,6 +1911,17 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
 
 
 @dataclass
+class ClientConnectedFrame(SystemFrame):
+    """Frame indicating that a client has connected to the transport.
+
+    Pushed downstream by the input transport when a client (participant)
+    connects. Used by observers to measure transport readiness timing.
+    """
+
+    pass
+
+
+@dataclass
 class OutputTransportReadyFrame(ControlFrame):
     """Frame indicating that the output transport is ready.
 
