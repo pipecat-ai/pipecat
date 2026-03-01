@@ -264,11 +264,10 @@ class TestOnairosContextAggregator(unittest.IsolatedAsyncioTestCase):
 class TestOnairosAPIIntegration(unittest.IsolatedAsyncioTestCase):
     """Tests for Onairos API integration (mocked)."""
 
-    @patch("aiohttp.ClientSession")
-    async def test_fetch_user_data_success(self, mock_session_class):
+    async def test_fetch_user_data_success(self):
         """Test successful API fetch."""
         # Mock the response
-        mock_response = AsyncMock()
+        mock_response = MagicMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(
             return_value={
@@ -282,22 +281,22 @@ class TestOnairosAPIIntegration(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        mock_session = AsyncMock()
-        mock_session.post = AsyncMock(return_value=mock_response)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock()
+        # Create async context manager for response
+        async_cm_response = MagicMock()
+        async_cm_response.__aenter__ = AsyncMock(return_value=mock_response)
+        async_cm_response.__aexit__ = AsyncMock(return_value=None)
+
+        # Create mock session
+        mock_session = MagicMock()
+        mock_session.post = MagicMock(return_value=async_cm_response)
         mock_session.closed = False
-
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock()
-
-        mock_session_class.return_value = mock_session
 
         persona = OnairosPersonaInjector(
             user_id="test_user",
             api_url="https://api.example.com/inference",
             access_token="test_token",
         )
+        # Directly inject mock session
         persona._http_session = mock_session
 
         result = await persona.fetch_user_data()
