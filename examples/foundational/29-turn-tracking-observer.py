@@ -131,6 +131,26 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             else:
                 logger.info(f"🏁 Turn {turn_number} completed in {duration:.2f}s")
 
+    @latency_observer.event_handler("on_latency_breakdown")
+    async def on_latency_breakdown(observer, breakdown):
+        # Display a sequential waterfall that roughly adds up to the total.
+        # User turn is the first stage: user silence → turn release.
+        # The STT TTFB is shown as context within the user turn since
+        # it's a component of that time (along with VAD silence and any
+        # turn analyzer delay).
+        stt_ttfb = next((t for t in breakdown.ttfb if "STT" in t.processor), None)
+        if breakdown.user_turn_secs is not None:
+            stt_note = f" (STT: {stt_ttfb.value:.3f}s)" if stt_ttfb else ""
+            logger.info(f"  User turn: {breakdown.user_turn_secs:.3f}s{stt_note}")
+
+        for ttfb in breakdown.ttfb:
+            if ttfb is not stt_ttfb:
+                logger.info(f"  {ttfb.processor}: TTFB {ttfb.value:.3f}s")
+
+        if breakdown.text_aggregation:
+            ta = breakdown.text_aggregation
+            logger.info(f"  {ta.processor}: text aggregation {ta.value:.3f}s")
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")

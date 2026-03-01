@@ -1,20 +1,61 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 """Observer for tracking user-to-bot response latency.
 
 This module provides an observer that monitors the time between when a user
 stops speaking and when the bot starts speaking, emitting events when latency
-is measured.
+is measured. Optionally collects per-service latency breakdown metrics
+(TTFB, text aggregation) when ``enable_metrics=True``.
 """
 
 import time
-from typing import Optional, Set
+from collections import deque
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    InterruptionFrame,
+    MetricsFrame,
+    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import (
+    TextAggregationMetricsData,
+    TTFBMetricsData,
+)
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
+
+
+@dataclass
+class LatencyBreakdown:
+    """Per-service latency breakdown for a single user-to-bot cycle.
+
+    Collected between ``VADUserStoppedSpeakingFrame`` and
+    ``BotStartedSpeakingFrame`` when ``enable_metrics=True`` in
+    :class:`~pipecat.pipeline.task.PipelineParams`.
+
+    Parameters:
+        ttfb: Time-to-first-byte metrics from each service in the pipeline.
+        text_aggregation: First text aggregation measurement, representing
+            the latency cost of sentence aggregation in the TTS pipeline.
+        user_turn_secs: Duration in seconds of the user's turn, measured
+            from when the user actually stopped speaking to when the turn
+            was released (``UserStoppedSpeakingFrame``). This includes
+            VAD silence detection, STT finalization, and any turn analyzer
+            wait. ``None`` if no ``UserStoppedSpeakingFrame`` was observed
+            (e.g. no turn analyzer configured).
+    """
+
+    ttfb: List[TTFBMetricsData] = field(default_factory=list)
+    text_aggregation: Optional[TextAggregationMetricsData] = None
+    user_turn_secs: Optional[float] = None
 
 
 class UserBotLatencyObserver(BaseObserver):
@@ -25,34 +66,54 @@ class UserBotLatencyObserver(BaseObserver):
     latency is measured, allowing consumers to log, trace, or otherwise process
     the latency data.
 
+    When ``enable_metrics=True`` in pipeline params, also collects per-service
+    latency breakdown (TTFB, text aggregation) and emits an
+    ``on_latency_breakdown`` event alongside the existing latency measurement.
+
     This observer follows the composition pattern used by TurnTrackingObserver,
     acting as a reusable component for latency measurement.
 
     Events:
-        on_latency_measured(observer, latency_seconds): Emitted when user-to-bot
-            latency is calculated. Includes the latency value in seconds as a float.
+        on_latency_measured(observer, latency_seconds): Emitted when
+            time-to-first-bot-speech is calculated. Measures the time from
+            when the user stopped speaking to when the bot starts speaking.
+        on_latency_breakdown(observer, breakdown): Emitted at each
+            ``BotStartedSpeakingFrame`` with a :class:`LatencyBreakdown`
+            containing per-service metrics collected during the user→bot cycle.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, max_frames=100, **kwargs):
         """Initialize the user-bot latency observer.
 
         Sets up tracking for processed frames and user speech timing
         to calculate response latencies.
 
         Args:
+            max_frames: Maximum number of frame IDs to keep in history for
+                duplicate detection. Defaults to 100.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
         self._user_stopped_time: Optional[float] = None
-        self._processed_frames: Set[str] = set()
+        self._user_turn: Optional[float] = None
+
+        # Frame deduplication (bounded deque + set pattern)
+        self._processed_frames: set = set()
+        self._frame_history: deque = deque(maxlen=max_frames)
+
+        # Per-cycle metric accumulators
+        self._ttfb: List[TTFBMetricsData] = []
+        self._text_aggregation: Optional[TextAggregationMetricsData] = None
 
         self._register_event_handler("on_latency_measured")
+        self._register_event_handler("on_latency_breakdown")
 
     async def on_push_frame(self, data: FramePushed):
         """Process frames to track speech timing and calculate latency.
 
         Tracks VAD events and bot speaking events to measure the time between
-        user stopping speech and bot starting speech.
+        user stopping speech and bot starting speech. Also accumulates metrics
+        from MetricsFrame for the latency breakdown.
 
         Args:
             data: Frame push event containing the frame and direction information.
@@ -61,23 +122,78 @@ class UserBotLatencyObserver(BaseObserver):
         if data.direction != FrameDirection.DOWNSTREAM:
             return
 
-        # Skip already processed frames
+        # Skip already processed frames (bounded deque + set)
         if data.frame.id in self._processed_frames:
             return
 
         self._processed_frames.add(data.frame.id)
+        self._frame_history.append(data.frame.id)
 
-        # Track VAD and bot speaking events for latency
+        if len(self._processed_frames) > len(self._frame_history):
+            self._processed_frames = set(self._frame_history)
+
+        # Track speech and pipeline events for latency
         if isinstance(data.frame, VADUserStartedSpeakingFrame):
             # Reset when user starts speaking
             self._user_stopped_time = None
+            self._user_turn = None
+            self._reset_accumulators()
         elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
             # Record the actual time the user stopped speaking, which is
             # the VAD determination time minus the stop_secs silence duration
             # that had to elapse before the VAD confirmed speech ended.
             self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
-        elif isinstance(data.frame, BotStartedSpeakingFrame) and self._user_stopped_time:
-            # Calculate and emit latency
-            latency = time.time() - self._user_stopped_time
-            self._user_stopped_time = None
-            await self._call_event_handler("on_latency_measured", latency)
+        elif isinstance(data.frame, UserStoppedSpeakingFrame):
+            # Measure the user turn duration: from actual user silence to
+            # turn release. Includes VAD silence detection, STT finalization,
+            # and any turn analyzer wait.
+            if self._user_stopped_time is not None:
+                self._user_turn = time.time() - self._user_stopped_time
+        elif isinstance(data.frame, InterruptionFrame):
+            # Discard stale metrics from cancelled LLM/TTS cycles
+            self._reset_accumulators()
+        elif isinstance(data.frame, MetricsFrame):
+            self._handle_metrics_frame(data.frame)
+        elif isinstance(data.frame, BotStartedSpeakingFrame):
+            await self._handle_bot_started_speaking()
+
+    async def _handle_bot_started_speaking(self):
+        """Handle BotStartedSpeakingFrame to emit latency and breakdown."""
+        if self._user_stopped_time is None:
+            return
+
+        latency = time.time() - self._user_stopped_time
+        self._user_stopped_time = None
+        await self._call_event_handler("on_latency_measured", latency)
+
+        breakdown = LatencyBreakdown(
+            ttfb=list(self._ttfb),
+            text_aggregation=self._text_aggregation,
+            user_turn_secs=self._user_turn,
+        )
+        await self._call_event_handler("on_latency_breakdown", breakdown)
+        self._reset_accumulators()
+
+    def _handle_metrics_frame(self, frame: MetricsFrame):
+        """Extract latency metrics from a MetricsFrame.
+
+        Only accumulates metrics when a user→bot measurement is in progress
+        (after ``VADUserStoppedSpeakingFrame``).
+        """
+        if self._user_stopped_time is None:
+            return
+
+        for metrics_data in frame.data:
+            if isinstance(metrics_data, TTFBMetricsData) and metrics_data.value > 0:
+                self._ttfb.append(metrics_data)
+            elif isinstance(metrics_data, TextAggregationMetricsData):
+                # Only keep the first measurement — it's the one that
+                # impacts the initial speaking latency.
+                if self._text_aggregation is None:
+                    self._text_aggregation = metrics_data
+
+    def _reset_accumulators(self):
+        """Clear per-cycle metric accumulators."""
+        self._ttfb = []
+        self._text_aggregation = None
+        self._user_turn = None
