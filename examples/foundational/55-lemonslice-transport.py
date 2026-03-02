@@ -53,7 +53,7 @@ async def main():
 
         tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-            voice_id="ys3XeJJA4ArWMhRpcX1D",
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
         )
 
         messages = [
