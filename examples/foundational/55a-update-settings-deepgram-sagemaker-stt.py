@@ -24,7 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt_sagemaker import (
+from pipecat.services.deepgram.sagemaker.stt import (
     DeepgramSageMakerSTTService,
     DeepgramSageMakerSTTSettings,
 )

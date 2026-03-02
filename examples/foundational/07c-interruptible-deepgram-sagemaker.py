@@ -23,8 +23,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.llm import AWSBedrockLLMService
-from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTService
-from pipecat.services.deepgram.tts_sagemaker import DeepgramSageMakerTTSService
+from pipecat.services.deepgram.sagemaker.stt import DeepgramSageMakerSTTService
+from pipecat.services.deepgram.sagemaker.tts import DeepgramSageMakerTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
