@@ -8,6 +8,8 @@
 
 This module provides integration with Gnani's multilingual STT API for speech-to-text
 transcription using segmented audio processing.
+
+For complete API documentation, see: https://docs.inya.ai/vachana/introduction/introduction
 """
 
 from typing import AsyncGenerator, Optional
@@ -87,6 +89,8 @@ class GnaniSTTService(SegmentedSTTService):
     This service uses Gnani's REST API to perform speech-to-text transcription on audio
     segments. It supports multiple Indian languages and inherits from SegmentedSTTService
     to handle audio buffering and speech detection.
+
+    For complete API documentation, see: https://docs.inya.ai/vachana/introduction/introduction
 
     Supported languages:
 
