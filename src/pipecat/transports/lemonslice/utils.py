@@ -64,7 +64,9 @@ class LemonSliceApi:
             ValueError: If neither agent_id nor agent_image_url is provided.
         """
         if not agent_id and not agent_image_url:
-            raise ValueError("Provide either agent_id or agent_image_url")
+            # Fallback to a default agent if none is provided
+            logger.debug("No agent_id or agent_image_url provided, using default agent")
+            agent_id = "agent_080308d8b6e99f47"
         if agent_id and agent_image_url:
             raise ValueError("Provide exactly one of agent_id or agent_image_url, not both")
 
