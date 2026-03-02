@@ -471,7 +471,7 @@ class DeepgramSTTService(STTService):
         await self._call_event_handler("on_speech_started", *args, **kwargs)
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
 
     async def _on_utterance_end(self, *args, **kwargs):
         await self._call_event_handler("on_utterance_end", *args, **kwargs)

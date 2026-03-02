@@ -608,12 +608,6 @@ class LLMUserAggregator(LLMContextAggregator):
         if should_mute_frame:
             logger.trace(f"{frame.name} suppressed - user currently muted")
 
-        # When muted, the InterruptionFrame won't propagate further and
-        # will never reach the pipeline sink. Complete it here so
-        # push_interruption_task_frame_and_wait() doesn't hang.
-        if should_mute_frame and isinstance(frame, InterruptionFrame):
-            frame.complete()
-
         should_mute_next_time = False
         for s in self._params.user_mute_strategies:
             should_mute_next_time |= await s.process_frame(frame)
@@ -737,7 +731,7 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
 
         if params.enable_interruptions and self._allow_interruptions:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
 
         await self._call_event_handler("on_user_turn_started", strategy)
 

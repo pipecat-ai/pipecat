@@ -734,7 +734,7 @@ class GrokRealtimeLLMService(LLMService):
         """Handle speech started event from VAD."""
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.push_interruption_task_frame_and_wait()
+        await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from VAD."""
