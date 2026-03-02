@@ -150,10 +150,6 @@ class FrameProcessorMetrics(BaseObject):
     async def start_processing_metrics(self, *, start_time: Optional[float] = None):
         """Start measuring processing time.
 
-        .. deprecated:: 0.0.104
-            Processing metrics are deprecated and will be removed in a future version.
-            Use TTFB metrics instead.
-
         Args:
             start_time: Optional timestamp to use as the start time. If None,
                 uses the current time.
@@ -162,10 +158,6 @@ class FrameProcessorMetrics(BaseObject):
 
     async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
         """Stop processing time measurement and generate metrics frame.
-
-        .. deprecated:: 0.0.104
-            Processing metrics are deprecated and will be removed in a future version.
-            Use TTFB metrics instead.
 
         Args:
             end_time: Optional timestamp to use as the end time. If None, uses

@@ -436,34 +436,18 @@ class FrameProcessor(BaseObject):
             if frame:
                 await self.push_frame(frame)
 
-    _processing_metrics_warned = False
-
     async def start_processing_metrics(self, *, start_time: Optional[float] = None):
         """Start processing metrics collection.
-
-        .. deprecated:: 0.0.104
-            Processing metrics are deprecated and will be removed in a future version.
-            Use TTFB metrics instead.
 
         Args:
             start_time: Optional timestamp to use as the start time. If None,
                 uses the current time.
         """
         if self.can_generate_metrics() and self.metrics_enabled:
-            if not FrameProcessor._processing_metrics_warned:
-                FrameProcessor._processing_metrics_warned = True
-                logger.warning(
-                    "Processing metrics are deprecated and will be removed in a future version. "
-                    "Use TTFB metrics instead."
-                )
             await self._metrics.start_processing_metrics(start_time=start_time)
 
     async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
         """Stop processing metrics collection and push results.
-
-        .. deprecated:: 0.0.104
-            Processing metrics are deprecated and will be removed in a future version.
-            Use TTFB metrics instead.
 
         Args:
             end_time: Optional timestamp to use as the end time. If None, uses
