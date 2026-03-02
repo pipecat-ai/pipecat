@@ -35,6 +35,7 @@ Example::
 """
 
 import time
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Type
 
 from pydantic import BaseModel, Field
@@ -47,6 +48,14 @@ from pipecat.processors.frame_processor import FrameProcessor
 
 # Internal pipeline types excluded from tracking by default.
 _INTERNAL_TYPES = (PipelineSink, PipelineSource, BasePipeline)
+
+
+@dataclass
+class _ArrivalInfo:
+    """Internal record of when a StartFrame arrived at a processor."""
+
+    processor: FrameProcessor
+    arrival_ts_ns: int
 
 
 class ProcessorStartupTiming(BaseModel):
@@ -161,8 +170,8 @@ class StartupTimingObserver(BaseObserver):
         super().__init__(**kwargs)
         self._processor_types = processor_types
 
-        # Map processor ID -> (processor, arrival_timestamp_ns)
-        self._arrivals: Dict[int, Tuple[FrameProcessor, int]] = {}
+        # Map processor ID -> arrival info.
+        self._arrivals: Dict[int, _ArrivalInfo] = {}
 
         # Collected timings in pipeline order.
         self._timings: List[ProcessorStartupTiming] = []
@@ -234,7 +243,9 @@ class StartupTimingObserver(BaseObserver):
             return
 
         if self._should_track(data.processor):
-            self._arrivals[data.processor.id] = (data.processor, data.timestamp)
+            self._arrivals[data.processor.id] = _ArrivalInfo(
+                processor=data.processor, arrival_ts_ns=data.timestamp
+            )
 
     async def on_push_frame(self, data: FramePushed):
         """Record when a StartFrame leaves a processor and compute the delta.
@@ -266,15 +277,13 @@ class StartupTimingObserver(BaseObserver):
         if arrival is None:
             return
 
-        processor, arrival_ts = arrival
-        duration_ns = data.timestamp - arrival_ts
+        duration_ns = data.timestamp - arrival.arrival_ts_ns
         duration_secs = duration_ns / 1e9
-
-        start_offset_secs = (arrival_ts - self._start_frame_arrival_ns) / 1e9
+        start_offset_secs = (arrival.arrival_ts_ns - self._start_frame_arrival_ns) / 1e9
 
         self._timings.append(
             ProcessorStartupTiming(
-                processor_name=processor.name,
+                processor_name=arrival.processor.name,
                 start_offset_secs=start_offset_secs,
                 duration_secs=duration_secs,
             )
