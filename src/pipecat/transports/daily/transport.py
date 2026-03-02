@@ -2072,6 +2072,8 @@ class DailyTransport(BaseTransport):
     Event handlers available:
 
     - on_joined: Called when the bot joins the room. Args: (data: dict)
+    - on_connected: Called when the bot connects to the room (alias for
+      on_joined). Args: (data: dict)
     - on_left: Called when the bot leaves the room.
     - on_before_leave: [sync] Called just before the bot leaves the room.
     - on_error: Called when a transport error occurs. Args: (error: str)
@@ -2189,6 +2191,7 @@ class DailyTransport(BaseTransport):
         # Register supported handlers. The user will only be able to register
         # these handlers.
         self._register_event_handler("on_active_speaker_changed")
+        self._register_event_handler("on_connected")
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
         self._register_event_handler("on_error")
@@ -2580,6 +2583,8 @@ class DailyTransport(BaseTransport):
             if error:
                 await self._on_error(f"Unable to start transcription: {error}")
         await self._call_event_handler("on_joined", data)
+        # Also call on_connected for compatibility with other transports
+        await self._call_event_handler("on_connected", data)
         if self._input:
             await self._input.push_frame(BotConnectedFrame())
 
