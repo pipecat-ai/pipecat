@@ -132,7 +132,11 @@ class TestSIPResponseBuilding:
         """200 OK Contact header includes the SIP port so SBC sends ACK to the correct port."""
         msg = self._make_invite_msg()
         response = build_200_ok(
-            invite=msg, local_ip="172.16.204.30", local_port=10000, session_id=1, local_sip_port=6060
+            invite=msg,
+            local_ip="172.16.204.30",
+            local_port=10000,
+            session_id=1,
+            local_sip_port=6060,
         )
         text = response.decode()
         assert "Contact: <sip:pipecat@172.16.204.30:6060>" in text
@@ -149,7 +153,11 @@ class TestSIPResponseBuilding:
         msg = self._make_invite_msg()
         # Simulate a bot listening on port 9060
         response = build_200_ok(
-            invite=msg, local_ip="192.168.1.100", local_port=12000, session_id=7, local_sip_port=9060
+            invite=msg,
+            local_ip="192.168.1.100",
+            local_port=12000,
+            session_id=7,
+            local_sip_port=9060,
         )
         text = response.decode()
         assert "Contact: <sip:pipecat@192.168.1.100:9060>" in text
