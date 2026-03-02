@@ -35,6 +35,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from azure.cognitiveservices.speech import (
+        CancellationReason,
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
@@ -209,6 +210,7 @@ class AzureSTTService(STTService):
             )
             self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
             self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+            self._speech_recognizer.canceled.connect(self._on_handle_canceled)
             self._speech_recognizer.start_continuous_recognition_async()
         except Exception as e:
             await self.push_error(
@@ -280,3 +282,13 @@ class AzureSTTService(STTService):
                 result=event,
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+
+    def _on_handle_canceled(self, event):
+        details = event.result.cancellation_details
+        if details.reason == CancellationReason.Error:
+            error_msg = f"Azure STT recognition canceled: {details.reason}"
+            if details.error_details:
+                error_msg += f" - {details.error_details}"
+            asyncio.run_coroutine_threadsafe(
+                self.push_error(error_msg=error_msg), self.get_event_loop()
+            )
