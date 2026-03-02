@@ -507,7 +507,8 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             elif hasattr(self, "_system_instruction"):
                                 system_message = self._system_instruction
 
-                            # Get settings from the service
+                            # Use given_fields() defensively in case a service doesn't
+                            # initialize all settings.
                             params = {}
                             if hasattr(self, "_settings"):
                                 for key, value in self._settings.given_fields().items():
