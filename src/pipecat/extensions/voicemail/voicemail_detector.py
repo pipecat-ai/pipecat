@@ -89,6 +89,18 @@ class NotifierGate(FrameProcessor):
             await self.cancel_task(self._gate_task)
             self._gate_task = None
 
+    async def reset(self) -> None:
+        """Reset the gate to its initial open state.
+
+        Cancels the existing notification-waiting task, re-opens the gate, and
+        restarts the task so the gate can respond to the next notification.
+        """
+        if self._gate_task:
+            await self.cancel_task(self._gate_task)
+            self._gate_task = None
+        self._gate_opened = True
+        self._gate_task = self.create_task(self._wait_for_notification())
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and control gate state based on notifier signals.
 
@@ -160,6 +172,19 @@ class ClassifierGate(NotifierGate):
         if self._conversation_task:
             await self.cancel_task(self._conversation_task)
             self._conversation_task = None
+
+    async def reset(self) -> None:
+        """Reset the classifier gate to its initial open state.
+
+        Cancels and restarts both the gate task and the conversation-watching task,
+        and clears the conversation-detected flag.
+        """
+        if self._conversation_task:
+            await self.cancel_task(self._conversation_task)
+            self._conversation_task = None
+        self._conversation_detected = False
+        await super().reset()
+        self._conversation_task = self.create_task(self._wait_for_conversation())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and control gate state based on notifier signals.
@@ -286,6 +311,22 @@ class ClassificationProcessor(FrameProcessor):
         if self._voicemail_task:
             await self.cancel_task(self._voicemail_task)
             self._voicemail_task = None
+
+    async def reset(self) -> None:
+        """Reset classification state to allow re-running detection.
+
+        Clears all decision flags, resets the response buffer, and restarts
+        the voicemail timing task.
+        """
+        if self._voicemail_task:
+            await self.cancel_task(self._voicemail_task)
+            self._voicemail_task = None
+        self._decision_made = False
+        self._processing_response = False
+        self._response_buffer = ""
+        self._voicemail_detected = False
+        self._voicemail_event.set()
+        self._voicemail_task = self.create_task(self._delayed_voicemail_handler())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle LLM classification responses.
@@ -448,6 +489,31 @@ class TTSGate(FrameProcessor):
         if self._voicemail_task:
             await self.cancel_task(self._voicemail_task)
             self._voicemail_task = None
+
+    async def reset(self, tts_gating: bool = True) -> None:
+        """Reset the TTS gate for a new detection run.
+
+        Clears any buffered frames and restarts the gate in the specified
+        gating mode. When tts_gating is False, TTS frames are not buffered
+        during classification — suitable for mid-call use where the bot should
+        continue speaking to the original caller during re-classification.
+
+        Args:
+            tts_gating: Whether to buffer TTS frames during classification.
+                True buffers TTS until a decision is made (call-start behavior).
+                False lets TTS flow through immediately (mid-call behavior).
+        """
+        if self._conversation_task:
+            await self.cancel_task(self._conversation_task)
+            self._conversation_task = None
+        if self._voicemail_task:
+            await self.cancel_task(self._voicemail_task)
+            self._voicemail_task = None
+        self._frame_buffer.clear()
+        self._gating_active = tts_gating
+        if tts_gating:
+            self._conversation_task = self.create_task(self._wait_for_conversation())
+            self._voicemail_task = self.create_task(self._wait_for_voicemail())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle gating logic based on frame type.
@@ -707,6 +773,41 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             The TTSGate processor instance.
         """
         return self._voicemail_gate
+
+    async def reset(self, tts_gating: bool = True) -> None:
+        """Reset the detector to allow re-classification mid-call.
+
+        Re-arms all internal gates and clears the LLM context so the detector
+        can make a fresh classification decision. This enables voicemail detection
+        at multiple points in a call — for example, during a warm transfer where
+        the bot dials out to an operator and needs to determine if a human answered
+        or the call went to voicemail while the original conversation is still active.
+
+        The tts_gating parameter controls whether TTS output is buffered during
+        re-classification. For mid-call use, False is typically appropriate since
+        the bot should continue speaking to the original caller uninterrupted.
+
+        Args:
+            tts_gating: Whether to buffer TTS frames during classification.
+                True (default) buffers TTS until a decision is made, matching
+                call-start behavior. False lets TTS flow through immediately,
+                suitable for mid-call re-classification.
+
+        Example::
+
+            detector = VoicemailDetector(llm=classifier_llm)
+
+            # First detection at call start (gate TTS by default)
+            # ... call connects, detection runs automatically ...
+
+            # Re-arm for warm transfer — don't gate TTS mid-call
+            await detector.reset(tts_gating=False)
+        """
+        await self._classifier_gate.reset()
+        await self._conversation_gate.reset()
+        await self._classification_processor.reset()
+        await self._voicemail_gate.reset(tts_gating)
+        self._context.set_messages([{"role": "system", "content": self._prompt}])
 
     def add_event_handler(self, event_name: str, handler):
         """Add an event handler for voicemail detection events.
