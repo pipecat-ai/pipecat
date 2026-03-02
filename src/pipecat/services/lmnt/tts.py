@@ -118,17 +118,16 @@ class LmntTTSService(InterruptibleTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            settings=LmntTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=self.language_to_service_language(language),
+                format="raw",
+            ),
             **kwargs,
         )
 
         self._api_key = api_key
-        self._settings = LmntTTSSettings(
-            model=model,
-            voice=voice_id,
-            language=self.language_to_service_language(language),
-            format="raw",
-        )
-        self._sync_model_name_to_metrics()
         self._receive_task = None
         self._context_id: Optional[str] = None
 

@@ -227,34 +227,34 @@ class MiniMaxHttpTTSService(TTSService):
             params: Additional configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or MiniMaxHttpTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=MiniMaxTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=None,
+                stream=True,
+                speed=params.speed,
+                volume=params.volume,
+                pitch=params.pitch,
+                language_boost=None,
+                emotion=None,
+                text_normalization=None,
+                latex_read=None,
+                audio_bitrate=128000,
+                audio_format="pcm",
+                audio_channel=1,
+                audio_sample_rate=0,
+            ),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._group_id = group_id
         self._base_url = f"{base_url}?GroupId={group_id}"
         self._session = aiohttp_session
-
-        # Create voice settings
-        self._settings = MiniMaxTTSSettings(
-            model=model,
-            voice=voice_id,
-            language=None,
-            stream=True,
-            speed=params.speed,
-            volume=params.volume,
-            pitch=params.pitch,
-            language_boost=None,
-            emotion=None,
-            text_normalization=None,
-            latex_read=None,
-            audio_bitrate=128000,
-            audio_format="pcm",
-            audio_channel=1,
-            audio_sample_rate=0,
-        )
-        self._sync_model_name_to_metrics()
 
         # Add language boost if provided
         if params.language:

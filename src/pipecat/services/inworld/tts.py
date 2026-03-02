@@ -51,7 +51,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import TTSService, WebsocketTTSService
+from pipecat.services.tts_service import TTSService, WebsocketTTSService, TextAggregationMode
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -150,14 +150,26 @@ class InworldHttpTTSService(TTSService):
             params: Input parameters for Inworld TTS configuration.
             **kwargs: Additional arguments passed to the parent class.
         """
+        params = params or InworldHttpTTSService.InputParams()
+
         super().__init__(
             push_text_frames=False,
             push_stop_frames=True,
             sample_rate=sample_rate,
+            settings=InworldTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=None,
+                audio_encoding=encoding,
+                audio_sample_rate=0,
+                speaking_rate=params.speaking_rate,
+                temperature=params.temperature,
+                timestamp_transport_strategy=params.timestamp_transport_strategy,
+                auto_mode=None,  # Not applicable for HTTP TTS
+                apply_text_normalization=None,  # Not applicable for HTTP TTS
+            ),
             **kwargs,
         )
-
-        params = params or InworldHttpTTSService.InputParams()
 
         self._api_key = api_key
         self._session = aiohttp_session
@@ -169,22 +181,7 @@ class InworldHttpTTSService(TTSService):
         else:
             self._base_url = "https://api.inworld.ai/tts/v1/voice"
 
-        self._settings = InworldTTSSettings(
-            model=model,
-            voice=voice_id,
-            language=None,
-            audio_encoding=encoding,
-            audio_sample_rate=0,
-            speaking_rate=params.speaking_rate,
-            temperature=params.temperature,
-            timestamp_transport_strategy=params.timestamp_transport_strategy,
-            auto_mode=None,  # Not applicable for HTTP TTS
-            apply_text_normalization=None,  # Not applicable for HTTP TTS
-        )
-
         self._cumulative_time = 0.0
-
-        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -511,7 +508,8 @@ class InworldTTSService(WebsocketTTSService):
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
         params: InputParams = None,
-        aggregate_sentences: bool = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         append_trailing_space: bool = True,
         **kwargs: Any,
     ):
@@ -525,36 +523,42 @@ class InworldTTSService(WebsocketTTSService):
             sample_rate: Audio sample rate in Hz.
             encoding: Audio encoding format.
             params: Input parameters for Inworld WebSocket TTS configuration.
-            aggregate_sentences: Whether to aggregate sentences before synthesis.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
             **kwargs: Additional arguments passed to the parent class.
         """
+        params = params or InworldTTSService.InputParams()
+
         super().__init__(
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             append_trailing_space=append_trailing_space,
+            settings=InworldTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=None,
+                audio_encoding=encoding,
+                audio_sample_rate=0,
+                speaking_rate=params.speaking_rate,
+                temperature=params.temperature,
+                apply_text_normalization=params.apply_text_normalization,
+                timestamp_transport_strategy=params.timestamp_transport_strategy,
+                auto_mode=params.auto_mode if params.auto_mode is not None else aggregate_sentences,
+            ),
             **kwargs,
         )
 
-        params = params or InworldTTSService.InputParams()
-
         self._api_key = api_key
         self._url = url
-        self._settings = InworldTTSSettings(
-            model=model,
-            voice=voice_id,
-            language=None,
-            audio_encoding=encoding,
-            audio_sample_rate=0,
-            speaking_rate=params.speaking_rate,
-            temperature=params.temperature,
-            apply_text_normalization=params.apply_text_normalization,
-            timestamp_transport_strategy=params.timestamp_transport_strategy,
-            auto_mode=params.auto_mode if params.auto_mode is not None else aggregate_sentences,
-        )
         self._timestamp_type = "WORD"
 
         self._buffer_settings = {
@@ -572,8 +576,6 @@ class InworldTTSService(WebsocketTTSService):
         self._cumulative_time = 0.0
         # Track the end time of the last word in the current generation
         self._generation_end_time = 0.0
-
-        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

@@ -330,6 +330,7 @@ class PipelineTask(BasePipelineTask):
 
         # RTVI support
         self._rtvi = None
+        prepend_rtvi = False
         external_rtvi = self._find_processor(pipeline, RTVIProcessor)
         external_observer_found = any(isinstance(o, RTVIObserver) for o in observers)
 
@@ -352,6 +353,7 @@ class PipelineTask(BasePipelineTask):
         elif enable_rtvi:
             self._rtvi = rtvi_processor or RTVIProcessor()
             observers.append(self._rtvi.create_rtvi_observer(params=rtvi_observer_params))
+            prepend_rtvi = True
 
         if self._rtvi:
             # Automatically call RTVIProcessor.set_bot_ready()
@@ -387,9 +389,12 @@ class PipelineTask(BasePipelineTask):
         # source allows us to receive and react to upstream frames, and the sink
         # allows us to receive and react to downstream frames.
         source = PipelineSource(self._source_push_frame, name=f"{self}::Source")
-        sink = PipelineSink(self._sink_push_frame, name=f"{self}::Sink")
-        processors = [self._rtvi, pipeline] if self._rtvi else [pipeline]
-        self._pipeline = Pipeline(processors, source=source, sink=sink)
+        self._sink = PipelineSink(self._sink_push_frame, name=f"{self}::Sink")
+        # Only prepend the RTVIProcessor if we created it ourselves. When the
+        # user already placed it inside their pipeline we must not insert it
+        # again or it will appear twice in the frame chain.
+        processors = [self._rtvi, pipeline] if prepend_rtvi else [pipeline]
+        self._pipeline = Pipeline(processors, source=source, sink=self._sink)
 
         # The task observer acts as a proxy to the provided observers. This way,
         # we only need to pass a single observer (using the StartFrame) which
@@ -620,26 +625,43 @@ class PipelineTask(BasePipelineTask):
             self._finished = True
             logger.debug(f"Pipeline task {self} has finished")
 
-    async def queue_frame(self, frame: Frame):
-        """Queue a single frame to be pushed down the pipeline.
+    async def queue_frame(
+        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+    ):
+        """Queue a single frame to be pushed through the pipeline.
+
+        Downstream frames are pushed from the beginning of the pipeline.
+        Upstream frames are pushed from the end of the pipeline.
 
         Args:
             frame: The frame to be processed.
+            direction: The direction to push the frame. Defaults to downstream.
         """
-        await self._push_queue.put(frame)
+        if direction == FrameDirection.DOWNSTREAM:
+            await self._push_queue.put(frame)
+        else:
+            await self._sink.queue_frame(frame, direction)
 
-    async def queue_frames(self, frames: Iterable[Frame] | AsyncIterable[Frame]):
-        """Queues multiple frames to be pushed down the pipeline.
+    async def queue_frames(
+        self,
+        frames: Iterable[Frame] | AsyncIterable[Frame],
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+    ):
+        """Queue multiple frames to be pushed through the pipeline.
+
+        Downstream frames are pushed from the beginning of the pipeline.
+        Upstream frames are pushed from the end of the pipeline.
 
         Args:
             frames: An iterable or async iterable of frames to be processed.
+            direction: The direction to push the frames. Defaults to downstream.
         """
         if isinstance(frames, AsyncIterable):
             async for frame in frames:
-                await self.queue_frame(frame)
+                await self.queue_frame(frame, direction)
         elif isinstance(frames, Iterable):
             for frame in frames:
-                await self.queue_frame(frame)
+                await self.queue_frame(frame, direction)
 
     async def _cancel(self, *, reason: Optional[str] = None):
         """Internal cancellation logic for the pipeline task.

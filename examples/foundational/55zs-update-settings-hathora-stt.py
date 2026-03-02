@@ -52,7 +52,9 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = HathoraSTTService(api_key=os.getenv("HATHORA_API_KEY"), model="deepgram-nova3")
+    stt = HathoraSTTService(
+        api_key=os.getenv("HATHORA_API_KEY"), model="nvidia-parakeet-tdt-0.6b-v3"
+    )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),

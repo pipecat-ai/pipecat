@@ -7,6 +7,7 @@
 import asyncio
 import os
 
+from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -106,11 +107,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
+        # NOTE: after this change, the bot will only respond if you speak Spanish
         await asyncio.sleep(10)
-        logger.info("Updating Deepgram SageMaker STT settings: language=es")
+        logger.info("Updating Deepgram SageMaker STT settings: language=es, punctuate=False")
         await task.queue_frame(
-            STTUpdateSettingsFrame(delta=DeepgramSageMakerSTTSettings(language=Language.ES))
+            STTUpdateSettingsFrame(
+                delta=DeepgramSageMakerSTTSettings(
+                    language=Language.ES,
+                    live_options=LiveOptions(punctuate=False),
+                )
+            )
         )
+
+        # Old-style dict update (for backward-compat testing):
+        # await asyncio.sleep(10)
+        # logger.info("Updating Deepgram SageMaker STT settings via dict: punctuate=False, filler_words=True")
+        # await task.queue_frame(
+        #     STTUpdateSettingsFrame(settings={"punctuate": False, "filler_words": True})
+        # )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

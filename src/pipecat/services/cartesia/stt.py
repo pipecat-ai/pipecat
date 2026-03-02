@@ -173,13 +173,6 @@ class CartesiaSTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to parent STTService.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-        super().__init__(
-            sample_rate=sample_rate,
-            ttfs_p99_latency=ttfs_p99_latency,
-            keepalive_timeout=120,
-            keepalive_interval=30,
-            **kwargs,
-        )
 
         default_options = CartesiaLiveOptions(
             model="ink-whisper",
@@ -196,12 +189,19 @@ class CartesiaSTTService(WebsocketSTTService):
                 k: v for k, v in merged_options.items() if not isinstance(v, str) or v != "None"
             }
 
-        self._settings = CartesiaSTTSettings(
-            model=merged_options["model"],
-            language=merged_options.get("language"),
-            encoding=merged_options.get("encoding", "pcm_s16le"),
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=120,
+            keepalive_interval=30,
+            settings=CartesiaSTTSettings(
+                model=merged_options["model"],
+                language=merged_options.get("language"),
+                encoding=merged_options.get("encoding", "pcm_s16le"),
+            ),
+            **kwargs,
         )
-        self._sync_model_name_to_metrics()
+
         self._api_key = api_key
         self._base_url = base_url or "api.cartesia.ai"
         self._receive_task = None

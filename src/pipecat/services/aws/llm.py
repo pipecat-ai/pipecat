@@ -797,9 +797,27 @@ class AWSBedrockLLMService(LLMService):
             retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        super().__init__(**kwargs)
-
         params = params or AWSBedrockLLMService.InputParams()
+
+        super().__init__(
+            settings=AWSBedrockLLMSettings(
+                model=model,
+                max_tokens=params.max_tokens,
+                temperature=params.temperature,
+                top_p=params.top_p,
+                top_k=None,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                latency=params.latency,
+                additional_model_request_fields=params.additional_model_request_fields
+                if isinstance(params.additional_model_request_fields, dict)
+                else {},
+            ),
+            **kwargs,
+        )
 
         # Initialize the AWS Bedrock client
         if not client_config:
@@ -822,23 +840,6 @@ class AWSBedrockLLMService(LLMService):
 
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._settings = AWSBedrockLLMSettings(
-            model=model,
-            max_tokens=params.max_tokens,
-            temperature=params.temperature,
-            top_p=params.top_p,
-            top_k=None,
-            frequency_penalty=None,
-            presence_penalty=None,
-            seed=None,
-            filter_incomplete_user_turns=False,
-            user_turn_completion_config=None,
-            latency=params.latency,
-            additional_model_request_fields=params.additional_model_request_fields
-            if isinstance(params.additional_model_request_fields, dict)
-            else {},
-        )
-        self._sync_model_name_to_metrics()
 
         logger.info(f"Using AWS Bedrock model: {model}")
 

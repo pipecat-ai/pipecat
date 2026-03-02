@@ -89,23 +89,20 @@ class HathoraSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent class.
         """
+        params = params or HathoraSTTService.InputParams()
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
+            settings=HathoraSTTSettings(
+                model=model,
+                language=params.language,
+                config=params.config,
+            ),
             **kwargs,
         )
-        self._model = model
         self._api_key = api_key or os.getenv("HATHORA_API_KEY")
         self._base_url = base_url
-
-        params = params or HathoraSTTService.InputParams()
-
-        self._settings = HathoraSTTSettings(
-            model=model,
-            language=params.language,
-            config=params.config,
-        )
-        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -137,7 +134,7 @@ class HathoraSTTService(SegmentedSTTService):
             url = f"{self._base_url}"
 
             payload = {
-                "model": self._model,
+                "model": self._settings.model,
             }
 
             if self._settings.language is not None:

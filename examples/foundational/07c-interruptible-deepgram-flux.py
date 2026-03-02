@@ -10,6 +10,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -72,7 +73,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
     )
 
     pipeline = Pipeline(

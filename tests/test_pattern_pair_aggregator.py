@@ -194,5 +194,66 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.aggregator.text.text, "")
 
 
+class TestPatternPairAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        from pipecat.utils.text.base_text_aggregator import AggregationType
+
+        self.aggregator = PatternPairAggregator(aggregation_type=AggregationType.TOKEN)
+        self.handler = AsyncMock()
+        self.aggregator.add_pattern(
+            type="think",
+            start_pattern="<think>",
+            end_pattern="</think>",
+            action=MatchAction.REMOVE,
+        )
+        self.aggregator.on_pattern_match("think", self.handler)
+
+    async def test_token_no_patterns(self):
+        """Non-pattern text passes through as TOKEN, one per aggregate call."""
+        results = []
+        for token in ["Hello", " world", "."]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        self.assertEqual(len(results), 3)
+        self.assertEqual(results[0].text, "Hello")
+        self.assertEqual(results[1].text, " world")
+        self.assertEqual(results[2].text, ".")
+        for r in results:
+            self.assertEqual(r.type, "token")
+
+    async def test_token_pattern_detection(self):
+        """Pattern detection still works with word-by-word token delivery."""
+        results = []
+        for token in ["Hi ", "<think>", "secret", "</think>", " bye"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        # Handler called once when the pattern completes
+        self.handler.assert_called_once()
+        call_args = self.handler.call_args[0][0]
+        self.assertEqual(call_args.text, "secret")
+
+        # "Hi " yields before pattern starts, pattern is removed, " bye" yields after
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0].text, "Hi ")
+        self.assertEqual(results[0].type, "token")
+        self.assertEqual(results[1].text, " bye")
+        self.assertEqual(results[1].type, "token")
+
+    async def test_token_incomplete_pattern_buffers(self):
+        """Incomplete pattern is buffered across calls, not leaked to output."""
+        results = []
+        for token in ["Hi ", "<think>", "partial"]:
+            async for r in self.aggregator.aggregate(token):
+                results.append(r)
+
+        # Only "Hi " should be yielded; "<think>partial" stays buffered
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "Hi ")
+        self.assertEqual(results[0].type, "token")
+        self.handler.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@
 """Krisp Instance manager for pipecat audio."""
 
 import atexit
+import os
 from threading import Lock
 
 from loguru import logger
@@ -89,15 +90,24 @@ class KrispVivaSDKManager:
     _reference_count = 0
 
     @staticmethod
+    def _license_callback(error, error_message):
+        """Callback for Krisp SDK licensing errors."""
+        logger.error(f"Krisp licensing error: {error} - {error_message}")
+
+    @staticmethod
     def _log_callback(log_message, log_level):
         """Thread-safe callback for Krisp SDK logging."""
         logger.info(f"[{log_level}] {log_message}")
 
     @classmethod
-    def acquire(cls):
+    def acquire(cls, api_key: str = ""):
         """Acquire a reference to the SDK (initializes if needed).
 
         Call this when creating a filter instance.
+
+        Args:
+            api_key: Krisp SDK API key. If empty, falls back to the
+                KRISP_VIVA_API_KEY environment variable.
 
         Raises:
             Exception: If SDK initialization fails (propagated from krisp_audio)
@@ -106,7 +116,19 @@ class KrispVivaSDKManager:
             # Initialize SDK on first acquire
             if cls._reference_count == 0:
                 try:
-                    krisp_audio.globalInit("", cls._log_callback, krisp_audio.LogLevel.Off)
+                    key = api_key or os.environ.get("KRISP_VIVA_API_KEY", "")
+                    try:
+                        # New SDK signature (requires license key)
+                        krisp_audio.globalInit(
+                            "",
+                            key,
+                            cls._license_callback,
+                            cls._log_callback,
+                            krisp_audio.LogLevel.Off,
+                        )
+                    except TypeError:
+                        # Old SDK signature (no license key)
+                        krisp_audio.globalInit("", cls._log_callback, krisp_audio.LogLevel.Off)
 
                     cls._initialized = True
 

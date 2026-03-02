@@ -137,18 +137,19 @@ class KokoroTTSService(TTSService):
             **kwargs: Additional arguments passed to parent `TTSService`.
 
         """
-        super().__init__(**kwargs)
-
         params = params or KokoroTTSService.InputParams()
 
-        self._lang_code = language_to_kokoro_language(params.language)
-
-        self._settings = KokoroTTSSettings(
-            model=None,
-            voice=voice_id,
-            language=language_to_kokoro_language(params.language),
-            lang_code=language_to_kokoro_language(params.language),
+        super().__init__(
+            settings=KokoroTTSSettings(
+                model=None,
+                voice=voice_id,
+                language=language_to_kokoro_language(params.language),
+                lang_code=language_to_kokoro_language(params.language),
+            ),
+            **kwargs,
         )
+
+        self._lang_code = language_to_kokoro_language(params.language)
 
         model = Path(model_path) if model_path else KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
         voices = Path(voices_path) if voices_path else KOKORO_CACHE_DIR / "voices-v1.0.bin"

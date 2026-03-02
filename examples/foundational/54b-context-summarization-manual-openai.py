@@ -4,14 +4,26 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Example demonstrating manual context summarization via a function call.
+
+This example shows how to trigger context summarization on demand rather than
+automatically. The user can ask the bot to "summarize the conversation" and the
+bot will call a function that pushes an LLMSummarizeContextFrame into the
+pipeline, causing the LLM service to compress the conversation history.
+
+Unlike example 54, automatic summarization is NOT enabled here. Summarization
+only happens when the user explicitly requests it through the function call.
+"""
 
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, LLMSummarizeContextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -22,12 +34,15 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.playht.tts import PlayHTHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -49,27 +64,59 @@ transport_params = {
 }
 
 
+async def summarize_conversation(params: FunctionCallParams):
+    """Trigger manual context summarization via a pipeline frame."""
+    logger.info("Tool called: summarize_conversation")
+    await params.result_callback({"status": "summarization_requested"})
+    await params.llm.queue_frame(LLMSummarizeContextFrame())
+
+
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = PlayHTHttpTTSService(
-        user_id=os.getenv("PLAYHT_USER_ID"),
-        api_key=os.getenv("PLAYHT_API_KEY"),
-        voice_url="s3://voice-cloning-zero-shot/d9ff78ba-d016-47f6-b0ef-dd630f59414e/female-cs/manifest.json",
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
+    llm.register_function("summarize_conversation", summarize_conversation)
+
+    summarize_function = FunctionSchema(
+        name="summarize_conversation",
+        description=(
+            "Summarize and compress the conversation history. "
+            "Call this when the user asks you to summarize the conversation "
+            "or when you want to free up context space."
+        ),
+        properties={},
+        required=[],
+    )
+    tools = ToolsSchema(standard_tools=[summarize_function])
+
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            "content": (
+                "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your "
+                "capabilities in a succinct way. Your output will be spoken aloud, so avoid "
+                "special characters that can't easily be spoken, such as emojis or bullet points. "
+                "Respond to what the user said in a creative and helpful way. "
+                "If the user asks you to summarize the conversation, call the "
+                "summarize_conversation function. After summarization, briefly acknowledge "
+                "that the conversation history has been compressed."
+            ),
         },
     ]
 
-    context = LLMContext(messages)
+    context = LLMContext(messages, tools=tools)
+
+    # Automatic summarization is NOT enabled here (enable_auto_context_summarization
+    # defaults to False). The summarizer is still created internally so that
+    # LLMSummarizeContextFrame frames pushed via the function call are handled.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -98,14 +145,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
+        logger.info("Client disconnected")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)

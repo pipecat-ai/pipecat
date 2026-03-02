@@ -254,28 +254,30 @@ class AWSNovaSonicLLMService(LLMService):
 
             **kwargs: Additional arguments passed to the parent LLMService.
         """
-        super().__init__(**kwargs)
+        params = params or Params()
+
+        super().__init__(
+            settings=AWSNovaSonicLLMSettings(
+                model=model,
+                voice_id=voice_id,
+                temperature=params.temperature,
+                max_tokens=params.max_tokens,
+                top_p=params.top_p,
+                top_k=None,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                endpointing_sensitivity=params.endpointing_sensitivity,
+            ),
+            **kwargs,
+        )
         self._secret_access_key = secret_access_key
         self._access_key_id = access_key_id
         self._session_token = session_token
         self._region = region
         self._client: Optional[BedrockRuntimeClient] = None
-        params = params or Params()
-        self._settings = AWSNovaSonicLLMSettings(
-            model=model,
-            voice_id=voice_id,
-            temperature=params.temperature,
-            max_tokens=params.max_tokens,
-            top_p=params.top_p,
-            top_k=None,
-            frequency_penalty=None,
-            presence_penalty=None,
-            seed=None,
-            filter_incomplete_user_turns=False,
-            user_turn_completion_config=None,
-            endpointing_sensitivity=params.endpointing_sensitivity,
-        )
-        self._sync_model_name_to_metrics()
 
         # Audio I/O config (hardware settings, not runtime-tunable)
         self._input_sample_rate = params.input_sample_rate

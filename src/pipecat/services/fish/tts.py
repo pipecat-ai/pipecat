@@ -138,13 +138,6 @@ class FishAudioTTSService(InterruptibleTTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to the parent service.
         """
-        super().__init__(
-            push_stop_frames=True,
-            pause_frame_processing=True,
-            sample_rate=sample_rate,
-            **kwargs,
-        )
-
         params = params or FishAudioTTSService.InputParams()
 
         # Validation for model and reference_id parameters
@@ -169,24 +162,29 @@ class FishAudioTTSService(InterruptibleTTSService):
                 )
             reference_id = model
 
+        super().__init__(
+            push_stop_frames=True,
+            pause_frame_processing=True,
+            sample_rate=sample_rate,
+            settings=FishAudioTTSSettings(
+                model=model_id,
+                voice=reference_id,
+                fish_sample_rate=0,
+                latency=params.latency,
+                format=output_format,
+                normalize=params.normalize,
+                prosody_speed=params.prosody_speed,
+                prosody_volume=params.prosody_volume,
+                reference_id=reference_id,
+            ),
+            **kwargs,
+        )
+
         self._api_key = api_key
         self._base_url = "wss://api.fish.audio/v1/tts/live"
         self._websocket = None
         self._receive_task = None
         self._request_id = None
-
-        self._settings = FishAudioTTSSettings(
-            model=model_id,
-            voice=reference_id,
-            fish_sample_rate=0,
-            latency=params.latency,
-            format=output_format,
-            normalize=params.normalize,
-            prosody_speed=params.prosody_speed,
-            prosody_volume=params.prosody_volume,
-            reference_id=reference_id,
-        )
-        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

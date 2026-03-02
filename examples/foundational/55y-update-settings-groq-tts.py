@@ -97,8 +97,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating Groq TTS settings: speed=1.5")
-        await task.queue_frame(TTSUpdateSettingsFrame(delta=GroqTTSSettings(speed=1.5)))
+        logger.info("Updating Groq TTS settings: voice=troy")
+        await task.queue_frame(TTSUpdateSettingsFrame(delta=GroqTTSSettings(voice="troy")))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

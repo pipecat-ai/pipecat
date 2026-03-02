@@ -103,21 +103,23 @@ class NvidiaTTSService(TTSService):
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or NvidiaTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=NvidiaTTSSettings(
+                model=model_function_map.get("model_name"),
+                voice=voice_id,
+                language=params.language,
+                quality=params.quality,
+            ),
+            **kwargs,
+        )
 
         self._server = server
         self._api_key = api_key
         self._function_id = model_function_map.get("function_id")
         self._use_ssl = use_ssl
-        self._settings = NvidiaTTSSettings(
-            model=model_function_map.get("model_name"),
-            voice=voice_id,
-            language=params.language,
-            quality=params.quality,
-        )
-        self._sync_model_name_to_metrics()
 
         self._service = None
         self._config = None

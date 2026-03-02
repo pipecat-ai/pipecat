@@ -132,10 +132,6 @@ class OpenAITTSService(TTSService):
                 f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-
         if instructions or speed:
             import warnings
 
@@ -147,13 +143,18 @@ class OpenAITTSService(TTSService):
                     stacklevel=2,
                 )
 
-        self._settings = OpenAITTSSettings(
-            model=model,
-            voice=voice,
-            instructions=params.instructions if params else instructions,
-            speed=params.speed if params else speed,
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=OpenAITTSSettings(
+                model=model,
+                voice=voice,
+                instructions=params.instructions if params else instructions,
+                speed=params.speed if params else speed,
+            ),
+            **kwargs,
         )
-        self._sync_model_name_to_metrics()
+
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

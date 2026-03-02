@@ -69,9 +69,10 @@ class PiperTTSService(TTSService):
             use_cuda: Use CUDA for GPU-accelerated inference.
             **kwargs: Additional arguments passed to the parent `TTSService`.
         """
-        super().__init__(**kwargs)
-
-        self._settings = PiperTTSSettings(model=None, voice=voice_id, language=None)
+        super().__init__(
+            settings=PiperTTSSettings(model=None, voice=voice_id, language=None),
+            **kwargs,
+        )
 
         download_dir = download_dir or Path.cwd()
 
@@ -199,7 +200,10 @@ class PiperHttpTTSService(TTSService):
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            settings=PiperHttpTTSSettings(model=None, voice=voice_id, language=None),
+            **kwargs,
+        )
 
         if base_url.endswith("/"):
             logger.warning("Base URL ends with a slash, this is not allowed.")
@@ -207,7 +211,6 @@ class PiperHttpTTSService(TTSService):
 
         self._base_url = base_url
         self._session = aiohttp_session
-        self._settings = PiperHttpTTSSettings(model=None, voice=voice_id, language=None)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

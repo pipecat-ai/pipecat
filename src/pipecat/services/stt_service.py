@@ -86,6 +86,7 @@ class STTService(AIService):
         ttfs_p99_latency: Optional[float] = None,
         keepalive_timeout: Optional[float] = None,
         keepalive_interval: float = 5.0,
+        settings: Optional[STTSettings] = None,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -109,14 +110,20 @@ class STTService(AIService):
                 connection alive. None disables keepalive. Useful for services that
                 close idle connections (e.g. behind a ServiceSwitcher).
             keepalive_interval: Seconds between idle checks when keepalive is enabled.
+            settings: The runtime-updatable settings for the STT service.
             **kwargs: Additional arguments passed to the parent AIService.
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            settings=settings
+            # Here in case subclass doesn't implement more specific settings
+            # (which hopefully should be rare)
+            or STTSettings(),
+            **kwargs,
+        )
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
 
-        self._settings = STTSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
         self._muted: bool = False
         self._user_id: str = ""
         self._ttfs_p99_latency = ttfs_p99_latency

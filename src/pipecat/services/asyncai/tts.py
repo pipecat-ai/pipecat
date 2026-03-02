@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-from pipecat.services.tts_service import TTSService, WebsocketTTSService
+from pipecat.services.tts_service import TTSService, WebsocketTTSService, TextAggregationMode
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -128,7 +128,8 @@ class AsyncAITTSService(WebsocketTTSService):
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
-        aggregate_sentences: Optional[bool] = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
     ):
         """Initialize the Async TTS service.
@@ -144,33 +145,38 @@ class AsyncAITTSService(WebsocketTTSService):
             encoding: Audio encoding format.
             container: Audio container format.
             params: Additional input parameters for voice customization.
-            aggregate_sentences: Whether to aggregate sentences within the TTSService.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to the parent service.
         """
+        params = params or AsyncAITTSService.InputParams()
+
         super().__init__(
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             pause_frame_processing=True,
             push_stop_frames=True,
             sample_rate=sample_rate,
+            settings=AsyncAITTSSettings(
+                model=model,
+                voice=voice_id,
+                output_container=container,
+                output_encoding=encoding,
+                output_sample_rate=0,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else None,
+            ),
             **kwargs,
         )
-
-        params = params or AsyncAITTSService.InputParams()
 
         self._api_key = api_key
         self._api_version = version
         self._url = url
-        self._settings = AsyncAITTSSettings(
-            model=model,
-            voice=voice_id,
-            output_container=container,
-            output_encoding=encoding,
-            output_sample_rate=0,
-            language=self.language_to_service_language(params.language)
-            if params.language
-            else None,
-        )
-        self._sync_model_name_to_metrics()
 
         self._receive_task = None
         self._keepalive_task = None
@@ -505,24 +511,26 @@ class AsyncAIHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or AsyncAIHttpTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=AsyncAITTSSettings(
+                model=model,
+                voice=voice_id,
+                output_container=container,
+                output_encoding=encoding,
+                output_sample_rate=0,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else None,
+            ),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._base_url = url
         self._api_version = version
-        self._settings = AsyncAITTSSettings(
-            model=model,
-            voice=voice_id,
-            output_container=container,
-            output_encoding=encoding,
-            output_sample_rate=0,
-            language=self.language_to_service_language(params.language)
-            if params.language
-            else None,
-        )
-        self._sync_model_name_to_metrics()
 
         self._session = aiohttp_session
 

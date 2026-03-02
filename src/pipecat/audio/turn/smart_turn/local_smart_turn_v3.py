@@ -14,11 +14,15 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import onnxruntime as ort
+import soxr
 from loguru import logger
 from transformers import WhisperFeatureExtractor
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 from pipecat.utils.env import env_truthy
+
+# The Whisper-based ONNX model expects 16 kHz audio input.
+_MODEL_SAMPLE_RATE = 16000
 
 
 class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
@@ -77,7 +81,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         logger.debug("Loaded Local Smart Turn v3.x")
 
     def _write_audio_to_wav(
-        self, audio_array: np.ndarray, sample_rate: int = 16000, suffix: str = ""
+        self, audio_array: np.ndarray, sample_rate: int = _MODEL_SAMPLE_RATE, suffix: str = ""
     ) -> None:
         """Write audio data to a WAV file in a background thread.
 
@@ -119,10 +123,27 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         thread = threading.Thread(target=write_wav, daemon=True)
         thread.start()
 
+    def _resample_to_model_rate(self, audio_array: np.ndarray) -> np.ndarray:
+        """Resample audio to the model's expected sample rate (16 kHz).
+
+        Args:
+            audio_array: Audio data as a float32 numpy array.
+
+        Returns:
+            Resampled audio array at 16 kHz.
+        """
+        actual_rate = self._sample_rate or _MODEL_SAMPLE_RATE
+        if actual_rate == _MODEL_SAMPLE_RATE:
+            return audio_array
+
+        return soxr.resample(audio_array, actual_rate, _MODEL_SAMPLE_RATE, quality="VHQ")
+
     def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         """Predict end-of-turn using local ONNX model."""
 
-        def truncate_audio_to_last_n_seconds(audio_array, n_seconds=8, sample_rate=16000):
+        def truncate_audio_to_last_n_seconds(
+            audio_array, n_seconds=8, sample_rate=_MODEL_SAMPLE_RATE
+        ):
             """Truncate audio to last n seconds or pad with zeros to meet n seconds."""
             max_samples = n_seconds * sample_rate
             if len(audio_array) > max_samples:
@@ -134,6 +155,10 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
             return audio_array
 
         audio_for_logging = audio_array
+        actual_rate = self._sample_rate or _MODEL_SAMPLE_RATE
+
+        # Resample to 16 kHz if the pipeline uses a different sample rate
+        audio_array = self._resample_to_model_rate(audio_array)
 
         # Truncate to 8 seconds (keeping the end) or pad to 8 seconds
         audio_array = truncate_audio_to_last_n_seconds(audio_array, n_seconds=8)
@@ -141,10 +166,10 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         # Process audio using Whisper's feature extractor
         inputs = self._feature_extractor(
             audio_array,
-            sampling_rate=16000,
+            sampling_rate=_MODEL_SAMPLE_RATE,
             return_tensors="np",
             padding="max_length",
-            max_length=8 * 16000,
+            max_length=8 * _MODEL_SAMPLE_RATE,
             truncation=True,
             do_normalize=True,
         )
@@ -164,7 +189,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
         if self._log_data:
             suffix = "_complete" if prediction == 1 else "_incomplete"
-            self._write_audio_to_wav(audio_for_logging, sample_rate=16000, suffix=suffix)
+            self._write_audio_to_wav(audio_for_logging, sample_rate=actual_rate, suffix=suffix)
 
         return {
             "prediction": prediction,

@@ -441,18 +441,34 @@ class FrameProcessor(BaseObject):
             if frame:
                 await self.push_frame(frame)
 
+    _processing_metrics_warned = False
+
     async def start_processing_metrics(self, *, start_time: Optional[float] = None):
         """Start processing metrics collection.
+
+        .. deprecated:: 0.0.104
+            Processing metrics are deprecated and will be removed in a future version.
+            Use TTFB metrics instead.
 
         Args:
             start_time: Optional timestamp to use as the start time. If None,
                 uses the current time.
         """
         if self.can_generate_metrics() and self.metrics_enabled:
+            if not FrameProcessor._processing_metrics_warned:
+                FrameProcessor._processing_metrics_warned = True
+                logger.warning(
+                    "Processing metrics are deprecated and will be removed in a future version. "
+                    "Use TTFB metrics instead."
+                )
             await self._metrics.start_processing_metrics(start_time=start_time)
 
     async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
         """Stop processing metrics collection and push results.
+
+        .. deprecated:: 0.0.104
+            Processing metrics are deprecated and will be removed in a future version.
+            Use TTFB metrics instead.
 
         Args:
             end_time: Optional timestamp to use as the end time. If None, uses
@@ -485,10 +501,23 @@ class FrameProcessor(BaseObject):
             if frame:
                 await self.push_frame(frame)
 
+    async def start_text_aggregation_metrics(self):
+        """Start text aggregation time metrics collection."""
+        if self.can_generate_metrics() and self.metrics_enabled:
+            await self._metrics.start_text_aggregation_metrics()
+
+    async def stop_text_aggregation_metrics(self):
+        """Stop text aggregation time metrics collection and push results."""
+        if self.can_generate_metrics() and self.metrics_enabled:
+            frame = await self._metrics.stop_text_aggregation_metrics()
+            if frame:
+                await self.push_frame(frame)
+
     async def stop_all_metrics(self):
         """Stop all active metrics collection."""
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
+        await self.stop_text_aggregation_metrics()
 
     def create_task(self, coroutine: Coroutine, name: Optional[str] = None) -> asyncio.Task:
         """Create a new task managed by this processor.
@@ -936,7 +965,7 @@ class FrameProcessor(BaseObject):
         try:
             timestamp = self._clock.get_time() if self._clock else 0
             if direction == FrameDirection.DOWNSTREAM and self._next:
-                logger.trace(f"Pushing {frame} from {self} to {self._next}")
+                logger.trace(f"Pushing {frame} downstream from {self} to {self._next}")
 
                 if self._observer:
                     data = FramePushed(

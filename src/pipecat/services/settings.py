@@ -320,6 +320,28 @@ class ServiceSettings:
 
 
 @dataclass
+class ImageGenSettings(ServiceSettings):
+    """Runtime-updatable settings for image generation services.
+
+    Used in both store and delta mode — see ``ServiceSettings``.
+
+    Parameters:
+        model: Image generation model identifier.
+    """
+
+
+@dataclass
+class VisionSettings(ServiceSettings):
+    """Runtime-updatable settings for vision services.
+
+    Used in both store and delta mode — see ``ServiceSettings``.
+
+    Parameters:
+        model: Vision model identifier.
+    """
+
+
+@dataclass
 class LLMSettings(ServiceSettings):
     """Runtime-updatable settings for LLM services.
 

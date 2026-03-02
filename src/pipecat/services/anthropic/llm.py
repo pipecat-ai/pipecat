@@ -232,37 +232,39 @@ class AnthropicLLMService(LLMService):
             retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        super().__init__(**kwargs)
         params = params or AnthropicLLMService.InputParams()
+
+        super().__init__(
+            settings=AnthropicLLMSettings(
+                model=model,
+                max_tokens=params.max_tokens,
+                enable_prompt_caching=(
+                    params.enable_prompt_caching
+                    if params.enable_prompt_caching is not None
+                    else (
+                        params.enable_prompt_caching_beta
+                        if params.enable_prompt_caching_beta is not None
+                        else False
+                    )
+                ),
+                temperature=params.temperature,
+                top_k=params.top_k,
+                top_p=params.top_p,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                thinking=params.thinking,
+                extra=params.extra if isinstance(params.extra, dict) else {},
+            ),
+            **kwargs,
+        )
         self._client = client or AsyncAnthropic(
             api_key=api_key
         )  # if the client is provided, use it and remove it, otherwise create a new one
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._settings = AnthropicLLMSettings(
-            model=model,
-            max_tokens=params.max_tokens,
-            enable_prompt_caching=(
-                params.enable_prompt_caching
-                if params.enable_prompt_caching is not None
-                else (
-                    params.enable_prompt_caching_beta
-                    if params.enable_prompt_caching_beta is not None
-                    else False
-                )
-            ),
-            temperature=params.temperature,
-            top_k=params.top_k,
-            top_p=params.top_p,
-            frequency_penalty=None,
-            presence_penalty=None,
-            seed=None,
-            filter_incomplete_user_turns=False,
-            user_turn_completion_config=None,
-            thinking=params.thinking,
-            extra=params.extra if isinstance(params.extra, dict) else {},
-        )
-        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate usage metrics.

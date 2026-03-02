@@ -793,29 +793,29 @@ class GoogleLLMService(LLMService):
             http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(**kwargs)
-
         params = params or GoogleLLMService.InputParams()
+
+        super().__init__(
+            settings=GoogleLLMSettings(
+                model=model,
+                max_tokens=params.max_tokens,
+                temperature=params.temperature,
+                top_k=params.top_k,
+                top_p=params.top_p,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                thinking=params.thinking,
+                extra=params.extra if isinstance(params.extra, dict) else {},
+            ),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._system_instruction = system_instruction
         self._http_options = update_google_client_http_options(http_options)
-
-        self._settings = GoogleLLMSettings(
-            model=model,
-            max_tokens=params.max_tokens,
-            temperature=params.temperature,
-            top_k=params.top_k,
-            top_p=params.top_p,
-            frequency_penalty=None,
-            presence_penalty=None,
-            seed=None,
-            filter_incomplete_user_turns=False,
-            user_turn_completion_config=None,
-            thinking=params.thinking,
-            extra=params.extra if isinstance(params.extra, dict) else {},
-        )
-        self._sync_model_name_to_metrics()
         self._tools = tools
         self._tool_config = tool_config
 

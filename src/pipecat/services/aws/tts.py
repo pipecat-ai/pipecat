@@ -195,9 +195,24 @@ class AWSPollyTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or AWSPollyTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=AWSPollyTTSSettings(
+                model=None,
+                voice=voice_id,
+                engine=params.engine,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en-US",
+                pitch=params.pitch,
+                rate=params.rate,
+                volume=params.volume,
+                lexicon_names=params.lexicon_names,
+            ),
+            **kwargs,
+        )
 
         # Get credentials from environment variables if not provided
         self._aws_params = {
@@ -208,18 +223,6 @@ class AWSPollyTTSService(TTSService):
         }
 
         self._aws_session = aioboto3.Session()
-        self._settings = AWSPollyTTSSettings(
-            model=None,
-            voice=voice_id,
-            engine=params.engine,
-            language=self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            pitch=params.pitch,
-            rate=params.rate,
-            volume=params.volume,
-            lexicon_names=params.lexicon_names,
-        )
 
         self._resampler = create_stream_resampler()
 

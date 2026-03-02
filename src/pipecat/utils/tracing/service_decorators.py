@@ -219,7 +219,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             tracer = trace.get_tracer("pipecat")
             with tracer.start_as_current_span(span_name, context=parent_context) as span:
                 try:
-                    settings = getattr(self, "_settings", {})
+                    settings = getattr(self, "_settings", None)
                     add_tts_span_attributes(
                         span=span,
                         service_name=service_class_name,
@@ -338,7 +338,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         )
 
                         # Use settings from the service if available
-                        settings = getattr(self, "_settings", {})
+                        settings = getattr(self, "_settings", None)
 
                         add_stt_span_attributes(
                             span=current_span,
@@ -510,15 +510,10 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Get settings from the service
                             params = {}
                             if hasattr(self, "_settings"):
-                                for key, value in self._settings.items():
-                                    if key == "extra":
-                                        continue
-                                    # Add value directly if it's a basic type
+                                for key, value in self._settings.given_fields().items():
                                     if isinstance(value, (int, float, bool, str)):
                                         params[key] = value
-                                    elif value is None or (
-                                        hasattr(value, "__name__") and value.__name__ == "NOT_GIVEN"
-                                    ):
+                                    elif value is None:
                                         params[key] = "NOT_GIVEN"
 
                             # Add all available attributes to the span
@@ -627,12 +622,12 @@ def traced_gemini_live(operation: str) -> Callable:
                         model_name = _get_model_name(self)
                         voice_id = getattr(self, "_voice_id", None)
                         language_code = getattr(self, "_language_code", None)
-                        settings = getattr(self, "_settings", {})
+                        settings = getattr(self, "_settings", None)
 
                         # Get modalities if available
                         modalities = None
-                        if hasattr(self, "_settings") and "modalities" in self._settings:
-                            modality_obj = self._settings["modalities"]
+                        if settings and hasattr(settings, "modalities"):
+                            modality_obj = settings.modalities
                             if hasattr(modality_obj, "value"):
                                 modalities = modality_obj.value
                             else:

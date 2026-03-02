@@ -156,25 +156,26 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             )
 
         full_url = f"{base_url}?model={model}"
-        super().__init__(base_url=full_url, **kwargs)
+        super().__init__(
+            base_url=full_url,
+            settings=OpenAIRealtimeBetaLLMSettings(
+                model=model,
+                temperature=None,
+                max_tokens=None,
+                top_p=None,
+                top_k=None,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                session_properties=session_properties or events.SessionProperties(),
+            ),
+            **kwargs,
+        )
 
         self.api_key = api_key
         self.base_url = full_url
-
-        self._settings = OpenAIRealtimeBetaLLMSettings(
-            model=model,
-            temperature=None,
-            max_tokens=None,
-            top_p=None,
-            top_k=None,
-            frequency_penalty=None,
-            presence_penalty=None,
-            seed=None,
-            filter_incomplete_user_turns=False,
-            user_turn_completion_config=None,
-            session_properties=session_properties or events.SessionProperties(),
-        )
-        self._sync_model_name_to_metrics()
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
         self._websocket = None
@@ -543,9 +544,12 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "error":
                 if not await self._maybe_handle_evt_retrieve_conversation_item_error(evt):
-                    await self._handle_evt_error(evt)
-                    # errors are fatal, so exit the receive loop
-                    return
+                    if evt.error.code == "response_cancel_not_active":
+                        logger.debug(f"{self} {evt.error.message}")
+                    else:
+                        await self._handle_evt_error(evt)
+                        # errors are fatal, so exit the receive loop
+                        return
 
     @traced_openai_realtime(operation="llm_setup")
     async def _handle_evt_session_created(self, evt):

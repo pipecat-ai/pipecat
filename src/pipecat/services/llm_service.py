@@ -62,6 +62,7 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.context.llm_context_summarization import (
+    DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
 )
 
@@ -181,7 +182,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
     def __init__(
-        self, run_in_parallel: bool = True, function_call_timeout_secs: float = 10.0, **kwargs
+        self,
+        run_in_parallel: bool = True,
+        function_call_timeout_secs: float = 10.0,
+        settings: Optional[LLMSettings] = None,
+        **kwargs,
     ):
         """Initialize the LLM service.
 
@@ -190,10 +195,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 Defaults to True.
             function_call_timeout_secs: Timeout in seconds for deferred function calls.
                 Defaults to 10.0 seconds.
+            settings: The runtime-updatable settings for the LLM service.
             **kwargs: Additional arguments passed to the parent AIService.
 
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            settings=settings
+            # Here in case subclass doesn't implement more specific settings
+            # (which hopefully should be rare)
+            or LLMSettings(),
+            **kwargs,
+        )
         self._run_in_parallel = run_in_parallel
         self._function_call_timeout_secs = function_call_timeout_secs
         self._filter_incomplete_user_turns: bool = False
@@ -204,7 +216,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._sequential_runner_task: Optional[asyncio.Task] = None
         self._skip_tts: Optional[bool] = None
         self._summary_task: Optional[asyncio.Task] = None
-        self._settings = LLMSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
@@ -426,8 +437,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         last_index = -1
         error = None
 
+        timeout = frame.summarization_timeout or DEFAULT_SUMMARIZATION_TIMEOUT
+
         try:
-            summary, last_index = await self._generate_summary(frame)
+            summary, last_index = await asyncio.wait_for(
+                self._generate_summary(frame),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            await self.push_error(error_msg=f"Context summarization timed out after {timeout}s")
         except Exception as e:
             error = f"Error generating context summary: {e}"
             await self.push_error(error, exception=e)

@@ -35,14 +35,21 @@ class AIService(FrameProcessor):
     this base infrastructure.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, settings: ServiceSettings | None = None, **kwargs):
         """Initialize the AI service.
 
         Args:
+            settings: The runtime-updatable settings for the AI service.
             **kwargs: Additional arguments passed to the parent FrameProcessor.
         """
         super().__init__(**kwargs)
-        self._settings: ServiceSettings = ServiceSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
+        self._settings: ServiceSettings = (
+            settings
+            # Here in case subclass doesn't implement more specific settings
+            # (which hopefully should be rare)
+            or ServiceSettings()
+        )
+        self._sync_model_name_to_metrics()
         self._session_properties: Dict[str, Any] = {}
         self._tracing_enabled: bool = False
         self._tracing_context = None
@@ -54,15 +61,12 @@ class AIService(FrameProcessor):
         of truth for it in `self._settings.model`. This method is just for
         syncing the model name to the metrics data.
 
-        TODO: as a next step we should make it so that service classes pass
-        model into `super().__init__` and `AIService` can be responsible for
-        syncing its initial value to metrics, just as it's responsible for
-        syncing any updates to its value to metrics via `_update_settings`.
-
         Args:
             model: The name of the AI model to use.
         """
-        self.set_core_metrics_data(MetricsData(processor=self.name, model=self._settings.model))
+        self.set_core_metrics_data(
+            MetricsData(processor=self.name, model=self._settings.model or "")
+        )
 
     async def start(self, frame: StartFrame):
         """Start the AI service.

@@ -11,6 +11,7 @@ for creating images from text prompts.
 """
 
 import io
+from dataclasses import dataclass
 from typing import AsyncGenerator, Literal, Optional
 
 import aiohttp
@@ -24,6 +25,16 @@ from pipecat.frames.frames import (
     URLImageRawFrame,
 )
 from pipecat.services.image_service import ImageGenService
+from pipecat.services.settings import ImageGenSettings
+
+
+@dataclass
+class OpenAIImageGenSettings(ImageGenSettings):
+    """Settings for the OpenAI image generation service.
+
+    Parameters:
+        model: DALL-E model identifier.
+    """
 
 
 class OpenAIImageGenService(ImageGenService):
@@ -52,9 +63,7 @@ class OpenAIImageGenService(ImageGenService):
             image_size: Target size for generated images.
             model: DALL-E model to use for generation. Defaults to "dall-e-3".
         """
-        super().__init__()
-        self._settings.model = model
-        self._sync_model_name_to_metrics()
+        super().__init__(settings=OpenAIImageGenSettings(model=model))
         self._image_size = image_size
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._aiohttp_session = aiohttp_session

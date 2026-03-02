@@ -202,32 +202,31 @@ class SonioxSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService.
         """
+        params = params or SonioxInputParams()
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=1,
             keepalive_interval=5,
+            settings=SonioxSTTSettings(
+                model=params.model,
+                language=None,
+                audio_format=params.audio_format,
+                num_channels=params.num_channels,
+                language_hints=params.language_hints,
+                language_hints_strict=params.language_hints_strict,
+                context=params.context,
+                enable_speaker_diarization=params.enable_speaker_diarization,
+                enable_language_identification=params.enable_language_identification,
+                client_reference_id=params.client_reference_id,
+            ),
             **kwargs,
         )
-        params = params or SonioxInputParams()
 
         self._api_key = api_key
         self._url = url
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
-
-        self._settings = SonioxSTTSettings(
-            model=params.model,
-            language=None,
-            audio_format=params.audio_format,
-            num_channels=params.num_channels,
-            language_hints=params.language_hints,
-            language_hints_strict=params.language_hints_strict,
-            context=params.context,
-            enable_speaker_diarization=params.enable_speaker_diarization,
-            enable_language_identification=params.enable_language_identification,
-            client_reference_id=params.client_reference_id,
-        )
-        self._sync_model_name_to_metrics()
 
         self._final_transcription_buffer = []
         self._last_tokens_received: Optional[float] = None

@@ -80,6 +80,7 @@ class AzureSTTService(STTService):
         region: str,
         language: Language = Language.EN_US,
         sample_rate: Optional[int] = None,
+        private_endpoint: Optional[str] = None,
         endpoint_id: Optional[str] = None,
         ttfs_p99_latency: Optional[float] = AZURE_TTFS_P99,
         **kwargs,
@@ -91,17 +92,30 @@ class AzureSTTService(STTService):
             region: Azure region for the Speech service (e.g., 'eastus').
             language: Language for speech recognition. Defaults to English (US).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
+            private_endpoint: Private endpoint for STT behind firewall.
+                See https://docs.azure.cn/en-us/ai-services/speech-service/speech-services-private-link?tabs=portal
             endpoint_id: Custom model endpoint id.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=AzureSTTSettings(
+                model=None,
+                region=region,
+                language=language_to_azure_language(language),
+                sample_rate=sample_rate,
+            ),
+            **kwargs,
+        )
 
         self._speech_config = SpeechConfig(
             subscription=api_key,
             region=region,
             speech_recognition_language=language_to_azure_language(language),
+            endpoint=private_endpoint,
         )
 
         if endpoint_id:
@@ -109,12 +123,6 @@ class AzureSTTService(STTService):
 
         self._audio_stream = None
         self._speech_recognizer = None
-        self._settings = AzureSTTSettings(
-            model=None,
-            region=region,
-            language=language_to_azure_language(language),
-            sample_rate=sample_rate,
-        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate performance metrics.

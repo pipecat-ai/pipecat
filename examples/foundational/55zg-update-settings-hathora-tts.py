@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = HathoraTTSService(
         api_key=os.getenv("HATHORA_API_KEY"),
-        model="hathora-ai/polar",
+        model="hexgrad-kokoro-82m",
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -100,8 +100,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating Hathora TTS settings: speed=1.3")
-        await task.queue_frame(TTSUpdateSettingsFrame(delta=HathoraTTSSettings(speed=1.3)))
+        logger.info("Updating Hathora TTS settings: speed=1.5")
+        await task.queue_frame(TTSUpdateSettingsFrame(delta=HathoraTTSSettings(speed=1.5)))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

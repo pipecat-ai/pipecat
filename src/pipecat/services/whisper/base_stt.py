@@ -155,21 +155,22 @@ class BaseWhisperSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        super().__init__(ttfs_p99_latency=ttfs_p99_latency, **kwargs)
+        super().__init__(
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=BaseWhisperSTTSettings(
+                model=model,
+                language=self.language_to_service_language(language or Language.EN),
+                base_url=base_url,
+                prompt=prompt,
+                temperature=temperature,
+            ),
+            **kwargs,
+        )
         self._client = self._create_client(api_key, base_url)
-        self._language = self.language_to_service_language(language or Language.EN)
+        self._language = self._settings.language
         self._prompt = prompt
         self._temperature = temperature
         self._include_prob_metrics = include_prob_metrics
-
-        self._settings = BaseWhisperSTTSettings(
-            model=model,
-            language=self._language,
-            base_url=base_url,
-            prompt=self._prompt,
-            temperature=self._temperature,
-        )
-        self._sync_model_name_to_metrics()
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)

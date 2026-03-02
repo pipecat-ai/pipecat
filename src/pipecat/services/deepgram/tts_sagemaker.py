@@ -99,18 +99,17 @@ class DeepgramSageMakerTTSService(TTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             append_trailing_space=True,
+            settings=DeepgramSageMakerTTSSettings(
+                model=voice,
+                voice=voice,
+                language=None,
+                encoding=encoding,
+            ),
             **kwargs,
         )
 
         self._endpoint_name = endpoint_name
         self._region = region
-        self._settings = DeepgramSageMakerTTSSettings(
-            model=voice,
-            voice=voice,
-            language=None,
-            encoding=encoding,
-        )
-        self._sync_model_name_to_metrics()
 
         self._client: Optional[SageMakerBidiClient] = None
         self._response_task: Optional[asyncio.Task] = None

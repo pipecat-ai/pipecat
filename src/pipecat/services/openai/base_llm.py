@@ -133,28 +133,28 @@ class BaseOpenAILLMService(LLMService):
             retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
-        super().__init__(**kwargs)
-
         params = params or BaseOpenAILLMService.InputParams()
 
-        self._settings = OpenAILLMSettings(
-            model=model,
-            frequency_penalty=params.frequency_penalty,
-            presence_penalty=params.presence_penalty,
-            seed=params.seed,
-            temperature=params.temperature,
-            top_p=params.top_p,
-            top_k=None,
-            max_tokens=params.max_tokens,
-            max_completion_tokens=params.max_completion_tokens,
-            service_tier=params.service_tier,
-            filter_incomplete_user_turns=False,
-            user_turn_completion_config=None,
-            extra=params.extra if isinstance(params.extra, dict) else {},
+        super().__init__(
+            settings=OpenAILLMSettings(
+                model=model,
+                frequency_penalty=params.frequency_penalty,
+                presence_penalty=params.presence_penalty,
+                seed=params.seed,
+                temperature=params.temperature,
+                top_p=params.top_p,
+                top_k=None,
+                max_tokens=params.max_tokens,
+                max_completion_tokens=params.max_completion_tokens,
+                service_tier=params.service_tier,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                extra=params.extra if isinstance(params.extra, dict) else {},
+            ),
+            **kwargs,
         )
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._sync_model_name_to_metrics()
         self._full_model_name: str = ""
         self._client = self.create_client(
             api_key=api_key,

@@ -233,20 +233,20 @@ class WhisperSTTService(SegmentedSTTService):
             language: The default language for transcription.
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            settings=WhisperSTTSettings(
+                model=model if isinstance(model, str) else model.value,
+                language=language,
+                device=device,
+                compute_type=compute_type,
+                no_speech_prob=no_speech_prob,
+            ),
+            **kwargs,
+        )
         self._device: str = device
         self._compute_type = compute_type
         self._no_speech_prob = no_speech_prob
         self._model: Optional[WhisperModel] = None
-
-        self._settings = WhisperSTTSettings(
-            model=model if isinstance(model, str) else model.value,
-            language=language,
-            device=self._device,
-            compute_type=self._compute_type,
-            no_speech_prob=self._no_speech_prob,
-        )
-        self._sync_model_name_to_metrics()
 
         self._load()
 
@@ -368,19 +368,20 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         # Skip WhisperSTTService.__init__ and call its parent directly
-        SegmentedSTTService.__init__(self, **kwargs)
+        SegmentedSTTService.__init__(
+            self,
+            settings=WhisperMLXSTTSettings(
+                model=model if isinstance(model, str) else model.value,
+                language=language,
+                no_speech_prob=no_speech_prob,
+                temperature=temperature,
+                engine="mlx",
+            ),
+            **kwargs,
+        )
 
         self._no_speech_prob = no_speech_prob
         self._temperature = temperature
-
-        self._settings = WhisperMLXSTTSettings(
-            model=model if isinstance(model, str) else model.value,
-            language=language,
-            no_speech_prob=self._no_speech_prob,
-            temperature=self._temperature,
-            engine="mlx",
-        )
-        self._sync_model_name_to_metrics()
 
         # No need to call _load() as MLX Whisper loads models on demand
 

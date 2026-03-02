@@ -257,15 +257,16 @@ The service stores its current settings in `self._settings` and declares the typ
 
 ```python
 class MySTTService(STTService):
-
     _settings: MySTTSettings
 
     def __init__(self, *, model: str, language: str, region: str, **kwargs):
-        super().__init__(**kwargs)
-        # Initial value must be provided for every field in self._settings
-        # before service is started
-        self._settings = MySTTSettings(model=model, language=language, region=region)
-        self._sync_model_name_to_metrics()
+        # An initial value should be provided for every settings field.
+        # This will be validated at service start.
+        # (If you track sample_rate, it can be a placeholder value like 0; see
+        # "Sample Rate Handling").
+        super().__init__(
+            settings=MySTTSettings(model=model, language=language, region=region), **kwargs
+        )
 ```
 
 To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns a `dict` mapping each changed field name to its **pre-update** value. Your override should call `super()` first, then act on the changed fields. A common implementation might look like:
