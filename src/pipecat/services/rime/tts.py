@@ -598,6 +598,7 @@ class RimeHttpTTSService(TTSService):
             "Accept": "audio/pcm",
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            "Accept-Encoding": "gzip, deflate",
         }
 
         payload = self._settings.copy()
@@ -620,7 +621,9 @@ class RimeHttpTTSService(TTSService):
                 self._base_url, json=payload, headers=headers
             ) as response:
                 if response.status != 200:
-                    error_message = f"Rime TTS error: HTTP {response.status}"
+                    body = await response.text()
+                    error_message = f"Rime TTS error: HTTP {response.status}, body: {body}"
+                    logger.error(f"{self}: {error_message}, payload: {payload}")
                     yield ErrorFrame(error=error_message)
                     return
 
