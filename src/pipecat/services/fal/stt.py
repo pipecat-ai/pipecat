@@ -259,7 +259,7 @@ class FalSTTService(SegmentedSTTService):
         """Handle a transcription result with tracing."""
         await self.stop_processing_metrics()
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Transcribes an audio segment using Fal's Wizper API.
 
         Args:

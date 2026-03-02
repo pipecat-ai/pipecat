@@ -271,7 +271,7 @@ class GradiumSTTService(WebsocketSTTService):
                 logger.warning(f"Failed to send silence frame: {e}")
                 break
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text conversion.
 
         Args:

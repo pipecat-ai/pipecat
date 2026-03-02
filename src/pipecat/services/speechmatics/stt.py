@@ -1013,7 +1013,7 @@ class SpeechmaticsSTTService(STTService):
         """Record transcription event for tracing."""
         pass
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Adds audio to the audio buffer and yields None."""
         try:
             if self._client:
