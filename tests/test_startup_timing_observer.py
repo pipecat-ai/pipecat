@@ -155,7 +155,7 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         for timing in report.processor_timings:
             self.assertIsInstance(timing.processor_name, str)
             self.assertIsInstance(timing.duration_secs, float)
-            self.assertGreater(timing.start_time, 0)
+            self.assertGreaterEqual(timing.start_offset_secs, 0)
 
     async def test_excludes_internal_processors(self):
         """Test that internal pipeline processors are excluded by default."""

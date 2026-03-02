@@ -54,12 +54,13 @@ class ProcessorStartupTiming(BaseModel):
 
     Parameters:
         processor_name: The name of the processor.
-        start_time: Unix timestamp when the processor's start() began.
+        start_offset_secs: Offset in seconds from the StartFrame to when this
+            processor's start() began.
         duration_secs: How long the processor's start() took, in seconds.
     """
 
     processor_name: str
-    start_time: float
+    start_offset_secs: float
     duration_secs: float
 
 
@@ -181,18 +182,11 @@ class StartupTimingObserver(BaseObserver):
         # Bot connected timing (stored for inclusion in the transport report).
         self._bot_connected_secs: Optional[float] = None
 
-        # Wall clock reference for converting monotonic ns to Unix timestamps.
-        self._wall_clock_ref: Optional[float] = None
-        self._mono_clock_ref_ns: Optional[int] = None
+        # Wall clock time when the StartFrame was first seen.
+        self._start_wall_clock: Optional[float] = None
 
         self._register_event_handler("on_startup_timing_report")
         self._register_event_handler("on_transport_timing_report")
-
-    def _mono_to_wall(self, mono_ns: int) -> float:
-        """Convert a monotonic nanosecond timestamp to a Unix wall clock time."""
-        if self._wall_clock_ref is None or self._mono_clock_ref_ns is None:
-            return 0.0
-        return self._wall_clock_ref + (mono_ns - self._mono_clock_ref_ns) / 1e9
 
     def _should_track(self, processor: FrameProcessor) -> bool:
         """Check if a processor should be tracked for timing.
@@ -227,8 +221,7 @@ class StartupTimingObserver(BaseObserver):
         if self._start_frame_id is None:
             self._start_frame_id = data.frame.id
             self._start_frame_arrival_ns = data.timestamp
-            self._wall_clock_ref = time.time()
-            self._mono_clock_ref_ns = data.timestamp
+            self._start_wall_clock = time.time()
         elif data.frame.id != self._start_frame_id:
             return
 
@@ -277,10 +270,12 @@ class StartupTimingObserver(BaseObserver):
         duration_ns = data.timestamp - arrival_ts
         duration_secs = duration_ns / 1e9
 
+        start_offset_secs = (arrival_ts - self._start_frame_arrival_ns) / 1e9
+
         self._timings.append(
             ProcessorStartupTiming(
                 processor_name=processor.name,
-                start_time=self._mono_to_wall(arrival_ts),
+                start_offset_secs=start_offset_secs,
                 duration_secs=duration_secs,
             )
         )
@@ -302,7 +297,7 @@ class StartupTimingObserver(BaseObserver):
         delta_ns = data.timestamp - self._start_frame_arrival_ns
         client_connected_secs = delta_ns / 1e9
         report = TransportTimingReport(
-            start_time=self._mono_to_wall(self._start_frame_arrival_ns),
+            start_time=self._start_wall_clock or 0.0,
             bot_connected_secs=self._bot_connected_secs,
             client_connected_secs=client_connected_secs,
         )
@@ -315,10 +310,9 @@ class StartupTimingObserver(BaseObserver):
         self._startup_timing_reported = True
 
         total = sum(t.duration_secs for t in self._timings)
-        start_time = self._timings[0].start_time if self._timings else 0.0
 
         report = StartupTimingReport(
-            start_time=start_time,
+            start_time=self._start_wall_clock or 0.0,
             total_duration_secs=total,
             processor_timings=self._timings,
         )
