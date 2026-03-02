@@ -43,11 +43,11 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import BotConnectedFrame, ClientConnectedFrame, StartFrame
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.pipeline.base_pipeline import BasePipeline
-from pipecat.pipeline.pipeline import PipelineSink, PipelineSource
+from pipecat.pipeline.pipeline import PipelineSource
 from pipecat.processors.frame_processor import FrameProcessor
 
 # Internal pipeline types excluded from tracking by default.
-_INTERNAL_TYPES = (PipelineSink, PipelineSource, BasePipeline)
+_INTERNAL_TYPES = (PipelineSource, BasePipeline)
 
 
 @dataclass
@@ -118,9 +118,9 @@ class StartupTimingObserver(BaseObserver):
     - ``client_connected_secs``: When a remote participant connects
       (triggered by ``ClientConnectedFrame``).
 
-    By default, internal pipeline processors (``PipelineSource``, ``PipelineSink``,
-    ``Pipeline``) are excluded from the report. Pass ``processor_types`` to
-    measure only specific types.
+    By default, internal pipeline processors (``PipelineSource``, ``Pipeline``)
+    are excluded from the report. Pass ``processor_types`` to measure only
+    specific types.
 
     Event handlers available:
 
@@ -211,11 +211,18 @@ class StartupTimingObserver(BaseObserver):
         # Default: exclude internal pipeline plumbing.
         return not isinstance(processor, _INTERNAL_TYPES)
 
+    async def on_pipeline_started(self):
+        """Emit the startup timing report when the pipeline has fully started.
+
+        Called by the ``PipelineTask`` after the ``StartFrame`` has been
+        processed by all processors, including nested ``ParallelPipeline``
+        branches.
+        """
+        if self._timings:
+            await self._emit_report()
+
     async def on_process_frame(self, data: FrameProcessed):
         """Record when a StartFrame arrives at a processor.
-
-        When a ``StartFrame`` reaches a ``PipelineSink``, startup is complete
-        (the frame has traversed the entire pipeline) and the report is emitted.
 
         Args:
             data: The frame processing event data.
@@ -232,14 +239,6 @@ class StartupTimingObserver(BaseObserver):
             self._start_frame_arrival_ns = data.timestamp
             self._start_wall_clock = time.time()
         elif data.frame.id != self._start_frame_id:
-            return
-
-        # When the StartFrame reaches a PipelineSink, all processors have
-        # completed start(). PipelineSinks use direct mode so the outermost
-        # sink fires last within the same synchronous call chain.
-        if isinstance(data.processor, PipelineSink):
-            if self._timings:
-                await self._emit_report()
             return
 
         if self._should_track(data.processor):
