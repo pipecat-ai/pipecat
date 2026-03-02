@@ -59,6 +59,7 @@ jobs:
           DOCS_SYNC_TOKEN: ${{ secrets.DOCS_SYNC_TOKEN }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             You are updating documentation for the pipecat-ai/docs repository based on
             changes merged in PR #${{ steps.pr.outputs.number }} of pipecat-ai/pipecat.
