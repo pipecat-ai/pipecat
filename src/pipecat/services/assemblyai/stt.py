@@ -590,7 +590,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 data = json.loads(message)
                 # Log raw JSON for Turn messages to debug speaker_label
                 if data.get("type") == "Turn":
-                    logger.debug(f"{self} RAW JSON from AssemblyAI: {json.dumps(data, indent=2)}")
+                    logger.trace(f"{self} RAW JSON from AssemblyAI: {json.dumps(data, indent=2)}")
                 await self._handle_message(data)
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message: {message}")
