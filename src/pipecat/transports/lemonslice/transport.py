@@ -329,7 +329,7 @@ class LemonSliceTransportClient:
 
     async def send_response_started_message(self) -> None:
         """Send a response_started message to the LemonSlice session."""
-        logger.info("Sending response_started message")
+        logger.trace("Sending response_started message")
         transport_frame = OutputTransportMessageUrgentFrame(
             message={
                 "event": "response_started",
@@ -340,7 +340,7 @@ class LemonSliceTransportClient:
 
     async def send_response_finished_message(self) -> None:
         """Send a response_finished message to the LemonSlice session."""
-        logger.debug("Sending response_finished message")
+        logger.trace("Sending response_finished message")
         transport_frame = OutputTransportMessageUrgentFrame(
             message={
                 "event": "response_finished",
@@ -470,7 +470,7 @@ class LemonSliceInputTransport(BaseInputTransport):
             participant: The participant to capture audio from.
         """
         if self._params.audio_in_enabled:
-            logger.info(
+            logger.debug(
                 f"LemonSliceTransportClient start capturing audio for participant {participant['id']}"
             )
             await self._client.capture_participant_audio(
@@ -587,7 +587,7 @@ class LemonSliceOutputTransport(BaseOutputTransport):
         Args:
             frame: The message frame to send.
         """
-        logger.info(f"LemonSliceTransport sending message {frame}")
+        logger.trace(f"LemonSliceTransport sending message {frame}")
         await self._client.send_message(frame)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
