@@ -131,14 +131,15 @@ class AssemblyAISTTService(WebsocketSTTService):
                 - max_turn_silence is ALWAYS set equal to min_turn_silence
                 - VAD stop sends ForceEndpoint as ceiling
                 - No UserStarted/StoppedSpeakingFrame emitted from STT
-                When False (STT mode, u3-rt-pro only): AssemblyAI's model controls turn endings.
+                When False (AssemblyAI turn detection mode, u3-rt-pro only): AssemblyAI's model
+                controls turn endings using built-in turn detection.
                 - Uses AssemblyAI API defaults for all parameters (unless user explicitly sets them)
                 - Respects all user-provided connection_params as-is
                 - Emits UserStarted/StoppedSpeakingFrame from STT
                 - No ForceEndpoint on VAD stop
             should_interrupt: Whether to interrupt the bot when the user starts speaking
-                in STT mode (vad_force_turn_endpoint=False). Only applies to STT mode.
-                Defaults to True.
+                in AssemblyAI turn detection mode (vad_force_turn_endpoint=False). Only applies
+                when using AssemblyAI's built-in turn detection. Defaults to True.
             speaker_format: Optional format string for speaker labels when diarization is enabled.
                 Use {speaker} for speaker label and {text} for transcript text.
                 Example: "<{speaker}>{text}</{speaker}>" or "{speaker}: {text}"
@@ -147,13 +148,13 @@ class AssemblyAISTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        # STT turn detection (vad_force_turn_endpoint=False) requires the
+        # AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires the
         # SpeechStarted event for reliable barge-in. Only u3-rt-pro supports
         # this. Other models must use Pipecat turn detection.
         is_u3_pro = connection_params.speech_model == "u3-rt-pro"
         if not vad_force_turn_endpoint and not is_u3_pro:
             raise ValueError(
-                f"STT turn detection (vad_force_turn_endpoint=False) requires "
+                f"AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires "
                 f"u3-rt-pro for SpeechStarted support. Either set "
                 f"vad_force_turn_endpoint=True for {connection_params.speech_model}, "
                 f"or use speech_model='u3-rt-pro'."
@@ -256,7 +257,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                     f"OVERRIDDEN in Pipecat mode (vad_force_turn_endpoint=True). It will be set to "
                     f"{min_silence}ms (matching min_turn_silence) and SENT to "
                     f"AssemblyAI to avoid double turn detection. To use your max_turn_silence as-is, "
-                    f"switch to STT mode (vad_force_turn_endpoint=False)."
+                    f"switch to AssemblyAI turn detection mode (vad_force_turn_endpoint=False)."
                 )
 
             updates = {
@@ -624,18 +625,18 @@ class AssemblyAISTTService(WebsocketSTTService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def _handle_speech_started(self, message: SpeechStartedMessage):
-        """Handle SpeechStarted event — fast barge-in for Mode 2.
+        """Handle SpeechStarted event — fast barge-in for AssemblyAI turn detection.
 
         Broadcasts UserStartedSpeakingFrame to signal the start of user
         speech, then pushes an interruption to cancel any bot audio.
         SpeechStarted fires before any transcript arrives, so the turn
         is cleanly started before any transcription frames are pushed.
 
-        Only applies to Mode 2 (STT turn detection). In Mode 1, VAD +
-        smart turn analyzer handle interruptions via the aggregator.
+        Only applies when using AssemblyAI's built-in turn detection. When using
+        Pipecat turn detection, VAD + smart turn analyzer handle interruptions.
         """
         if self._vad_force_turn_endpoint:
-            return  # Mode 1: handled by aggregator
+            return  # Pipecat mode: handled by aggregator
 
         await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
@@ -655,15 +656,15 @@ class AssemblyAISTTService(WebsocketSTTService):
         await self.push_frame(EndFrame())
 
     async def _handle_transcription(self, message: TurnMessage):
-        """Handle transcription results with two-mode turn detection.
+        """Handle transcription results with two turn detection modes.
 
-        Mode 1 (vad_force_turn_endpoint=True, Pipecat turn detection):
+        Pipecat turn detection (vad_force_turn_endpoint=True):
             - No UserStarted/StoppedSpeakingFrame from STT
             - end_of_turn → TranscriptionFrame (finalized set by base class
               if this is a ForceEndpoint response)
             - else → InterimTranscriptionFrame
 
-        Mode 2 (vad_force_turn_endpoint=False, STT turn detection):
+        AssemblyAI turn detection (vad_force_turn_endpoint=False):
             - UserStartedSpeakingFrame on first transcript
             - end_of_turn → TranscriptionFrame + UserStoppedSpeakingFrame
             - else → InterimTranscriptionFrame
@@ -700,7 +701,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         )
 
         if self._vad_force_turn_endpoint:
-            # --- Mode 1: Pipecat turn detection ---
+            # --- Pipecat turn detection mode ---
             # No UserStarted/StoppedSpeakingFrame — VAD + smart turn analyzer handle this
             if is_final_turn:
                 finalize_confirmed = bool(message.turn_is_formatted)
@@ -729,11 +730,11 @@ class AssemblyAISTTService(WebsocketSTTService):
                     )
                 )
         else:
-            # --- Mode 2: STT turn detection ---
+            # --- AssemblyAI turn detection mode ---
             # SpeechStarted always arrives before transcripts with u3-rt-pro,
             # so UserStartedSpeakingFrame is guaranteed to be broadcast first.
             if is_final_turn:
-                # STT mode: AssemblyAI controls finalization, just mark as finalized
+                # AssemblyAI controls finalization, just mark as finalized
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript_text,

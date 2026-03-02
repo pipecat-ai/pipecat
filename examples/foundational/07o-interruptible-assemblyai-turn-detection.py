@@ -53,20 +53,20 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """AssemblyAI u3-rt-pro STT Example with STT-Controlled Turn Detection
+    """AssemblyAI u3-rt-pro with Built-in Turn Detection
 
     This example demonstrates using AssemblyAI's u3-rt-pro Speech-to-Text model
-    with STT-controlled turn detection for more natural conversation flow.
+    with AssemblyAI's built-in turn detection for more natural conversation flow.
 
     Key features:
 
-    1. STT-Controlled Turn Detection
-       - Set `vad_force_turn_endpoint=False` to enable STT mode
+    1. AssemblyAI Turn Detection
+       - Set `vad_force_turn_endpoint=False` to use AssemblyAI's built-in turn detection
        - AssemblyAI's model determines when user starts/stops speaking
-       - Uses `ExternalUserTurnStrategies` instead of Pipecat's VAD
+       - Uses `ExternalUserTurnStrategies` to delegate turn control to AssemblyAI
        - More natural turn detection based on speech patterns and pauses
 
-    2. Advanced Turn Detection Tuning (STT Mode)
+    2. Advanced Turn Detection Tuning
        - `min_turn_silence`: Minimum silence (ms) when confident about end-of-turn.
          Lower values = faster responses. Default: 100ms
        - `max_turn_silence`: Maximum silence (ms) before forcing end-of-turn.
@@ -93,7 +93,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = AssemblyAISTTService(
         api_key=os.getenv("ASSEMBLYAI_API_KEY"),
-        vad_force_turn_endpoint=False,  # Enable STT-controlled turn detection
+        vad_force_turn_endpoint=False,  # Use AssemblyAI's built-in turn detection
         connection_params=AssemblyAIConnectionParams(
             speech_model="u3-rt-pro",
             # Optional: Tune turn detection timing (defaults shown below)
