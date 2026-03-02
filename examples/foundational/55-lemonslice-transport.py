@@ -25,7 +25,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.groq.llm import GroqLLMService
-from pipecat.transports.lemonslice.transport import LemonSliceParams, LemonSliceTransport
+from pipecat.transports.lemonslice.transport import (
+    LemonSliceNewSessionRequest,
+    LemonSliceParams,
+    LemonSliceTransport,
+)
 
 load_dotenv(override=True)
 
@@ -38,8 +42,10 @@ async def main():
         transport = LemonSliceTransport(
             bot_name="Pipecat",
             api_key=os.getenv("LEMONSLICE_API_KEY"),
-            agent_id=os.getenv("LEMONSLICE_AGENT_ID"),
             session=session,
+            session_request=LemonSliceNewSessionRequest(
+                agent_id=os.getenv("LEMONSLICE_AGENT_ID"),
+            ),
             params=LemonSliceParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
