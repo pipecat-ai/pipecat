@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024–2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,7 +15,14 @@ from typing import AsyncGenerator, Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    ErrorFrame,
+    Frame,
+    StartFrame,
+    TranscriptionFrame,
+)
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -128,10 +135,7 @@ class GnaniSTTService(SegmentedSTTService):
             params: Configuration parameters for the STT service.
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        super().__init__(
-            sample_rate=sample_rate,
-            **kwargs,
-        )
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or GnaniSTTService.InputParams()
 
@@ -140,12 +144,12 @@ class GnaniSTTService(SegmentedSTTService):
         self._base_url = base_url
         self._api_user_id = params.api_user_id
         self._api_request_id = params.api_request_id
+        self._session: Optional[aiohttp.ClientSession] = None
 
         self._settings = {
             "language": self.language_to_service_language(params.language)
             if params.language
             else "hi-IN",
-            "api_user_id": self._api_user_id,
         }
 
     def can_generate_metrics(self) -> bool:
@@ -167,6 +171,39 @@ class GnaniSTTService(SegmentedSTTService):
         """
         return language_to_gnani_language(language)
 
+    async def start(self, frame: StartFrame):
+        """Start the Gnani STT service and create the HTTP session.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        self._session = aiohttp.ClientSession()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the Gnani STT service and close the HTTP session.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._close_session()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the Gnani STT service and close the HTTP session.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._close_session()
+
+    async def _close_session(self):
+        """Close the aiohttp session if open."""
+        if self._session:
+            await self._session.close()
+            self._session = None
+
     async def set_language(self, language: Language):
         """Set the transcription language.
 
@@ -178,7 +215,9 @@ class GnaniSTTService(SegmentedSTTService):
         if gnani_language:
             self._settings["language"] = gnani_language
         else:
-            logger.warning(f"Language {language} not supported by Gnani STT, keeping current language")
+            logger.warning(
+                f"Language {language} not supported by Gnani STT, keeping current language"
+            )
 
     @traced_stt
     async def _handle_transcription(
@@ -205,18 +244,15 @@ class GnaniSTTService(SegmentedSTTService):
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
-            # Prepare headers
             headers = {
                 "X-API-Key-ID": self._api_key,
                 "X-Organization-ID": self._organization_id,
-                "X-API-User-ID": self._settings["api_user_id"],
+                "X-API-User-ID": self._api_user_id,
             }
 
-            # Add optional request ID if provided
             if self._api_request_id:
                 headers["X-API-Request-ID"] = self._api_request_id
 
-            # Prepare form data
             form_data = aiohttp.FormData()
             form_data.add_field("language_code", self._settings["language"])
             form_data.add_field(
@@ -226,8 +262,10 @@ class GnaniSTTService(SegmentedSTTService):
                 content_type="audio/wav",
             )
 
-            # Make API request
-            async with aiohttp.ClientSession() as session:
+            session = self._session or aiohttp.ClientSession()
+            close_session = self._session is None
+
+            try:
                 async with session.post(
                     self._base_url,
                     headers=headers,
@@ -236,7 +274,6 @@ class GnaniSTTService(SegmentedSTTService):
                     if response.status == 200:
                         result = await response.json()
 
-                        # Check if the request was successful
                         if result.get("success", False):
                             transcript = result.get("transcript", "").strip()
 
@@ -246,25 +283,11 @@ class GnaniSTTService(SegmentedSTTService):
                                 )
                                 logger.debug(f"Gnani transcription: [{transcript}]")
 
-                                # Try to convert language code to Language enum
-                                try:
-                                    # Convert language code like 'hi-IN' to Language enum
-                                    language_code = self._settings["language"]
-                                    # Try direct conversion first
-                                    language_enum = Language(language_code)
-                                except (ValueError, KeyError):
-                                    # If direct conversion fails, try to find a matching enum
-                                    language_enum = None
-                                    for lang in Language:
-                                        if self.language_to_service_language(lang) == language_code:
-                                            language_enum = lang
-                                            break
-
                                 yield TranscriptionFrame(
                                     transcript,
                                     self._user_id,
                                     time_now_iso8601(),
-                                    language_enum,
+                                    Language(self._settings["language"]),
                                     result=result,
                                 )
                             else:
@@ -275,9 +298,14 @@ class GnaniSTTService(SegmentedSTTService):
                             yield ErrorFrame(error=error_msg)
                     else:
                         error_text = await response.text()
-                        error_msg = f"Gnani API error (status {response.status}): {error_text}"
+                        error_msg = (
+                            f"Gnani API error (status {response.status}): {error_text}"
+                        )
                         logger.error(error_msg)
                         yield ErrorFrame(error=error_msg)
+            finally:
+                if close_session:
+                    await session.close()
 
         except aiohttp.ClientError as e:
             error_msg = f"Network error calling Gnani API: {e}"
@@ -287,4 +315,3 @@ class GnaniSTTService(SegmentedSTTService):
             error_msg = f"Unknown error occurred: {e}"
             logger.error(error_msg)
             yield ErrorFrame(error=error_msg)
-

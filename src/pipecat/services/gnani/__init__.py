@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024–2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,4 +9,3 @@
 from pipecat.services.gnani.stt import GnaniSTTService
 
 __all__ = ["GnaniSTTService"]
-
