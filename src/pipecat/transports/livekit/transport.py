@@ -23,6 +23,7 @@ from pipecat.audio.utils import create_stream_resampler
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotConnectedFrame,
     CancelFrame,
     ClientConnectedFrame,
     EndFrame,
@@ -1132,6 +1133,8 @@ class LiveKitTransport(BaseTransport):
     async def _on_connected(self):
         """Handle room connected events."""
         await self._call_event_handler("on_connected")
+        if self._input:
+            await self._input.push_frame(BotConnectedFrame())
 
     async def _on_disconnected(self):
         """Handle room disconnected events."""

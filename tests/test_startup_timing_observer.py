@@ -1,11 +1,17 @@
 import asyncio
 import unittest
 
-from pipecat.frames.frames import ClientConnectedFrame, Frame, StartFrame, TextFrame
+from pipecat.frames.frames import (
+    BotConnectedFrame,
+    ClientConnectedFrame,
+    Frame,
+    StartFrame,
+    TextFrame,
+)
 from pipecat.observers.startup_timing_observer import (
     StartupTimingObserver,
     StartupTimingReport,
-    TransportReadinessReport,
+    TransportTimingReport,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import run_test
@@ -182,16 +188,16 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
                     f"Internal processor {t.processor_name} should be excluded by default",
                 )
 
-    async def test_transport_readiness_measured(self):
-        """Test that ClientConnectedFrame after startup emits on_transport_readiness_measured."""
+    async def test_transport_timing_client_only(self):
+        """Test that ClientConnectedFrame emits on_transport_timing_report."""
         observer = StartupTimingObserver()
         processor = FastProcessor()
 
-        readiness_reports = []
+        transport_reports = []
 
-        @observer.event_handler("on_transport_readiness_measured")
-        async def on_readiness(obs, report):
-            readiness_reports.append(report)
+        @observer.event_handler("on_transport_timing_report")
+        async def on_transport(obs, report):
+            transport_reports.append(report)
 
         frames_to_send = [ClientConnectedFrame(), TextFrame(text="hello")]
 
@@ -202,21 +208,22 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
             observers=[observer],
         )
 
-        self.assertEqual(len(readiness_reports), 1)
-        report = readiness_reports[0]
-        self.assertIsInstance(report, TransportReadinessReport)
-        self.assertGreater(report.readiness_secs, 0)
+        self.assertEqual(len(transport_reports), 1)
+        report = transport_reports[0]
+        self.assertIsInstance(report, TransportTimingReport)
+        self.assertGreater(report.client_connected_secs, 0)
+        self.assertIsNone(report.bot_connected_secs)
 
-    async def test_transport_readiness_only_first(self):
+    async def test_transport_timing_only_first_client(self):
         """Test that only the first ClientConnectedFrame triggers the event."""
         observer = StartupTimingObserver()
         processor = FastProcessor()
 
-        readiness_reports = []
+        transport_reports = []
 
-        @observer.event_handler("on_transport_readiness_measured")
-        async def on_readiness(obs, report):
-            readiness_reports.append(report)
+        @observer.event_handler("on_transport_timing_report")
+        async def on_transport(obs, report):
+            transport_reports.append(report)
 
         frames_to_send = [
             ClientConnectedFrame(),
@@ -231,9 +238,9 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
             observers=[observer],
         )
 
-        self.assertEqual(len(readiness_reports), 1)
+        self.assertEqual(len(transport_reports), 1)
 
-    async def test_transport_readiness_without_start_frame(self):
+    async def test_transport_timing_without_start_frame(self):
         """Test that ClientConnectedFrame before StartFrame does not crash."""
         observer = StartupTimingObserver()
 
@@ -253,7 +260,74 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         await observer.on_push_frame(data)
 
         # No event should have been emitted.
-        self.assertFalse(observer._transport_readiness_measured)
+        self.assertFalse(observer._transport_timing_reported)
+
+    async def test_bot_and_client_connected(self):
+        """Test that BotConnectedFrame timing is included in the transport report."""
+        observer = StartupTimingObserver()
+        processor = FastProcessor()
+
+        transport_reports = []
+
+        @observer.event_handler("on_transport_timing_report")
+        async def on_transport(obs, report):
+            transport_reports.append(report)
+
+        frames_to_send = [
+            BotConnectedFrame(),
+            ClientConnectedFrame(),
+            TextFrame(text="hello"),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[BotConnectedFrame, ClientConnectedFrame, TextFrame],
+            observers=[observer],
+        )
+
+        self.assertEqual(len(transport_reports), 1)
+        report = transport_reports[0]
+        self.assertGreater(report.client_connected_secs, 0)
+        self.assertIsNotNone(report.bot_connected_secs)
+        self.assertGreater(report.bot_connected_secs, 0)
+
+        # Client connected should be >= bot connected.
+        self.assertGreaterEqual(report.client_connected_secs, report.bot_connected_secs)
+
+    async def test_bot_connected_only_first(self):
+        """Test that only the first BotConnectedFrame is recorded."""
+        observer = StartupTimingObserver()
+        processor = FastProcessor()
+
+        transport_reports = []
+
+        @observer.event_handler("on_transport_timing_report")
+        async def on_transport(obs, report):
+            transport_reports.append(report)
+
+        frames_to_send = [
+            BotConnectedFrame(),
+            BotConnectedFrame(),
+            ClientConnectedFrame(),
+            TextFrame(text="hello"),
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[
+                BotConnectedFrame,
+                BotConnectedFrame,
+                ClientConnectedFrame,
+                TextFrame,
+            ],
+            observers=[observer],
+        )
+
+        # Only one transport report, with bot timing from first frame.
+        self.assertEqual(len(transport_reports), 1)
+        self.assertIsNotNone(transport_reports[0].bot_connected_secs)
 
 
 if __name__ == "__main__":

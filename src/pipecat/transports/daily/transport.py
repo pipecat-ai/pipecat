@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
+    BotConnectedFrame,
     CancelFrame,
     ClientConnectedFrame,
     DataFrame,
@@ -2579,6 +2580,8 @@ class DailyTransport(BaseTransport):
             if error:
                 await self._on_error(f"Unable to start transcription: {error}")
         await self._call_event_handler("on_joined", data)
+        if self._input:
+            await self._input.push_frame(BotConnectedFrame())
 
     async def _on_left(self):
         """Handle room left events."""

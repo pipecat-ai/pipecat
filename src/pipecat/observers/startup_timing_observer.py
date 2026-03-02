@@ -12,9 +12,9 @@ when a ``StartFrame`` arrives at a processor (``on_process_frame``) versus
 when it leaves (``on_push_frame``), giving the exact ``start()`` duration
 for each processor in the pipeline.
 
-It also measures transport readiness — the time from ``StartFrame`` to the
-first ``ClientConnectedFrame`` — via a separate ``on_transport_readiness_measured``
-event.
+It also measures transport timing — the time from ``StartFrame`` to the
+first ``BotConnectedFrame`` (SFU transports only) and ``ClientConnectedFrame``
+— via a separate ``on_transport_timing_report`` event.
 
 Example::
 
@@ -25,9 +25,11 @@ Example::
         for t in report.processor_timings:
             print(f"{t.processor_name}: {t.duration_secs:.3f}s")
 
-    @observer.event_handler("on_transport_readiness_measured")
-    async def on_readiness(observer, report):
-        print(f"Transport ready in {report.readiness_secs:.3f}s")
+    @observer.event_handler("on_transport_timing_report")
+    async def on_transport(observer, report):
+        if report.bot_connected_secs is not None:
+            print(f"Bot connected in {report.bot_connected_secs:.3f}s")
+        print(f"Client connected in {report.client_connected_secs:.3f}s")
 
     task = PipelineTask(pipeline, observers=[observer])
 """
@@ -35,9 +37,7 @@ Example::
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Type
 
-from loguru import logger
-
-from pipecat.frames.frames import ClientConnectedFrame, StartFrame
+from pipecat.frames.frames import BotConnectedFrame, ClientConnectedFrame, StartFrame
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import PipelineSink, PipelineSource
@@ -74,14 +74,17 @@ class StartupTimingReport:
 
 
 @dataclass
-class TransportReadinessReport:
-    """Time from pipeline start to first client connection.
+class TransportTimingReport:
+    """Time from pipeline start to transport connection milestones.
 
     Parameters:
-        readiness_secs: Seconds from StartFrame to first ClientConnectedFrame.
+        bot_connected_secs: Seconds from StartFrame to first BotConnectedFrame
+            (only set for SFU transports).
+        client_connected_secs: Seconds from StartFrame to first ClientConnectedFrame.
     """
 
-    readiness_secs: float
+    bot_connected_secs: Optional[float] = None
+    client_connected_secs: Optional[float] = None
 
 
 class StartupTimingObserver(BaseObserver):
@@ -92,9 +95,13 @@ class StartupTimingObserver(BaseObserver):
     pushed downstream. This captures WebSocket connections, API authentication,
     model loading, and other initialization work.
 
-    Also measures transport readiness — the time from ``StartFrame`` to the
-    first ``ClientConnectedFrame`` — indicating how long it takes for a client
-    to connect after the pipeline starts.
+    Also measures transport timing, the time from ``StartFrame`` to connection
+    milestones:
+
+    - ``bot_connected_secs``: When the bot joins the transport room
+      (SFU transports only, triggered by ``BotConnectedFrame``).
+    - ``client_connected_secs``: When a remote participant connects
+      (triggered by ``ClientConnectedFrame``).
 
     By default, internal pipeline processors (``PipelineSource``, ``PipelineSink``,
     ``Pipeline``) are excluded from the report. Pass ``processor_types`` to
@@ -104,8 +111,9 @@ class StartupTimingObserver(BaseObserver):
 
     - on_startup_timing_report: Called once after startup completes with the full
       timing report.
-    - on_transport_readiness_measured: Called once when the first client connects with the
-      transport readiness timing.
+    - on_transport_timing_report: Called once when the first client connects with a
+      TransportTimingReport containing client_connected_secs and bot_connected_secs
+      (if available).
 
     Example::
 
@@ -118,9 +126,11 @@ class StartupTimingObserver(BaseObserver):
             for t in report.processor_timings:
                 logger.info(f"{t.processor_name}: {t.duration_secs:.3f}s")
 
-        @observer.event_handler("on_transport_readiness_measured")
-        async def on_readiness(observer, report):
-            logger.info(f"Transport ready in {report.readiness_secs:.3f}s")
+        @observer.event_handler("on_transport_timing_report")
+        async def on_transport(observer, report):
+            if report.bot_connected_secs is not None:
+                logger.info(f"Bot connected in {report.bot_connected_secs:.3f}s")
+            logger.info(f"Client connected in {report.client_connected_secs:.3f}s")
 
         task = PipelineTask(pipeline, observers=[observer])
 
@@ -157,14 +167,17 @@ class StartupTimingObserver(BaseObserver):
         # Whether we've already emitted the startup timing report.
         self._startup_timing_reported = False
 
-        # Whether we've already measured transport readiness.
-        self._transport_readiness_measured = False
+        # Whether we've already measured transport timing.
+        self._transport_timing_reported = False
 
         # Timestamp (ns) when we first see a StartFrame arrive at a processor.
         self._start_frame_arrival_ns: Optional[int] = None
 
+        # Bot connected timing (stored for inclusion in the transport report).
+        self._bot_connected_secs: Optional[float] = None
+
         self._register_event_handler("on_startup_timing_report")
-        self._register_event_handler("on_transport_readiness_measured")
+        self._register_event_handler("on_transport_timing_report")
 
     def _should_track(self, processor: FrameProcessor) -> bool:
         """Check if a processor should be tracked for timing.
@@ -216,11 +229,16 @@ class StartupTimingObserver(BaseObserver):
     async def on_push_frame(self, data: FramePushed):
         """Record when a StartFrame leaves a processor and compute the delta.
 
-        Also handles ``ClientConnectedFrame`` to measure transport readiness.
+        Also handles ``BotConnectedFrame`` and ``ClientConnectedFrame`` to
+        measure transport timing.
 
         Args:
             data: The frame push event data.
         """
+        if isinstance(data.frame, BotConnectedFrame):
+            self._handle_bot_connected(data)
+            return
+
         if isinstance(data.frame, ClientConnectedFrame):
             await self._handle_client_connected(data)
             return
@@ -249,16 +267,27 @@ class StartupTimingObserver(BaseObserver):
             )
         )
 
-    async def _handle_client_connected(self, data: FramePushed):
-        """Measure transport readiness on first client connection."""
-        if self._transport_readiness_measured or self._start_frame_arrival_ns is None:
+    def _handle_bot_connected(self, data: FramePushed):
+        """Record bot connected timing on first BotConnectedFrame."""
+        if self._bot_connected_secs is not None or self._start_frame_arrival_ns is None:
             return
 
-        self._transport_readiness_measured = True
         delta_ns = data.timestamp - self._start_frame_arrival_ns
-        readiness_secs = delta_ns / 1e9
-        report = TransportReadinessReport(readiness_secs=readiness_secs)
-        await self._call_event_handler("on_transport_readiness_measured", report)
+        self._bot_connected_secs = delta_ns / 1e9
+
+    async def _handle_client_connected(self, data: FramePushed):
+        """Emit transport timing report on first ClientConnectedFrame."""
+        if self._transport_timing_reported or self._start_frame_arrival_ns is None:
+            return
+
+        self._transport_timing_reported = True
+        delta_ns = data.timestamp - self._start_frame_arrival_ns
+        client_connected_secs = delta_ns / 1e9
+        report = TransportTimingReport(
+            bot_connected_secs=self._bot_connected_secs,
+            client_connected_secs=client_connected_secs,
+        )
+        await self._call_event_handler("on_transport_timing_report", report)
 
     async def _emit_report(self):
         """Build and emit the startup timing report."""

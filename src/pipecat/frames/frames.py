@@ -1911,6 +1911,18 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
 
 
 @dataclass
+class BotConnectedFrame(SystemFrame):
+    """Frame indicating the bot has connected to the transport service.
+
+    Pushed downstream by SFU transports (Daily, LiveKit, HeyGen, Tavus)
+    when the bot successfully joins the room. Non-SFU transports do not
+    emit this frame.
+    """
+
+    pass
+
+
+@dataclass
 class ClientConnectedFrame(SystemFrame):
     """Frame indicating that a client has connected to the transport.
 
