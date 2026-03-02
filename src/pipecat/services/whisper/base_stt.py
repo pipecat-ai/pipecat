@@ -218,7 +218,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         """Handle a transcription result with tracing."""
         pass
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Transcribe audio data to text.
 
         Args:
