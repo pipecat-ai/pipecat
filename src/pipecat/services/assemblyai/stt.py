@@ -717,7 +717,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 finalize_confirmed = bool(message.turn_is_formatted)
                 if finalize_confirmed:
                     self.confirm_finalize()
-                logger.debug(f'{self} Final transcript: "{transcript_text}"')
+                logger.debug(f'{self} Transcript: "{transcript_text}"')
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript_text,
