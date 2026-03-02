@@ -212,7 +212,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._chunk_size_bytes = 0
 
         self._user_speaking = False
-        self._vad_speaking = False
 
     def _configure_pipecat_turn_mode(
         self, connection_params: AssemblyAIConnectionParams, is_u3_pro: bool
@@ -320,48 +319,44 @@ class AssemblyAISTTService(WebsocketSTTService):
             old_conn_params = changed.get("connection_params")
 
             # Check each potentially changed parameter
-            if hasattr(conn_params, "keyterms_prompt"):
-                if (
-                    old_conn_params is None
-                    or conn_params.keyterms_prompt != old_conn_params.keyterms_prompt
-                ):
-                    if conn_params.keyterms_prompt is not None:
-                        update_config["keyterms_prompt"] = conn_params.keyterms_prompt
-                        logger.info(f"Updating keyterms_prompt to: {conn_params.keyterms_prompt}")
+            if (
+                old_conn_params is None
+                or conn_params.keyterms_prompt != old_conn_params.keyterms_prompt
+            ):
+                if conn_params.keyterms_prompt is not None:
+                    update_config["keyterms_prompt"] = conn_params.keyterms_prompt
+                    logger.info(f"Updating keyterms_prompt to: {conn_params.keyterms_prompt}")
 
-            if hasattr(conn_params, "prompt"):
-                if old_conn_params is None or conn_params.prompt != old_conn_params.prompt:
-                    if conn_params.prompt is not None:
-                        if conn_params.speech_model != "u3-rt-pro":
-                            logger.warning(
-                                f"prompt parameter is only supported with u3-rt-pro model, "
-                                f"current model is {conn_params.speech_model}"
-                            )
-                        else:
-                            update_config["prompt"] = conn_params.prompt
-                            logger.info(f"Updating prompt")
-
-            if hasattr(conn_params, "max_turn_silence"):
-                if (
-                    old_conn_params is None
-                    or conn_params.max_turn_silence != old_conn_params.max_turn_silence
-                ):
-                    if conn_params.max_turn_silence is not None:
-                        update_config["max_turn_silence"] = conn_params.max_turn_silence
-                        logger.info(
-                            f"Updating max_turn_silence to: {conn_params.max_turn_silence}ms"
+            if old_conn_params is None or conn_params.prompt != old_conn_params.prompt:
+                if conn_params.prompt is not None:
+                    if conn_params.speech_model != "u3-rt-pro":
+                        logger.warning(
+                            f"prompt parameter is only supported with u3-rt-pro model, "
+                            f"current model is {conn_params.speech_model}"
                         )
+                    else:
+                        update_config["prompt"] = conn_params.prompt
+                        logger.info(f"Updating prompt")
 
-            if hasattr(conn_params, "min_turn_silence"):
-                if (
-                    old_conn_params is None
-                    or conn_params.min_turn_silence != old_conn_params.min_turn_silence
-                ):
-                    if conn_params.min_turn_silence is not None:
-                        update_config["min_turn_silence"] = conn_params.min_turn_silence
-                        logger.info(
-                            f"Updating min_turn_silence to: {conn_params.min_turn_silence}ms"
-                        )
+            if (
+                old_conn_params is None
+                or conn_params.max_turn_silence != old_conn_params.max_turn_silence
+            ):
+                if conn_params.max_turn_silence is not None:
+                    update_config["max_turn_silence"] = conn_params.max_turn_silence
+                    logger.info(
+                        f"Updating max_turn_silence to: {conn_params.max_turn_silence}ms"
+                    )
+
+            if (
+                old_conn_params is None
+                or conn_params.min_turn_silence != old_conn_params.min_turn_silence
+            ):
+                if conn_params.min_turn_silence is not None:
+                    update_config["min_turn_silence"] = conn_params.min_turn_silence
+                    logger.info(
+                        f"Updating min_turn_silence to: {conn_params.min_turn_silence}ms"
+                    )
 
             # Send update if we have parameters to update
             if len(update_config) > 1:  # More than just "type"
@@ -639,20 +634,14 @@ class AssemblyAISTTService(WebsocketSTTService):
         Only applies to Mode 2 (STT turn detection). In Mode 1, VAD +
         smart turn analyzer handle interruptions via the aggregator.
         """
-        logger.debug(
-            f"{self} SpeechStarted received (vad_force_turn_endpoint={self._vad_force_turn_endpoint})"
-        )
         if self._vad_force_turn_endpoint:
-            logger.debug(f"{self} SpeechStarted ignored in Pipecat mode")
             return  # Mode 1: handled by aggregator
 
-        logger.debug(f"{self} Processing SpeechStarted in STT mode")
         await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
             await self.push_interruption_task_frame_and_wait()
         self._user_speaking = True
-        logger.debug(f"{self} _user_speaking set to True")
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""
@@ -730,7 +719,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                 await self._trace_transcription(transcript_text, True, language)
                 await self.stop_processing_metrics()
             else:
-                logger.debug(f'{self} Interim transcript: "{transcript_text}"')
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript_text,
@@ -744,10 +732,6 @@ class AssemblyAISTTService(WebsocketSTTService):
             # --- Mode 2: STT turn detection ---
             # SpeechStarted always arrives before transcripts with u3-rt-pro,
             # so UserStartedSpeakingFrame is guaranteed to be broadcast first.
-            logger.debug(
-                f"{self} Transcript received in STT mode (_user_speaking={self._user_speaking})"
-            )
-
             if is_final_turn:
                 # STT mode: AssemblyAI controls finalization, just mark as finalized
                 await self.push_frame(
