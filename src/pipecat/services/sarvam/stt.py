@@ -516,10 +516,7 @@ class SarvamSTTService(STTService):
                 # Headers are supplied through request_options because this is a
                 # documented SDK parameter that survives SDK signature changes.
                 request_options = {"additional_headers": self._sdk_headers}
-                logger.debug(
-                    f"Sarvam STT connect request_options.additional_headers: "
-                    f"{request_options['additional_headers']}"
-                )
+
                 attempts = [kwargs]
                 if "prompt" in kwargs:
                     attempts.append({k: v for k, v in kwargs.items() if k != "prompt"})

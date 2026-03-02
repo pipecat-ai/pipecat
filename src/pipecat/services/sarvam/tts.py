@@ -1021,7 +1021,6 @@ class SarvamTTSService(InterruptibleTTSService):
             self._websocket = await websocket_connect(
                 self._websocket_url,
                 additional_headers=ws_additional_headers,
-                user_agent_header=None,
             )
             logger.debug("Connected to Sarvam TTS Websocket")
             await self._send_config()
