@@ -40,7 +40,7 @@ from pipecat.transports.daily.transport import (
     DailyParams,
     DailyTransportClient,
 )
-from pipecat.transports.lemonslice.utils import LemonSliceApi
+from pipecat.transports.lemonslice.api import LemonSliceApi
 
 
 class LemonSliceCallbacks(BaseModel):
