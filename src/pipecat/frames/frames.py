@@ -11,7 +11,6 @@ including data frames, system frames, and control frames for audio, video, text,
 and LLM processing.
 """
 
-import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import (
@@ -1141,24 +1140,9 @@ class InterruptionFrame(SystemFrame):
     This frame is used to interrupt the pipeline. For example, when a user
     starts speaking to cancel any in-progress bot output. It can also be pushed
     by any processor.
-
-    Parameters:
-        event: Optional event set when the frame has fully traversed the
-            pipeline.
-
     """
 
-    event: Optional[asyncio.Event] = None
-
-    def complete(self):
-        """Signal that this interruption has been fully processed.
-
-        Called automatically when the frame reaches the pipeline sink, or
-        manually when the frame is consumed before reaching it (e.g. when
-        the user is muted).
-        """
-        if self.event:
-            self.event.set()
+    pass
 
 
 @dataclass
@@ -1825,16 +1809,11 @@ class InterruptionTaskFrame(TaskFrame):
     """Frame indicating the pipeline should be interrupted.
 
     This frame should be pushed upstream to indicate the pipeline should be
-    interrupted. The pipeline task converts this into an `InterruptionFrame` and
-    sends it downstream. The `event` is passed to the `InterruptionFrame` so it
-    can signal when the interruption has fully traversed the pipeline.
-
-    Parameters:
-        event: Optional event passed to the corresponding `InterruptionFrame`.
-
+    interrupted. The pipeline task converts this into an `InterruptionFrame`
+    and sends it downstream.
     """
 
-    event: Optional[asyncio.Event] = None
+    pass
 
 
 @dataclass

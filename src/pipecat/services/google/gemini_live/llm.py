@@ -1265,7 +1265,7 @@ class GeminiLiveLLMService(LLMService):
                             # combination with the context aggregator default
                             # turn strategies.
                             logger.debug("Gemini VAD: interrupted signal received")
-                            await self.push_interruption_task_frame_and_wait()
+                            await self.broadcast_interruption()
                         elif message.server_content and message.server_content.model_turn:
                             await self._handle_msg_model_turn(message)
                         elif (

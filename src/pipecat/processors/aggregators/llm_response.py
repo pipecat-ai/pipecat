@@ -581,7 +581,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                     logger.debug(
                         "Interruption conditions met - pushing interruption and aggregation"
                     )
-                    await self.push_interruption_task_frame_and_wait()
+                    await self.broadcast_interruption()
                     await self._process_aggregation()
                 else:
                     logger.debug("Interruption conditions not met - not pushing aggregation")
