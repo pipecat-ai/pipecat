@@ -50,6 +50,7 @@ from pipecat.turns.user_mute import (
     MuteUntilFirstBotCompleteUserMuteStrategy,
 )
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 USER_TURN_STOP_TIMEOUT = 0.2
@@ -154,6 +155,28 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
         )
         assert context.messages[0]["content"] == "Hi there!"
+
+    async def test_llm_messages_update_reinjects_turn_completion_instructions(self):
+        context = LLMContext()
+        params = LLMUserAggregatorParams(filter_incomplete_user_turns=True)
+        pipeline = Pipeline([LLMUserAggregator(context, params=params)])
+
+        new_messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello!"},
+        ]
+        frames_to_send = [LLMMessagesUpdateFrame(messages=new_messages)]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+        )
+        config = UserTurnCompletionConfig()
+        # The context should contain the new messages plus the re-injected instructions
+        assert len(context.messages) == 3
+        assert context.messages[0]["content"] == "You are a helpful assistant."
+        assert context.messages[1]["content"] == "Hello!"
+        assert context.messages[2]["role"] == "system"
+        assert context.messages[2]["content"] == config.completion_instructions
 
     async def test_default_user_turn_strategies(self):
         context = LLMContext()
