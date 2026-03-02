@@ -561,9 +561,13 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         # User cancellation (from interruption) is expected, not an error
         if reason == CancellationReason.CancelledByUser:
             logger.debug(f"{self}: Speech synthesis canceled by user (interruption)")
+            self._audio_queue.put_nowait(None)
         else:
-            logger.warning(f"{self}: Speech synthesis canceled: {reason}")
-        self._audio_queue.put_nowait(None)
+            details = evt.result.cancellation_details
+            error_msg = f"Azure TTS synthesis canceled: {reason}"
+            if details.error_details:
+                error_msg += f" - {details.error_details}"
+            self._audio_queue.put_nowait(Exception(error_msg))
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
@@ -675,6 +679,9 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
                 while True:
                     chunk = await self._audio_queue.get()
                     if chunk is None:  # End of stream
+                        break
+                    if isinstance(chunk, Exception):  # Error from _handle_canceled
+                        yield ErrorFrame(error=str(chunk))
                         break
 
                     if self._first_chunk:
