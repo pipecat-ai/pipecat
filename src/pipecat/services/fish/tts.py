@@ -11,7 +11,8 @@ for streaming text-to-speech synthesis with customizable voice parameters.
 """
 
 import uuid
-from typing import AsyncGenerator, Literal, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, ClassVar, Dict, Literal, Mapping, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -28,6 +29,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -45,6 +47,41 @@ except ModuleNotFoundError as e:
 FishAudioOutputFormat = Literal["opus", "mp3", "pcm", "wav"]
 
 
+@dataclass
+class FishAudioTTSSettings(TTSSettings):
+    """Settings for Fish Audio TTS service.
+
+    Parameters:
+        fish_sample_rate: Audio sample rate sent to the API.
+        latency: Latency mode ("normal" or "balanced"). Defaults to "normal".
+        format: Audio output format.
+        normalize: Whether to normalize audio output. Defaults to True.
+        prosody_speed: Speech speed multiplier (0.5-2.0). Defaults to 1.0.
+        prosody_volume: Volume adjustment in dB. Defaults to 0.
+        reference_id: Reference ID of the voice model.
+    """
+
+    fish_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latency: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    normalize: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prosody_speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prosody_volume: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "fish_sample_rate"}
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "FishAudioTTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested ``prosody``."""
+        flat = dict(settings)
+        nested = flat.pop("prosody", None)
+        if isinstance(nested, dict):
+            flat.setdefault("prosody_speed", nested.get("speed"))
+            flat.setdefault("prosody_volume", nested.get("volume"))
+        return super().from_mapping(flat)
+
+
 class FishAudioTTSService(InterruptibleTTSService):
     """Fish Audio text-to-speech service with WebSocket streaming.
 
@@ -52,6 +89,8 @@ class FishAudioTTSService(InterruptibleTTSService):
     Supports various audio formats, customizable prosody controls, and streaming
     audio generation with interruption handling.
     """
+
+    _settings: FishAudioTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Fish Audio TTS configuration.
@@ -99,13 +138,6 @@ class FishAudioTTSService(InterruptibleTTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to the parent service.
         """
-        super().__init__(
-            push_stop_frames=True,
-            pause_frame_processing=True,
-            sample_rate=sample_rate,
-            **kwargs,
-        )
-
         params = params or FishAudioTTSService.InputParams()
 
         # Validation for model and reference_id parameters
@@ -130,25 +162,29 @@ class FishAudioTTSService(InterruptibleTTSService):
                 )
             reference_id = model
 
+        super().__init__(
+            push_stop_frames=True,
+            pause_frame_processing=True,
+            sample_rate=sample_rate,
+            settings=FishAudioTTSSettings(
+                model=model_id,
+                voice=reference_id,
+                fish_sample_rate=0,
+                latency=params.latency,
+                format=output_format,
+                normalize=params.normalize,
+                prosody_speed=params.prosody_speed,
+                prosody_volume=params.prosody_volume,
+                reference_id=reference_id,
+            ),
+            **kwargs,
+        )
+
         self._api_key = api_key
         self._base_url = "wss://api.fish.audio/v1/tts/live"
         self._websocket = None
         self._receive_task = None
         self._request_id = None
-
-        self._settings = {
-            "sample_rate": 0,
-            "latency": params.latency,
-            "format": output_format,
-            "normalize": params.normalize,
-            "prosody": {
-                "speed": params.prosody_speed,
-                "volume": params.prosody_volume,
-            },
-            "reference_id": reference_id,
-        }
-
-        self.set_model_name(model_id)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -158,16 +194,24 @@ class FishAudioTTSService(InterruptibleTTSService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Set the TTS model and reconnect.
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect if needed.
+
+        Any change to voice or model triggers a WebSocket reconnect.
 
         Args:
-            model: The model name to use for synthesis.
+            delta: A :class:`TTSSettings` (or ``FishAudioTTSSettings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
         """
-        await super().set_model(model)
-        logger.info(f"Switching TTS model to: [{model}]")
-        await self._disconnect()
-        await self._connect()
+        changed = await super()._update_settings(delta)
+
+        if changed:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the Fish Audio TTS service.
@@ -176,7 +220,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["sample_rate"] = self.sample_rate
+        self._settings.fish_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -221,11 +265,22 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             logger.debug("Connecting to Fish Audio")
             headers = {"Authorization": f"Bearer {self._api_key}"}
-            headers["model"] = self.model_name
+            headers["model"] = self._settings.model
             self._websocket = await websocket_connect(self._base_url, additional_headers=headers)
 
             # Send initial start message with ormsgpack
-            start_message = {"event": "start", "request": {"text": "", **self._settings}}
+            request_settings = {
+                "sample_rate": self._settings.fish_sample_rate,
+                "latency": self._settings.latency,
+                "format": self._settings.format,
+                "normalize": self._settings.normalize,
+                "prosody": {
+                    "speed": self._settings.prosody_speed,
+                    "volume": self._settings.prosody_volume,
+                },
+                "reference_id": self._settings.reference_id,
+            }
+            start_message = {"event": "start", "request": {"text": "", **request_settings}}
             await self._websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start message to Fish Audio")
 

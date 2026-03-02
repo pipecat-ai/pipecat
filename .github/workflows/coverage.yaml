@@ -37,11 +37,12 @@ jobs:
           uv sync --group dev \
             --extra anthropic \
             --extra aws \
+            --extra deepgram \
             --extra google \
             --extra langchain \
             --extra livekit \
-            --extra local-smart-turn-v3 \
             --extra piper \
+            --extra sagemaker \
             --extra tracing \
             --extra websocket
 

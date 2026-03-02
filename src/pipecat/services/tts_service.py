@@ -8,8 +8,10 @@
 
 import asyncio
 import uuid
+import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import (
     Any,
     AsyncGenerator,
@@ -18,7 +20,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -38,6 +39,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     InterruptionFrame,
+    LLMAssistantPushAggregationFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     StartFrame,
@@ -52,6 +54,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.settings import TTSSettings, is_given
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -65,10 +68,33 @@ class TTSContext:
     """Context information for a TTS request.
 
     Attributes:
-        append_to_context: Whether this TTS output should be appended to the conversation context.
+        append_to_context: Whether this TTS output should be appended to the
+            conversation context after it is spoken.
+        push_assistant_aggregation: Whether to push an
+            ``LLMAssistantPushAggregationFrame`` after the TTS has finished
+            speaking, forcing the assistant aggregator to commit its current
+            text buffer to the conversation context.
     """
 
     append_to_context: bool = True
+    push_assistant_aggregation: Optional[bool] = False
+
+
+class TextAggregationMode(str, Enum):
+    """Controls how incoming text is aggregated before TTS synthesis.
+
+    Parameters:
+        SENTENCE: Buffer text until sentence boundaries are detected before synthesis.
+            Produces more natural speech but adds latency (~200-300ms per sentence).
+        TOKEN: Stream text tokens directly to TTS as they arrive.
+            Reduces latency but may affect speech quality depending on the TTS provider.
+    """
+
+    SENTENCE = "sentence"
+    TOKEN = "token"
+
+    def __str__(self):
+        return self.value
 
 
 class TTSService(AIService):
@@ -103,10 +129,13 @@ class TTSService(AIService):
             logger.debug(f"TTS request: {context_id} - {text}")
     """
 
+    _settings: TTSSettings
+
     def __init__(
         self,
         *,
-        aggregate_sentences: bool = True,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        aggregate_sentences: Optional[bool] = None,
         # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
         # otherwise subclass must do it
         push_text_frames: bool = True,
@@ -125,6 +154,8 @@ class TTSService(AIService):
         append_trailing_space: bool = False,
         # TTS output sample rate
         sample_rate: Optional[int] = None,
+        # if True, enables word-level timestamp tracking and synchronization
+        supports_word_timestamps: bool = False,
         # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
         text_aggregator: Optional[BaseTextAggregator] = None,
         # Types of text aggregations that should not be spoken.
@@ -142,12 +173,22 @@ class TTSService(AIService):
         text_filter: Optional[BaseTextFilter] = None,
         # Audio transport destination of the generated frames.
         transport_destination: Optional[str] = None,
+        settings: Optional[TTSSettings] = None,
         **kwargs,
     ):
         """Initialize the TTS service.
 
         Args:
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
+                TextAggregationMode.SENTENCE (default) buffers until sentence boundaries,
+                TextAggregationMode.TOKEN streams tokens directly for lower latency.
             aggregate_sentences: Whether to aggregate text into sentences before synthesis.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE``
+                    to aggregate text into sentences before synthesis, or
+                    ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency.
+
             push_text_frames: Whether to push TextFrames and LLMFullResponseEndFrames.
             push_stop_frames: Whether to automatically push TTSStoppedFrames.
             stop_frame_timeout_s: Idle time before pushing TTSStoppedFrame when push_stop_frames is True.
@@ -157,6 +198,9 @@ class TTSService(AIService):
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
             sample_rate: Output sample rate for generated audio.
+            supports_word_timestamps: Whether this service supports word-level timestamp tracking.
+                When True, enables synchronization of audio with spoken words so only spoken words
+                are added to the conversation context.
             text_aggregator: Custom text aggregator for processing incoming text.
 
                 .. deprecated:: 0.0.95
@@ -175,10 +219,41 @@ class TTSService(AIService):
                     Use `text_filters` instead, which allows multiple filters.
 
             transport_destination: Destination for generated audio frames.
+            settings: The runtime-updatable settings for the TTS service.
             **kwargs: Additional arguments passed to the parent AIService.
         """
-        super().__init__(**kwargs)
-        self._aggregate_sentences: bool = aggregate_sentences
+        super().__init__(
+            settings=settings
+            # Here in case subclass doesn't implement more specific settings
+            # (which hopefully should be rare)
+            or TTSSettings(),
+            **kwargs,
+        )
+
+        # Resolve text_aggregation_mode from the new param or deprecated aggregate_sentences
+        if aggregate_sentences is not None:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'aggregate_sentences' is deprecated. "
+                    "Use 'text_aggregation_mode=TextAggregationMode.SENTENCE' or "
+                    "'text_aggregation_mode=TextAggregationMode.TOKEN' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            if text_aggregation_mode is None:
+                text_aggregation_mode = (
+                    TextAggregationMode.SENTENCE
+                    if aggregate_sentences
+                    else TextAggregationMode.TOKEN
+                )
+
+        if text_aggregation_mode is None:
+            text_aggregation_mode = TextAggregationMode.SENTENCE
+
+        self._text_aggregation_mode: TextAggregationMode = text_aggregation_mode
         self._push_text_frames: bool = push_text_frames
         self._push_stop_frames: bool = push_stop_frames
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
@@ -188,9 +263,9 @@ class TTSService(AIService):
         self._append_trailing_space: bool = append_trailing_space
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._voice_id: str = ""
-        self._settings: Dict[str, Any] = {}
-        self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
+        self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator(
+            aggregation_type=self._text_aggregation_mode
+        )
         if text_aggregator:
             import warnings
 
@@ -226,11 +301,54 @@ class TTSService(AIService):
 
         self._processing_text: bool = False
         self._tts_contexts: Dict[str, TTSContext] = {}
+        self._streamed_text: str = ""
+        self._text_aggregation_metrics_started: bool = False
+
+        # Word timestamp state (active when supports_word_timestamps=True)
+        self._supports_word_timestamps: bool = supports_word_timestamps
+        self._initial_word_timestamp: int = -1
+        self._initial_word_times: List[Tuple[str, float, Optional[str]]] = []
+        self._words_task: Optional[asyncio.Task] = None
+        self._llm_response_started: bool = False
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_connection_error")
         self._register_event_handler("on_tts_request")
+
+    @property
+    def _is_streaming_tokens(self) -> bool:
+        """Whether the service is streaming tokens directly without sentence aggregation."""
+        return self._text_aggregation_mode == TextAggregationMode.TOKEN
+
+    async def start_tts_usage_metrics(self, text: str):
+        """Record TTS usage metrics.
+
+        When streaming tokens, usage metrics are aggregated and reported at
+        flush time instead of per token, so individual calls are skipped.
+
+        Args:
+            text: The text being processed by TTS.
+        """
+        if self._is_streaming_tokens:
+            return
+        await super().start_tts_usage_metrics(text)
+
+    async def start_text_aggregation_metrics(self):
+        """Start text aggregation metrics if not already started.
+
+        Only starts the metric once per LLM response. Skipped when streaming
+        tokens since per-token aggregation time is not meaningful.
+        """
+        if self._is_streaming_tokens or self._text_aggregation_metrics_started:
+            return
+        self._text_aggregation_metrics_started = True
+        await super().start_text_aggregation_metrics()
+
+    async def stop_text_aggregation_metrics(self):
+        """Stop text aggregation metrics and reset the started flag."""
+        self._text_aggregation_metrics_started = False
+        await super().stop_text_aggregation_metrics()
 
     @property
     def sample_rate(self) -> int:
@@ -261,18 +379,42 @@ class TTSService(AIService):
     async def set_model(self, model: str):
         """Set the TTS model to use.
 
+        .. deprecated:: 0.0.104
+            Use ``TTSUpdateSettingsFrame(model=...)`` instead.
+
         Args:
             model: The name of the TTS model.
         """
-        self.set_model_name(model)
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_model' is deprecated, use 'TTSUpdateSettingsFrame(model=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        logger.info(f"Switching TTS model to: [{model}]")
+        settings_cls = type(self._settings)
+        await self._update_settings(settings_cls(model=model))
 
-    def set_voice(self, voice: str):
+    async def set_voice(self, voice: str):
         """Set the voice for speech synthesis.
+
+        .. deprecated:: 0.0.104
+            Use ``TTSUpdateSettingsFrame(voice=...)`` instead.
 
         Args:
             voice: The voice identifier or name.
         """
-        self._voice_id = voice
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_voice' is deprecated, use 'TTSUpdateSettingsFrame(voice=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        logger.info(f"Switching TTS voice to: [{voice}]")
+        settings_cls = type(self._settings)
+        await self._update_settings(settings_cls(voice=voice))
 
     def create_context_id(self) -> str:
         """Generate a unique context ID for a TTS request.
@@ -324,15 +466,6 @@ class TTSService(AIService):
             return text + " "
         return text
 
-    async def update_setting(self, key: str, value: Any):
-        """Update a service-specific setting.
-
-        Args:
-            key: The setting key to update.
-            value: The new value for the setting.
-        """
-        pass
-
     async def flush_audio(self):
         """Flush any buffered audio data."""
         pass
@@ -347,6 +480,8 @@ class TTSService(AIService):
         self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
         if self._push_stop_frames and not self._stop_frame_task:
             self._stop_frame_task = self.create_task(self._stop_frame_handler())
+        if self._supports_word_timestamps:
+            self._create_words_task()
 
     async def stop(self, frame: EndFrame):
         """Stop the TTS service.
@@ -358,6 +493,8 @@ class TTSService(AIService):
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
+        if self._words_task:
+            await self._stop_words_task()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the TTS service.
@@ -369,6 +506,8 @@ class TTSService(AIService):
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
+        if self._words_task:
+            await self._stop_words_task()
 
     def add_text_transformer(
         self,
@@ -403,22 +542,26 @@ class TTSService(AIService):
             if not (agg_type == aggregation_type and func == transform_function)
         ]
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        for key, value in settings.items():
-            if key in self._settings:
-                logger.info(f"Updating TTS setting {key} to: [{value}]")
-                self._settings[key] = value
-                if key == "language":
-                    self._settings[key] = self.language_to_service_language(value)
-            elif key == "model":
-                self.set_model_name(value)
-            elif key == "voice" or key == "voice_id":
-                self.set_voice(value)
-            elif key == "text_filter":
-                for filter in self._text_filters:
-                    await filter.update_settings(value)
-            else:
-                logger.warning(f"Unknown setting for TTS service: {key}")
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a TTS settings delta.
+
+        Translates language to service-specific value before applying.
+
+        Args:
+            delta: A TTS settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        # Translate language *before* applying so the stored value is canonical
+        if is_given(delta.language) and isinstance(delta.language, Language):
+            converted = self.language_to_service_language(delta.language)
+            if converted is not None:
+                delta.language = converted
+
+        changed = await super()._update_settings(delta)
+
+        return changed
 
     async def say(self, text: str):
         """Immediately speak the provided text.
@@ -465,9 +608,13 @@ class TTSService(AIService):
             and not isinstance(frame, InterimTranscriptionFrame)
             and not isinstance(frame, TranscriptionFrame)
         ):
+            await self.start_text_aggregation_metrics()
             await self._process_text_frame(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption(frame, direction)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMFullResponseStartFrame):
+            self._llm_response_started = True
             await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             # We pause processing incoming frames if the LLM response included
@@ -477,8 +624,16 @@ class TTSService(AIService):
 
             # Flush any remaining text (including text waiting for lookahead)
             remaining = await self._text_aggregator.flush()
+            # Stop the aggregation metric (no-op if already stopped on first sentence).
+            await self.stop_text_aggregation_metrics()
             if remaining:
                 await self._push_tts_frames(AggregatedTextFrame(remaining.text, remaining.type))
+
+            # Log accumulated streamed text and emit aggregated usage metric.
+            if self._streamed_text:
+                logger.debug(f"{self}: Generating TTS [{self._streamed_text}]")
+                await super().start_tts_usage_metrics(self._streamed_text)
+                self._streamed_text = ""
 
             # Reset aggregator state
             self._processing_text = False
@@ -487,13 +642,19 @@ class TTSService(AIService):
                     await self.push_frame(frame, direction)
             else:
                 await self.push_frame(frame, direction)
+            # Flush any pending audio so the TTS service closes the current context.
+            if self._supports_word_timestamps:
+                await self.flush_audio()
         elif isinstance(frame, TTSSpeakFrame):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
+            # If we are not receiving text from the LLM, we can assume that the SpeakFrame should be automatically added to the context
+            push_assistant_aggregation = frame.append_to_context and not self._llm_response_started
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
             await self._push_tts_frames(
                 AggregatedTextFrame(frame.text, AggregationType.SENTENCE),
                 append_tts_text_to_context=frame.append_to_context,
+                push_assistant_aggregation=push_assistant_aggregation,
             )
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
@@ -501,7 +662,20 @@ class TTSService(AIService):
             await self.flush_audio()
             self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
+            if frame.delta is not None:
+                await self._update_settings(frame.delta)
+            elif frame.settings:
+                # Backward-compatible path: convert legacy dict to settings object.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "Passing a dict via TTSUpdateSettingsFrame(settings={...}) is deprecated "
+                        "since 0.0.104, use TTSUpdateSettingsFrame(delta=TTSSettings(...)) instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                delta = type(self._settings).from_mapping(frame.settings)
+                await self._update_settings(delta)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
@@ -612,6 +786,12 @@ class TTSService(AIService):
         for filter in self._text_filters:
             await filter.handle_interruption()
 
+        self._llm_response_started = False
+        self._streamed_text = ""
+        self._text_aggregation_metrics_started = False
+        if self._supports_word_timestamps:
+            await self.reset_word_timestamps()
+
     async def _maybe_pause_frame_processing(self):
         if self._processing_text and self._pause_frame_processing:
             await self.pause_processing_frames()
@@ -621,32 +801,25 @@ class TTSService(AIService):
             await self.resume_processing_frames()
 
     async def _process_text_frame(self, frame: TextFrame):
-        text: Optional[str] = None
-        includes_inter_frame_spaces: bool = False
-        if not self._aggregate_sentences:
-            text = frame.text
-            includes_inter_frame_spaces = frame.includes_inter_frame_spaces
-            aggregated_by = "token"
-
-            if text:
-                logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
-                await self._push_tts_frames(
-                    AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
-                )
-        else:
-            async for aggregate in self._text_aggregator.aggregate(frame.text):
-                text = aggregate.text
-                aggregated_by = aggregate.type
-                logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
-                await self._push_tts_frames(
-                    AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
-                )
+        async for aggregate in self._text_aggregator.aggregate(frame.text):
+            includes_inter_frame_spaces = (
+                frame.includes_inter_frame_spaces
+                if aggregate.type == AggregationType.TOKEN
+                else False
+            )
+            if aggregate.type != AggregationType.TOKEN:
+                # Stop the aggregation metric on the first sentence only.
+                await self.stop_text_aggregation_metrics()
+            await self._push_tts_frames(
+                AggregatedTextFrame(aggregate.text, aggregate.type), includes_inter_frame_spaces
+            )
 
     async def _push_tts_frames(
         self,
         src_frame: AggregatedTextFrame,
         includes_inter_frame_spaces: Optional[bool] = False,
         append_tts_text_to_context: Optional[bool] = True,
+        push_assistant_aggregation: Optional[bool] = False,
     ):
         type = src_frame.aggregated_by
         text = src_frame.text
@@ -670,7 +843,15 @@ class TTSService(AIService):
         # or when we received an LLMFullResponseEndFrame
         self._processing_text = True
 
-        await self.start_processing_metrics()
+        # Accumulate text for a single debug log at flush time when streaming tokens.
+        if self._is_streaming_tokens:
+            self._streamed_text += text
+
+        # Skip per-token processing metrics when streaming. The per-token
+        # processing time is just websocket send overhead (~0.1ms) and not
+        # meaningful. TTFB captures the important timing for streaming TTS.
+        if not self._is_streaming_tokens:
+            await self.start_processing_metrics()
 
         # Process all filters.
         for filter in self._text_filters:
@@ -678,7 +859,8 @@ class TTSService(AIService):
             text = await filter.filter(text)
 
         if not text.strip():
-            await self.stop_processing_metrics()
+            if not self._is_streaming_tokens:
+                await self.stop_processing_metrics()
             return
 
         # Create context ID and store metadata
@@ -705,7 +887,8 @@ class TTSService(AIService):
         self._tts_contexts[context_id] = TTSContext(
             append_to_context=append_tts_text_to_context
             if append_tts_text_to_context is not None
-            else True
+            else True,
+            push_assistant_aggregation=push_assistant_aggregation,
         )
 
         # Apply any final text preparation (e.g., trailing space)
@@ -716,7 +899,8 @@ class TTSService(AIService):
 
         await self.process_generator(self.run_tts(prepared_text, context_id))
 
-        await self.stop_processing_metrics()
+        if not self._is_streaming_tokens:
+            await self.stop_processing_metrics()
 
         if self._push_text_frames:
             # In TTS services that support word timestamps, the TTSTextFrames
@@ -733,6 +917,8 @@ class TTSService(AIService):
             if append_tts_text_to_context is not None:
                 frame.append_to_context = append_tts_text_to_context
             await self.push_frame(frame)
+            if push_assistant_aggregation:
+                await self.push_frame(LLMAssistantPushAggregationFrame())
 
     async def _stop_frame_handler(self):
         has_started = False
@@ -750,25 +936,9 @@ class TTSService(AIService):
                     await self.push_frame(TTSStoppedFrame())
                     has_started = False
 
-
-class WordTTSService(TTSService):
-    """Base class for TTS services that support word timestamps.
-
-    Word timestamps are useful to synchronize audio with text of the spoken
-    words. This way only the spoken words are added to the conversation context.
-    """
-
-    def __init__(self, **kwargs):
-        """Initialize the Word TTS service.
-
-        Args:
-            **kwargs: Additional arguments passed to the parent TTSService.
-        """
-        super().__init__(**kwargs)
-        self._initial_word_timestamp = -1
-        self._initial_word_times = []
-        self._words_task = None
-        self._llm_response_started: bool = False
+    #
+    # Word timestamp methods (active when supports_word_timestamps=True)
+    #
 
     async def start_word_timestamps(self):
         """Start tracking word timestamps from the current time."""
@@ -803,55 +973,9 @@ class WordTTSService(TTSService):
         else:
             await self._add_word_timestamps(word_times_with_context)
 
-    async def start(self, frame: StartFrame):
-        """Start the word TTS service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-        self._create_words_task()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the word TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._stop_words_task()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the word TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._stop_words_task()
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with word timestamp awareness.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame processing.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, LLMFullResponseStartFrame):
-            self._llm_response_started = True
-        elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
-            await self.flush_audio()
-
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
-        self._llm_response_started = False
-        await self.reset_word_timestamps()
-
     def _create_words_task(self):
         if not self._words_task:
-            self._words_queue = asyncio.Queue()
+            self._words_queue: asyncio.Queue = asyncio.Queue()
             self._words_task = self.create_task(self._words_task_handler())
 
     async def _stop_words_task(self):
@@ -878,6 +1002,9 @@ class WordTTSService(TTSService):
                 frame = TTSStoppedFrame()
                 frame.pts = last_pts
                 frame.context_id = context_id
+                if context_id in self._tts_contexts:
+                    if self._tts_contexts[context_id].push_assistant_aggregation:
+                        await self.push_frame(LLMAssistantPushAggregationFrame())
             else:
                 # Assumption: word-by-word text frames don't include spaces, so
                 # we can rely on the default includes_inter_frame_spaces=False
@@ -891,6 +1018,23 @@ class WordTTSService(TTSService):
                 last_pts = frame.pts
                 await self.push_frame(frame)
             self._words_queue.task_done()
+
+
+class WordTTSService(TTSService):
+    """Deprecated. Use TTSService with supports_word_timestamps=True instead.
+
+    .. deprecated:: 0.0.104
+        Word timestamp functionality has been moved to TTSService. Pass
+        ``supports_word_timestamps=True`` to TTSService (or any subclass) instead.
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize the Word TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent TTSService.
+        """
+        super().__init__(supports_word_timestamps=True, **kwargs)
 
 
 class WebsocketTTSService(TTSService, WebsocketService):
@@ -965,10 +1109,12 @@ class InterruptibleTTSService(WebsocketTTSService):
             self._bot_speaking = False
 
 
-class WebsocketWordTTSService(WordTTSService, WebsocketService):
-    """Base class for websocket-based TTS services that support word timestamps.
+class WebsocketWordTTSService(WebsocketTTSService):
+    """Deprecated. Use WebsocketTTSService with supports_word_timestamps=True instead.
 
-    Combines word timestamp functionality with websocket connectivity.
+    .. deprecated:: 0.0.104
+        Word timestamp functionality has been moved to TTSService. Pass
+        ``supports_word_timestamps=True`` to WebsocketTTSService instead.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -978,53 +1124,26 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to parent classes.
         """
-        WordTTSService.__init__(self, **kwargs)
-        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-
-    async def _report_error(self, error: ErrorFrame):
-        await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        super().__init__(
+            supports_word_timestamps=True, reconnect_on_error=reconnect_on_error, **kwargs
+        )
 
 
-class InterruptibleWordTTSService(WebsocketWordTTSService):
-    """Websocket-based TTS service with word timestamps that handles interruptions.
+class InterruptibleWordTTSService(InterruptibleTTSService):
+    """Deprecated. Use InterruptibleTTSService with supports_word_timestamps=True instead.
 
-    For TTS services that support word timestamps but can't correlate generated
-    audio with requested text. Handles interruptions by reconnecting when needed.
+    .. deprecated:: 0.0.104
+        Word timestamp functionality has been moved to TTSService. Pass
+        ``supports_word_timestamps=True`` to InterruptibleTTSService instead.
     """
 
     def __init__(self, **kwargs):
         """Initialize the Interruptible Word TTS service.
 
         Args:
-            **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
+            **kwargs: Additional arguments passed to the parent InterruptibleTTSService.
         """
-        super().__init__(**kwargs)
-
-        # Indicates if the bot is speaking. If the bot is not speaking we don't
-        # need to reconnect when the user speaks. If the bot is speaking and the
-        # user interrupts we need to reconnect.
-        self._bot_speaking = False
-
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
-        if self._bot_speaking:
-            await self._disconnect()
-            await self._connect()
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with bot speaking state tracking.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame processing.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
+        super().__init__(supports_word_timestamps=True, **kwargs)
 
 
 class AudioContextTTSService(WebsocketTTSService):
@@ -1198,6 +1317,7 @@ class AudioContextTTSService(WebsocketTTSService):
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self._stop_audio_context_task()
+        await self.on_audio_context_interrupted(context_id=self._context_id)
         self.reset_active_audio_context()
         self._create_audio_context_task()
 
@@ -1226,6 +1346,7 @@ class AudioContextTTSService(WebsocketTTSService):
 
                 # We just finished processing the context, so we can safely remove it.
                 del self._contexts[context_id]
+                await self.on_audio_context_completed(context_id=context_id)
                 self.reset_active_audio_context()
 
                 # Append some silence between sentences.
@@ -1262,16 +1383,42 @@ class AudioContextTTSService(WebsocketTTSService):
                 logger.trace(f"{self} time out on audio context {context_id}")
                 break
 
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Called when an audio context is cancelled due to an interruption.
 
-class AudioContextWordTTSService(AudioContextTTSService, WebsocketWordTTSService):
-    """Websocket-based TTS service with word timestamps and audio context management.
+        Override this in a subclass to perform provider-specific cleanup (e.g.
+        sending a cancel/close message over the WebSocket) when the bot is
+        interrupted mid-speech.  The audio context task has already been stopped
+        and the active context has **not** yet been reset when this is called,
+        so ``context_id`` reflects the context that was cut short.
 
-    This is a base class for websocket-based TTS services that support word
-    timestamps and also allow correlating the generated audio with the requested
-    text through audio contexts.
+        Args:
+            context_id: The ID of the audio context that was interrupted, or
+                ``None`` if no context was active at the time.
+        """
+        pass
 
-    Combines the audio context management capabilities of AudioContextTTSService
-    with the word timestamp functionality of WebsocketWordTTSService.
+    async def on_audio_context_completed(self, context_id: str):
+        """Called after an audio context has finished playing all of its audio.
+
+        Override this in a subclass to perform provider-specific cleanup (e.g.
+        sending a close-context message to free server-side resources) once an
+        audio context has been fully processed.  The context entry has already
+        been removed from the internal context map, and the active context has
+        **not** yet been reset when this is called.
+
+        Args:
+            context_id: The ID of the audio context that finished processing.
+        """
+        pass
+
+
+class AudioContextWordTTSService(AudioContextTTSService):
+    """Deprecated. Use AudioContextTTSService with supports_word_timestamps=True instead.
+
+    .. deprecated:: 0.0.104
+        Word timestamp functionality has been moved to TTSService. Pass
+        ``supports_word_timestamps=True`` to AudioContextTTSService instead.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -1281,5 +1428,6 @@ class AudioContextWordTTSService(AudioContextTTSService, WebsocketWordTTSService
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to parent classes.
         """
-        AudioContextTTSService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        WebsocketWordTTSService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        super().__init__(
+            supports_word_timestamps=True, reconnect_on_error=reconnect_on_error, **kwargs
+        )

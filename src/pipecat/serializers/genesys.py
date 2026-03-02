@@ -642,7 +642,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """
         # Binary data = audio
         if isinstance(data, bytes):
-            logger.debug(f"[AUDIO IN] Received {len(data)} bytes from Genesys")
             return await self._deserialize_audio(data)
 
         # Text data = JSON control message

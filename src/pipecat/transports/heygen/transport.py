@@ -23,9 +23,11 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotConnectedFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -339,6 +341,7 @@ class HeyGenTransport(BaseTransport):
             session_request=session_request,
             service_type=service_type,
             callbacks=HeyGenCallbacks(
+                on_connected=self._on_connected,
                 on_participant_connected=self._on_participant_connected,
                 on_participant_disconnected=self._on_participant_disconnected,
             ),
@@ -349,8 +352,15 @@ class HeyGenTransport(BaseTransport):
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
+        self._register_event_handler("on_connected")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
+
+    async def _on_connected(self):
+        """Handle bot connected to LiveKit room."""
+        await self._call_event_handler("on_connected")
+        if self._input:
+            await self._input.push_frame(BotConnectedFrame())
 
     async def _on_participant_disconnected(self, participant_id: str):
         logger.debug(f"HeyGen participant {participant_id} disconnected")
@@ -387,6 +397,8 @@ class HeyGenTransport(BaseTransport):
     async def _on_client_connected(self, participant: Any):
         """Handle client connected events."""
         await self._call_event_handler("on_client_connected", participant)
+        if self._input:
+            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_client_disconnected(self, participant: Any):
         """Handle client disconnected events."""

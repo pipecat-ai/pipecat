@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -964,6 +965,8 @@ class SmallWebRTCTransport(BaseTransport):
     async def _on_client_connected(self, webrtc_connection):
         """Handle client connection events."""
         await self._call_event_handler("on_client_connected", webrtc_connection)
+        if self._input:
+            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_client_disconnected(self, webrtc_connection):
         """Handle client disconnection events."""

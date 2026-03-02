@@ -12,6 +12,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
+from pipecat.observers.startup_timing_observer import StartupTimingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -87,8 +88,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    # Create latency tracking observer
     latency_observer = UserBotLatencyObserver()
+    startup_observer = StartupTimingObserver()
 
     task = PipelineTask(
         pipeline,
@@ -97,13 +98,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        observers=[latency_observer],
+        observers=[latency_observer, startup_observer],
     )
 
-    # Log latency measurements using the event handler
     @latency_observer.event_handler("on_latency_measured")
     async def on_latency_measured(observer, latency_seconds):
         logger.info(f"⏱️ User-to-bot latency: {latency_seconds:.3f}s")
+
+    @startup_observer.event_handler("on_startup_timing_report")
+    async def on_startup_timing_report(observer, report):
+        logger.info(f"Total startup: {report.total_duration_secs:.3f}s")
+        for timing in report.processor_timings:
+            logger.info(f"  {timing.processor_name}: {timing.duration_secs:.3f}s")
+
+    @startup_observer.event_handler("on_transport_timing_report")
+    async def on_transport_timing_report(observer, report):
+        if report.bot_connected_secs is not None:
+            logger.info(f"Bot connected: {report.bot_connected_secs:.3f}s")
+        logger.info(f"Client connected: {report.client_connected_secs:.3f}s")
 
     turn_observer = task.turn_tracking_observer
     if turn_observer:

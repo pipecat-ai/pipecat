@@ -25,7 +25,7 @@ uv run pytest tests/test_name.py
 uv run pytest tests/test_name.py::test_function_name
 
 # Preview changelog
-towncrier build --draft --version Unreleased
+uv run towncrier build --draft --version Unreleased
 
 # Lint and format check
 uv run ruff check
@@ -74,7 +74,7 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 - **Context Aggregation**: `LLMContext` accumulates messages for LLM calls; `UserResponse` aggregates user input
 
 - **Turn Management**: Turn management is done through `LLMUserAggregator` and
-`LLMAssistantAggregator`, created with `LLMContextAggregatorPair`
+  `LLMAssistantAggregator`, created with `LLMContextAggregatorPair`
 
 - **User turn strategies**: Detection of when the user starts and stops speaking is done via user turn start/stop strategies. They push `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` respectively.
 
@@ -90,23 +90,26 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 ### Key Directories
 
-| Directory                 | Purpose                                            |
-|---------------------------|----------------------------------------------------|
-| `src/pipecat/frames/`     | Frame definitions (100+ types)                     |
-| `src/pipecat/processors/` | FrameProcessor base + aggregators, filters, audio  |
-| `src/pipecat/pipeline/`   | Pipeline orchestration                             |
-| `src/pipecat/services/`   | AI service integrations (60+ providers)            |
-| `src/pipecat/transports/` | Transport layer (Daily, LiveKit, WebSocket, Local) |
-| `src/pipecat/serializers/`| Frame serialization for WebSocket protocols        |
-| `src/pipecat/observers/`  | Pipeline observers for monitoring frame flow       |
-| `src/pipecat/audio/`      | VAD, filters, mixers, turn detection, DTMF         |
-| `src/pipecat/turns/`      | User turn management                               |
+| Directory                  | Purpose                                            |
+| -------------------------- | -------------------------------------------------- |
+| `src/pipecat/frames/`      | Frame definitions (100+ types)                     |
+| `src/pipecat/processors/`  | FrameProcessor base + aggregators, filters, audio  |
+| `src/pipecat/pipeline/`    | Pipeline orchestration                             |
+| `src/pipecat/services/`    | AI service integrations (60+ providers)            |
+| `src/pipecat/transports/`  | Transport layer (Daily, LiveKit, WebSocket, Local) |
+| `src/pipecat/serializers/` | Frame serialization for WebSocket protocols        |
+| `src/pipecat/observers/`   | Pipeline observers for monitoring frame flow       |
+| `src/pipecat/audio/`       | VAD, filters, mixers, turn detection, DTMF         |
+| `src/pipecat/turns/`       | User turn management                               |
 
 ## Code Style
 
 - **Docstrings**: Google-style. Classes describe purpose; `__init__` has `Args:` section; dataclasses use `Parameters:` section.
 - **Linting**: Ruff (line length 100). Pre-commit hooks enforce formatting.
 - **Type hints**: Required for complex async code.
+- **Dataclass vs Pydantic**: Use `@dataclass` for frames and internal pipeline data (high-frequency, no validation needed). Use Pydantic `BaseModel` for configuration, parameters, metrics, and external API data (benefits from validation and serialization). Specifically:
+  - `@dataclass`: Frame types, context aggregator pairs, internal data containers
+  - `BaseModel`: Service `InputParams`, transport/VAD/turn params, metrics data, API request/response models, serializer params
 
 ### Docstring Example
 
@@ -152,4 +155,3 @@ When adding a new service:
 ## Testing
 
 Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
-

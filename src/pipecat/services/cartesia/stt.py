@@ -12,7 +12,8 @@ the Cartesia Live transcription API for real-time speech recognition.
 
 import json
 import urllib.parse
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -27,6 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -40,6 +42,17 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class CartesiaSTTSettings(STTSettings):
+    """Settings for the Cartesia STT service.
+
+    Parameters:
+        encoding: Audio encoding format (e.g. ``"pcm_s16le"``).
+    """
+
+    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaLiveOptions:
@@ -136,6 +149,8 @@ class CartesiaSTTService(WebsocketSTTService):
     See: https://docs.cartesia.ai/api-reference/stt/stt
     """
 
+    _settings: CartesiaSTTSettings
+
     def __init__(
         self,
         *,
@@ -158,13 +173,6 @@ class CartesiaSTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to parent STTService.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-        super().__init__(
-            sample_rate=sample_rate,
-            ttfs_p99_latency=ttfs_p99_latency,
-            keepalive_timeout=120,
-            keepalive_interval=30,
-            **kwargs,
-        )
 
         default_options = CartesiaLiveOptions(
             model="ink-whisper",
@@ -181,8 +189,19 @@ class CartesiaSTTService(WebsocketSTTService):
                 k: v for k, v in merged_options.items() if not isinstance(v, str) or v != "None"
             }
 
-        self._settings = merged_options
-        self.set_model_name(merged_options["model"])
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=120,
+            keepalive_interval=30,
+            settings=CartesiaSTTSettings(
+                model=merged_options["model"],
+                language=merged_options.get("language"),
+                encoding=merged_options.get("encoding", "pcm_s16le"),
+            ),
+            **kwargs,
+        )
+
         self._api_key = api_key
         self._base_url = base_url or "api.cartesia.ai"
         self._receive_task = None
@@ -275,13 +294,39 @@ class CartesiaSTTService(WebsocketSTTService):
 
         await self._disconnect_websocket()
 
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Args:
+            delta: A :class:`STTSettings` (or ``CartesiaSTTSettings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # if changed:
+        #     await self._disconnect()
+        #     await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
+
     async def _connect_websocket(self):
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug("Connecting to Cartesia STT")
 
-            params = self._settings
+            params = {
+                "model": self._settings.model,
+                "language": self._settings.language,
+                "encoding": self._settings.encoding,
+                "sample_rate": str(self.sample_rate),
+            }
             ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"
             headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 

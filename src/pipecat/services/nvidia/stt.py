@@ -8,7 +8,8 @@
 
 import asyncio
 from concurrent.futures import CancelledError as FuturesCancelledError
-from typing import AsyncGenerator, List, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, List, Mapping, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -89,6 +91,32 @@ def language_to_nvidia_riva_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+@dataclass
+class NvidiaSTTSettings(STTSettings):
+    """Settings for the NVIDIA Riva streaming STT service."""
+
+    pass
+
+
+@dataclass
+class NvidiaSegmentedSTTSettings(STTSettings):
+    """Settings for the NVIDIA Riva segmented STT service.
+
+    Parameters:
+        profanity_filter: Whether to filter profanity from results.
+        automatic_punctuation: Whether to add automatic punctuation.
+        verbatim_transcripts: Whether to return verbatim transcripts.
+        boosted_lm_words: List of words to boost in language model.
+        boosted_lm_score: Score boost for specified words.
+    """
+
+    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    verbatim_transcripts: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_words: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_score: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class NvidiaSTTService(STTService):
     """Real-time speech-to-text service using NVIDIA Riva streaming ASR.
 
@@ -96,6 +124,8 @@ class NvidiaSTTService(STTService):
     through streaming recognition. Supports interim results and continuous audio
     processing for low-latency applications.
     """
+
+    _settings: NvidiaSTTSettings
 
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva STT service.
@@ -134,19 +164,21 @@ class NvidiaSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
         params = params or NvidiaSTTService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=NvidiaSTTSettings(
+                model=model_function_map.get("model_name"),
+                language=params.language,
+            ),
+            **kwargs,
+        )
 
         self._server = server
         self._api_key = api_key
         self._use_ssl = use_ssl
-        self._profanity_filter = False
-        self._automatic_punctuation = True
-        self._no_verbatim_transcripts = False
-        self._language_code = params.language
-        self._boosted_lm_words = None
-        self._boosted_lm_score = 4.0
         self._start_history = -1
         self._start_threshold = -1.0
         self._stop_history = -1
@@ -155,17 +187,6 @@ class NvidiaSTTService(STTService):
         self._stop_threshold_eou = -1.0
         self._custom_configuration = ""
         self._function_id = model_function_map.get("function_id")
-
-        self._settings = {
-            "language": str(params.language),
-            "profanity_filter": self._profanity_filter,
-            "automatic_punctuation": self._automatic_punctuation,
-            "verbatim_transcripts": not self._no_verbatim_transcripts,
-            "boosted_lm_words": self._boosted_lm_words,
-            "boosted_lm_score": self._boosted_lm_score,
-        }
-
-        self.set_model_name(model_function_map.get("model_name"))
 
         self._asr_service = None
         self._queue = None
@@ -186,20 +207,16 @@ class NvidiaSTTService(STTService):
         config = riva.client.StreamingRecognitionConfig(
             config=riva.client.RecognitionConfig(
                 encoding=riva.client.AudioEncoding.LINEAR_PCM,
-                language_code=self._language_code,
+                language_code=self._settings.language,
                 model="",
                 max_alternatives=1,
-                profanity_filter=self._profanity_filter,
-                enable_automatic_punctuation=self._automatic_punctuation,
-                verbatim_transcripts=not self._no_verbatim_transcripts,
+                profanity_filter=False,
+                enable_automatic_punctuation=True,
+                verbatim_transcripts=True,
                 sample_rate_hertz=self.sample_rate,
                 audio_channel_count=1,
             ),
             interim_results=True,
-        )
-
-        riva.client.add_word_boosting_to_config(
-            config, self._boosted_lm_words, self._boosted_lm_score
         )
 
         riva.client.add_endpoint_parameters_to_config(
@@ -226,18 +243,31 @@ class NvidiaSTTService(STTService):
     async def set_model(self, model: str):
         """Set the ASR model for transcription.
 
+        .. deprecated:: 0.0.104
+            Model cannot be changed after initialization for NVIDIA Riva streaming STT.
+            Set model and function id in the constructor instead, e.g.::
+
+                NvidiaSTTService(
+                    api_key=...,
+                    model_function_map={"function_id": "<UUID>", "model_name": "<model_name>"},
+                )
+
         Args:
             model: Model name to set.
-
-        Note:
-            Model cannot be changed after initialization. Use model_function_map
-            parameter in constructor instead.
         """
-        logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
-        example = {"function_id": "<UUID>", "model_name": "<model_name>"}
-        logger.warning(
-            f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
-        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_model' is deprecated. Model cannot be changed after initialization"
+                " for NVIDIA Riva streaming STT. Set model and function id in the"
+                " constructor instead, e.g.:"
+                " NvidiaSTTService(api_key=..., model_function_map="
+                "{'function_id': '<UUID>', 'model_name': '<model_name>'})",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     async def start(self, frame: StartFrame):
         """Start the NVIDIA Riva STT service and initialize streaming configuration.
@@ -254,7 +284,7 @@ class NvidiaSTTService(STTService):
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
 
-        logger.debug(f"Initialized NvidiaSTTService with model: {self.model_name}")
+        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
 
     async def stop(self, frame: EndFrame):
         """Stop the NVIDIA Riva STT service and clean up resources.
@@ -318,14 +348,14 @@ class NvidiaSTTService(STTService):
                             transcript,
                             self._user_id,
                             time_now_iso8601(),
-                            self._language_code,
+                            self._settings.language,
                             result=result,
                         )
                     )
                     await self._handle_transcription(
                         transcript=transcript,
                         is_final=result.is_final,
-                        language=self._language_code,
+                        language=self._settings.language,
                     )
                 else:
                     await self.push_frame(
@@ -333,7 +363,7 @@ class NvidiaSTTService(STTService):
                             transcript,
                             self._user_id,
                             time_now_iso8601(),
-                            self._language_code,
+                            self._settings.language,
                             result=result,
                         )
                     )
@@ -386,6 +416,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     audio buffering and speech detection.
     """
 
+    _settings: NvidiaSegmentedSTTSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva segmented STT service.
 
@@ -433,30 +465,29 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService
         """
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
         params = params or NvidiaSegmentedSTTService.InputParams()
 
-        # Set model name
-        self.set_model_name(model_function_map.get("model_name"))
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=NvidiaSegmentedSTTSettings(
+                model=model_function_map.get("model_name"),
+                language=self.language_to_service_language(params.language or Language.EN_US)
+                or "en-US",
+                profanity_filter=params.profanity_filter,
+                automatic_punctuation=params.automatic_punctuation,
+                verbatim_transcripts=params.verbatim_transcripts,
+                boosted_lm_words=params.boosted_lm_words,
+                boosted_lm_score=params.boosted_lm_score,
+            ),
+            **kwargs,
+        )
 
         # Initialize NVIDIA Riva settings
         self._api_key = api_key
         self._server = server
         self._use_ssl = use_ssl
         self._function_id = model_function_map.get("function_id")
-        self._model_name = model_function_map.get("model_name")
-
-        # Store the language as a Language enum and as a string
-        self._language_enum = params.language or Language.EN_US
-        self._language = self.language_to_service_language(self._language_enum) or "en-US"
-
-        # Configure transcription parameters
-        self._profanity_filter = params.profanity_filter
-        self._automatic_punctuation = params.automatic_punctuation
-        self._verbatim_transcripts = params.verbatim_transcripts
-        self._boosted_lm_words = params.boosted_lm_words
-        self._boosted_lm_score = params.boosted_lm_score
 
         # Voice activity detection thresholds (use NVIDIA Riva defaults)
         self._start_history = -1
@@ -467,10 +498,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         self._stop_threshold_eou = -1.0
         self._custom_configuration = ""
 
-        # Create NVIDIA Riva client
         self._config = None
         self._asr_service = None
-        self._settings = {"language": self._language_enum}
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language enum to NVIDIA Riva's language code.
@@ -498,21 +527,25 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         auth = riva.client.Auth(None, self._use_ssl, self._server, metadata)
         self._asr_service = riva.client.ASRService(auth)
 
+    def _get_language_code(self) -> str:
+        """Get the current NVIDIA Riva language code string."""
+        return self._settings.language or "en-US"
+
     def _create_recognition_config(self):
         """Create the NVIDIA Riva ASR recognition configuration."""
         # Create base configuration
         config = riva.client.RecognitionConfig(
-            language_code=self._language,  # Now using the string, not a tuple
+            language_code=self._get_language_code(),
             max_alternatives=1,
-            profanity_filter=self._profanity_filter,
-            enable_automatic_punctuation=self._automatic_punctuation,
-            verbatim_transcripts=self._verbatim_transcripts,
+            profanity_filter=self._settings.profanity_filter,
+            enable_automatic_punctuation=self._settings.automatic_punctuation,
+            verbatim_transcripts=self._settings.verbatim_transcripts,
         )
 
         # Add word boosting if specified
-        if self._boosted_lm_words:
+        if self._settings.boosted_lm_words:
             riva.client.add_word_boosting_to_config(
-                config, self._boosted_lm_words, self._boosted_lm_score
+                config, self._settings.boosted_lm_words, self._settings.boosted_lm_score
             )
 
         # Add voice activity detection parameters
@@ -540,22 +573,6 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Set the ASR model for transcription.
-
-        Args:
-            model: Model name to set.
-
-        Note:
-            Model cannot be changed after initialization. Use model_function_map
-            parameter in constructor instead.
-        """
-        logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
-        example = {"function_id": "<UUID>", "model_name": "<model_name>"}
-        logger.warning(
-            f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
-        )
-
     async def start(self, frame: StartFrame):
         """Initialize the service when the pipeline starts.
 
@@ -565,22 +582,23 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         await super().start(frame)
         self._initialize_client()
         self._config = self._create_recognition_config()
-        logger.debug(f"Initialized NvidiaSegmentedSTTService with model: {self.model_name}")
+        logger.debug(f"Initialized NvidiaSegmentedSTTService with model: {self._settings.model}")
 
-    async def set_language(self, language: Language):
-        """Set the language for the STT service.
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and sync internal state.
 
         Args:
-            language: Target language for transcription.
-        """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._language_enum = language
-        self._language = self.language_to_service_language(language) or "en-US"
-        self._settings["language"] = language
+            delta: A :class:`STTSettings` (or ``NvidiaSegmentedSTTSettings``) delta.
 
-        # Update configuration with new language
-        if self._config:
-            self._config.language_code = self._language
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+
+        if changed:
+            self._config = self._create_recognition_config()
+
+        return changed
 
     @traced_stt
     async def _handle_transcription(
@@ -633,11 +651,11 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                             text,
                             self._user_id,
                             time_now_iso8601(),
-                            self._language_enum,
+                            self._settings.language,
                         )
                         transcription_found = True
 
-                        await self._handle_transcription(text, True, self._language_enum)
+                        await self._handle_transcription(text, True, self._settings.language)
 
             if not transcription_found:
                 logger.debug(f"{self}: No transcription results found in NVIDIA Riva response")

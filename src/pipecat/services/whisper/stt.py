@@ -11,6 +11,7 @@ supporting both Faster Whisper and MLX Whisper backends for efficient inference.
 """
 
 import asyncio
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import AsyncGenerator, Optional
 
@@ -19,6 +20,7 @@ from loguru import logger
 from typing_extensions import TYPE_CHECKING, override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -172,12 +174,44 @@ def language_to_whisper_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class WhisperSTTSettings(STTSettings):
+    """Settings for the local Whisper (Faster Whisper) STT service.
+
+    Parameters:
+        device: Inference device ('cpu', 'cuda', or 'auto').
+        compute_type: Compute type for inference ('default', 'int8', etc.).
+        no_speech_prob: Probability threshold for filtering non-speech segments.
+    """
+
+    device: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    compute_type: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_speech_prob: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+@dataclass
+class WhisperMLXSTTSettings(STTSettings):
+    """Settings for the MLX Whisper STT service.
+
+    Parameters:
+        no_speech_prob: Probability threshold for filtering non-speech segments.
+        temperature: Sampling temperature (0.0-1.0).
+        engine: Whisper engine identifier.
+    """
+
+    no_speech_prob: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    engine: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class WhisperSTTService(SegmentedSTTService):
     """Class to transcribe audio with a locally-downloaded Whisper model.
 
     This service uses Faster Whisper to perform speech-to-text transcription on audio
     segments. It supports multiple languages and various model sizes.
     """
+
+    _settings: WhisperSTTSettings
 
     def __init__(
         self,
@@ -199,19 +233,20 @@ class WhisperSTTService(SegmentedSTTService):
             language: The default language for transcription.
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            settings=WhisperSTTSettings(
+                model=model if isinstance(model, str) else model.value,
+                language=language,
+                device=device,
+                compute_type=compute_type,
+                no_speech_prob=no_speech_prob,
+            ),
+            **kwargs,
+        )
         self._device: str = device
         self._compute_type = compute_type
-        self.set_model_name(model if isinstance(model, str) else model.value)
         self._no_speech_prob = no_speech_prob
         self._model: Optional[WhisperModel] = None
-
-        self._settings = {
-            "language": language,
-            "device": self._device,
-            "compute_type": self._compute_type,
-            "no_speech_prob": self._no_speech_prob,
-        }
 
         self._load()
 
@@ -234,15 +269,6 @@ class WhisperSTTService(SegmentedSTTService):
         """
         return language_to_whisper_language(language)
 
-    async def set_language(self, language: Language):
-        """Set the language for transcription.
-
-        Args:
-            language: The Language enum value to use for transcription.
-        """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._settings["language"] = language
-
     def _load(self):
         """Loads the Whisper model.
 
@@ -255,7 +281,7 @@ class WhisperSTTService(SegmentedSTTService):
 
             logger.debug("Loading Whisper model...")
             self._model = WhisperModel(
-                self.model_name, device=self._device, compute_type=self._compute_type
+                self._settings.model, device=self._device, compute_type=self._compute_type
             )
             logger.debug("Loaded Whisper model")
         except ModuleNotFoundError as e:
@@ -293,9 +319,8 @@ class WhisperSTTService(SegmentedSTTService):
         # Divide by 32768 because we have signed 16-bit data.
         audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
-        whisper_lang = self.language_to_service_language(self._settings["language"])
         segments, _ = await asyncio.to_thread(
-            self._model.transcribe, audio_float, language=whisper_lang
+            self._model.transcribe, audio_float, language=self._settings.language
         )
         text: str = ""
         for segment in segments:
@@ -305,13 +330,13 @@ class WhisperSTTService(SegmentedSTTService):
         await self.stop_processing_metrics()
 
         if text:
-            await self._handle_transcription(text, True, self._settings["language"])
+            await self._handle_transcription(text, True, self._settings.language)
             logger.debug(f"Transcription: [{text}]")
             yield TranscriptionFrame(
                 text,
                 self._user_id,
                 time_now_iso8601(),
-                self._settings["language"],
+                self._settings.language,
             )
 
 
@@ -321,6 +346,8 @@ class WhisperSTTServiceMLX(WhisperSTTService):
     This service uses MLX Whisper to perform speech-to-text transcription on audio
     segments. It's optimized for Apple Silicon and supports multiple languages and quantizations.
     """
+
+    _settings: WhisperMLXSTTSettings
 
     def __init__(
         self,
@@ -341,18 +368,20 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         # Skip WhisperSTTService.__init__ and call its parent directly
-        SegmentedSTTService.__init__(self, **kwargs)
+        SegmentedSTTService.__init__(
+            self,
+            settings=WhisperMLXSTTSettings(
+                model=model if isinstance(model, str) else model.value,
+                language=language,
+                no_speech_prob=no_speech_prob,
+                temperature=temperature,
+                engine="mlx",
+            ),
+            **kwargs,
+        )
 
-        self.set_model_name(model if isinstance(model, str) else model.value)
         self._no_speech_prob = no_speech_prob
         self._temperature = temperature
-
-        self._settings = {
-            "language": language,
-            "no_speech_prob": self._no_speech_prob,
-            "temperature": self._temperature,
-            "engine": "mlx",
-        }
 
         # No need to call _load() as MLX Whisper loads models on demand
 
@@ -390,13 +419,12 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             # Divide by 32768 because we have signed 16-bit data.
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
-            whisper_lang = self.language_to_service_language(self._settings["language"])
             chunk = await asyncio.to_thread(
                 mlx_whisper.transcribe,
                 audio_float,
-                path_or_hf_repo=self.model_name,
+                path_or_hf_repo=self._settings.model,
                 temperature=self._temperature,
-                language=whisper_lang,
+                language=self._settings.language,
             )
             text: str = ""
             for segment in chunk.get("segments", []):
@@ -413,13 +441,13 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             await self.stop_processing_metrics()
 
             if text:
-                await self._handle_transcription(text, True, self._settings["language"])
+                await self._handle_transcription(text, True, self._settings.language)
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(
                     text,
                     self._user_id,
                     time_now_iso8601(),
-                    self._settings["language"],
+                    self._settings.language,
                 )
 
         except Exception as e:

@@ -8,7 +8,8 @@
 
 import io
 import wave
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, ClassVar, Dict, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -20,6 +21,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -32,6 +34,23 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class GroqTTSSettings(TTSSettings):
+    """Settings for the Groq TTS service.
+
+    Parameters:
+        output_format: Audio output format.
+        speed: Speech speed multiplier. Defaults to 1.0.
+        groq_sample_rate: Audio sample rate.
+    """
+
+    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    groq_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "groq_sample_rate"}
+
+
 class GroqTTSService(TTSService):
     """Groq text-to-speech service implementation.
 
@@ -39,6 +58,8 @@ class GroqTTSService(TTSService):
     operates at a fixed 48kHz sample rate and supports various voices
     and output formats.
     """
+
+    _settings: GroqTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Groq TTS configuration.
@@ -78,28 +99,24 @@ class GroqTTSService(TTSService):
         if sample_rate != self.GROQ_SAMPLE_RATE:
             logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
 
+        params = params or GroqTTSService.InputParams()
+
         super().__init__(
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            settings=GroqTTSSettings(
+                model=model_name,
+                voice=voice_id,
+                language=str(params.language) if params.language else "en",
+                output_format=output_format,
+                speed=params.speed,
+                groq_sample_rate=sample_rate,
+            ),
             **kwargs,
         )
 
-        params = params or GroqTTSService.InputParams()
-
         self._api_key = api_key
-        self._model_name = model_name
         self._output_format = output_format
-        self._voice_id = voice_id
-        self._params = params
-
-        self._settings = {
-            "model": model_name,
-            "voice_id": voice_id,
-            "output_format": output_format,
-            "language": str(params.language) if params.language else "en",
-            "speed": params.speed,
-            "sample_rate": sample_rate,
-        }
 
         self._client = AsyncGroq(api_key=self._api_key)
 
@@ -129,9 +146,12 @@ class GroqTTSService(TTSService):
 
         try:
             response = await self._client.audio.speech.create(
-                model=self._model_name,
-                voice=self._voice_id,
+                model=self._settings.model,
+                voice=self._settings.voice,
                 response_format=self._output_format,
+                # Note: as of 2026-02-25, only a speed of 1.0 is supported, but
+                # here we pass it for completeness and future-proofing
+                speed=self._settings.speed,
                 input=text,
             )
 

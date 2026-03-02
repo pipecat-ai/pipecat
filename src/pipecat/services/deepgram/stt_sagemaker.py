@@ -14,7 +14,8 @@ languages, and various Deepgram features.
 
 import asyncio
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from loguru import logger
 
@@ -31,6 +32,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.deepgram.stt import _DeepgramSTTSettingsBase
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -45,6 +48,16 @@ except ModuleNotFoundError as e:
         "In order to use DeepgramSageMakerSTTService, you need to `pip install pipecat-ai[deepgram,sagemaker]`."
     )
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class DeepgramSageMakerSTTSettings(_DeepgramSTTSettingsBase):
+    """Settings for the Deepgram SageMaker STT service.
+
+    See ``_DeepgramSTTSettingsBase`` for full documentation.
+    """
+
+    pass
 
 
 class DeepgramSageMakerSTTService(STTService):
@@ -75,6 +88,8 @@ class DeepgramSageMakerSTTService(STTService):
         )
     """
 
+    _settings: DeepgramSageMakerSTTSettings
+
     def __init__(
         self,
         *,
@@ -93,19 +108,15 @@ class DeepgramSageMakerSTTService(STTService):
             region: AWS region where the endpoint is deployed (e.g., "us-east-2").
             sample_rate: Audio sample rate in Hz. If None, uses value from
                 live_options or defaults to the value from StartFrame.
-            live_options: Deepgram LiveOptions for detailed configuration. If None,
-                uses sensible defaults (nova-3 model, English, interim results enabled).
+            live_options: Deepgram LiveOptions configuration. Treated as a
+                delta from a set of sensible defaults — only the fields you
+                set are overridden; all others keep their default values.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
-        self._endpoint_name = endpoint_name
-        self._region = region
-
-        # Create default options similar to DeepgramSTTService
         default_options = LiveOptions(
             encoding="linear16",
             language=Language.EN,
@@ -115,21 +126,23 @@ class DeepgramSageMakerSTTService(STTService):
             punctuate=True,
         )
 
-        # Merge with provided options
-        merged_options = default_options.to_dict()
+        settings = DeepgramSageMakerSTTSettings(
+            model=default_options.model,
+            language=default_options.language,
+            live_options=default_options,
+        )
         if live_options:
-            default_model = default_options.model
-            merged_options.update(live_options.to_dict())
-            # Handle the "None" string bug from deepgram-sdk
-            if "model" in merged_options and merged_options["model"] == "None":
-                merged_options["model"] = default_model
+            settings._merge_live_options_delta(live_options)
 
-        # Convert Language enum to string if needed
-        if "language" in merged_options and isinstance(merged_options["language"], Language):
-            merged_options["language"] = merged_options["language"].value
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=settings,
+            **kwargs,
+        )
 
-        self.set_model_name(merged_options["model"])
-        self._settings = merged_options
+        self._endpoint_name = endpoint_name
+        self._region = region
 
         self._client: Optional[SageMakerBidiClient] = None
         self._response_task: Optional[asyncio.Task] = None
@@ -143,35 +156,21 @@ class DeepgramSageMakerSTTService(STTService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Set the Deepgram model and reconnect.
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and warn about unhandled changes."""
+        changed = await super()._update_settings(delta)
 
-        Disconnects from the current session, updates the model setting, and
-        establishes a new connection with the updated model.
+        if not changed:
+            return changed
 
-        Args:
-            model: The Deepgram model name to use (e.g., "nova-3").
-        """
-        await super().set_model(model)
-        logger.info(f"Switching STT model to: [{model}]")
-        self._settings["model"] = model
-        await self._disconnect()
-        await self._connect()
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # await self._disconnect()
+        # await self._connect()
 
-    async def set_language(self, language: Language):
-        """Set the recognition language and reconnect.
+        self._warn_unhandled_updated_settings(changed)
 
-        Disconnects from the current session, updates the language setting, and
-        establishes a new connection with the updated language.
-
-        Args:
-            language: The language to use for speech recognition (e.g., Language.EN,
-                Language.ES).
-        """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._settings["language"] = language
-        await self._disconnect()
-        await self._connect()
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the Deepgram SageMaker STT service.
@@ -180,7 +179,6 @@ class DeepgramSageMakerSTTService(STTService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["sample_rate"] = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -226,12 +224,13 @@ class DeepgramSageMakerSTTService(STTService):
         """
         logger.debug("Connecting to Deepgram on SageMaker...")
 
-        # Update sample rate in settings
-        self._settings["sample_rate"] = self.sample_rate
+        live_options = LiveOptions(
+            **{**self._settings.live_options.to_dict(), "sample_rate": self.sample_rate}
+        )
 
-        # Build query string from settings, converting booleans to strings
+        # Build query string from live_options, converting booleans to strings
         query_params = {}
-        for key, value in self._settings.items():
+        for key, value in live_options.to_dict().items():
             if value is not None:
                 # Convert boolean values to lowercase strings for Deepgram API
                 if isinstance(value, bool):

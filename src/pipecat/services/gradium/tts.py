@@ -6,7 +6,8 @@
 
 import base64
 import json
-from typing import Any, AsyncGenerator, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -16,14 +17,13 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.tts_service import AudioContextTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -38,8 +38,21 @@ except ModuleNotFoundError as e:
 SAMPLE_RATE = 48000
 
 
-class GradiumTTSService(AudioContextWordTTSService):
+@dataclass
+class GradiumTTSSettings(TTSSettings):
+    """Settings for the Gradium TTS service.
+
+    Parameters:
+        output_format: Audio output format.
+    """
+
+    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+class GradiumTTSService(AudioContextTTSService):
     """Text-to-Speech service using Gradium's websocket API."""
+
+    _settings: GradiumTTSSettings
 
     class InputParams(BaseModel):
         """Configuration parameters for Gradium TTS service.
@@ -72,27 +85,27 @@ class GradiumTTSService(AudioContextWordTTSService):
             params: Additional configuration parameters.
             **kwargs: Additional arguments passed to parent class.
         """
+        params = params or GradiumTTSService.InputParams()
+
         super().__init__(
             push_stop_frames=True,
             push_text_frames=False,
             pause_frame_processing=True,
+            supports_word_timestamps=True,
             sample_rate=SAMPLE_RATE,
+            settings=GradiumTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=None,
+                output_format="pcm",
+            ),
             **kwargs,
         )
-
-        params = params or GradiumTTSService.InputParams()
 
         # Store service configuration
         self._api_key = api_key
         self._url = url
-        self._voice_id = voice_id
         self._json_config = json_config
-        self._model = model
-        self._settings = {
-            "voice_id": voice_id,
-            "model_name": model,
-            "output_format": "pcm",
-        }
 
         # State tracking
         self._receive_task = None
@@ -105,24 +118,22 @@ class GradiumTTSService(AudioContextWordTTSService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Update the TTS model.
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect if voice changed.
 
         Args:
-            model: The model name to use for synthesis.
-        """
-        self._model = model
-        await super().set_model(model)
+            delta: A :class:`TTSSettings` (or ``GradiumTTSSettings``) delta.
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect if voice changed."""
-        prev_voice = self._voice_id
-        await super()._update_settings(settings)
-        if not prev_voice == self._voice_id:
-            self._settings["voice_id"] = self._voice_id
-            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        if "voice" in changed:
             await self._disconnect()
             await self._connect()
+        else:
+            self._warn_unhandled_updated_settings(changed)
+        return changed
 
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Gradium API."""
@@ -200,7 +211,7 @@ class GradiumTTSService(AudioContextWordTTSService):
             setup_msg = {
                 "type": "setup",
                 "output_format": "pcm",
-                "voice_id": self._voice_id,
+                "voice_id": self._settings.voice,
                 "close_ws_on_eos": False,
             }
             if self._json_config is not None:
@@ -252,20 +263,23 @@ class GradiumTTSService(AudioContextWordTTSService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        """Handle interruption by resetting context state.
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Called when an audio context is cancelled due to an interruption.
 
-        The parent AudioContextTTSService._handle_interruption() cancels the audio context
-        task and creates a new one. We reset _context_id so the next run_tts() creates a
-        fresh context. No websocket reconnection needed — audio from the old client_req_id
-        will be silently dropped since the audio context no longer exists.
-
-        Args:
-            frame: The interruption frame.
-            direction: The direction of the frame.
+        No WebSocket message is needed — audio from the interrupted
+        ``client_req_id`` will be silently dropped by the base class once the
+        audio context no longer exists.
         """
-        await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
+
+    async def on_audio_context_completed(self, context_id: str):
+        """Called after an audio context has finished playing all of its audio.
+
+        No close message is needed: Gradium signals completion with an
+        ``end_of_stream`` message (handled in ``_receive_messages``), after
+        which the server-side context is already closed.
+        """
+        pass
 
     async def _receive_messages(self):
         """Process incoming websocket messages, demultiplexing by client_req_id."""

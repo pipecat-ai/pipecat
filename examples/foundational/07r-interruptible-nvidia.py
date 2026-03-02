@@ -55,7 +55,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = NvidiaSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
 
     llm = NvidiaLLMService(
-        api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.1-405b-instruct"
+        api_key=os.getenv("NVIDIA_API_KEY"),
+        model="meta/llama-3.3-70b-instruct",
     )
 
     tts = NvidiaTTSService(api_key=os.getenv("NVIDIA_API_KEY"))

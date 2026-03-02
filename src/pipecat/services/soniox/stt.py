@@ -8,7 +8,8 @@
 
 import json
 import time
-from typing import AsyncGenerator, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -23,6 +24,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -134,6 +136,35 @@ def _prepare_language_hints(
     return list(set(prepared_languages))
 
 
+@dataclass
+class SonioxSTTSettings(STTSettings):
+    """Settings for Soniox STT service.
+
+    Parameters:
+        audio_format: Audio format to use for transcription.
+        num_channels: Number of channels to use for transcription.
+        language_hints: List of language hints to use for transcription.
+        language_hints_strict: If true, strictly enforce language hints.
+        context: Customization for transcription. String for models with
+            context_version 1 and SonioxContextObject for models with
+            context_version 2.
+        enable_speaker_diarization: Whether to enable speaker diarization.
+        enable_language_identification: Whether to enable language identification.
+        client_reference_id: Client reference ID to use for transcription.
+    """
+
+    audio_format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    num_channels: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_hints: List[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_hints_strict: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    context: SonioxContextObject | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_speaker_diarization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_language_identification: bool | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    client_reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class SonioxSTTService(WebsocketSTTService):
     """Speech-to-Text service using Soniox's WebSocket API.
 
@@ -143,6 +174,8 @@ class SonioxSTTService(WebsocketSTTService):
 
     For complete API documentation, see: https://soniox.com/docs/speech-to-text/api-reference/websocket-api
     """
+
+    _settings: SonioxSTTSettings
 
     def __init__(
         self,
@@ -169,25 +202,44 @@ class SonioxSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService.
         """
+        params = params or SonioxInputParams()
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=1,
             keepalive_interval=5,
+            settings=SonioxSTTSettings(
+                model=params.model,
+                language=None,
+                audio_format=params.audio_format,
+                num_channels=params.num_channels,
+                language_hints=params.language_hints,
+                language_hints_strict=params.language_hints_strict,
+                context=params.context,
+                enable_speaker_diarization=params.enable_speaker_diarization,
+                enable_language_identification=params.enable_language_identification,
+                client_reference_id=params.client_reference_id,
+            ),
             **kwargs,
         )
-        params = params or SonioxInputParams()
 
         self._api_key = api_key
         self._url = url
-        self.set_model_name(params.model)
-        self._params = params
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
 
         self._final_transcription_buffer = []
         self._last_tokens_received: Optional[float] = None
 
         self._receive_task = None
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Soniox STT supports metrics generation.
+        """
+        return True
 
     async def start(self, frame: StartFrame):
         """Start the Soniox STT websocket connection.
@@ -197,6 +249,31 @@ class SonioxSTTService(WebsocketSTTService):
         """
         await super().start(frame)
         await self._connect()
+
+    async def _update_settings(self, delta: SonioxSTTSettings) -> dict[str, Any]:
+        """Apply settings delta.
+
+        Settings are stored but not applied to the active connection.
+
+        Args:
+            delta: A settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     async def stop(self, frame: EndFrame):
         """Stop the Soniox STT websocket connection.
@@ -233,10 +310,8 @@ class SonioxSTTService(WebsocketSTTService):
         Yields:
             Frame: None (transcription results come via WebSocket callbacks).
         """
-        await self.start_processing_metrics()
         if self._websocket and self._websocket.state is State.OPEN:
             await self._websocket.send(audio)
-        await self.stop_processing_metrics()
 
         yield None
 
@@ -311,24 +386,26 @@ class SonioxSTTService(WebsocketSTTService):
             # Either one or the other is required.
             enable_endpoint_detection = not self._vad_force_turn_endpoint
 
-            context = self._params.context
+            s = self._settings
+
+            context = s.context
             if isinstance(context, SonioxContextObject):
                 context = context.model_dump()
 
             # Send the initial configuration message.
             config = {
                 "api_key": self._api_key,
-                "model": self._model_name,
-                "audio_format": self._params.audio_format,
-                "num_channels": self._params.num_channels or 1,
+                "model": s.model,
+                "audio_format": s.audio_format,
+                "num_channels": s.num_channels or 1,
                 "enable_endpoint_detection": enable_endpoint_detection,
                 "sample_rate": self.sample_rate,
-                "language_hints": _prepare_language_hints(self._params.language_hints),
-                "language_hints_strict": self._params.language_hints_strict,
+                "language_hints": _prepare_language_hints(s.language_hints),
+                "language_hints_strict": s.language_hints_strict,
                 "context": context,
-                "enable_speaker_diarization": self._params.enable_speaker_diarization,
-                "enable_language_identification": self._params.enable_language_identification,
-                "client_reference_id": self._params.client_reference_id,
+                "enable_speaker_diarization": s.enable_speaker_diarization,
+                "enable_language_identification": s.enable_language_identification,
+                "client_reference_id": s.client_reference_id,
             }
 
             # Send the configuration message.
@@ -415,6 +492,8 @@ class SonioxSTTService(WebsocketSTTService):
                             # the rest will be sent as interim tokens (even final tokens).
                             await send_endpoint_transcript()
                         else:
+                            if not self._final_transcription_buffer:
+                                await self.start_processing_metrics()
                             self._final_transcription_buffer.append(token)
                     else:
                         non_final_transcription.append(token)

@@ -11,7 +11,8 @@ for streaming text-to-speech synthesis.
 """
 
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, ClassVar, Dict, Mapping, Optional
 
 import aiohttp
 from loguru import logger
@@ -25,6 +26,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -85,6 +87,69 @@ def language_to_minimax_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+@dataclass
+class MiniMaxTTSSettings(TTSSettings):
+    """Settings for MiniMax TTS service.
+
+    Parameters:
+        stream: Whether to use streaming mode.
+        speed: Speech speed (range: 0.5 to 2.0).
+        volume: Speech volume (range: 0 to 10).
+        pitch: Pitch adjustment (range: -12 to 12).
+        emotion: Emotional tone (options: "happy", "sad", "angry", "fearful",
+            "disgusted", "surprised", "calm", "fluent").
+        text_normalization: Enable text normalization (Chinese/English).
+        latex_read: Enable LaTeX formula reading.
+        audio_bitrate: Audio bitrate in bps.
+        audio_format: Audio output format.
+        audio_channel: Number of audio channels.
+        audio_sample_rate: Audio sample rate in Hz.
+        language_boost: Language boost string for multilingual support.
+    """
+
+    stream: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emotion: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latex_read: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_bitrate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_channel: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_boost: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "MiniMaxTTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested dicts.
+
+        Handles ``voice_setting`` (with ``vol`` → ``volume`` rename) and
+        ``audio_setting`` (with prefixed field mapping).
+        """
+        flat = dict(settings)
+
+        voice = flat.pop("voice_setting", None)
+        if isinstance(voice, dict):
+            flat.setdefault("speed", voice.get("speed"))
+            flat.setdefault("volume", voice.get("vol"))
+            flat.setdefault("pitch", voice.get("pitch"))
+            flat.setdefault("emotion", voice.get("emotion"))
+            flat.setdefault("text_normalization", voice.get("text_normalization"))
+            flat.setdefault("latex_read", voice.get("latex_read"))
+
+        audio = flat.pop("audio_setting", None)
+        if isinstance(audio, dict):
+            flat.setdefault("audio_bitrate", audio.get("bitrate"))
+            flat.setdefault("audio_format", audio.get("format"))
+            flat.setdefault("audio_channel", audio.get("channel"))
+            flat.setdefault("audio_sample_rate", audio.get("sample_rate"))
+
+        return super().from_mapping(flat)
+
+
 class MiniMaxHttpTTSService(TTSService):
     """Text-to-speech service using MiniMax's T2A (Text-to-Audio) API.
 
@@ -95,6 +160,8 @@ class MiniMaxHttpTTSService(TTSService):
     Platform documentation:
     https://www.minimax.io/platform/document/T2A%20V2?key=66719005a427f0c8a5701643
     """
+
+    _settings: MiniMaxTTSSettings
 
     class InputParams(BaseModel):
         """Configuration parameters for MiniMax TTS.
@@ -160,41 +227,40 @@ class MiniMaxHttpTTSService(TTSService):
             params: Additional configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or MiniMaxHttpTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=MiniMaxTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=None,
+                stream=True,
+                speed=params.speed,
+                volume=params.volume,
+                pitch=params.pitch,
+                language_boost=None,
+                emotion=None,
+                text_normalization=None,
+                latex_read=None,
+                audio_bitrate=128000,
+                audio_format="pcm",
+                audio_channel=1,
+                audio_sample_rate=0,
+            ),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._group_id = group_id
         self._base_url = f"{base_url}?GroupId={group_id}"
         self._session = aiohttp_session
-        self._model_name = model
-        self._voice_id = voice_id
-
-        # Create voice settings
-        self._settings = {
-            "stream": True,
-            "voice_setting": {
-                "speed": params.speed,
-                "vol": params.volume,
-                "pitch": params.pitch,
-            },
-            "audio_setting": {
-                "bitrate": 128000,
-                "format": "pcm",
-                "channel": 1,
-            },
-        }
-
-        # Set voice and model
-        self.set_voice(voice_id)
-        self.set_model_name(model)
 
         # Add language boost if provided
         if params.language:
             service_lang = self.language_to_service_language(params.language)
             if service_lang:
-                self._settings["language_boost"] = service_lang
+                self._settings.language_boost = service_lang
 
         # Add optional emotion if provided
         if params.emotion:
@@ -210,7 +276,7 @@ class MiniMaxHttpTTSService(TTSService):
                 "fluent",
             ]
             if params.emotion in supported_emotions:
-                self._settings["voice_setting"]["emotion"] = params.emotion
+                self._settings.emotion = params.emotion
             else:
                 logger.warning(
                     f"Unsupported emotion: {params.emotion}. Supported emotions: {supported_emotions}"
@@ -226,15 +292,15 @@ class MiniMaxHttpTTSService(TTSService):
                     "Parameter `english_normalization` is deprecated and will be removed in a future version. Use `text_normalization` instead.",
                     DeprecationWarning,
                 )
-            self._settings["voice_setting"]["text_normalization"] = params.english_normalization
+            self._settings.text_normalization = params.english_normalization
 
         # Add text_normalization if provided (corrected parameter name)
         if params.text_normalization is not None:
-            self._settings["voice_setting"]["text_normalization"] = params.text_normalization
+            self._settings.text_normalization = params.text_normalization
 
         # Add latex_read if provided
         if params.latex_read is not None:
-            self._settings["voice_setting"]["latex_read"] = params.latex_read
+            self._settings.latex_read = params.latex_read
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -255,24 +321,6 @@ class MiniMaxHttpTTSService(TTSService):
         """
         return language_to_minimax_language(language)
 
-    def set_model_name(self, model: str):
-        """Set the TTS model to use.
-
-        Args:
-            model: The model name to use for synthesis.
-        """
-        self._model_name = model
-
-    def set_voice(self, voice: str):
-        """Set the voice to use.
-
-        Args:
-            voice: The voice identifier to use for synthesis.
-        """
-        self._voice_id = voice
-        if "voice_setting" in self._settings:
-            self._settings["voice_setting"]["voice_id"] = voice
-
     async def start(self, frame: StartFrame):
         """Start the MiniMax TTS service.
 
@@ -280,7 +328,7 @@ class MiniMaxHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["audio_setting"]["sample_rate"] = self.sample_rate
+        self._settings.audio_sample_rate = self.sample_rate
         logger.debug(f"MiniMax TTS initialized with sample_rate: {self.sample_rate}")
 
     @traced_tts
@@ -302,10 +350,38 @@ class MiniMaxHttpTTSService(TTSService):
             "Authorization": f"Bearer {self._api_key}",
         }
 
+        # Build voice_setting dict for API
+        voice_setting = {
+            "voice_id": self._settings.voice,
+            "speed": self._settings.speed,
+            "vol": self._settings.volume,
+            "pitch": self._settings.pitch,
+        }
+        if self._settings.emotion is not None:
+            voice_setting["emotion"] = self._settings.emotion
+        if self._settings.text_normalization is not None:
+            voice_setting["text_normalization"] = self._settings.text_normalization
+        if self._settings.latex_read is not None:
+            voice_setting["latex_read"] = self._settings.latex_read
+
+        # Build audio_setting dict for API
+        audio_setting = {
+            "bitrate": self._settings.audio_bitrate,
+            "format": self._settings.audio_format,
+            "channel": self._settings.audio_channel,
+            "sample_rate": self._settings.audio_sample_rate,
+        }
+
         # Create payload from settings
-        payload = self._settings.copy()
-        payload["model"] = self._model_name
-        payload["text"] = text
+        payload = {
+            "stream": self._settings.stream,
+            "voice_setting": voice_setting,
+            "audio_setting": audio_setting,
+            "model": self._settings.model,
+            "text": text,
+        }
+        if self._settings.language_boost is not None:
+            payload["language_boost"] = self._settings.language_boost
 
         try:
             await self.start_ttfb_metrics()

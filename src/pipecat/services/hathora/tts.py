@@ -9,6 +9,7 @@
 import io
 import os
 import wave
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional, Tuple
 
 import aiohttp
@@ -21,6 +22,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -45,11 +47,28 @@ def _decode_audio_payload(
         return audio_bytes, fallback_sample_rate, fallback_channels
 
 
+@dataclass
+class HathoraTTSSettings(TTSSettings):
+    """Settings for Hathora TTS service.
+
+    Parameters:
+        speed: Speech speed multiplier (if supported by model).
+        config: Some models support additional config, refer to
+            [docs](https://models.hathora.dev) for each model to see
+            what is supported.
+    """
+
+    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    config: list[ConfigOption] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class HathoraTTSService(TTSService):
     """This service supports several different text-to-speech models hosted by Hathora.
 
     [Documentation](https://models.hathora.dev)
     """
+
+    _settings: HathoraTTSSettings
 
     class InputParams(BaseModel):
         """Optional input parameters for Hathora TTS configuration.
@@ -88,23 +107,21 @@ class HathoraTTSService(TTSService):
             params: Configuration parameters.
             **kwargs: Additional arguments passed to the parent class.
         """
-        super().__init__(
-            sample_rate=sample_rate,
-            **kwargs,
-        )
-        self._model = model
-        self._api_key = api_key or os.getenv("HATHORA_API_KEY")
-        self._base_url = base_url
-
         params = params or HathoraTTSService.InputParams()
 
-        self._settings = {
-            "speed": params.speed,
-            "config": params.config,
-        }
-
-        self.set_model_name(model)
-        self.set_voice(voice_id)
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=HathoraTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=None,  # Not applicable here
+                speed=params.speed,
+                config=params.config,
+            ),
+            **kwargs,
+        )
+        self._api_key = api_key or os.getenv("HATHORA_API_KEY")
+        self._base_url = base_url
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -131,16 +148,15 @@ class HathoraTTSService(TTSService):
 
             url = f"{self._base_url}"
 
-            payload = {"model": self._model, "text": text}
+            payload = {"model": self._settings.model, "text": text}
 
-            if self._voice_id is not None:
-                payload["voice"] = self._voice_id
-            if self._settings["speed"] is not None:
-                payload["speed"] = self._settings["speed"]
-            if self._settings["config"] is not None:
+            if self._settings.voice is not None:
+                payload["voice"] = self._settings.voice
+            if self._settings.speed is not None:
+                payload["speed"] = self._settings.speed
+            if self._settings.config is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value}
-                    for option in self._settings["config"]
+                    {"name": option.name, "value": option.value} for option in self._settings.config
                 ]
 
             yield TTSStartedFrame(context_id=context_id)

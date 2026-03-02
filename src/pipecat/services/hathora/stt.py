@@ -8,6 +8,7 @@
 
 import base64
 import os
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -18,6 +19,7 @@ from pipecat.frames.frames import (
     Frame,
     TranscriptionFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import HATHORA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
@@ -27,11 +29,26 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 from .utils import ConfigOption
 
 
+@dataclass
+class HathoraSTTSettings(STTSettings):
+    """Settings for the Hathora STT service.
+
+    Parameters:
+        config: Some models support additional config, refer to
+            `docs <https://models.hathora.dev>`_ for each model to see
+            what is supported.
+    """
+
+    config: list[ConfigOption] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class HathoraSTTService(SegmentedSTTService):
     """This service supports several different speech-to-text models hosted by Hathora.
 
     [Documentation](https://models.hathora.dev)
     """
+
+    _settings: HathoraSTTSettings
 
     class InputParams(BaseModel):
         """Optional input parameters for Hathora STT configuration.
@@ -72,23 +89,20 @@ class HathoraSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent class.
         """
+        params = params or HathoraSTTService.InputParams()
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
+            settings=HathoraSTTSettings(
+                model=model,
+                language=params.language,
+                config=params.config,
+            ),
             **kwargs,
         )
-        self._model = model
         self._api_key = api_key or os.getenv("HATHORA_API_KEY")
         self._base_url = base_url
-
-        params = params or HathoraSTTService.InputParams()
-
-        self._settings = {
-            "language": params.language,
-            "config": params.config,
-        }
-
-        self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -120,15 +134,14 @@ class HathoraSTTService(SegmentedSTTService):
             url = f"{self._base_url}"
 
             payload = {
-                "model": self._model,
+                "model": self._settings.model,
             }
 
-            if self._settings["language"] is not None:
-                payload["language"] = self._settings["language"]
-            if self._settings["config"] is not None:
+            if self._settings.language is not None:
+                payload["language"] = self._settings.language
+            if self._settings.config is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value}
-                    for option in self._settings["config"]
+                    {"name": option.name, "value": option.value} for option in self._settings.config
                 ]
 
             base64_audio = base64.b64encode(audio).decode("utf-8")
@@ -147,7 +160,7 @@ class HathoraSTTService(SegmentedSTTService):
                 if text:  # Only yield non-empty text
                     # Hathora's API currently doesn't return language info
                     # so we default to the requested language or "en"
-                    response_language = self._settings["language"] or "en"
+                    response_language = self._settings.language or "en"
                     await self._handle_transcription(text, True, response_language)
                     yield TranscriptionFrame(
                         text,

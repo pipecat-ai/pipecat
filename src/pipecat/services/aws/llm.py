@@ -18,8 +18,8 @@ import io
 import json
 import os
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Dict, List, Optional
 
 from loguru import logger
 from PIL import Image
@@ -40,7 +40,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
-    LLMUpdateSettingsFrame,
     UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -57,6 +56,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -69,6 +69,21 @@ except ModuleNotFoundError as e:
         "In order to use AWS services, you need to `pip install pipecat-ai[aws]`. Also, remember to set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
     )
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class AWSBedrockLLMSettings(LLMSettings):
+    """Settings for AWS Bedrock LLM services.
+
+    Parameters:
+        latency: Performance mode - "standard" or "optimized".
+        additional_model_request_fields: Additional model-specific parameters.
+    """
+
+    latency: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    additional_model_request_fields: Dict[str, Any] | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 @dataclass
@@ -730,6 +745,8 @@ class AWSBedrockLLMService(LLMService):
     vision capabilities.
     """
 
+    _settings: AWSBedrockLLMSettings
+
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AWSBedrockLLMAdapter
 
@@ -780,9 +797,27 @@ class AWSBedrockLLMService(LLMService):
             retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        super().__init__(**kwargs)
-
         params = params or AWSBedrockLLMService.InputParams()
+
+        super().__init__(
+            settings=AWSBedrockLLMSettings(
+                model=model,
+                max_tokens=params.max_tokens,
+                temperature=params.temperature,
+                top_p=params.top_p,
+                top_k=None,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                latency=params.latency,
+                additional_model_request_fields=params.additional_model_request_fields
+                if isinstance(params.additional_model_request_fields, dict)
+                else {},
+            ),
+            **kwargs,
+        )
 
         # Initialize the AWS Bedrock client
         if not client_config:
@@ -803,18 +838,8 @@ class AWSBedrockLLMService(LLMService):
             "config": client_config,
         }
 
-        self.set_model_name(model)
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._settings = {
-            "max_tokens": params.max_tokens,
-            "temperature": params.temperature,
-            "top_p": params.top_p,
-            "latency": params.latency,
-            "additional_model_request_fields": params.additional_model_request_fields
-            if isinstance(params.additional_model_request_fields, dict)
-            else {},
-        }
 
         logger.info(f"Using AWS Bedrock model: {model}")
 
@@ -836,12 +861,12 @@ class AWSBedrockLLMService(LLMService):
             Dictionary containing only the inference parameters that are not None.
         """
         inference_config = {}
-        if self._settings["max_tokens"] is not None:
-            inference_config["maxTokens"] = self._settings["max_tokens"]
-        if self._settings["temperature"] is not None:
-            inference_config["temperature"] = self._settings["temperature"]
-        if self._settings["top_p"] is not None:
-            inference_config["topP"] = self._settings["top_p"]
+        if self._settings.max_tokens is not None:
+            inference_config["maxTokens"] = self._settings.max_tokens
+        if self._settings.temperature is not None:
+            inference_config["temperature"] = self._settings.temperature
+        if self._settings.top_p is not None:
+            inference_config["topP"] = self._settings.top_p
         return inference_config
 
     async def run_inference(
@@ -877,9 +902,9 @@ class AWSBedrockLLMService(LLMService):
             inference_config["maxTokens"] = max_tokens
 
         request_params = {
-            "modelId": self.model_name,
+            "modelId": self._settings.model,
             "messages": messages,
-            "additionalModelRequestFields": self._settings["additional_model_request_fields"],
+            "additionalModelRequestFields": self._settings.additional_model_request_fields,
         }
 
         if inference_config:
@@ -1034,9 +1059,9 @@ class AWSBedrockLLMService(LLMService):
 
             # Prepare request parameters
             request_params = {
-                "modelId": self.model_name,
+                "modelId": self._settings.model,
                 "messages": messages,
-                "additionalModelRequestFields": self._settings["additional_model_request_fields"],
+                "additionalModelRequestFields": self._settings.additional_model_request_fields,
             }
 
             # Only add inference config if it has parameters
@@ -1081,8 +1106,8 @@ class AWSBedrockLLMService(LLMService):
                 request_params["toolConfig"] = tool_config
 
             # Add performance config if latency is specified
-            if self._settings["latency"] in ["standard", "optimized"]:
-                request_params["performanceConfig"] = {"latency": self._settings["latency"]}
+            if self._settings.latency in ["standard", "optimized"]:
+                request_params["performanceConfig"] = {"latency": self._settings.latency}
 
             # Log request params with messages redacted for logging
             if isinstance(context, LLMContext):
@@ -1207,8 +1232,6 @@ class AWSBedrockLLMService(LLMService):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
             context = AWSBedrockLLMContext.from_messages(frame.messages)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 

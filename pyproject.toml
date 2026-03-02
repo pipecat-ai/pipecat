@@ -26,7 +26,7 @@ dependencies = [
     "docstring_parser~=0.16",
     "loguru~=0.7.3",
     "Markdown>=3.7,<4",
-    "nltk>=3.9.1,<4",
+    "nltk>=3.9.3,<4",
     "numpy>=1.26.4,<3",
     "Pillow>=11.1.0,<13",
     "protobuf~=5.29.6",
@@ -36,10 +36,12 @@ dependencies = [
     "soxr~=0.5.0",
     "openai>=1.74.0,<3",
     # Pinning numba to resolve package dependencies
-    "numba==0.61.2",
+    "numba>=0.61.2",
     "wait_for2>=0.4.1; python_version<'3.12'",
-    # Pipecat optionals
-    "pipecat-ai[local-smart-turn-v3]",
+    # Required by LocalSmartTurnAnalyzerV3
+    # Inlined here instead of using a self-referential extra for Poetry compatibility.
+    "transformers",
+    "onnxruntime~=1.23.2",
 ]
 
 [project.urls]
@@ -85,7 +87,6 @@ livekit = [ "livekit~=1.0.13", "livekit-api~=1.0.5", "tenacity>=8.2.3,<10.0.0", 
 lmnt = [ "pipecat-ai[websockets-base]" ]
 local = [ "pyaudio~=0.2.14" ]
 local-smart-turn = [ "coremltools>=8.0", "transformers", "torch>=2.5.0,<3", "torchaudio>=2.5.0,<3" ]
-local-smart-turn-v3 = [ "transformers", "onnxruntime~=1.23.2" ]
 mcp = [ "mcp[cli]>=1.11.0,<2" ]
 mem0 = [ "mem0ai~=0.1.94" ]
 mistral = []
@@ -100,13 +101,12 @@ openpipe = [ "openpipe>=4.50.0,<6" ]
 openrouter = []
 perplexity = []
 piper = [ "piper-tts>=1.3.0,<2", "requests>=2.32.5,<3" ]
-playht = [ "pipecat-ai[websockets-base]" ]
 qwen = []
 remote-smart-turn = []
 resembleai = [ "pipecat-ai[websockets-base]" ]
 rime = [ "pipecat-ai[websockets-base]" ]
 riva = [ "pipecat-ai[nvidia]" ]
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.128.0", "pipecat-ai-small-webrtc-prebuilt>=2.2.0"]
+runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.128.0", "pipecat-ai-small-webrtc-prebuilt>=2.3.0"]
 sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
 sarvam = [ "sarvamai==0.1.26a2", "pipecat-ai[websockets-base]" ]
@@ -255,6 +255,11 @@ showcontent = true
 [[tool.towncrier.type]]
 directory = "fixed"
 name = "Fixed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "performance"
+name = "Performance"
 showcontent = true
 
 [[tool.towncrier.type]]

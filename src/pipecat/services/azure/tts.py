@@ -7,6 +7,7 @@
 """Azure Cognitive Services Text-to-Speech service implementations."""
 
 import asyncio
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -25,7 +26,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.tts_service import TTSService, WordTTSService
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -65,6 +67,31 @@ def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputForma
     return sample_rate_map.get(sample_rate, SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm)
 
 
+@dataclass
+class AzureTTSSettings(TTSSettings):
+    """Settings for Azure TTS services.
+
+    Parameters:
+        emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
+        language: Language for synthesis. Defaults to English (US).
+        pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
+        rate: Speech rate adjustment (e.g., "1.0", "1.25", "slow", "fast").
+        role: Voice role for expression (e.g., "YoungAdultFemale").
+        style: Speaking style (e.g., "cheerful", "sad", "excited").
+        style_degree: Intensity of the speaking style (0.01 to 2.0).
+        volume: Volume level (e.g., "+20%", "loud", "x-soft").
+    """
+
+    emphasis: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    role: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style_degree: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class AzureBaseTTSService:
     """Base mixin class for Azure Cognitive Services text-to-speech implementations.
 
@@ -72,6 +99,8 @@ class AzureBaseTTSService:
     construction, voice configuration, and parameter management.
     This is a mixin class and should be used alongside TTSService or its subclasses.
     """
+
+    _settings: AzureTTSSettings
 
     # Define SSML escape mappings based on SSML reserved characters
     # See - https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure
@@ -112,7 +141,6 @@ class AzureBaseTTSService:
         api_key: str,
         region: str,
         voice: str = "en-US-SaraNeural",
-        params: Optional[InputParams] = None,
     ):
         """Initialize Azure-specific configuration.
 
@@ -122,26 +150,9 @@ class AzureBaseTTSService:
             api_key: Azure Cognitive Services subscription key.
             region: Azure region identifier (e.g., "eastus", "westus2").
             voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
-            params: Voice and synthesis parameters configuration.
         """
-        params = params or AzureBaseTTSService.InputParams()
-
-        self._settings = {
-            "emphasis": params.emphasis,
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            "pitch": params.pitch,
-            "rate": params.rate,
-            "role": params.role,
-            "style": params.style,
-            "style_degree": params.style_degree,
-            "volume": params.volume,
-        }
-
         self._api_key = api_key
         self._region = region
-        self._voice_id = voice
         self._speech_synthesizer = None
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
@@ -156,7 +167,7 @@ class AzureBaseTTSService:
         return language_to_azure_language(language)
 
     def _construct_ssml(self, text: str) -> str:
-        language = self._settings["language"]
+        language = self._settings.language
 
         # Escape special characters
         escaped_text = self._escape_text(text)
@@ -165,42 +176,42 @@ class AzureBaseTTSService:
             f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
-            f"<voice name='{self._voice_id}'>"
+            f"<voice name='{self._settings.voice}'>"
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
         )
 
-        if self._settings["style"]:
-            ssml += f"<mstts:express-as style='{self._settings['style']}'"
-            if self._settings["style_degree"]:
-                ssml += f" styledegree='{self._settings['style_degree']}'"
-            if self._settings["role"]:
-                ssml += f" role='{self._settings['role']}'"
+        if self._settings.style:
+            ssml += f"<mstts:express-as style='{self._settings.style}'"
+            if self._settings.style_degree:
+                ssml += f" styledegree='{self._settings.style_degree}'"
+            if self._settings.role:
+                ssml += f" role='{self._settings.role}'"
             ssml += ">"
 
         prosody_attrs = []
-        if self._settings["rate"]:
-            prosody_attrs.append(f"rate='{self._settings['rate']}'")
-        if self._settings["pitch"]:
-            prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
-        if self._settings["volume"]:
-            prosody_attrs.append(f"volume='{self._settings['volume']}'")
+        if self._settings.rate:
+            prosody_attrs.append(f"rate='{self._settings.rate}'")
+        if self._settings.pitch:
+            prosody_attrs.append(f"pitch='{self._settings.pitch}'")
+        if self._settings.volume:
+            prosody_attrs.append(f"volume='{self._settings.volume}'")
 
         # Only wrap in prosody tag if there are prosody attributes
         if prosody_attrs:
             ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
-        if self._settings["emphasis"]:
-            ssml += f"<emphasis level='{self._settings['emphasis']}'>"
+        if self._settings.emphasis:
+            ssml += f"<emphasis level='{self._settings.emphasis}'>"
 
         ssml += escaped_text
 
-        if self._settings["emphasis"]:
+        if self._settings.emphasis:
             ssml += "</emphasis>"
 
         if prosody_attrs:
             ssml += "</prosody>"
 
-        if self._settings["style"]:
+        if self._settings.style:
             ssml += "</mstts:express-as>"
 
         ssml += "</voice></speak>"
@@ -229,7 +240,7 @@ class AzureBaseTTSService:
         return escaped_text
 
 
-class AzureTTSService(WordTTSService, AzureBaseTTSService):
+class AzureTTSService(TTSService, AzureBaseTTSService):
     """Azure Cognitive Services streaming TTS service with word timestamps.
 
     Provides real-time text-to-speech synthesis using Azure's WebSocket-based
@@ -245,7 +256,8 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         voice: str = "en-US-SaraNeural",
         sample_rate: Optional[int] = None,
         params: Optional[AzureBaseTTSService.InputParams] = None,
-        aggregate_sentences: bool = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
     ):
         """Initialize the Azure streaming TTS service.
@@ -256,21 +268,43 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
-            aggregate_sentences: Whether to aggregate sentences before synthesis.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent WordTTSService.
         """
-        # Initialize WordTTSService first to set up word timestamp tracking
+        params = params or AzureBaseTTSService.InputParams()
+
         super().__init__(
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             push_text_frames=False,  # We'll push text frames based on word timestamps
             push_stop_frames=True,
             pause_frame_processing=True,
+            supports_word_timestamps=True,
             sample_rate=sample_rate,
+            settings=AzureTTSSettings(
+                model=None,
+                emphasis=params.emphasis,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en-US",
+                pitch=params.pitch,
+                rate=params.rate,
+                role=params.role,
+                style=params.style,
+                style_degree=params.style_degree,
+                voice=voice,
+                volume=params.volume,
+            ),
             **kwargs,
         )
 
         # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, voice=voice, params=params)
+        self._init_azure_base(api_key=api_key, region=region, voice=voice)
 
         self._speech_config = None
         self._speech_synthesizer = None
@@ -314,7 +348,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             subscription=self._api_key,
             region=self._region,
         )
-        self._speech_config.speech_synthesis_language = self._settings["language"]
+        self._speech_config.speech_synthesis_language = self._settings.language
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )
@@ -364,7 +398,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         Returns:
             True if the language is CJK, False otherwise.
         """
-        language = self._settings.get("language", "").lower()
+        language = (self._settings.language if self._settings.language else "").lower()
         # Check if language starts with CJK language codes
         return language.startswith(("zh", "ja", "ko", "cmn", "yue", "wuu"))
 
@@ -527,9 +561,13 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         # User cancellation (from interruption) is expected, not an error
         if reason == CancellationReason.CancelledByUser:
             logger.debug(f"{self}: Speech synthesis canceled by user (interruption)")
+            self._audio_queue.put_nowait(None)
         else:
-            logger.warning(f"{self}: Speech synthesis canceled: {reason}")
-        self._audio_queue.put_nowait(None)
+            details = evt.result.cancellation_details
+            error_msg = f"Azure TTS synthesis canceled: {reason}"
+            if details.error_details:
+                error_msg += f" - {details.error_details}"
+            self._audio_queue.put_nowait(Exception(error_msg))
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
@@ -642,6 +680,9 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                     chunk = await self._audio_queue.get()
                     if chunk is None:  # End of stream
                         break
+                    if isinstance(chunk, Exception):  # Error from _handle_canceled
+                        yield ErrorFrame(error=str(chunk))
+                        break
 
                     if self._first_chunk:
                         await self.stop_ttfb_metrics()
@@ -704,10 +745,29 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             params: Voice and synthesis parameters configuration.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        params = params or AzureBaseTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=AzureTTSSettings(
+                model=None,
+                emphasis=params.emphasis,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en-US",
+                pitch=params.pitch,
+                rate=params.rate,
+                role=params.role,
+                style=params.style,
+                style_degree=params.style_degree,
+                voice=voice,
+                volume=params.volume,
+            ),
+            **kwargs,
+        )
 
         # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, voice=voice, params=params)
+        self._init_azure_base(api_key=api_key, region=region, voice=voice)
 
         self._speech_config = None
         self._speech_synthesizer = None
@@ -735,7 +795,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             subscription=self._api_key,
             region=self._region,
         )
-        self._speech_config.speech_synthesis_language = self._settings["language"]
+        self._speech_config.speech_synthesis_language = self._settings.language
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )

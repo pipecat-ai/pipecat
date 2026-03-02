@@ -182,7 +182,7 @@ class UserTurnProcessor(FrameProcessor):
         await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
 
         if params.enable_interruptions and self._allow_interruptions:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
 
         await self._call_event_handler("on_user_turn_started", strategy)
 
