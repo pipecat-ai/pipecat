@@ -282,13 +282,17 @@ class SarvamHttpTTSService(TTSService):
                 "text": text,
                 "target_language_code": self._settings["language"],
                 "speaker": self._voice_id,
-                "pitch": self._settings["pitch"],
-                "pace": self._settings["pace"],
-                "loudness": self._settings["loudness"],
                 "sample_rate": self.sample_rate,
                 "enable_preprocessing": self._settings["enable_preprocessing"],
                 "model": self._model_name,
             }
+
+            if self._model_name in ("bulbul:v3-beta", "bulbul:v3"):
+                payload["temperature"] = self._settings["temperature"]
+            else:
+                payload["pitch"] = self._settings["pitch"]
+                payload["pace"] = self._settings["pace"]
+                payload["loudness"] = self._settings["loudness"]
 
             headers = {
                 "api-subscription-key": self._api_key,
