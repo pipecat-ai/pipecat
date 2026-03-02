@@ -1013,12 +1013,14 @@ class SarvamTTSService(InterruptibleTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
+            ws_additional_headers = {
+                "api-subscription-key": self._api_key,
+                **sdk_headers(),
+            }
+
             self._websocket = await websocket_connect(
                 self._websocket_url,
-                additional_headers={
-                    "api-subscription-key": self._api_key,
-                    **sdk_headers(),
-                },
+                additional_headers=ws_additional_headers,
             )
             logger.debug("Connected to Sarvam TTS Websocket")
             await self._send_config()
