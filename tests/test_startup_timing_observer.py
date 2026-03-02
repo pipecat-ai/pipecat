@@ -151,9 +151,11 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         report = reports[0]
         self.assertIsInstance(report, StartupTimingReport)
         self.assertIsInstance(report.total_duration_secs, float)
+        self.assertGreater(report.start_time, 0)
         for timing in report.processor_timings:
             self.assertIsInstance(timing.processor_name, str)
             self.assertIsInstance(timing.duration_secs, float)
+            self.assertGreater(timing.start_time, 0)
 
     async def test_excludes_internal_processors(self):
         """Test that internal pipeline processors are excluded by default."""
@@ -211,6 +213,7 @@ class TestStartupTimingObserver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(transport_reports), 1)
         report = transport_reports[0]
         self.assertIsInstance(report, TransportTimingReport)
+        self.assertGreater(report.start_time, 0)
         self.assertGreater(report.client_connected_secs, 0)
         self.assertIsNone(report.bot_connected_secs)
 
