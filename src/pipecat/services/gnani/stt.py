@@ -302,9 +302,7 @@ class GnaniSTTService(SegmentedSTTService):
                             yield ErrorFrame(error=error_msg)
                     else:
                         error_text = await response.text()
-                        error_msg = (
-                            f"Gnani API error (status {response.status}): {error_text}"
-                        )
+                        error_msg = f"Gnani API error (status {response.status}): {error_text}"
                         logger.error(error_msg)
                         yield ErrorFrame(error=error_msg)
             finally:
