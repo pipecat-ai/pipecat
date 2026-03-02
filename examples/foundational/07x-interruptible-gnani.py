@@ -15,6 +15,12 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
+from pipecat.turns.turn_strategies import (
+    TurnAnalyzerBotTurnStartStrategy,
+    TurnStartStrategies,
+)
+from pipecat.turns.turn_utils import LocalSmartTurnAnalyzerV3
+from pipecat.universal_context.llm_context import LLMContext
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -33,12 +39,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.turn_strategies import (
-    TurnAnalyzerBotTurnStartStrategy,
-    TurnStartStrategies,
-)
-from pipecat.turns.turn_utils import LocalSmartTurnAnalyzerV3
-from pipecat.universal_context.llm_context import LLMContext
 
 load_dotenv(override=True)
 
@@ -148,7 +148,7 @@ async def bot(runner_args: RunnerArguments):
 
 if __name__ == "__main__":
     import asyncio
+
     from pipecat.runner import main as run
 
     asyncio.run(run(bot))
-
