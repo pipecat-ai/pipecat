@@ -267,7 +267,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         else:
             # universal-streaming: Different configuration (works differently)
             updates = {
-                "end_of_turn_confidence_threshold": 0.0,
+                "end_of_turn_confidence_threshold": 1.0,
                 "min_turn_silence": 160,
             }
 
