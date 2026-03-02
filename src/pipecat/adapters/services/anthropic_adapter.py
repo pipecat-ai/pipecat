@@ -13,7 +13,10 @@ from typing import Any, Dict, List, TypedDict
 
 from anthropic import NOT_GIVEN, NotGiven
 from anthropic.types.message_param import MessageParam
-from anthropic.types.tool_union_param import ToolUnionParam
+try:
+    from anthropic.types.tool_union_param import ToolUnionParam
+except (ImportError, ModuleNotFoundError):
+    ToolUnionParam = Any  # type: ignore[assignment,misc]
 from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter

@@ -298,15 +298,21 @@ class AnthropicLLMService(LLMService):
             "messages": messages,
             "system": system,
             "tools": tools,
-            "betas": ["interleaved-thinking-2025-05-14"],
         }
         if self._settings["thinking"]:
             params["thinking"] = self._settings["thinking"].model_dump(exclude_unset=True)
+            params["betas"] = ["interleaved-thinking-2025-05-14"]
 
         params.update(self._settings["extra"])
 
         # LLM completion
-        response = await self._client.beta.messages.create(**params)
+        # Use beta.messages if available (newer SDK), otherwise fall back to messages
+        if hasattr(self._client.beta, "messages"):
+            response = await self._client.beta.messages.create(**params)
+        else:
+            params.pop("betas", None)
+            params.pop("thinking", None)
+            response = await self._client.messages.create(**params)
 
         return next((block.text for block in response.content if hasattr(block, "text")), None)
 
@@ -420,12 +426,17 @@ class AnthropicLLMService(LLMService):
 
             params.update(self._settings["extra"])
 
-            # "Interleaved thinking" needed to allow thinking between sequences
-            # of function calls, when extended thinking is enabled.
-            # Note that this requires us to use `client.beta`, below.
-            params.update({"betas": ["interleaved-thinking-2025-05-14"]})
+            # Use beta.messages if available (newer SDK with interleaved thinking support),
+            # otherwise fall back to standard messages API.
+            if hasattr(self._client.beta, "messages"):
+                params.update({"betas": ["interleaved-thinking-2025-05-14"]})
+                create_fn = self._client.beta.messages.create
+            else:
+                params.pop("betas", None)
+                params.pop("thinking", None)
+                create_fn = self._client.messages.create
 
-            response = await self._create_message_stream(self._client.beta.messages.create, params)
+            response = await self._create_message_stream(create_fn, params)
 
             await self.stop_ttfb_metrics()
 

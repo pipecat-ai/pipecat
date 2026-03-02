@@ -45,6 +45,46 @@ from pipecat.runner.types import (
 from pipecat.transports.base_transport import BaseTransport
 
 
+def _get_twilio_credentials_from_db() -> dict:
+    """Fetch Twilio account_sid and auth_token from the DB (api_keys table).
+
+    Queries service_providers for name='twilio', then finds the api_keys
+    rows whose additional_credentials->key_type is 'sid' or 'auth_token'.
+    Returns {"account_sid": ..., "auth_token": ...}.
+    """
+    from core.database.session import get_db_context
+    from core.models.service_provider import ServiceProvider
+    from core.models.api_key import ApiKey
+    from core.utils.encryption import decrypt
+
+    try:
+        with get_db_context() as db:
+            provider = db.query(ServiceProvider).filter(ServiceProvider.name == "twilio").first()
+            if not provider:
+                logger.warning("Twilio service provider not found in DB")
+                return {}
+
+            api_keys = (
+                db.query(ApiKey)
+                .filter(ApiKey.service_provider_id == provider.id)
+                .all()
+            )
+
+            creds = {}
+            for ak in api_keys:
+                additional = ak.additional_credentials or {}
+                key_type = additional.get("key_type")
+                if key_type == "sid":
+                    creds["account_sid"] = decrypt(ak.api_key_encrypted)
+                elif key_type == "auth_token":
+                    creds["auth_token"] = decrypt(ak.api_key_encrypted)
+
+            return creds
+    except Exception as e:
+        logger.error(f"Error fetching Twilio credentials from DB: {e}")
+        return {}
+
+
 def _detect_transport_type_from_message(message_data: dict) -> str:
     """Attempt to auto-detect transport type from WebSocket message structure."""
     logger.trace("=== Auto-Detection Analysis ===")
@@ -435,11 +475,12 @@ async def _create_telephony_transport(
     if transport_type == "twilio":
         from pipecat.serializers.twilio import TwilioFrameSerializer
 
+        twilio_creds = _get_twilio_credentials_from_db()
         params.serializer = TwilioFrameSerializer(
             stream_sid=call_data["stream_id"],
             call_sid=call_data["call_id"],
-            account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
-            auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+            account_sid=twilio_creds.get("account_sid", ""),
+            auth_token=twilio_creds.get("auth_token", ""),
         )
     elif transport_type == "telnyx":
         from pipecat.serializers.telnyx import TelnyxFrameSerializer
