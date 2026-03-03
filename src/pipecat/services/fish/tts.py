@@ -95,7 +95,7 @@ class FishAudioTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         """Input parameters for Fish Audio TTS configuration.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=FishAudioTTSSettings(...)`` instead.
 
         Parameters:
@@ -131,7 +131,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             api_key: Fish Audio API key for authentication.
             reference_id: Reference ID of the voice model to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=FishAudioTTSSettings(voice=...)`` instead.
 
             model: Deprecated. Reference ID of the voice model to use for synthesis.
@@ -142,14 +142,14 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             model_id: Specify which Fish Audio TTS model to use (e.g. "s1").
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=FishAudioTTSSettings(model=...)`` instead.
 
             output_format: Audio output format. Defaults to "pcm".
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=FishAudioTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

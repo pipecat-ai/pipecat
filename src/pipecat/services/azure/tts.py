@@ -115,7 +115,7 @@ class AzureBaseTTSService:
     class InputParams(BaseModel):
         """Input parameters for Azure TTS voice configuration.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=AzureTTSSettings(...)`` instead.
 
         Parameters:
@@ -271,13 +271,13 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             region: Azure region identifier (e.g., "eastus", "westus2").
             voice: Voice name to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=AzureTTSSettings(voice=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=AzureTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -766,13 +766,13 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             region: Azure region identifier (e.g., "eastus", "westus2").
             voice: Voice name to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=AzureTTSSettings(voice=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=AzureTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

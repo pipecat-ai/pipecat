@@ -84,7 +84,7 @@ class ResembleAITTSService(AudioContextTTSService):
             api_key: Resemble AI API key for authentication.
             voice_id: Voice UUID to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=ResembleAITTSSettings(voice=...)`` instead.
 
             url: WebSocket URL for Resemble AI TTS API.

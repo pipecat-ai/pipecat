@@ -395,7 +395,7 @@ class SpeechmaticsSTTService(STTService):
             sample_rate: Optional audio sample rate in Hz.
             params: Input parameters for the service.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=SpeechmaticsSTTSettings(...)`` instead.
 
             should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.

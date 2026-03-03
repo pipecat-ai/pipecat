@@ -114,7 +114,7 @@ class InworldHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Inworld TTS configuration.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``InworldTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -148,12 +148,12 @@ class InworldHttpTTSService(TTSService):
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=InworldTTSSettings(voice=...)`` instead.
 
             model: ID of the model to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=InworldTTSSettings(model=...)`` instead.
 
             streaming: Whether to use streaming mode.
@@ -161,7 +161,7 @@ class InworldHttpTTSService(TTSService):
             encoding: Audio encoding format.
             params: Input parameters for Inworld TTS configuration.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=InworldTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -506,7 +506,7 @@ class InworldTTSService(AudioContextTTSService):
     class InputParams(BaseModel):
         """Input parameters for Inworld WebSocket TTS configuration.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``InworldTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -553,12 +553,12 @@ class InworldTTSService(AudioContextTTSService):
             api_key: Inworld API key.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=InworldTTSSettings(voice=...)`` instead.
 
             model: ID of the model to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=InworldTTSSettings(model=...)`` instead.
 
             url: URL of the Inworld WebSocket API.
@@ -566,7 +566,7 @@ class InworldTTSService(AudioContextTTSService):
             encoding: Audio encoding format.
             params: Input parameters for Inworld WebSocket TTS configuration.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=InworldTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

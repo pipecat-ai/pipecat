@@ -228,7 +228,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs STT API.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=ElevenLabsSTTSettings(...)`` instead.
 
         Parameters:
@@ -260,13 +260,13 @@ class ElevenLabsSTTService(SegmentedSTTService):
             base_url: Base URL for ElevenLabs API.
             model: Model ID for transcription.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=ElevenLabsSTTSettings(model=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=ElevenLabsSTTSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -452,7 +452,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs Realtime STT API.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=ElevenLabsRealtimeSTTSettings(...)`` instead.
 
         Parameters:
@@ -500,13 +500,13 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             base_url: Base URL for ElevenLabs WebSocket API.
             model: Model ID for transcription.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=ElevenLabsRealtimeSTTSettings(model=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=ElevenLabsRealtimeSTTSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

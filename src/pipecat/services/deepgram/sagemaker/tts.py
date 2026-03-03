@@ -92,7 +92,7 @@ class DeepgramSageMakerTTSService(TTSService):
             region: AWS region where the endpoint is deployed (e.g., "us-east-2").
             voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=DeepgramSageMakerTTSSettings(voice=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses the value from StartFrame.

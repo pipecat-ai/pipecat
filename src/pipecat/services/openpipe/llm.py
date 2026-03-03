@@ -52,7 +52,7 @@ class OpenPipeLLMService(OpenAILLMService):
         Args:
             model: The model name to use. Defaults to "gpt-4.1".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             api_key: OpenAI API key for authentication. If None, reads from environment.

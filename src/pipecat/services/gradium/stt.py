@@ -91,7 +91,7 @@ class GradiumSTTService(WebsocketSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for Gradium STT API.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=GradiumSTTSettings(...)`` instead.
 
         Parameters:
@@ -125,7 +125,7 @@ class GradiumSTTService(WebsocketSTTService):
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
             params: Configuration parameters for language and delay settings.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=GradiumSTTSettings(...)`` instead.
 
             json_config: Optional JSON configuration string for additional model settings.

@@ -64,7 +64,7 @@ class OpenAIImageGenService(ImageGenService):
             image_size: Target size for generated images.
             model: DALL-E model to use for generation. Defaults to "dall-e-3".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAIImageGenSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

@@ -46,7 +46,7 @@ class PerplexityLLMService(OpenAILLMService):
             base_url: The base URL for Perplexity's API. Defaults to "https://api.perplexity.ai".
             model: The model identifier to use. Defaults to "sonar".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

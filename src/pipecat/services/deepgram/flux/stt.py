@@ -124,7 +124,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for Deepgram Flux API.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=DeepgramFluxSTTSettings(...)`` instead.
 
         Parameters:
@@ -173,14 +173,14 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             sample_rate: Audio sample rate in Hz. If None, uses the rate from params or 16000.
             model: Deepgram Flux model to use for transcription.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=DeepgramFluxSTTSettings(model=...)`` instead.
 
             flux_encoding: Audio encoding format required by Flux API. Must be "linear16".
                 Raw signed little-endian 16-bit PCM encoding.
             params: InputParams instance containing detailed API configuration options.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=DeepgramFluxSTTSettings(...)`` instead.
 
             should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.

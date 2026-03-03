@@ -376,7 +376,7 @@ class SarvamHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Sarvam TTS configuration.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``SarvamHttpTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -445,14 +445,14 @@ class SarvamHttpTTSService(TTSService):
             aiohttp_session: Shared aiohttp session for making requests.
             voice_id: Speaker voice ID. If None, uses model-appropriate default.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=SarvamHttpTTSSettings(voice=...)`` instead.
 
             model: TTS model to use. Options:
                 - "bulbul:v2" (default): Standard model with pitch/loudness support
                 - "bulbul:v3-beta": Advanced model with temperature control
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=SarvamHttpTTSSettings(model=...)`` instead.
 
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
@@ -460,7 +460,7 @@ class SarvamHttpTTSService(TTSService):
                 If None, uses model-specific default.
             params: Additional voice and preprocessing parameters. If None, uses defaults.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=SarvamHttpTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -724,7 +724,7 @@ class SarvamTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam TTS WebSocket service.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``SarvamTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -830,12 +830,12 @@ class SarvamTTSService(InterruptibleTTSService):
                 - "bulbul:v2" (default): Standard model with pitch/loudness support
                 - "bulbul:v3-beta": Advanced model with temperature control
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=SarvamTTSSettings(model=...)`` instead.
 
             voice_id: Speaker voice ID. If None, uses model-appropriate default.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=SarvamTTSSettings(voice=...)`` instead.
 
             url: WebSocket URL for the TTS backend (default production URL).
@@ -849,7 +849,7 @@ class SarvamTTSService(InterruptibleTTSService):
                 If None, uses model-specific default.
             params: Optional input parameters to override defaults.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=SarvamTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

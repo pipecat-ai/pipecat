@@ -45,24 +45,24 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
         Args:
             model: Whisper model to use.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=BaseWhisperSTTSettings(model=...)`` instead.
 
             api_key: SambaNova API key. Defaults to None.
             base_url: API base URL. Defaults to "https://api.sambanova.ai/v1".
             language: Language of the audio input.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=BaseWhisperSTTSettings(language=...)`` instead.
 
             prompt: Optional text to guide the model's style or continue a previous segment.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=BaseWhisperSTTSettings(prompt=...)`` instead.
 
             temperature: Optional sampling temperature between 0 and 1.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=BaseWhisperSTTSettings(temperature=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

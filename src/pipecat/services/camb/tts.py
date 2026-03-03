@@ -175,7 +175,7 @@ class CambTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Camb.ai TTS configuration.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=CambTTSSettings(...)`` instead.
 
         Parameters:
@@ -210,12 +210,12 @@ class CambTTSService(TTSService):
             api_key: Camb.ai API key for authentication.
             voice_id: Voice ID to use.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=CambTTSSettings(voice=...)`` instead.
 
             model: TTS model to use. Options: "mars-flash" (fast), "mars-pro" (high quality).
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=CambTTSSettings(model=...)`` instead.
 
             timeout: Request timeout in seconds. Defaults to 60.0 (minimum recommended
@@ -223,7 +223,7 @@ class CambTTSService(TTSService):
             sample_rate: Audio sample rate in Hz. If None, uses model-specific default.
             params: Additional voice parameters. If None, uses defaults.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=CambTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

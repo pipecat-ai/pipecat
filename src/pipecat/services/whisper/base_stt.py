@@ -145,24 +145,24 @@ class BaseWhisperSTTService(SegmentedSTTService):
         Args:
             model: Name of the Whisper model to use.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=BaseWhisperSTTSettings(model=...)`` instead.
 
             api_key: Service API key. Defaults to None.
             base_url: Service API base URL. Defaults to None.
             language: Language of the audio input.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=BaseWhisperSTTSettings(language=...)`` instead.
 
             prompt: Optional text to guide the model's style or continue a previous segment.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=BaseWhisperSTTSettings(prompt=...)`` instead.
 
             temperature: Sampling temperature between 0 and 1.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=BaseWhisperSTTSettings(temperature=...)`` instead.
 
             include_prob_metrics: If True, enables probability metrics in API response.
