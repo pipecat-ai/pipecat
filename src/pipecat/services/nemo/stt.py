@@ -19,6 +19,7 @@ from typing import AsyncGenerator, Optional
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -149,6 +150,12 @@ class NemoSTTService(WebsocketSTTService):
         self._pre_speech_buffer: deque[bytes] = deque()
         self._pre_speech_buffer_bytes = 0  # Track current size
 
+        # Resampling support for different input rates (e.g., 8kHz Twilio -> 16kHz Nemo)
+        # _input_sample_rate: actual rate from pipeline (set in start())
+        # sample_rate: rate required by Nemo server (always 16000)
+        self._input_sample_rate: Optional[int] = None
+        self._resampler = None
+
         self.set_model_name("nemo-asr")
 
     def can_generate_metrics(self) -> bool:
@@ -166,6 +173,17 @@ class NemoSTTService(WebsocketSTTService):
             frame: Frame indicating service should start.
         """
         await super().start(frame)
+
+        # Get input sample rate from pipeline
+        self._input_sample_rate = frame.audio_in_sample_rate
+
+        # Create resampler if input rate differs from Nemo's required rate (16kHz)
+        if self._input_sample_rate != self.sample_rate:
+            logger.info(
+                f"NemoSTTService: Creating resampler {self._input_sample_rate}Hz -> {self.sample_rate}Hz"
+            )
+            self._resampler = create_stream_resampler()
+
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -223,6 +241,12 @@ class NemoSTTService(WebsocketSTTService):
         Yields:
             None - transcription results are handled via WebSocket responses.
         """
+        # Resample if needed (e.g., 8kHz Twilio -> 16kHz Nemo)
+        if self._resampler and self._input_sample_rate != self.sample_rate:
+            audio = await self._resampler.resample(
+                audio, self._input_sample_rate, self.sample_rate
+            )
+
         if self._stream_started:
             # Active stream - buffer audio for batching and send
             if self._websocket and self._websocket.state is State.OPEN:
