@@ -39,7 +39,7 @@ class CerebrasLLMService(OpenAILLMService):
             base_url: The base URL for Cerebras API. Defaults to "https://api.cerebras.ai/v1".
             model: The model identifier to use. Defaults to "gpt-oss-120b".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

@@ -112,7 +112,7 @@ class KokoroTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Kokoro TTS configuration.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``KokoroTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -136,14 +136,14 @@ class KokoroTTSService(TTSService):
         Args:
             voice_id: Voice identifier to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=KokoroTTSSettings(voice=...)`` instead.
 
             model_path: Path to the kokoro ONNX model file. Defaults to auto-downloaded file.
             voices_path: Path to the voices binary file. Defaults to auto-downloaded file.
             params: Configuration parameters for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=KokoroTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

@@ -39,7 +39,7 @@ class DeepSeekLLMService(OpenAILLMService):
             base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
             model: The model identifier to use. Defaults to "deepseek-chat".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

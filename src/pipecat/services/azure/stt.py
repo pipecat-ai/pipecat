@@ -94,7 +94,7 @@ class AzureSTTService(STTService):
             region: Azure region for the Speech service (e.g., 'eastus').
             language: Language for speech recognition. Defaults to English (US).
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=AzureSTTSettings(language=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.

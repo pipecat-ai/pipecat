@@ -155,7 +155,7 @@ class AWSPollyTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for AWS Polly TTS configuration.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``AWSPollyTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -196,13 +196,13 @@ class AWSPollyTTSService(TTSService):
             region: AWS region for Polly service. Defaults to 'us-east-1'.
             voice_id: Voice ID to use for synthesis. Defaults to 'Joanna'.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=AWSPollyTTSSettings(voice=...)`` instead.
 
             sample_rate: Audio sample rate. If None, uses service default.
             params: Additional input parameters for voice customization.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=AWSPollyTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

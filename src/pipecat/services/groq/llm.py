@@ -38,7 +38,7 @@ class GroqLLMService(OpenAILLMService):
             base_url: The base URL for Groq API. Defaults to "https://api.groq.com/openai/v1".
             model: The model identifier to use. Defaults to "llama-3.3-70b-versatile".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

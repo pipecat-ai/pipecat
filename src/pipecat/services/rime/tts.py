@@ -144,7 +144,7 @@ class RimeTTSService(AudioContextTTSService):
     class InputParams(BaseModel):
         """Configuration parameters for Rime TTS service.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=RimeTTSSettings(...)`` instead.
 
         Parameters:
@@ -196,19 +196,19 @@ class RimeTTSService(AudioContextTTSService):
             api_key: Rime API key for authentication.
             voice_id: ID of the voice to use.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=RimeTTSSettings(voice=...)`` instead.
 
             url: Rime websocket API endpoint.
             model: Model ID to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=RimeTTSSettings(model=...)`` instead.
 
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=RimeTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -657,7 +657,7 @@ class RimeHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Configuration parameters for Rime HTTP TTS service.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=RimeTTSSettings(...)`` instead.
 
         Parameters:
@@ -694,19 +694,19 @@ class RimeHttpTTSService(TTSService):
             api_key: Rime API key for authentication.
             voice_id: ID of the voice to use.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=RimeTTSSettings(voice=...)`` instead.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             model: Model ID to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=RimeTTSSettings(model=...)`` instead.
 
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=RimeTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -868,7 +868,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         """Configuration parameters for Rime Non-JSON WebSocket TTS service.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=RimeNonJsonTTSSettings(...)`` instead.
 
         Args:
@@ -908,20 +908,20 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             api_key: Rime API key for authentication.
             voice_id: ID of the voice to use.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=RimeNonJsonTTSSettings(voice=...)`` instead.
 
             url: Rime websocket API endpoint.
             model: Model ID to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=RimeNonJsonTTSSettings(model=...)`` instead.
 
             audio_format: Audio format to use.
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=RimeNonJsonTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

@@ -45,7 +45,7 @@ class NvidiaLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to
                 "nvidia/llama-3.1-nemotron-70b-instruct".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

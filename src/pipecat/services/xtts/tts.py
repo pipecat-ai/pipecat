@@ -107,7 +107,7 @@ class XTTSService(TTSService):
         Args:
             voice_id: ID of the voice/speaker to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=XTTSTTSSettings(voice=...)`` instead.
 
             base_url: Base URL of the XTTS streaming server.

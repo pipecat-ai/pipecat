@@ -85,7 +85,7 @@ class DeepgramTTSService(WebsocketTTSService):
             api_key: Deepgram API key for authentication.
             voice: Voice model to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=DeepgramTTSSettings(voice=...)`` instead.
 
             base_url: WebSocket base URL for Deepgram API. Defaults to "wss://api.deepgram.com".
@@ -403,7 +403,7 @@ class DeepgramHttpTTSService(TTSService):
             api_key: Deepgram API key for authentication.
             voice: Voice model to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=DeepgramTTSSettings(voice=...)`` instead.
 
             aiohttp_session: Shared aiohttp session for HTTP requests with connection pooling.

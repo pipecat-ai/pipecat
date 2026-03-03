@@ -425,7 +425,7 @@ class GoogleSTTService(STTService):
     class InputParams(BaseModel):
         """Configuration parameters for Google Speech-to-Text.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=GoogleSTTSettings(...)`` instead.
 
         Parameters:
@@ -500,7 +500,7 @@ class GoogleSTTService(STTService):
             sample_rate: Audio sample rate in Hertz.
             params: Configuration parameters for the service.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=GoogleSTTSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

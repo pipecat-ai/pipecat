@@ -62,7 +62,7 @@ class SpeechmaticsTTSService(TTSService):
     class InputParams(BaseModel):
         """Optional input parameters for Speechmatics TTS configuration.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=SpeechmaticsTTSSettings(...)`` instead.
 
         Parameters:
@@ -90,14 +90,14 @@ class SpeechmaticsTTSService(TTSService):
             base_url: Base URL for Speechmatics TTS API.
             voice_id: Voice model to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=SpeechmaticsTTSSettings(voice=...)`` instead.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             sample_rate: Audio sample rate in Hz.
             params: Input parameters for the service.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=SpeechmaticsTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

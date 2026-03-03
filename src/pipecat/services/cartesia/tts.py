@@ -279,14 +279,14 @@ class CartesiaTTSService(AudioContextTTSService):
             api_key: Cartesia API key for authentication.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=CartesiaTTSSettings(voice=...)`` instead.
 
             cartesia_version: API version string for Cartesia service.
             url: WebSocket URL for Cartesia TTS API.
             model: TTS model to use (e.g., "sonic-3").
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=CartesiaTTSSettings(model=...)`` instead.
 
             sample_rate: Audio sample rate. If None, uses default.
@@ -294,7 +294,7 @@ class CartesiaTTSService(AudioContextTTSService):
             container: Audio container format.
             params: Additional input parameters for voice customization.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=CartesiaTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -757,12 +757,12 @@ class CartesiaHttpTTSService(TTSService):
             api_key: Cartesia API key for authentication.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=CartesiaTTSSettings(voice=...)`` instead.
 
             model: TTS model to use (e.g., "sonic-3").
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=CartesiaTTSSettings(model=...)`` instead.
 
             base_url: Base URL for Cartesia HTTP API.
@@ -774,7 +774,7 @@ class CartesiaHttpTTSService(TTSService):
             container: Audio container format.
             params: Additional input parameters for voice customization.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=CartesiaTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

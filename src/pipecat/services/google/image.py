@@ -82,7 +82,7 @@ class GoogleImageGenService(ImageGenService):
             api_key: Google AI API key for authentication.
             params: Configuration parameters for image generation.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=GoogleImageGenSettings(model=...)`` instead.
 
             http_options: HTTP options for the client.

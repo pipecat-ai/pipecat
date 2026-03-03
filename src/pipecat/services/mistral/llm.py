@@ -41,7 +41,7 @@ class MistralLLMService(OpenAILLMService):
             base_url: The base URL for Mistral API. Defaults to "https://api.mistral.ai/v1".
             model: The model identifier to use. Defaults to "mistral-small-latest".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

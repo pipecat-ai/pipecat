@@ -38,7 +38,7 @@ class FireworksLLMService(OpenAILLMService):
             api_key: The API key for accessing Fireworks AI.
             model: The model identifier to use. Defaults to "accounts/fireworks/models/firefunction-v2".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             base_url: The base URL for Fireworks API. Defaults to "https://api.fireworks.ai/inference/v1".

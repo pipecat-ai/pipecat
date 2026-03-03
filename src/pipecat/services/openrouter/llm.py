@@ -42,7 +42,7 @@ class OpenRouterLLMService(OpenAILLMService):
                 to read from environment variables.
             model: The model identifier to use. Defaults to "openai/gpt-4o-2024-11-20".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             base_url: The base URL for OpenRouter API. Defaults to "https://openrouter.ai/api/v1".

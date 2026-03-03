@@ -229,27 +229,27 @@ class WhisperSTTService(SegmentedSTTService):
         Args:
             model: The Whisper model to use for transcription. Can be a Model enum or string.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=WhisperSTTSettings(model=...)`` instead.
 
             device: The device to run inference on ('cpu', 'cuda', or 'auto').
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=WhisperSTTSettings(device=...)`` instead.
 
             compute_type: The compute type for inference ('default', 'int8', 'int8_float16', etc.).
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=WhisperSTTSettings(compute_type=...)`` instead.
 
             no_speech_prob: Probability threshold for filtering out non-speech segments.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=WhisperSTTSettings(no_speech_prob=...)`` instead.
 
             language: The default language for transcription.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=WhisperSTTSettings(language=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -408,22 +408,22 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         Args:
             model: The MLX Whisper model to use for transcription. Can be an MLXModel enum or string.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=WhisperMLXSTTSettings(model=...)`` instead.
 
             no_speech_prob: Probability threshold for filtering out non-speech segments.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=WhisperMLXSTTSettings(no_speech_prob=...)`` instead.
 
             language: The default language for transcription.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=WhisperMLXSTTSettings(language=...)`` instead.
 
             temperature: Temperature for sampling. Can be a float or tuple of floats.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=WhisperMLXSTTSettings(temperature=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

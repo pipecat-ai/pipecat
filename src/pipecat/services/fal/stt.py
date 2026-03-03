@@ -169,7 +169,7 @@ class FalSTTService(SegmentedSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for Fal's Wizper API.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=FalSTTSettings(...)`` instead.
 
         Parameters:
@@ -204,7 +204,7 @@ class FalSTTService(SegmentedSTTService):
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the Wizper API.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=FalSTTSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

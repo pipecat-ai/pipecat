@@ -66,7 +66,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             base_url: Base URL for Google's OpenAI-compatible API.
             model: Google model name to use (e.g., "gemini-2.0-flash").
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

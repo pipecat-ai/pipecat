@@ -84,7 +84,7 @@ class HumeTTSService(TTSService):
     class InputParams(BaseModel):
         """Optional synthesis parameters for Hume TTS.
 
-        .. deprecated:: 1.0
+        .. deprecated:: 1.0.0
             Use ``settings=HumeTTSSettings(...)`` instead.
 
         Parameters:
@@ -113,12 +113,12 @@ class HumeTTSService(TTSService):
             api_key: Hume API key. If omitted, reads the ``HUME_API_KEY`` environment variable.
             voice_id: ID of the voice to use. Only voice IDs are supported; voice names are not.
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=HumeTTSSettings(voice=...)`` instead.
 
             params: Optional synthesis controls (acting instructions, speed, trailing silence).
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=HumeTTSSettings(...)`` instead.
 
             sample_rate: Output sample rate for emitted PCM frames. Defaults to 48_000 (Hume).

@@ -49,7 +49,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             api_key: The API key for accessing SambaNova API.
             model: The model identifier to use. Defaults to "Llama-4-Maverick-17B-128E-Instruct".
 
-                .. deprecated:: 1.0
+                .. deprecated:: 1.0.0
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             base_url: The base URL for SambaNova API. Defaults to "https://api.sambanova.ai/v1".
