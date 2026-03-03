@@ -375,12 +375,7 @@ class AICFilter(BaseAudioFilter):
         self._vad_ctx = self._processor.get_vad_context()
 
         # Apply initial parameters
-        try:
-            self._processor_ctx.set_parameter(
-                ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0
-            )
-        except ParameterFixedError as e:
-            logger.error(f"AIC parameter update failed: {e}")
+        self._processor_ctx.set_parameter(ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0)
 
         # Log processor information
         logger.debug(f"ai-coustics filter started:")
@@ -389,7 +384,8 @@ class AICFilter(BaseAudioFilter):
         logger.debug(f"  Frames per chunk: {self._frames_per_block}")
         logger.debug(f"  Optimal sample rate: {self._model.get_optimal_sample_rate()} Hz")
         logger.debug(
-            f"  Optimal number of frames for {self._sample_rate} Hz: {self._model.get_optimal_num_frames(self._sample_rate)}"
+            f"  Optimal number of frames for {self._sample_rate} Hz: "
+            f"{self._model.get_optimal_num_frames(self._sample_rate)}"
         )
         logger.debug(
             f"  Output delay: {self._processor_ctx.get_output_delay()} samples "
@@ -458,13 +454,16 @@ class AICFilter(BaseAudioFilter):
         if num_blocks == 0:
             return b""
 
-        filtered_chunks: List[bytes] = []
-        mv = memoryview(self._audio_buffer)
         block_size = self._frames_per_block * self._bytes_per_sample
+        total_size = num_blocks * block_size
+        blocks_data = bytes(self._audio_buffer[:total_size])
+        self._audio_buffer = self._audio_buffer[total_size:]
+
+        filtered_chunks: List[bytes] = []
 
         for i in range(num_blocks):
             start = i * block_size
-            block_i16 = np.frombuffer(mv[start : start + block_size], dtype=self._dtype)
+            block_i16 = np.frombuffer(blocks_data[start : start + block_size], dtype=self._dtype)
 
             # Reuse input buffer, in-place divide
             np.copyto(self._in_f32[0], block_i16)
@@ -479,5 +478,4 @@ class AICFilter(BaseAudioFilter):
 
             filtered_chunks.append(self._out_i16.tobytes())
 
-        self._audio_buffer = self._audio_buffer[num_blocks * block_size :]
         return b"".join(filtered_chunks)
