@@ -15,7 +15,13 @@ from pipecat.metrics.metrics import (
     TextAggregationMetricsData,
     TTFBMetricsData,
 )
-from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
+from pipecat.observers.user_bot_latency_observer import (
+    FunctionCallMetrics,
+    LatencyBreakdown,
+    TextAggregationBreakdownMetrics,
+    TTFBBreakdownMetrics,
+    UserBotLatencyObserver,
+)
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.tests.utils import SleepFrame, run_test
 
@@ -543,6 +549,82 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(breakdowns), 1)
         self.assertEqual(len(breakdowns[0].function_calls), 0)
+
+
+class TestLatencyBreakdownChronologicalEvents(unittest.TestCase):
+    """Tests for LatencyBreakdown.chronological_events()."""
+
+    def test_events_sorted_by_start_time(self):
+        """Test that events are returned in chronological order."""
+        breakdown = LatencyBreakdown(
+            user_turn_start_time=100.0,
+            user_turn_secs=0.150,
+            ttfb=[
+                TTFBBreakdownMetrics(
+                    processor="OpenAILLMService#0",
+                    model="gpt-4o",
+                    start_time=100.200,
+                    duration_secs=0.250,
+                ),
+                TTFBBreakdownMetrics(
+                    processor="DeepgramSTTService#0",
+                    start_time=100.050,
+                    duration_secs=0.080,
+                ),
+                TTFBBreakdownMetrics(
+                    processor="CartesiaTTSService#0",
+                    start_time=100.500,
+                    duration_secs=0.070,
+                ),
+            ],
+            function_calls=[
+                FunctionCallMetrics(
+                    function_name="get_weather",
+                    start_time=100.450,
+                    duration_secs=0.120,
+                ),
+            ],
+            text_aggregation=TextAggregationBreakdownMetrics(
+                processor="CartesiaTTSService#0",
+                start_time=100.480,
+                duration_secs=0.030,
+            ),
+        )
+
+        events = breakdown.chronological_events()
+
+        self.assertEqual(len(events), 6)
+        self.assertEqual(events[0], "User turn: 0.150s")
+        self.assertEqual(events[1], "DeepgramSTTService#0: TTFB 0.080s")
+        self.assertEqual(events[2], "OpenAILLMService#0: TTFB 0.250s")
+        self.assertEqual(events[3], "get_weather: 0.120s")
+        self.assertEqual(events[4], "CartesiaTTSService#0: text aggregation 0.030s")
+        self.assertEqual(events[5], "CartesiaTTSService#0: TTFB 0.070s")
+
+    def test_empty_breakdown(self):
+        """Test that an empty breakdown returns no events."""
+        breakdown = LatencyBreakdown()
+        self.assertEqual(breakdown.chronological_events(), [])
+
+    def test_user_turn_requires_both_fields(self):
+        """Test that user turn is only included when both start_time and secs are set."""
+        # Only start_time, no duration
+        breakdown = LatencyBreakdown(user_turn_start_time=100.0)
+        self.assertEqual(breakdown.chronological_events(), [])
+
+        # Only duration, no start_time
+        breakdown = LatencyBreakdown(user_turn_secs=0.150)
+        self.assertEqual(breakdown.chronological_events(), [])
+
+    def test_ttfb_only(self):
+        """Test breakdown with only TTFB metrics."""
+        breakdown = LatencyBreakdown(
+            ttfb=[
+                TTFBBreakdownMetrics(processor="LLM#0", start_time=100.0, duration_secs=0.200),
+            ],
+        )
+        events = breakdown.chronological_events()
+        self.assertEqual(events, ["LLM#0: TTFB 0.200s"])
 
 
 if __name__ == "__main__":

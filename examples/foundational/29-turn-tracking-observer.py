@@ -184,30 +184,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @latency_observer.event_handler("on_latency_breakdown")
     async def on_latency_breakdown(observer, breakdown):
-        # Display a sequential waterfall that roughly adds up to the total.
-        # User turn is the first stage: user silence → turn release.
-        # The STT TTFB is shown as context within the user turn since
-        # it's a component of that time (along with VAD silence and any
-        # turn analyzer delay).
-        stt_ttfb = next((t for t in breakdown.ttfb if "STT" in t.processor), None)
-        if breakdown.user_turn_secs is not None:
-            stt_note = f" (STT: {stt_ttfb.duration_secs:.3f}s)" if stt_ttfb else ""
-            logger.info(f"  User turn: {breakdown.user_turn_secs:.3f}s{stt_note}")
-
-        # Show non-STT TTFBs, inserting function calls after the first
-        # LLM TTFB (which triggered the calls) for a chronological waterfall.
-        non_stt = [t for t in breakdown.ttfb if t is not stt_ttfb]
-        fc_shown = False
-        for ttfb in non_stt:
-            logger.info(f"  {ttfb.processor}: TTFB {ttfb.duration_secs:.3f}s")
-            if not fc_shown and breakdown.function_calls:
-                for fc in breakdown.function_calls:
-                    logger.info(f"  {fc.function_name}: {fc.duration_secs:.3f}s")
-                fc_shown = True
-
-        if breakdown.text_aggregation:
-            ta = breakdown.text_aggregation
-            logger.info(f"  {ta.processor}: text aggregation {ta.duration_secs:.3f}s")
+        for event in breakdown.chronological_events():
+            logger.info(f"  {event}")
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

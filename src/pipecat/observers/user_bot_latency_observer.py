@@ -111,6 +111,35 @@ class LatencyBreakdown(BaseModel):
     user_turn_secs: Optional[float] = None
     function_calls: List[FunctionCallMetrics] = Field(default_factory=list)
 
+    def chronological_events(self) -> List[str]:
+        """Return human-readable event labels sorted by start time.
+
+        Collects all sub-metrics into a flat list, sorts by ``start_time``,
+        and returns formatted strings suitable for logging.
+
+        Returns:
+            List of formatted strings, one per event, in chronological order.
+        """
+        events: List[tuple] = []
+
+        if self.user_turn_start_time is not None and self.user_turn_secs is not None:
+            events.append((self.user_turn_start_time, f"User turn: {self.user_turn_secs:.3f}s"))
+
+        for t in self.ttfb:
+            events.append((t.start_time, f"{t.processor}: TTFB {t.duration_secs:.3f}s"))
+
+        for fc in self.function_calls:
+            events.append((fc.start_time, f"{fc.function_name}: {fc.duration_secs:.3f}s"))
+
+        if self.text_aggregation:
+            ta = self.text_aggregation
+            events.append(
+                (ta.start_time, f"{ta.processor}: text aggregation {ta.duration_secs:.3f}s")
+            )
+
+        events.sort(key=lambda e: e[0])
+        return [label for _, label in events]
+
 
 class UserBotLatencyObserver(BaseObserver):
     """Observer that tracks user-to-bot response latency.
