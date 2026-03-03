@@ -14,6 +14,7 @@ from typing import AsyncGenerator, Optional
 from loguru import logger
 
 from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import TOGETHER_TTFS_P99
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -70,6 +71,7 @@ class TogetherSTTService(WebsocketSTTService):
         language: Language = Language.EN,
         sample_rate: int = 16000,
         base_url: str = "wss://api.together.xyz/v1",
+        ttfs_p99_latency: float = TOGETHER_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Together AI STT service.
@@ -80,10 +82,13 @@ class TogetherSTTService(WebsocketSTTService):
             language: Language of the audio input. Defaults to English.
             sample_rate: Audio sample rate (default: 16000). Together AI requires 16kHz input.
             base_url: The URL of the Together AI WebSocket API.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent WebsocketSTTService.
         """
         super().__init__(
             sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
             settings=TogetherSTTSettings(
                 model=model,
                 language=language,
