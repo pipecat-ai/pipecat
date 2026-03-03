@@ -86,6 +86,21 @@ class DailyRunnerArguments(RunnerArguments):
 
 
 @dataclass
+class VonageRunnerArguments(RunnerArguments):
+    """Daily transport session arguments for the runner.
+
+    Parameters:
+        application_id: Vonage application ID
+        session_id: Vonage session ID
+        token: Vonage Session Token
+    """
+
+    application_id: str
+    session_id: str
+    token: str
+
+
+@dataclass
 class WebSocketRunnerArguments(RunnerArguments):
     """WebSocket transport session arguments for the runner.
 
