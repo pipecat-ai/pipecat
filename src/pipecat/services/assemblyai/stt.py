@@ -345,9 +345,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             ):
                 if conn_params.max_turn_silence is not None:
                     update_config["max_turn_silence"] = conn_params.max_turn_silence
-                    logger.info(
-                        f"Updating max_turn_silence to: {conn_params.max_turn_silence}ms"
-                    )
+                    logger.info(f"Updating max_turn_silence to: {conn_params.max_turn_silence}ms")
 
             if (
                 old_conn_params is None
@@ -355,9 +353,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             ):
                 if conn_params.min_turn_silence is not None:
                     update_config["min_turn_silence"] = conn_params.min_turn_silence
-                    logger.info(
-                        f"Updating min_turn_silence to: {conn_params.min_turn_silence}ms"
-                    )
+                    logger.info(f"Updating min_turn_silence to: {conn_params.min_turn_silence}ms")
 
             # Send update if we have parameters to update
             if len(update_config) > 1:  # More than just "type"
