@@ -639,7 +639,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         logger.debug("Server VAD: speech started")
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
         await self.start_processing_metrics()
 
     async def _handle_speech_stopped(self, evt: dict):

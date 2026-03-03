@@ -21,7 +21,9 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    BotConnectedFrame,
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -132,10 +134,12 @@ class TavusCallbacks(BaseModel):
     """Callback handlers for Tavus events.
 
     Parameters:
+        on_joined: Called when the bot joins the Daily room.
         on_participant_joined: Called when a participant joins the conversation.
         on_participant_left: Called when a participant leaves the conversation.
     """
 
+    on_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
 
@@ -270,6 +274,7 @@ class TavusTransportClient:
     async def _on_joined(self, data):
         """Handle joined event."""
         logger.debug("TavusTransportClient joined!")
+        await self._callbacks.on_joined(data)
 
     async def _on_left(self):
         """Handle left event."""
@@ -664,6 +669,7 @@ class TavusTransport(BaseTransport):
 
     Event handlers available:
 
+    - on_connected(transport, data): Bot connected to the room
     - on_client_connected(transport, participant): Participant connected to the session
     - on_client_disconnected(transport, participant): Participant disconnected from the session
 
@@ -702,6 +708,7 @@ class TavusTransport(BaseTransport):
         self._params = params
 
         callbacks = TavusCallbacks(
+            on_joined=self._on_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
         )
@@ -720,8 +727,15 @@ class TavusTransport(BaseTransport):
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
+        self._register_event_handler("on_connected")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
+
+    async def _on_joined(self, data):
+        """Handle bot joined room event."""
+        await self._call_event_handler("on_connected", data)
+        if self._input:
+            await self._input.push_frame(BotConnectedFrame())
 
     async def _on_participant_left(self, participant, reason):
         """Handle participant left events."""
@@ -786,6 +800,8 @@ class TavusTransport(BaseTransport):
     async def _on_client_connected(self, participant: Any):
         """Handle client connected events."""
         await self._call_event_handler("on_client_connected", participant)
+        if self._input:
+            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_client_disconnected(self, participant: Any):
         """Handle client disconnected events."""

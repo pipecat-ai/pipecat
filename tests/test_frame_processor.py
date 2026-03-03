@@ -9,8 +9,6 @@ import unittest
 from dataclasses import dataclass, field
 from typing import List
 
-from loguru import logger
-
 from pipecat.frames.frames import (
     DataFrame,
     EndFrame,
@@ -85,50 +83,38 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         assert before_push_called
         assert after_push_called
 
-    async def test_interruption_and_wait(self):
-        class DelayFrameProcessor(FrameProcessor):
-            """This processors just gives time to the event loop to change
-            between tasks. Otherwise things happen to fast."""
-
-            async def process_frame(self, frame: Frame, direction: FrameDirection):
-                await super().process_frame(frame, direction)
-                await asyncio.sleep(0.1)
-                await self.push_frame(frame, direction)
+    async def test_broadcast_interruption(self):
+        """Test that broadcast_interruption() pushes InterruptionFrame both
+        directions and allows subsequent code to run."""
 
         class InterruptFrameProcessor(FrameProcessor):
             async def process_frame(self, frame: Frame, direction: FrameDirection):
                 await super().process_frame(frame, direction)
 
                 if isinstance(frame, TextFrame):
-                    await self.push_interruption_task_frame_and_wait()
+                    await self.broadcast_interruption()
                     await self.push_frame(OutputTransportMessageUrgentFrame(message=frame.text))
                 else:
                     await self.push_frame(frame, direction)
 
-        pipeline = Pipeline([DelayFrameProcessor(), InterruptFrameProcessor()])
+        pipeline = Pipeline([InterruptFrameProcessor()])
 
         frames_to_send = [
-            # Just a random interruption to make sure we don't clear anything
-            # before the actual `InterruptionTaskFrame` interruption.
-            InterruptionFrame(),
-            # This will generate an `InterruptionTaskFrame` and will wait for an
-            # `InterruptionFrame`.
             TextFrame(text="Hello from Pipecat!"),
-            # Just give time for everything to complete.
             SleepFrame(sleep=0.5),
-            EndFrame(),
         ]
         expected_down_frames = [
             InterruptionFrame,
-            InterruptionFrame,
             OutputTransportMessageUrgentFrame,
-            EndFrame,
+        ]
+        expected_up_frames = [
+            InterruptionFrame,
         ]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
-            send_end_frame=False,
+            expected_up_frames=expected_up_frames,
         )
 
     async def test_interruptible_frames(self):
@@ -454,33 +440,20 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         stop_frames = [f for f in received_frames if isinstance(f, StopFrame)]
         self.assertEqual(len(stop_frames), 1, "StopFrame should survive interruption")
 
-    async def test_interruption_frame_complete_sets_event(self):
-        """Test that InterruptionFrame.complete() sets the event."""
-        event = asyncio.Event()
-        frame = InterruptionFrame(event=event)
-        self.assertFalse(event.is_set())
-        frame.complete()
-        self.assertTrue(event.is_set())
-
-    async def test_interruption_frame_complete_without_event(self):
-        """Test that InterruptionFrame.complete() is safe without an event."""
-        frame = InterruptionFrame()
-        frame.complete()  # Should not raise
-
-    async def test_interruption_event_set_at_pipeline_sink(self):
-        """Test that the event from push_interruption_task_frame_and_wait()
-        is set when the InterruptionFrame reaches the pipeline sink."""
-        event_was_set = False
+    async def test_broadcast_interruption_allows_subsequent_code(self):
+        """Test that broadcast_interruption() returns immediately, allowing the
+        caller to run code afterwards (e.g. push an urgent frame)."""
+        code_after_ran = False
 
         class InterruptOnTextProcessor(FrameProcessor):
             async def process_frame(self, frame: Frame, direction: FrameDirection):
-                nonlocal event_was_set
+                nonlocal code_after_ran
 
                 await super().process_frame(frame, direction)
                 if isinstance(frame, TextFrame):
-                    await self.push_interruption_task_frame_and_wait()
+                    await self.broadcast_interruption()
 
-                    event_was_set = True
+                    code_after_ran = True
                     await self.push_frame(OutputTransportMessageUrgentFrame(message="done"))
                 else:
                     await self.push_frame(frame, direction)
@@ -499,63 +472,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        self.assertTrue(event_was_set, "Event should be set after InterruptionFrame completes")
-
-    async def test_interruption_completion_timeout_warning(self):
-        """Test that a warning is logged when an InterruptionFrame is blocked
-        and never reaches the pipeline sink."""
-        warnings = []
-        handler_id = logger.add(
-            lambda msg: warnings.append(str(msg)), level="WARNING", format="{message}"
-        )
-
-        try:
-
-            class BlockInterruptionProcessor(FrameProcessor):
-                """Blocks InterruptionFrames, completing them after a delay."""
-
-                async def process_frame(self, frame: Frame, direction: FrameDirection):
-                    await super().process_frame(frame, direction)
-                    if isinstance(frame, InterruptionFrame):
-                        # Complete after the timeout so the warning fires
-                        # but the test doesn't hang.
-                        async def delayed_complete():
-                            await asyncio.sleep(1.0)
-                            frame.complete()
-
-                        asyncio.create_task(delayed_complete())
-                        return
-                    await self.push_frame(frame, direction)
-
-            class InterruptOnTextProcessor(FrameProcessor):
-                async def process_frame(self, frame: Frame, direction: FrameDirection):
-                    await super().process_frame(frame, direction)
-                    if isinstance(frame, TextFrame):
-                        await self.push_interruption_task_frame_and_wait(timeout=0.5)
-                        await self.push_frame(OutputTransportMessageUrgentFrame(message="done"))
-                    else:
-                        await self.push_frame(frame, direction)
-
-            pipeline = Pipeline([BlockInterruptionProcessor(), InterruptOnTextProcessor()])
-
-            frames_to_send = [
-                TextFrame(text="trigger"),
-            ]
-            expected_down_frames = [
-                OutputTransportMessageUrgentFrame,
-            ]
-            await run_test(
-                pipeline,
-                frames_to_send=frames_to_send,
-                expected_down_frames=expected_down_frames,
-            )
-        finally:
-            logger.remove(handler_id)
-
-        self.assertTrue(
-            any("InterruptionFrame has not completed" in w for w in warnings),
-            "Expected a timeout warning about InterruptionFrame not completing",
-        )
+        self.assertTrue(code_after_ran, "Code after broadcast_interruption() should execute")
 
 
 if __name__ == "__main__":

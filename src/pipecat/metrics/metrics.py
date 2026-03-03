@@ -41,10 +41,6 @@ class TTFBMetricsData(MetricsData):
 class ProcessingMetricsData(MetricsData):
     """General processing time metrics data.
 
-    .. deprecated:: 0.0.104
-        Processing metrics are deprecated and will be removed in a future version.
-        Use TTFB metrics instead.
-
     Parameters:
         value: Processing time measurement in seconds.
     """

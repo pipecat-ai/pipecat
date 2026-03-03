@@ -632,6 +632,84 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         for result in results:
             self.assertIsInstance(result, bytes)
 
+    async def test_concurrent_filter_no_buffer_resize_error(self):
+        """Regression: concurrent filter() must not raise BufferError.
+
+        When process_async yields to the event loop, a second filter() call
+        runs and calls _audio_buffer.extend().  If the first call still holds
+        a memoryview on the bytearray, extend() raises:
+
+            BufferError: Existing exports of data: object cannot be re-sized
+
+        The fix snapshots the needed data into immutable bytes and trims the
+        buffer *before* any await, so no memoryview is held across yield
+        points.
+        """
+        filter_instance = self._create_filter_with_mocks()
+
+        # Make process_async yield to the event loop so concurrent filter()
+        # calls can interleave and attempt _audio_buffer.extend().
+        async def yielding_process_async(audio_array):
+            await asyncio.sleep(0)
+            return audio_array.copy()
+
+        self.mock_processor.process_async = yielding_process_async
+        await self._start_filter_with_mocks(filter_instance)
+
+        samples = np.random.randint(-32768, 32767, size=160, dtype=np.int16)
+        input_audio = samples.tobytes()
+
+        async def filter_audio():
+            return await filter_instance.filter(input_audio)
+
+        # 20 concurrent calls to reliably trigger the interleaving.
+        tasks = [filter_audio() for _ in range(20)]
+        results = await asyncio.gather(*tasks)
+
+        for result in results:
+            self.assertIsInstance(result, bytes)
+
+    async def test_stop_during_filter_no_buffer_resize_error(self):
+        """Regression: stop() during filter() must not raise BufferError.
+
+        When filter() holds a memoryview on _audio_buffer across an await
+        (process_async), a concurrent stop() that calls
+        _audio_buffer.clear() raises:
+
+            BufferError: Existing exports of data: object cannot be re-sized
+
+        This is the exact error path reported in production (line 414).
+        The fix removes the memoryview by snapshotting data into immutable
+        bytes before any await.
+        """
+        filter_instance = self._create_filter_with_mocks()
+
+        # Gate so stop() waits until filter() is inside process_async.
+        processing_started = asyncio.Event()
+
+        async def yielding_process_async(audio_array):
+            processing_started.set()
+            await asyncio.sleep(0)  # yield — stop() runs here
+            return audio_array.copy()
+
+        self.mock_processor.process_async = yielding_process_async
+        await self._start_filter_with_mocks(filter_instance)
+
+        # Exactly one complete frame so the loop runs once.
+        samples = np.random.randint(-32768, 32767, size=160, dtype=np.int16)
+        input_audio = samples.tobytes()
+
+        async def stop_after_filter_enters_process_async():
+            await processing_started.wait()
+            await filter_instance.stop()
+
+        # filter() enters process_async → yields → stop() calls clear()
+        filter_result, _ = await asyncio.gather(
+            filter_instance.filter(input_audio),
+            stop_after_filter_enters_process_async(),
+        )
+        self.assertIsInstance(filter_result, bytes)
+
     async def test_buffer_cleared_on_stop(self):
         """Test that audio buffer is cleared when stopping."""
         filter_instance = self._create_filter_with_mocks()
