@@ -157,7 +157,11 @@ After processing all mapped pairs, check for two kinds of gaps:
 
 **Missing sections**: Mapped doc pages that are missing standard sections compared to the source. For example, a transport page with no Configuration section, or a service page with no InputParams table when the source defines `InputParams(BaseModel)`. Flag these and offer to add the missing sections.
 
-If the user wants a new page, create it using this template structure:
+If the user wants a new page, do all three of the following:
+
+#### 8a: Create the doc page
+
+Create the new `.mdx` file using this template structure:
 ```
 ---
 title: "Service Name"
@@ -207,6 +211,53 @@ pip install "pipecat-ai[package-name]"
 [Event table and example code]
 ```
 
+#### 8b: Add to docs.json
+
+Add the new page path to `DOCS_PATH/docs.json` in the correct navigation group. The path format is `server/services/{category}/{provider}` (without the `.mdx` extension).
+
+Find the matching group in the navigation structure:
+- **STT** → `"group": "Speech-to-Text"` under Services
+- **TTS** → `"group": "Text-to-Speech"` under Services
+- **LLM** → `"group": "LLM"` under Services
+- **S2S** → `"group": "Speech-to-Speech"` under Services
+- **Transport** → `"group": "Transport"` under Services
+- **Serializer** → `"group": "Serializers"` under Services
+- **Image generation** → `"group": "Image Generation"` under Services
+- **Video** → `"group": "Video"` under Services
+- **Memory** → `"group": "Memory"` under Services
+- **Vision** → `"group": "Vision"` under Services
+- **Analytics** → `"group": "Analytics & Monitoring"` under Services
+
+Insert the new entry **alphabetically** within the group's `pages` array. For example, adding a new STT service "foo":
+```json
+{
+  "group": "Speech-to-Text",
+  "pages": [
+    "server/services/stt/assemblyai",
+    "server/services/stt/aws",
+    ...
+    "server/services/stt/foo",
+    ...
+  ]
+}
+```
+
+#### 8c: Add to supported-services.mdx
+
+Add a new row to the correct category table in `DOCS_PATH/server/services/supported-services.mdx`.
+
+Use this format:
+```
+| [DisplayName](/server/services/{category}/{provider}) | `pip install "pipecat-ai[package]"` |
+```
+
+To determine the correct values:
+- **DisplayName**: Use the service's human-readable name (e.g., "ElevenLabs", "AWS Polly", "Google Gemini")
+- **package**: Look at the service's `pyproject.toml` extras or the import pattern in the source code. For example, if the service is in `src/pipecat/services/foo/`, the package is typically `foo`.
+- If no pip dependencies are required, use `No dependencies required` instead.
+
+Insert the new row **alphabetically** within the table. Match the column alignment of the existing rows.
+
 ### Step 9: Output summary
 
 After all edits are complete, print a summary:
@@ -220,6 +271,9 @@ After all edits are complete, print a summary:
 
 ### Updated guides
 - `guides/learn/speech-to-text.mdx` — Updated code example (renamed `old_param` → `new_param`)
+
+### New service pages
+- `server/services/tts/newprovider.mdx` — Created page, added to docs.json (Text-to-Speech), added to supported-services.mdx
 
 ### Unmapped source files
 - `src/pipecat/services/newprovider/tts.py` — NewProviderTTSService (no doc page exists)
@@ -247,4 +301,6 @@ Before finishing, verify:
 - [ ] New parameters have accurate types and defaults from source
 - [ ] Formatting matches the existing page style
 - [ ] Guides referencing changed APIs were checked and updated
+- [ ] New service pages were added to `docs.json` in the correct group, alphabetically
+- [ ] New service pages were added to `supported-services.mdx` in the correct table, alphabetically
 - [ ] Unmapped files were reported to the user
