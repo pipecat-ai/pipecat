@@ -317,7 +317,7 @@ class DeepgramSageMakerTTSService(TTSService):
             except Exception as e:
                 logger.error(f"{self} error sending Clear message: {e}")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending Flush command.
 
         This should be called when the LLM finishes a complete response to force
