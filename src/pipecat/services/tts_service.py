@@ -1210,16 +1210,6 @@ class TTSService(AIService):
                 del self._audio_contexts[context_id]
                 await self.on_audio_context_completed(context_id=context_id)
                 self.reset_active_audio_context()
-
-                # Append some silence between sentences.
-                silence = b"\x00" * self.sample_rate
-                frame = TTSAudioRawFrame(
-                    audio=silence,
-                    sample_rate=self.sample_rate,
-                    num_channels=1,
-                    context_id=context_id,
-                )
-                await self.push_frame(frame)
             else:
                 running = False
 
