@@ -4,14 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
+
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, STTUpdateSettingsFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -23,15 +23,19 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.assemblyai.models import AssemblyAIConnectionParams
-from pipecat.services.assemblyai.stt import AssemblyAISTTService, AssemblyAISTTSettings
+from pipecat.services.assemblyai.stt import AssemblyAISTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 load_dotenv(override=True)
 
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -49,12 +53,56 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    """AssemblyAI u3-rt-pro with Built-in Turn Detection
+
+    This example demonstrates using AssemblyAI's u3-rt-pro Speech-to-Text model
+    with AssemblyAI's built-in turn detection for more natural conversation flow.
+
+    Key features:
+
+    1. AssemblyAI Turn Detection
+       - Set `vad_force_turn_endpoint=False` to use AssemblyAI's built-in turn detection
+       - AssemblyAI's model determines when user starts/stops speaking
+       - Uses `ExternalUserTurnStrategies` to delegate turn control to AssemblyAI
+       - More natural turn detection based on speech patterns and pauses
+
+    2. Advanced Turn Detection Tuning
+       - `min_turn_silence`: Minimum silence (ms) when confident about end-of-turn.
+         Lower values = faster responses. Default: 100ms
+       - `max_turn_silence`: Maximum silence (ms) before forcing end-of-turn.
+         Prevents long pauses. Default: 1000ms
+
+    3. Prompt-Based Transcription Enhancement
+       - Use `prompt` parameter to improve accuracy for specific names/terms
+       - Particularly useful for proper nouns, technical terms, domain vocabulary
+       - Example: "Names: Xiomara, Saoirse, Krzystof. Technical terms: API, OAuth."
+
+    4. Speaker Diarization (Optional)
+       - Enable with `speaker_labels=True`
+       - Automatically identifies different speakers in multi-party conversations
+       - TranscriptionFrame includes speaker_id field (e.g., "Speaker A", "Speaker B")
+
+    5. Language Detection (Optional, multilingual model only)
+       - Enable with `language_detection=True`
+       - Automatically detects spoken language
+       - Available with universal-streaming-multilingual model
+
+    For more information: https://www.assemblyai.com/docs/speech-to-text/streaming
+    """
     logger.info(f"Starting bot")
 
     stt = AssemblyAISTTService(
         api_key=os.getenv("ASSEMBLYAI_API_KEY"),
+        vad_force_turn_endpoint=False,  # Use AssemblyAI's built-in turn detection
         connection_params=AssemblyAIConnectionParams(
             speech_model="u3-rt-pro",
+            # Optional: Tune turn detection timing (defaults shown below)
+            # min_turn_silence=100,  # Default
+            # max_turn_silence=1000,  # Default
+            # Optional: Boost accuracy for specific names/terms
+            # prompt="Names: Xiomara, Saoirse, Krzystof. Technical terms: API, OAuth.",
+            # Optional: Enable speaker diarization
+            # speaker_labels=True,
         ),
     )
 
@@ -68,25 +116,28 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call demonstrating dynamic keyterms updates. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Try saying difficult names like 'Xiomara', 'Saoirse', or 'Krzystof' to test transcription accuracy.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
     context = LLMContext(messages)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
     )
 
     pipeline = Pipeline(
         [
-            transport.input(),
-            stt,
-            user_aggregator,
-            llm,
-            tts,
-            transport.output(),
-            assistant_aggregator,
+            transport.input(),  # Transport user input
+            stt,  # STT
+            user_aggregator,  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 
@@ -102,24 +153,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        logger.info(
-            "Phase 1: No keyterms boosting - try saying 'Xiomara', 'Saoirse', or 'Krzystof'"
-        )
+        # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
-
-        await asyncio.sleep(15)
-        logger.info("🔄 Updating keyterms: Adding difficult names for boosting")
-        await task.queue_frame(
-            STTUpdateSettingsFrame(
-                delta=AssemblyAISTTSettings(
-                    connection_params=AssemblyAIConnectionParams(
-                        keyterms_prompt=["Xiomara", "Saoirse", "Krzystof", "Nguyen", "Pipecat"]
-                    )
-                )
-            )
-        )
-        logger.info("Phase 2: Keyterms active - same names should transcribe better now!")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
