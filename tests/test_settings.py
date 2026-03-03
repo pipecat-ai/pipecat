@@ -6,10 +6,11 @@
 
 """Tests for the typed settings infrastructure in pipecat.services.settings."""
 
-import pytest
-from deepgram import LiveOptions
+from unittest.mock import patch
 
-from pipecat.services.deepgram.stt import DeepgramSTTSettings
+import pytest
+
+from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTSettings
 from pipecat.services.settings import (
     NOT_GIVEN,
@@ -317,14 +318,16 @@ class TestRoundtrip:
 
 
 # ---------------------------------------------------------------------------
-# DeepgramSTTSettings: live_options delta merge
+# DeepgramSTTSettings: flat field apply_update
 # ---------------------------------------------------------------------------
 
 
 class TestDeepgramSTTSettingsApplyUpdate:
-    def _make_store(self, **lo_kwargs) -> DeepgramSTTSettings:
+    def _make_store(self, **kwargs) -> DeepgramSTTSettings:
         """Helper to build a store-mode DeepgramSTTSettings."""
         defaults = dict(
+            model="nova-3-general",
+            language="en",
             encoding="linear16",
             channels=1,
             interim_results=True,
@@ -333,52 +336,25 @@ class TestDeepgramSTTSettingsApplyUpdate:
             profanity_filter=True,
             vad_events=False,
         )
-        defaults.update(lo_kwargs)
-        s = DeepgramSTTSettings(
-            model="nova-3-general",
-            language="en",
-            live_options=LiveOptions(**defaults),
-        )
-        return s
+        defaults.update(kwargs)
+        return DeepgramSTTSettings(**defaults)
 
-    def test_apply_update_merges_live_options_as_delta(self):
-        """Only the given fields in the delta LiveOptions are merged."""
+    def test_apply_update_merges_flat_fields_as_delta(self):
+        """Only the given fields in the delta are merged."""
         current = self._make_store()
-        assert current.live_options.punctuate is True
+        assert current.punctuate is True
 
-        delta = DeepgramSTTSettings(live_options=LiveOptions(punctuate=False))
+        delta = DeepgramSTTSettings(punctuate=False)
         changed = current.apply_update(delta)
 
-        assert current.live_options.punctuate is False
+        assert current.punctuate is False
         assert "punctuate" in changed
         # Other fields are untouched
-        assert current.live_options.encoding == "linear16"
-        assert current.live_options.channels == 1
+        assert current.encoding == "linear16"
+        assert current.channels == 1
 
-    def test_apply_update_syncs_model_from_live_options_to_top_level(self):
-        """model inside live_options delta should sync to top-level model."""
-        current = self._make_store()
-        assert current.model == "nova-3-general"
-
-        delta = DeepgramSTTSettings(live_options=LiveOptions(model="nova-2"))
-        changed = current.apply_update(delta)
-
-        assert current.model == "nova-2"
-        assert "model" in changed
-
-    def test_apply_update_syncs_language_from_live_options_to_top_level(self):
-        """language inside live_options delta should sync to top-level language."""
-        current = self._make_store()
-        assert current.language == "en"
-
-        delta = DeepgramSTTSettings(live_options=LiveOptions(language="es"))
-        changed = current.apply_update(delta)
-
-        assert current.language == "es"
-        assert "language" in changed
-
-    def test_apply_update_syncs_top_level_model_into_live_options(self):
-        """Top-level model change should propagate into stored live_options."""
+    def test_apply_update_model(self):
+        """model field is updated directly."""
         current = self._make_store()
         assert current.model == "nova-3-general"
 
@@ -386,86 +362,64 @@ class TestDeepgramSTTSettingsApplyUpdate:
         changed = current.apply_update(delta)
 
         assert current.model == "nova-2"
-        assert current.live_options.model == "nova-2"
         assert "model" in changed
 
-    def test_apply_update_syncs_top_level_language_into_live_options(self):
-        """Top-level language change should propagate into stored live_options."""
+    def test_apply_update_language(self):
+        """language field is updated directly."""
         current = self._make_store()
+        assert current.language == "en"
 
-        delta = DeepgramSTTSettings(language="fr")
+        delta = DeepgramSTTSettings(language="es")
         changed = current.apply_update(delta)
 
-        assert current.language == "fr"
-        assert current.live_options.language == "fr"
+        assert current.language == "es"
         assert "language" in changed
 
     def test_apply_update_no_change(self):
         """Delta with same values should report no changes."""
         current = self._make_store()
-        delta = DeepgramSTTSettings(live_options=LiveOptions(punctuate=True))
+        delta = DeepgramSTTSettings(punctuate=True)
         changed = current.apply_update(delta)
         assert changed == {}
 
-    def test_apply_update_top_level_model_takes_precedence_over_live_options(self):
-        """When both top-level model and live_options.model are set, top-level wins."""
+    def test_apply_update_multiple_fields(self):
+        """Multiple flat fields updated at once."""
         current = self._make_store()
-        assert current.model == "nova-3-general"
 
-        delta = DeepgramSTTSettings(
-            model="nova-2",
-            live_options=LiveOptions(model="nova-3"),
-        )
+        delta = DeepgramSTTSettings(model="nova-2", language="fr", punctuate=False)
         changed = current.apply_update(delta)
 
         assert current.model == "nova-2"
-        assert current.live_options.model == "nova-2"
-        assert "model" in changed
-
-    def test_apply_update_top_level_language_takes_precedence_over_live_options(self):
-        """When both top-level language and live_options.language are set, top-level wins."""
-        current = self._make_store()
-        assert current.language == "en"
-
-        delta = DeepgramSTTSettings(
-            language="fr",
-            live_options=LiveOptions(language="es"),
-        )
-        changed = current.apply_update(delta)
-
         assert current.language == "fr"
-        assert current.live_options.language == "fr"
-        assert "language" in changed
+        assert current.punctuate is False
+        assert changed.keys() == {"model", "language", "punctuate"}
 
 
 class TestDeepgramSTTSettingsFromMapping:
-    def test_routes_live_options_kwargs(self):
-        """LiveOptions-valid keys should be collected into live_options."""
-        delta = DeepgramSTTSettings.from_mapping({"punctuate": False, "filler_words": True})
-        assert is_given(delta.live_options)
-        assert delta.live_options.punctuate is False
-        assert delta.live_options.filler_words is True
+    def test_known_flat_fields_mapped_directly(self):
+        """Deepgram field names map directly to flat settings fields."""
+        delta = DeepgramSTTSettings.from_mapping({"punctuate": False, "diarize": True})
+        assert delta.punctuate is False
+        assert delta.diarize is True
 
-    def test_routes_model_and_language_to_top_level(self):
-        """model and language should be top-level fields, not in live_options."""
+    def test_model_and_language_top_level(self):
+        """model and language are top-level fields."""
         delta = DeepgramSTTSettings.from_mapping({"model": "nova-2", "language": "es"})
         assert delta.model == "nova-2"
         assert delta.language == "es"
-        assert not is_given(delta.live_options)
 
     def test_unknown_keys_go_to_extra(self):
-        """Keys that aren't LiveOptions params or STT fields go to extra."""
+        """Keys that aren't declared fields go to extra."""
         delta = DeepgramSTTSettings.from_mapping({"unknown_param": 42})
         assert delta.extra == {"unknown_param": 42}
-        assert not is_given(delta.live_options)
 
     def test_mixed_keys(self):
-        """model + LiveOptions keys + unknown keys are routed correctly."""
+        """model + known Deepgram fields + unknown keys are routed correctly."""
         delta = DeepgramSTTSettings.from_mapping(
             {"model": "nova-2", "punctuate": False, "unknown": "val"}
         )
         assert delta.model == "nova-2"
-        assert delta.live_options.punctuate is False
+        assert delta.punctuate is False
         assert delta.extra == {"unknown": "val"}
 
     def test_roundtrip_from_mapping_apply_update(self):
@@ -473,33 +427,32 @@ class TestDeepgramSTTSettingsFromMapping:
         current = DeepgramSTTSettings(
             model="nova-3-general",
             language="en",
-            live_options=LiveOptions(
-                encoding="linear16",
-                channels=1,
-                interim_results=True,
-                punctuate=True,
-                profanity_filter=True,
-                vad_events=False,
-            ),
+            encoding="linear16",
+            channels=1,
+            interim_results=True,
+            punctuate=True,
+            profanity_filter=True,
+            vad_events=False,
         )
 
-        raw = {"punctuate": False, "filler_words": True}
+        raw = {"punctuate": False, "diarize": True}
         delta = DeepgramSTTSettings.from_mapping(raw)
         changed = current.apply_update(delta)
 
-        assert current.live_options.punctuate is False
-        assert current.live_options.filler_words is True
+        assert current.punctuate is False
+        assert current.diarize is True
         # Unchanged fields stay put
-        assert current.live_options.encoding == "linear16"
+        assert current.encoding == "linear16"
         assert current.model == "nova-3-general"
         assert "punctuate" in changed
 
     def test_roundtrip_model_via_dict(self):
-        """Dict update with model should change top-level and NOT create live_options."""
+        """Dict update with model should change top-level model field."""
         current = DeepgramSTTSettings(
             model="nova-3-general",
             language="en",
-            live_options=LiveOptions(encoding="linear16", channels=1),
+            encoding="linear16",
+            channels=1,
         )
 
         raw = {"model": "nova-2"}
@@ -507,26 +460,167 @@ class TestDeepgramSTTSettingsFromMapping:
         changed = current.apply_update(delta)
 
         assert current.model == "nova-2"
-        assert current.live_options.model == "nova-2"
         assert "model" in changed
 
 
 # ---------------------------------------------------------------------------
-# DeepgramSageMakerSTTSettings: smoke test that the shared base is inherited
+# DeepgramSageMakerSTTSettings: smoke test that flat base is inherited
 # ---------------------------------------------------------------------------
 
 
 class TestDeepgramSageMakerSTTSettings:
-    def test_inherits_live_options_behavior(self):
-        """Smoke test: SageMaker settings inherit the shared base correctly."""
+    def test_inherits_flat_settings_behavior(self):
+        """Smoke test: SageMaker settings inherit the flat base correctly."""
         store = DeepgramSageMakerSTTSettings(
             model="nova-3",
             language="en",
-            live_options=LiveOptions(encoding="linear16", channels=1, punctuate=True),
+            encoding="linear16",
+            channels=1,
+            punctuate=True,
         )
-        delta = DeepgramSageMakerSTTSettings(live_options=LiveOptions(punctuate=False))
+        delta = DeepgramSageMakerSTTSettings(punctuate=False)
         changed = store.apply_update(delta)
 
-        assert store.live_options.punctuate is False
-        assert store.live_options.encoding == "linear16"
+        assert store.punctuate is False
+        assert store.encoding == "linear16"
         assert "punctuate" in changed
+
+
+# ---------------------------------------------------------------------------
+# DeepgramSTTService: settings initialization with extra syncing
+# ---------------------------------------------------------------------------
+
+
+class TestDeepgramSTTSettingsExtraSync:
+    """Test that settings.extra values are synced to declared fields at init time."""
+
+    def _make_service(self, **kwargs):
+        with patch("pipecat.services.deepgram.stt.AsyncDeepgramClient"):
+            return DeepgramSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+
+    def test_extra_synced_to_declared_field_at_init(self):
+        """If LiveOptions has unknown params in _extra, they can be synced if they match fields."""
+        from pipecat.services.deepgram.stt import LiveOptions
+
+        # Use **kwargs to pass undeclared params
+        live_options = LiveOptions(numerals=True)  # 'numerals' goes into _extra
+
+        svc = self._make_service(live_options=live_options)
+
+        # 'numerals' doesn't match a declared DeepgramSTTSettings field,
+        # so it should stay in extra
+        assert svc._settings.extra["numerals"] is True
+
+    def test_declared_field_from_live_options(self):
+        """LiveOptions fields that match DeepgramSTTSettings fields are applied."""
+        from pipecat.services.deepgram.stt import LiveOptions
+
+        live_options = LiveOptions(
+            punctuate=False,
+            diarize=True,
+        )
+
+        svc = self._make_service(live_options=live_options)
+
+        # These should be in the declared fields
+        assert svc._settings.punctuate is False
+        assert svc._settings.diarize is True
+
+    def test_sync_after_from_mapping_with_extra(self):
+        """If we use from_mapping with keys matching declared fields, they sync."""
+        # Simulate a dict-style update with both declared and undeclared keys
+        raw_dict = {
+            "diarize": True,  # matches declared field
+            "punctuate": False,  # matches declared field
+            "numerals": True,  # doesn't match - stays in extra
+        }
+
+        delta = DeepgramSTTSettings.from_mapping(raw_dict)
+
+        # After from_mapping, declared fields should be set
+        assert delta.diarize is True
+        assert delta.punctuate is False
+        # Unknown stays in extra
+        assert delta.extra["numerals"] is True
+
+        # Now simulate syncing (though from_mapping already routes correctly)
+        delta._sync_extra_to_fields()
+
+        # Still the same - from_mapping already put them in the right place
+        assert delta.diarize is True
+        assert delta.punctuate is False
+        assert delta.extra["numerals"] is True
+
+    def test_sync_promotes_extra_to_field_when_not_given(self):
+        """_sync_extra_to_fields promotes extra dict entries to declared fields."""
+        settings = DeepgramSTTSettings()
+        # Manually populate extra with a key matching a declared field
+        settings.extra = {"diarize": True, "punctuate": False, "unknown": "value"}
+
+        # Before sync, fields are NOT_GIVEN
+        assert not is_given(settings.diarize)
+        assert not is_given(settings.punctuate)
+
+        # Sync it
+        settings._sync_extra_to_fields()
+
+        # Now the matching fields should be promoted
+        assert settings.diarize is True
+        assert settings.punctuate is False
+        # And removed from extra
+        assert "diarize" not in settings.extra
+        assert "punctuate" not in settings.extra
+        # Unknown stays
+        assert settings.extra["unknown"] == "value"
+
+    def test_sync_doesnt_overwrite_already_set_field(self):
+        """If a field is already set, extra shouldn't overwrite it."""
+        settings = DeepgramSTTSettings(punctuate=True)
+        # Try to put a different value in extra
+        settings.extra = {"punctuate": False}
+
+        # Sync
+        settings._sync_extra_to_fields()
+
+        # The already-set field should win
+        assert settings.punctuate is True
+        # extra entry should still be removed to avoid confusion
+        assert "punctuate" not in settings.extra
+
+    def test_build_connect_kwargs_after_sync(self):
+        """After syncing, _build_connect_kwargs should use the right values."""
+        from pipecat.services.deepgram.stt import LiveOptions
+
+        live_options = LiveOptions(
+            model="nova-2",
+            language="es",
+            punctuate=True,
+            diarize=False,
+        )
+
+        svc = self._make_service(live_options=live_options)
+        kwargs = svc._build_connect_kwargs()
+
+        # All should appear in connect kwargs
+        assert kwargs["model"] == "nova-2"
+        assert kwargs["language"] == "es"
+        assert kwargs["punctuate"] == "true"
+        assert kwargs["diarize"] == "false"
+
+    def test_unknown_params_stay_in_extra_and_appear_in_kwargs(self):
+        """Unknown params (not matching fields) stay in extra and get forwarded."""
+        from pipecat.services.deepgram.stt import LiveOptions
+
+        # numerals isn't a declared field in DeepgramSTTSettings
+        live_options = LiveOptions(numerals=True, custom_param="test")
+
+        svc = self._make_service(live_options=live_options)
+
+        # Should be in extra
+        assert svc._settings.extra["numerals"] is True
+        assert svc._settings.extra["custom_param"] == "test"
+
+        # And forwarded to kwargs
+        kwargs = svc._build_connect_kwargs()
+        assert kwargs["numerals"] == "true"
+        assert kwargs["custom_param"] == "test"
