@@ -7,6 +7,7 @@
 """Base websocket service with automatic reconnection and error handling."""
 
 import asyncio
+import time
 from abc import ABC, abstractmethod
 from typing import Awaitable, Callable, Optional
 
@@ -17,6 +18,21 @@ from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
 from pipecat.utils.network import exponential_backoff_time
+
+# Close codes that indicate permanent errors where reconnection will never succeed.
+# See RFC 6455 Section 7.4.1 and https://www.iana.org/assignments/websocket/websocket.xhtml
+_NON_RECOVERABLE_CLOSE_CODES = {
+    1002,  # Protocol error
+    1003,  # Unsupported data
+    1008,  # Policy violation (e.g., invalid API key)
+    1009,  # Message too big
+    1010,  # Mandatory extension
+    1015,  # TLS handshake failure
+}
+
+# Minimum connection duration (seconds) to consider a reconnection "stable".
+# If the connection drops faster than this, it counts toward the rapid failure limit.
+_MIN_STABLE_CONNECTION_SECS = 5.0
 
 
 class WebsocketService(ABC):
@@ -38,6 +54,8 @@ class WebsocketService(ABC):
         self._reconnect_on_error = reconnect_on_error
         self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False
+        self._rapid_failure_count: int = 0
+        self._last_connect_time: float = 0.0
 
     async def _verify_connection(self) -> bool:
         """Verify the websocket connection is active and responsive.
@@ -106,6 +124,23 @@ class WebsocketService(ABC):
         finally:
             self._reconnect_in_progress = False
 
+    def _is_non_recoverable_close_code(self, error: ConnectionClosedError) -> bool:
+        """Check if a close code indicates a permanent error.
+
+        Args:
+            error: The ConnectionClosedError to check.
+
+        Returns:
+            True if the close code indicates reconnection will never succeed.
+        """
+        code = error.rcvd.code if error.rcvd else None
+        if code is None:
+            return False
+        # 4000-4999 are application-specific private codes (typically permanent errors)
+        if 4000 <= code <= 4999:
+            return True
+        return code in _NON_RECOVERABLE_CLOSE_CODES
+
     async def send_with_retry(self, message, report_error: Callable[[ErrorFrame], Awaitable[None]]):
         """Attempt to send a message, retrying after reconnect if necessary."""
         try:
@@ -145,6 +180,40 @@ class WebsocketService(ABC):
                 logger.debug(f"{self} receive loop ended during disconnect")
             return False
 
+        # Don't reconnect on non-recoverable close codes (e.g., invalid API key)
+        if isinstance(error, ConnectionClosedError) and self._is_non_recoverable_close_code(error):
+            code = error.rcvd.code if error.rcvd else None
+            reason = error.rcvd.reason if error.rcvd else ""
+            fatal_msg = (
+                f"{self} connection closed with non-recoverable error "
+                f"(code {code}: {reason}), not reconnecting"
+            )
+            logger.error(fatal_msg)
+            await report_error(ErrorFrame(fatal_msg, fatal=True))
+            return False
+
+        # Track rapid failures: if the connection didn't last long enough,
+        # it counts toward the rapid failure limit
+        elapsed = time.monotonic() - self._last_connect_time
+        if self._last_connect_time > 0 and elapsed < _MIN_STABLE_CONNECTION_SECS:
+            self._rapid_failure_count += 1
+            logger.warning(
+                f"{self} connection lasted only {elapsed:.1f}s "
+                f"(rapid failure {self._rapid_failure_count}/3)"
+            )
+            if self._rapid_failure_count >= 3:
+                fatal_msg = (
+                    f"{self} connection keeps failing immediately after reconnecting "
+                    f"({self._rapid_failure_count} rapid failures), giving up"
+                )
+                logger.error(fatal_msg)
+                await report_error(ErrorFrame(fatal_msg, fatal=True))
+                self._rapid_failure_count = 0
+                return False
+        else:
+            # Connection was stable, reset the counter
+            self._rapid_failure_count = 0
+
         # Log the message
         logger.warning(error_message)
 
@@ -169,6 +238,7 @@ class WebsocketService(ABC):
         """
         while True:
             try:
+                self._last_connect_time = time.monotonic()
                 await self._receive_messages()
                 # _receive_messages() returned normally. This happens when the websocket
                 # closes gracefully (server sent close frame). The async for loop over
@@ -205,6 +275,7 @@ class WebsocketService(ABC):
         additional setup required.
         """
         self._disconnecting = False
+        self._rapid_failure_count = 0
 
     async def _disconnect(self):
         """Disconnect from the service and set disconnecting flag.
