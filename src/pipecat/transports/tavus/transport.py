@@ -134,12 +134,12 @@ class TavusCallbacks(BaseModel):
     """Callback handlers for Tavus events.
 
     Parameters:
-        on_connected: Called when the bot connects to the room.
+        on_joined: Called when the bot joins the Daily room.
         on_participant_joined: Called when a participant joins the conversation.
         on_participant_left: Called when a participant leaves the conversation.
     """
 
-    on_connected: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
 
@@ -274,7 +274,7 @@ class TavusTransportClient:
     async def _on_joined(self, data):
         """Handle joined event."""
         logger.debug("TavusTransportClient joined!")
-        await self._callbacks.on_connected(data)
+        await self._callbacks.on_joined(data)
 
     async def _on_left(self):
         """Handle left event."""
@@ -708,7 +708,7 @@ class TavusTransport(BaseTransport):
         self._params = params
 
         callbacks = TavusCallbacks(
-            on_connected=self._on_joined,
+            on_joined=self._on_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
         )
