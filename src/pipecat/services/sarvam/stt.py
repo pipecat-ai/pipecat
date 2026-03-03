@@ -266,15 +266,10 @@ class SarvamSTTService(STTService):
 
         # Initialize Sarvam SDK client
         self._sdk_headers = sdk_headers()
-        # NOTE: We avoid passing non-standard kwargs here because different sarvamai
-        # versions expose different constructor signatures (static type checkers
-        # complain otherwise). We instead inject headers best-effort below.
-        self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key)
-        for attr in ("default_headers", "_default_headers", "headers", "_headers"):
-            d = getattr(self._sarvam_client, attr, None)
-            if isinstance(d, dict):
-                d.update(self._sdk_headers)
-                break
+        # Pass Pipecat SDK headers directly at client construction time so they are
+        # merged by the Sarvam SDK's client wrapper and consistently applied to
+        # WebSocket handshake requests.
+        self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key, headers=self._sdk_headers)
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
@@ -517,20 +512,26 @@ class SarvamSTTService(STTService):
                 connect_kwargs["prompt"] = self._settings.prompt
 
             def _connect_with_sdk_headers(connect_fn, **kwargs):
-                # Different SDK versions may use different kwarg names.
                 # If prompt is unsupported at connect-time, retry without it.
+                # Headers are supplied through request_options because this is a
+                # documented SDK parameter that survives SDK signature changes.
+                request_options = {"additional_headers": self._sdk_headers}
+
                 attempts = [kwargs]
                 if "prompt" in kwargs:
                     attempts.append({k: v for k, v in kwargs.items() if k != "prompt"})
 
                 last_type_error = None
                 for attempt_kwargs in attempts:
-                    for header_kw in ("headers", "additional_headers", "extra_headers"):
-                        try:
-                            return connect_fn(**attempt_kwargs, **{header_kw: self._sdk_headers})
-                        except TypeError as e:
-                            last_type_error = e
                     try:
+                        return connect_fn(
+                            **attempt_kwargs,
+                            request_options=request_options,
+                        )
+                    except TypeError as e:
+                        last_type_error = e
+                    try:
+                        # Fallback for SDK builds that don't expose request_options.
                         return connect_fn(**attempt_kwargs)
                     except TypeError as e:
                         last_type_error = e
@@ -643,7 +644,7 @@ class SarvamSTTService(STTService):
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
                     await self.broadcast_frame(UserStartedSpeakingFrame)
-                    await self.push_interruption_task_frame_and_wait()
+                    await self.broadcast_interruption()
 
                 elif signal == "END_SPEECH":
                     logger.debug("User stopped speaking")

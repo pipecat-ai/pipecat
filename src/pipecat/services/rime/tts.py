@@ -147,10 +147,10 @@ class RimeTTSService(AudioContextTTSService):
         Parameters:
             language: Language for synthesis. Defaults to English.
             segment: Text segmentation mode ("immediate", "bySentence", "never").
+            speed_alpha: Speech speed multiplier.
             repetition_penalty: Token repetition penalty (arcana only).
             temperature: Sampling temperature (arcana only).
             top_p: Cumulative probability threshold (arcana only).
-            speed_alpha: Speech speed multiplier (mistv2 only).
             reduce_latency: Whether to reduce latency at potential quality cost (mistv2 only).
             pause_between_brackets: Whether to add pauses between bracketed content (mistv2 only).
             phonemize_between_brackets: Whether to phonemize bracketed content (mistv2 only).
@@ -160,12 +160,12 @@ class RimeTTSService(AudioContextTTSService):
 
         language: Optional[Language] = Language.EN
         segment: Optional[str] = None
+        speed_alpha: Optional[float] = None
         # Arcana params
         repetition_penalty: Optional[float] = None
         temperature: Optional[float] = None
         top_p: Optional[float] = None
         # Mistv2 params
-        speed_alpha: Optional[float] = None
         reduce_latency: Optional[bool] = None
         pause_between_brackets: Optional[bool] = None
         phonemize_between_brackets: Optional[bool] = None
@@ -230,12 +230,12 @@ class RimeTTSService(AudioContextTTSService):
                 else None,
                 segment=params.segment,
                 inlineSpeedAlpha=None,  # Not applicable here
+                speedAlpha=params.speed_alpha,
                 # Arcana params
                 repetition_penalty=params.repetition_penalty,
                 temperature=params.temperature,
                 top_p=params.top_p,
                 # Mistv2 params
-                speedAlpha=params.speed_alpha,
                 reduceLatency=params.reduce_latency,
                 pauseBetweenBrackets=params.pause_between_brackets,
                 phonemizeBetweenBrackets=params.phonemize_between_brackets,

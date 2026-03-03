@@ -22,10 +22,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.assemblyai.models import AssemblyAIConnectionParams
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, AssemblyAISTTSettings
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -51,7 +51,12 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = AssemblyAISTTService(api_key=os.getenv("ASSEMBLYAI_API_KEY"))
+    stt = AssemblyAISTTService(
+        api_key=os.getenv("ASSEMBLYAI_API_KEY"),
+        connection_params=AssemblyAIConnectionParams(
+            speech_model="u3-rt-pro",
+        ),
+    )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -63,7 +68,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            "content": "You are a helpful LLM in a WebRTC call demonstrating dynamic keyterms updates. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Try saying difficult names like 'Xiomara', 'Saoirse', or 'Krzystof' to test transcription accuracy.",
         },
     ]
 
@@ -97,14 +102,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        logger.info(
+            "Phase 1: No keyterms boosting - try saying 'Xiomara', 'Saoirse', or 'Krzystof'"
+        )
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
-        await asyncio.sleep(10)
-        logger.info("Updating AssemblyAI STT settings: language=es")
+        await asyncio.sleep(15)
+        logger.info("🔄 Updating keyterms: Adding difficult names for boosting")
         await task.queue_frame(
-            STTUpdateSettingsFrame(delta=AssemblyAISTTSettings(language=Language.ES))
+            STTUpdateSettingsFrame(
+                delta=AssemblyAISTTSettings(
+                    connection_params=AssemblyAIConnectionParams(
+                        keyterms_prompt=["Xiomara", "Saoirse", "Krzystof", "Nguyen", "Pipecat"]
+                    )
+                )
+            )
         )
+        logger.info("Phase 2: Keyterms active - same names should transcribe better now!")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

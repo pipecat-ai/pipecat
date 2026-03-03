@@ -4,14 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tavus transport implementation for Pipecat.
+"""LemonSlice transport for Pipecat.
 
-This module provides integration with the Tavus platform for creating conversational
-AI applications with avatars. It manages conversation sessions and provides real-time
-audio/video streaming capabilities through the Tavus API.
+This module adds LemonSlice avatars to Daily rooms, enabling
+real-time voice conversations with synchronized avatars.
 """
 
-import os
 from functools import partial
 from typing import Any, Awaitable, Callable, Mapping, Optional
 
@@ -21,9 +19,9 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotConnectedFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
-    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -42,110 +40,46 @@ from pipecat.transports.daily.transport import (
     DailyParams,
     DailyTransportClient,
 )
+from pipecat.transports.lemonslice.api import LemonSliceApi
 
 
-class TavusApi:
-    """Helper class for interacting with the Tavus API (v2).
-
-    Provides methods for creating and managing conversations with Tavus avatars,
-    including conversation lifecycle management and persona information retrieval.
-    """
-
-    BASE_URL = "https://tavusapi.com/v2"
-    MOCK_CONVERSATION_ID = "dev-conversation"
-    MOCK_PERSONA_NAME = "TestTavusTransport"
-
-    def __init__(self, api_key: str, session: aiohttp.ClientSession):
-        """Initialize the TavusApi client.
-
-        Args:
-            api_key: Tavus API key for authentication.
-            session: An aiohttp session for making HTTP requests.
-        """
-        self._api_key = api_key
-        self._session = session
-        self._headers = {"Content-Type": "application/json", "x-api-key": self._api_key}
-        # Only for development
-        self._dev_room_url = os.getenv("TAVUS_SAMPLE_ROOM_URL")
-
-    async def create_conversation(self, replica_id: str, persona_id: str) -> dict:
-        """Create a new conversation with the specified replica and persona.
-
-        Args:
-            replica_id: ID of the replica to use in the conversation.
-            persona_id: ID of the persona to use in the conversation.
-
-        Returns:
-            Dictionary containing conversation_id and conversation_url.
-        """
-        if self._dev_room_url:
-            return {
-                "conversation_id": self.MOCK_CONVERSATION_ID,
-                "conversation_url": self._dev_room_url,
-            }
-
-        logger.debug(f"Creating Tavus conversation: replica={replica_id}, persona={persona_id}")
-        url = f"{self.BASE_URL}/conversations"
-        payload = {
-            "replica_id": replica_id,
-            "persona_id": persona_id,
-        }
-        async with self._session.post(url, headers=self._headers, json=payload) as r:
-            r.raise_for_status()
-            response = await r.json()
-            logger.debug(f"Created Tavus conversation: {response}")
-            return response
-
-    async def end_conversation(self, conversation_id: str):
-        """End an existing conversation.
-
-        Args:
-            conversation_id: ID of the conversation to end.
-        """
-        if conversation_id is None or conversation_id == self.MOCK_CONVERSATION_ID:
-            return
-
-        url = f"{self.BASE_URL}/conversations/{conversation_id}/end"
-        async with self._session.post(url, headers=self._headers) as r:
-            r.raise_for_status()
-            logger.debug(f"Ended Tavus conversation {conversation_id}")
-
-    async def get_persona_name(self, persona_id: str) -> str:
-        """Get the name of a persona by ID.
-
-        Args:
-            persona_id: ID of the persona to retrieve.
-
-        Returns:
-            The name of the persona.
-        """
-        if self._dev_room_url is not None:
-            return self.MOCK_PERSONA_NAME
-
-        url = f"{self.BASE_URL}/personas/{persona_id}"
-        async with self._session.get(url, headers=self._headers) as r:
-            r.raise_for_status()
-            response = await r.json()
-            logger.debug(f"Fetched Tavus persona: {response}")
-            return response["persona_name"]
-
-
-class TavusCallbacks(BaseModel):
-    """Callback handlers for Tavus events.
+class LemonSliceNewSessionRequest(BaseModel):
+    """Request model for creating a new LemonSlice session.
 
     Parameters:
-        on_joined: Called when the bot joins the Daily room.
+        agent_image_url: URL to an agent image. Provide either agent_id or agent_image_url.
+        agent_id: ID of a LemonSlice agent. Provide either agent_id or agent_image_url.
+        agent_prompt: A high-level system prompt that subtly influences the avatar's movements,
+            expressions, and emotional demeanor.
+        idle_timeout: Idle timeout in seconds.
+        daily_room_url: Daily room URL to use for the session.
+        daily_token: Daily token for authenticating with the room.
+        lemonslice_properties: Additional properties to pass to the session.
+    """
+
+    agent_image_url: Optional[str] = None
+    agent_id: Optional[str] = None
+    agent_prompt: Optional[str] = None
+    idle_timeout: Optional[int] = None
+    daily_room_url: Optional[str] = None
+    daily_token: Optional[str] = None
+    lemonslice_properties: Optional[dict] = None
+
+
+class LemonSliceCallbacks(BaseModel):
+    """Callback handlers for LemonSlice events.
+
+    Parameters:
         on_participant_joined: Called when a participant joins the conversation.
         on_participant_left: Called when a participant leaves the conversation.
     """
 
-    on_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
 
 
-class TavusParams(DailyParams):
-    """Configuration parameters for the Tavus transport.
+class LemonSliceParams(DailyParams):
+    """Configuration parameters for the LemonSlice transport.
 
     Parameters:
         audio_in_enabled: Whether to enable audio input from participants.
@@ -158,55 +92,61 @@ class TavusParams(DailyParams):
     microphone_out_enabled: bool = False
 
 
-class TavusTransportClient:
-    """Transport client that integrates Pipecat with the Tavus platform.
+class LemonSliceTransportClient:
+    """Transport client that integrates Pipecat with the LemonSlice platform.
 
-    A transport client that integrates a Pipecat Bot with the Tavus platform by managing
-    conversation sessions using the Tavus API.
+    A transport client that integrates a Pipecat Bot with the LemonSlice platform by managing
+    conversation sessions using the LemonSlice API.
 
-    This client uses `TavusApi` to interact with the Tavus backend services. When a conversation
-    is started via `TavusApi`, Tavus provides a `roomURL` that can be used to connect the Pipecat Bot
-    into the same virtual room where the TavusBot is operating.
+    This client uses `LemonSliceApi` to interact with the LemonSlice backend. LemonSlice either provides
+    a room URL where the avatar is already present, or adds the LemonSlice avatar to a Daily room
+    the user supplies.
     """
 
     def __init__(
         self,
         *,
         bot_name: str,
-        params: TavusParams = TavusParams(),
-        callbacks: TavusCallbacks,
+        params: LemonSliceParams = LemonSliceParams(),
+        callbacks: LemonSliceCallbacks,
         api_key: str,
-        replica_id: str,
-        persona_id: str = "pipecat-stream",
+        session_request: Optional[LemonSliceNewSessionRequest] = None,
         session: aiohttp.ClientSession,
     ) -> None:
-        """Initialize the Tavus transport client.
+        """Initialize the LemonSlice transport client.
 
         Args:
             bot_name: The name of the Pipecat bot instance.
-            params: Optional parameters for Tavus operation.
-            callbacks: Callback handlers for Tavus-related events.
-            api_key: API key for authenticating with Tavus API.
-            replica_id: ID of the replica to use in the Tavus conversation.
-            persona_id: ID of the Tavus persona. Defaults to "pipecat-stream",
-                which signals Tavus to use the TTS voice of the Pipecat bot
-                instead of a Tavus persona voice.
+            params: Optional parameters for LemonSlice operation.
+            callbacks: Callback handlers for LemonSlice-related events.
+            api_key: API key for authenticating with LemonSlice API.
+            session_request: Optional session creation parameters. If not provided, a default
+                agent will be used.
             session: The aiohttp session for making async HTTP requests.
         """
         self._bot_name = bot_name
-        self._api = TavusApi(api_key, session)
-        self._replica_id = replica_id
-        self._persona_id = persona_id
-        self._conversation_id: Optional[str] = None
-        self._client: Optional[DailyTransportClient] = None
+        self._api = LemonSliceApi(api_key, session)
+        self._session_request = session_request or LemonSliceNewSessionRequest()
+        self._session_id: Optional[str] = None
+        self._control_url: Optional[str] = None
+        self._daily_transport_client: Optional[DailyTransportClient] = None
         self._callbacks = callbacks
         self._params = params
 
     async def _initialize(self) -> str:
         """Initialize the conversation and return the room URL."""
-        response = await self._api.create_conversation(self._replica_id, self._persona_id)
-        self._conversation_id = response["conversation_id"]
-        return response["conversation_url"]
+        response = await self._api.create_session(
+            agent_image_url=self._session_request.agent_image_url,
+            agent_id=self._session_request.agent_id,
+            agent_prompt=self._session_request.agent_prompt,
+            idle_timeout=self._session_request.idle_timeout,
+            daily_room_url=self._session_request.daily_room_url,
+            daily_token=self._session_request.daily_token,
+            properties=self._session_request.lemonslice_properties,
+        )
+        self._session_id = response["session_id"]
+        self._control_url = response["control_url"]
+        return response["room_url"]
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client and initialize the conversation.
@@ -214,8 +154,8 @@ class TavusTransportClient:
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._conversation_id is not None:
-            logger.debug(f"Conversation ID already defined: {self._conversation_id}")
+        if self._session_id is not None:
+            logger.debug(f"Session ID already defined: {self._session_id}")
             return
         try:
             room_url = await self._initialize()
@@ -255,42 +195,45 @@ class TavusTransportClient:
                 ),
                 on_transcription_error=partial(self._on_handle_callback, "on_transcription_error"),
             )
-            self._client = DailyTransportClient(
-                room_url, None, "Pipecat", self._params, daily_callbacks, self._bot_name
+            self._daily_transport_client = DailyTransportClient(
+                room_url, None, self._bot_name, self._params, daily_callbacks, "LemonSlicePipecat"
             )
-            await self._client.setup(setup)
+            await self._daily_transport_client.setup(setup)
         except Exception as e:
-            logger.error(f"Failed to setup TavusTransportClient: {e}")
-            await self._api.end_conversation(self._conversation_id)
-            self._conversation_id = None
+            logger.error(f"Failed to setup LemonSliceTransportClient: {e}")
+            if self._session_id and self._control_url:
+                await self._api.end_session(self._session_id, self._control_url)
+            self._session_id = None
+            self._control_url = None
+            raise
 
     async def cleanup(self):
         """Cleanup client resources."""
         try:
-            await self._client.cleanup()
+            if self._daily_transport_client:
+                await self._daily_transport_client.cleanup()
         except Exception as e:
             logger.error(f"Exception during cleanup: {e}")
 
     async def _on_joined(self, data):
         """Handle joined event."""
-        logger.debug("TavusTransportClient joined!")
-        await self._callbacks.on_joined(data)
+        logger.debug("LemonSliceTransportClient joined!")
 
     async def _on_left(self):
         """Handle left event."""
-        logger.debug("TavusTransportClient left!")
+        logger.debug("LemonSliceTransportClient left!")
 
     async def _on_handle_callback(self, event_name, *args, **kwargs):
         """Handle generic callback events."""
         logger.trace(f"[Callback] {event_name} called with args={args}, kwargs={kwargs}")
 
-    async def get_persona_name(self) -> str:
-        """Get the persona name from the API.
+    async def get_bot_name(self) -> str:
+        """Get the name of the LemonSlice participant.
 
         Returns:
-            The name of the current persona.
+            The name of the LemonSlice participant.
         """
-        return await self._api.get_persona_name(self._persona_id)
+        return "LemonSlice"
 
     async def start(self, frame: StartFrame):
         """Start the client and join the room.
@@ -298,15 +241,16 @@ class TavusTransportClient:
         Args:
             frame: The start frame containing initialization parameters.
         """
-        logger.debug("TavusTransportClient start invoked!")
-        await self._client.start(frame)
-        await self._client.join()
+        await self._daily_transport_client.start(frame)
+        await self._daily_transport_client.join()
 
     async def stop(self):
         """Stop the client and end the conversation."""
-        await self._client.leave()
-        await self._api.end_conversation(self._conversation_id)
-        self._conversation_id = None
+        await self._daily_transport_client.leave()
+        if self._session_id and self._control_url:
+            await self._api.end_session(self._session_id, self._control_url)
+        self._session_id = None
+        self._control_url = None
 
     async def capture_participant_video(
         self,
@@ -325,7 +269,7 @@ class TavusTransportClient:
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
-        await self._client.capture_participant_video(
+        await self._daily_transport_client.capture_participant_video(
             participant_id, callback, framerate, video_source, color_format
         )
 
@@ -346,7 +290,7 @@ class TavusTransportClient:
             sample_rate: Desired sample rate for audio capture.
             callback_interval_ms: Interval between audio callbacks in milliseconds.
         """
-        await self._client.capture_participant_audio(
+        await self._daily_transport_client.capture_participant_audio(
             participant_id, callback, audio_source, sample_rate, callback_interval_ms
         )
 
@@ -358,7 +302,7 @@ class TavusTransportClient:
         Args:
             frame: The message frame to send.
         """
-        await self._client.send_message(frame)
+        await self._daily_transport_client.send_message(frame)
 
     @property
     def out_sample_rate(self) -> int:
@@ -367,7 +311,7 @@ class TavusTransportClient:
         Returns:
             The output sample rate in Hz.
         """
-        return self._client.out_sample_rate
+        return self._daily_transport_client.out_sample_rate
 
     @property
     def in_sample_rate(self) -> int:
@@ -376,15 +320,37 @@ class TavusTransportClient:
         Returns:
             The input sample rate in Hz.
         """
-        return self._client.in_sample_rate
+        return self._daily_transport_client.in_sample_rate
 
     async def send_interrupt_message(self) -> None:
-        """Send an interrupt message to the conversation."""
+        """Send an interrupt message to the LemonSlice session."""
+        logger.debug("Sending interrupt message")
         transport_frame = OutputTransportMessageUrgentFrame(
             message={
-                "message_type": "conversation",
-                "event_type": "conversation.interrupt",
-                "conversation_id": self._conversation_id,
+                "event": "interrupt",
+                "session_id": self._session_id,
+            }
+        )
+        await self.send_message(transport_frame)
+
+    async def send_response_started_message(self) -> None:
+        """Send a response_started message to the LemonSlice session."""
+        logger.trace("Sending response_started message")
+        transport_frame = OutputTransportMessageUrgentFrame(
+            message={
+                "event": "response_started",
+                "session_id": self._session_id,
+            }
+        )
+        await self.send_message(transport_frame)
+
+    async def send_response_finished_message(self) -> None:
+        """Send a response_finished message to the LemonSlice session."""
+        logger.trace("Sending response_finished message")
+        transport_frame = OutputTransportMessageUrgentFrame(
+            message={
+                "event": "response_finished",
+                "session_id": self._session_id,
             }
         )
         await self.send_message(transport_frame)
@@ -396,10 +362,10 @@ class TavusTransportClient:
             participant_settings: Per-participant subscription settings.
             profile_settings: Global subscription profile settings.
         """
-        if not self._client:
+        if not self._daily_transport_client:
             return
 
-        await self._client.update_subscriptions(
+        await self._daily_transport_client.update_subscriptions(
             participant_settings=participant_settings, profile_settings=profile_settings
         )
 
@@ -412,9 +378,10 @@ class TavusTransportClient:
         Returns:
             True if the audio frame was written successfully, False otherwise.
         """
-        if not self._client:
+        if not self._daily_transport_client:
             return False
-        return await self._client.write_audio_frame(frame)
+
+        return await self._daily_transport_client.write_audio_frame(frame)
 
     async def register_audio_destination(self, destination: str):
         """Register an audio destination for output.
@@ -422,29 +389,29 @@ class TavusTransportClient:
         Args:
             destination: The destination identifier to register.
         """
-        if not self._client:
+        if not self._daily_transport_client:
             return
 
-        await self._client.register_audio_destination(destination)
+        await self._daily_transport_client.register_audio_destination(destination)
 
 
-class TavusInputTransport(BaseInputTransport):
-    """Input transport for receiving audio and events from Tavus conversations.
+class LemonSliceInputTransport(BaseInputTransport):
+    """Input transport for receiving audio and events from LemonSlice.
 
     Handles incoming audio streams from participants and manages audio capture
-    from the Daily room connected to the Tavus conversation.
+    from the Daily room connected to LemonSlice.
     """
 
     def __init__(
         self,
-        client: TavusTransportClient,
+        client: LemonSliceTransportClient,
         params: TransportParams,
         **kwargs,
     ):
-        """Initialize the Tavus input transport.
+        """Initialize the LemonSlice input transport.
 
         Args:
-            client: The Tavus transport client instance.
+            client: The LemonSlice transport client instance.
             params: Transport configuration parameters.
             **kwargs: Additional arguments passed to parent class.
         """
@@ -509,8 +476,8 @@ class TavusInputTransport(BaseInputTransport):
             participant: The participant to capture audio from.
         """
         if self._params.audio_in_enabled:
-            logger.info(
-                f"TavusTransportClient start capturing audio for participant {participant['id']}"
+            logger.debug(
+                f"LemonSliceTransportClient start capturing audio for participant {participant['id']}"
             )
             await self._client.capture_participant_audio(
                 participant_id=participant["id"],
@@ -521,7 +488,13 @@ class TavusInputTransport(BaseInputTransport):
     async def _on_participant_audio_data(
         self, participant_id: str, audio: AudioData, audio_source: str
     ):
-        """Handle received participant audio data."""
+        """Handle received participant audio data.
+
+        Args:
+            participant_id: ID of the participant who sent the audio.
+            audio: The audio data from the participant.
+            audio_source: The source of the audio (e.g., microphone).
+        """
         frame = InputAudioRawFrame(
             audio=audio.audio_frames,
             sample_rate=audio.sample_rate,
@@ -531,23 +504,23 @@ class TavusInputTransport(BaseInputTransport):
         await self.push_audio_frame(frame)
 
 
-class TavusOutputTransport(BaseOutputTransport):
-    """Output transport for sending audio and events to Tavus conversations.
+class LemonSliceOutputTransport(BaseOutputTransport):
+    """Output transport for sending audio and events to LemonSlice.
 
     Handles outgoing audio streams to participants and manages the custom
-    audio track expected by the Tavus platform.
+    audio track expected by the LemonSlice platform.
     """
 
     def __init__(
         self,
-        client: TavusTransportClient,
+        client: LemonSliceTransportClient,
         params: TransportParams,
         **kwargs,
     ):
-        """Initialize the Tavus output transport.
+        """Initialize the LemonSlice output transport.
 
         Args:
-            client: The Tavus transport client instance.
+            client: The LemonSlice transport client instance.
             params: Transport configuration parameters.
             **kwargs: Additional arguments passed to parent class.
         """
@@ -557,7 +530,7 @@ class TavusOutputTransport(BaseOutputTransport):
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
-        # This is the custom track destination expected by Tavus
+        # This is the custom track destination expected by LemonSlice
         self._transport_destination: Optional[str] = "stream"
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -620,8 +593,24 @@ class TavusOutputTransport(BaseOutputTransport):
         Args:
             frame: The message frame to send.
         """
-        logger.info(f"TavusOutputTransport sending message {frame}")
+        logger.trace(f"LemonSliceTransport sending message {frame}")
         await self._client.send_message(frame)
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame to the next processor in the pipeline.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        # The BotStartedSpeakingFrame and BotStoppedSpeakingFrame are created inside BaseOutputTransport
+        # This is a workaround, so we can more reliably be aware when the bot has started or stopped speaking
+        if direction == FrameDirection.DOWNSTREAM:
+            if isinstance(frame, BotStartedSpeakingFrame):
+                await self._handle_response_started()
+            if isinstance(frame, BotStoppedSpeakingFrame):
+                await self._handle_response_finished()
+        await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle interruptions.
@@ -638,8 +627,16 @@ class TavusOutputTransport(BaseOutputTransport):
         """Handle interruption events by sending interrupt message."""
         await self._client.send_interrupt_message()
 
+    async def _handle_response_started(self):
+        """Handle bot started speaking events by sending response_started message."""
+        await self._client.send_response_started_message()
+
+    async def _handle_response_finished(self):
+        """Handle tts response stopped events by sending response_finished message."""
+        await self._client.send_response_finished_message()
+
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Write an audio frame to the Tavus transport.
+        """Write an audio frame to the LemonSlice transport.
 
         Args:
             frame: The audio frame to write.
@@ -647,7 +644,7 @@ class TavusOutputTransport(BaseOutputTransport):
         Returns:
             True if the audio frame was written successfully, False otherwise.
         """
-        # This is the custom track destination expected by Tavus
+        # This is the custom track destination expected by LemonSlice
         frame.transport_destination = self._transport_destination
         return await self._client.write_audio_frame(frame)
 
@@ -660,16 +657,15 @@ class TavusOutputTransport(BaseOutputTransport):
         await self._client.register_audio_destination(destination)
 
 
-class TavusTransport(BaseTransport):
-    """Transport implementation for Tavus video calls.
+class LemonSliceTransport(BaseTransport):
+    """Transport implementation to add a LemonSlice avatar to Daily calls.
 
-    When used, the Pipecat bot joins the same virtual room as the Tavus Avatar and the user.
-    This is achieved by using `TavusTransportClient`, which initiates the conversation via
-    `TavusApi` and obtains a room URL that all participants connect to.
+    When used, the Pipecat bot joins the same virtual room as the LemonSlice Avatar and the user.
+    This is achieved by using `LemonSliceTransportClient`, which initiates the conversation via
+    `LemonSliceApi` and obtains a room URL that all participants connect to.
 
     Event handlers available:
 
-    - on_connected(transport, data): Bot connected to the room
     - on_client_connected(transport, participant): Participant connected to the session
     - on_client_disconnected(transport, participant): Participant disconnected from the session
 
@@ -685,79 +681,67 @@ class TavusTransport(BaseTransport):
         bot_name: str,
         session: aiohttp.ClientSession,
         api_key: str,
-        replica_id: str,
-        persona_id: str = "pipecat-stream",
-        params: TavusParams = TavusParams(),
+        session_request: Optional[LemonSliceNewSessionRequest] = None,
+        params: LemonSliceParams = LemonSliceParams(),
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
     ):
-        """Initialize the Tavus transport.
+        """Initialize the LemonSlice transport.
 
         Args:
             bot_name: The name of the Pipecat bot.
             session: aiohttp session used for async HTTP requests.
-            api_key: Tavus API key for authentication.
-            replica_id: ID of the replica model used for voice generation.
-            persona_id: ID of the Tavus persona. Defaults to "pipecat-stream"
-                to use the Pipecat TTS voice.
-            params: Optional Tavus-specific configuration parameters.
+            api_key: LemonSlice API key for authentication.
+            session_request: Optional session creation parameters. If not provided, a default
+                agent will be used.
+            params: Optional LemonSlice-specific configuration parameters.
             input_name: Optional name for the input transport.
             output_name: Optional name for the output transport.
         """
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 
-        callbacks = TavusCallbacks(
-            on_joined=self._on_joined,
+        callbacks = LemonSliceCallbacks(
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
         )
-        self._client = TavusTransportClient(
-            bot_name="Pipecat",
+        self._client = LemonSliceTransportClient(
+            bot_name=bot_name,
             callbacks=callbacks,
             api_key=api_key,
-            replica_id=replica_id,
-            persona_id=persona_id,
+            session_request=session_request,
             session=session,
             params=params,
         )
-        self._input: Optional[TavusInputTransport] = None
-        self._output: Optional[TavusOutputTransport] = None
-        self._tavus_participant_id = None
+        self._input: Optional[LemonSliceInputTransport] = None
+        self._output: Optional[LemonSliceOutputTransport] = None
+        self._lemonslice_participant_id = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
-        self._register_event_handler("on_connected")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
 
-    async def _on_joined(self, data):
-        """Handle bot joined room event."""
-        await self._call_event_handler("on_connected", data)
-        if self._input:
-            await self._input.push_frame(BotConnectedFrame())
-
     async def _on_participant_left(self, participant, reason):
         """Handle participant left events."""
-        persona_name = await self._client.get_persona_name()
-        if participant.get("info", {}).get("userName", "") != persona_name:
+        ls_bot_name = await self._client.get_bot_name()
+        if participant.get("info", {}).get("userName", "") != ls_bot_name:
             await self._on_client_disconnected(participant)
 
     async def _on_participant_joined(self, participant):
         """Handle participant joined events."""
-        # get persona, look up persona_name, set this as the bot name to ignore
-        persona_name = await self._client.get_persona_name()
+        ls_bot_name = await self._client.get_bot_name()
 
-        # Ignore the Tavus replica's microphone
-        if participant.get("info", {}).get("userName", "") == persona_name:
-            self._tavus_participant_id = participant["id"]
+        # Ignore the LemonSlice bot's microphone
+        if participant.get("info", {}).get("userName", "") == ls_bot_name:
+            self._lemonslice_participant_id = participant["id"]
         else:
             await self._on_client_connected(participant)
-            if self._tavus_participant_id:
-                logger.debug(f"Ignoring {self._tavus_participant_id}'s microphone")
+            if self._lemonslice_participant_id:
+                logger.debug(f"Ignoring {self._lemonslice_participant_id}'s microphone")
                 await self.update_subscriptions(
                     participant_settings={
-                        self._tavus_participant_id: {
+                        self._lemonslice_participant_id: {
                             "media": {"microphone": "unsubscribed"},
                         }
                     }
@@ -781,27 +765,25 @@ class TavusTransport(BaseTransport):
         """Get the input transport for receiving media and events.
 
         Returns:
-            The Tavus input transport instance.
+            The LemonSlice input transport instance.
         """
         if not self._input:
-            self._input = TavusInputTransport(client=self._client, params=self._params)
+            self._input = LemonSliceInputTransport(client=self._client, params=self._params)
         return self._input
 
     def output(self) -> FrameProcessor:
         """Get the output transport for sending media and events.
 
         Returns:
-            The Tavus output transport instance.
+            The LemonSlice output transport instance.
         """
         if not self._output:
-            self._output = TavusOutputTransport(client=self._client, params=self._params)
+            self._output = LemonSliceOutputTransport(client=self._client, params=self._params)
         return self._output
 
     async def _on_client_connected(self, participant: Any):
         """Handle client connected events."""
         await self._call_event_handler("on_client_connected", participant)
-        if self._input:
-            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_client_disconnected(self, participant: Any):
         """Handle client disconnected events."""

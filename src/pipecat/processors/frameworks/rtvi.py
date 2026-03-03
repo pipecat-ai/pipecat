@@ -1702,7 +1702,7 @@ class RTVIProcessor(FrameProcessor):
 
     async def interrupt_bot(self):
         """Send a bot interruption frame upstream."""
-        await self.push_interruption_task_frame_and_wait()
+        await self.broadcast_interruption()
 
     async def send_server_message(self, data: Any):
         """Send a server message to the client."""
