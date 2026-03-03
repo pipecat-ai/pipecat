@@ -5,11 +5,14 @@
 #
 
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.startup_timing_observer import StartupTimingObserver
@@ -26,12 +29,24 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
+
+
+async def fetch_weather_from_api(params: FunctionCallParams):
+    await asyncio.sleep(0.25)
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await asyncio.sleep(0.1)
+    await params.result_callback({"name": "The Golden Dragon"})
+
 
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
@@ -63,6 +78,38 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
+    llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+
+    weather_function = FunctionSchema(
+        name="get_current_weather",
+        description="Get the current weather",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+            "format": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the user's location.",
+            },
+        },
+        required=["location", "format"],
+    )
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
+
     messages = [
         {
             "role": "system",
@@ -70,7 +117,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
 
-    context = LLMContext(messages)
+    context = LLMContext(messages, tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -101,6 +148,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         observers=[latency_observer, startup_observer],
     )
 
+    @latency_observer.event_handler("on_first_bot_speech_latency")
+    async def on_first_bot_speech_latency(observer, latency_seconds):
+        logger.info(f"First bot speech: {latency_seconds:.3f}s after client connected")
+
     @latency_observer.event_handler("on_latency_measured")
     async def on_latency_measured(observer, latency_seconds):
         logger.info(f"⏱️ User-to-bot latency: {latency_seconds:.3f}s")
@@ -130,6 +181,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 logger.info(f"🔄 Turn {turn_number} interrupted after {duration:.2f}s")
             else:
                 logger.info(f"🏁 Turn {turn_number} completed in {duration:.2f}s")
+
+    @latency_observer.event_handler("on_latency_breakdown")
+    async def on_latency_breakdown(observer, breakdown):
+        for event in breakdown.chronological_events():
+            logger.info(f"  {event}")
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
