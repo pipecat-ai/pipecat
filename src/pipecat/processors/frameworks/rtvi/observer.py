@@ -316,7 +316,7 @@ class RTVIObserver(BaseObserver):
         """Send an RTVI message.
 
         By default, we push a transport frame. But this function can be
-        overriden by subclass to send RTVI messages in different ways.
+        overridden by subclass to send RTVI messages in different ways.
 
         Args:
             model: The message to send.
@@ -539,15 +539,15 @@ class RTVIObserver(BaseObserver):
             return
 
         text = frame.text
-        type = frame.aggregated_by
+        agg_type = frame.aggregated_by
         for aggregation_type, transform in self._aggregation_transforms:
-            if aggregation_type == type or aggregation_type == "*":
-                text = await transform(text, type)
+            if aggregation_type == agg_type or aggregation_type == "*":
+                text = await transform(text, agg_type)
 
         isTTS = isinstance(frame, TTSTextFrame)
         if self._params.bot_output_enabled:
             message = RTVI.BotOutputMessage(
-                data=RTVI.BotOutputMessageData(text=text, spoken=isTTS, aggregated_by=type)
+                data=RTVI.BotOutputMessageData(text=text, spoken=isTTS, aggregated_by=agg_type)
             )
             await self.send_rtvi_message(message)
 

@@ -12,6 +12,7 @@ server messages instead.
 """
 
 from typing import (
+    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
@@ -25,6 +26,9 @@ from typing import (
 from pydantic import BaseModel, Field, PrivateAttr
 
 import pipecat.processors.frameworks.rtvi.models_v1 as RTVI
+
+if TYPE_CHECKING:
+    from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
 ActionResult = Union[bool, int, float, str, list, dict]
 
