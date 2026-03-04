@@ -65,7 +65,7 @@ class RTVIServerResponseFrame(SystemFrame):
     and include the original RTVIClientMessageFrame to ensure the response
     is properly attributed to the original request. To respond with an error,
     set the `error` field to a string describing the error. This will result
-    in the client receiving a `response-error` message instead of a
+    in the client receiving an `error-response` message instead of a
     `server-response` message.
     """
 

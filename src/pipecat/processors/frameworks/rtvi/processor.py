@@ -566,10 +566,6 @@ class RTVIProcessor(FrameProcessor):
 
     async def _handle_client_message(self, msg_id: str, data: RTVI.RawClientMessageData):
         """Handle a client message frame."""
-        if not data:
-            await self._send_error_response(msg_id, "Malformed client message")
-            return
-
         # Create a RTVIClientMessageFrame to push the message
         frame = RTVIClientMessageFrame(msg_id=msg_id, type=data.t, data=data.d)
         await self.push_frame(frame)
