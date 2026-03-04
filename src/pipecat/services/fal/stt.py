@@ -213,20 +213,29 @@ class FalSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        if params is not None:
-            _warn_deprecated_param("params", "FalSTTSettings")
-
-        _params = params or FalSTTService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = FalSTTSettings(
             model=None,
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else "en",
-            task=_params.task,
-            chunk_level=_params.chunk_level,
-            version=_params.version,
+            language=language_to_fal_language(Language.EN) or "en",
+            task="transcribe",
+            chunk_level="segment",
+            version="3",
         )
+
+        # 2. (no deprecated direct args for this service)
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", FalSTTSettings)
+            if not settings:
+                default_settings.language = (
+                    language_to_fal_language(params.language) if params.language else "en"
+                )
+                default_settings.task = params.task
+                default_settings.chunk_level = params.chunk_level
+                default_settings.version = params.version
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

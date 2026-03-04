@@ -76,10 +76,17 @@ class PiperTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent `TTSService`.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "PiperTTSSettings", "voice")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = PiperTTSSettings(model=None, voice=None, language=None)
 
-        default_settings = PiperTTSSettings(model=None, voice=voice_id, language=None)
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", PiperTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. No params for this service
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -92,15 +99,15 @@ class PiperTTSService(TTSService):
 
         _voice = self._settings.voice
         model_file = f"{_voice}.onnx"
-        model_path = Path(download_dir) / model_file
+        model_path_resolved = Path(download_dir) / model_file
 
-        if not model_path.exists():
+        if not model_path_resolved.exists():
             logger.debug(f"Downloading Piper '{_voice}' model")
             download_voice(_voice, download_dir, force_redownload=force_redownload)
 
-        logger.debug(f"Loading Piper '{_voice}' model from {model_path}")
+        logger.debug(f"Loading Piper '{_voice}' model from {model_path_resolved}")
 
-        self._voice = PiperVoice.load(model_path, use_cuda=use_cuda)
+        self._voice = PiperVoice.load(model_path_resolved, use_cuda=use_cuda)
 
         logger.debug(f"Loaded Piper '{_voice}' model")
 
@@ -222,10 +229,17 @@ class PiperHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "PiperHttpTTSSettings", "voice")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = PiperHttpTTSSettings(model=None, voice=None, language=None)
 
-        default_settings = PiperHttpTTSSettings(model=None, voice=voice_id, language=None)
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", PiperHttpTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. No params for this service
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -230,33 +230,44 @@ class CambTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "CambTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "CambTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "CambTTSSettings")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = CambTTSSettings(
+            model="mars-flash",
+            voice=147320,
+            language="en-us",
+            user_instructions=None,
+        )
 
-        _params = params or CambTTSService.InputParams()
-        _model = model or "mars-flash"
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", CambTTSSettings, "model")
+            default_settings.model = model
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", CambTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", CambTTSSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = (
+                        self.language_to_service_language(params.language) or "en-us"
+                    )
+                if params.user_instructions is not None:
+                    default_settings.user_instructions = params.user_instructions
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         # Warn if sample rate doesn't match model's supported rate
+        _model = default_settings.model
         if sample_rate and sample_rate != MODEL_SAMPLE_RATES.get(_model):
             logger.warning(
                 f"Camb.ai's {_model} model only supports {MODEL_SAMPLE_RATES.get(_model)}Hz "
                 f"sample rate. Current rate of {sample_rate}Hz may cause issues."
             )
-
-        default_settings = CambTTSSettings(
-            model=_model,
-            voice=voice_id or 147320,
-            language=(
-                self.language_to_service_language(_params.language) if _params.language else "en-us"
-            ),
-            user_instructions=_params.user_instructions,
-        )
-        if settings is not None:
-            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,

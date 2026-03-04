@@ -181,24 +181,30 @@ class BaseWhisperSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "BaseWhisperSTTSettings", "model")
-        if language is not None:
-            _warn_deprecated_param("language", "BaseWhisperSTTSettings", "language")
-        if prompt is not None:
-            _warn_deprecated_param("prompt", "BaseWhisperSTTSettings", "prompt")
-        if temperature is not None:
-            _warn_deprecated_param("temperature", "BaseWhisperSTTSettings", "temperature")
-
-        _language = language or Language.EN
-
+        # --- 1. Hardcoded defaults ---
         default_settings = BaseWhisperSTTSettings(
-            model=model,
-            language=self.language_to_service_language(_language),
+            model=None,
+            language=None,
             base_url=base_url,
-            prompt=prompt,
-            temperature=temperature,
         )
+
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            _warn_deprecated_param("model", BaseWhisperSTTSettings, "model")
+            default_settings.model = model
+        if language is not None:
+            _warn_deprecated_param("language", BaseWhisperSTTSettings, "language")
+            default_settings.language = self.language_to_service_language(language)
+        if prompt is not None:
+            _warn_deprecated_param("prompt", BaseWhisperSTTSettings, "prompt")
+            default_settings.prompt = prompt
+        if temperature is not None:
+            _warn_deprecated_param("temperature", BaseWhisperSTTSettings, "temperature")
+            default_settings.temperature = temperature
+
+        # --- 3. (no params object for this service) ---
+
+        # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -209,10 +215,8 @@ class BaseWhisperSTTService(SegmentedSTTService):
         )
         self._client = self._create_client(api_key, base_url)
         self._language = self._settings.language
-        self._prompt = self._settings.prompt if self._settings.prompt else prompt
-        self._temperature = (
-            self._settings.temperature if self._settings.temperature else temperature
-        )
+        self._prompt = self._settings.prompt
+        self._temperature = self._settings.temperature
         self._include_prob_metrics = include_prob_metrics
         self._push_empty_transcripts = push_empty_transcripts
 

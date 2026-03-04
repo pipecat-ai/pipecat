@@ -174,15 +174,21 @@ class NvidiaSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        if params is not None:
-            _warn_deprecated_param("params", "NvidiaSTTSettings")
-
-        _params = params or NvidiaSTTService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = NvidiaSTTSettings(
             model=model_function_map.get("model_name"),
-            language=_params.language,
+            language=Language.EN_US,
         )
+
+        # 2. (no deprecated direct args for this service)
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", NvidiaSTTSettings)
+            if not settings:
+                default_settings.language = params.language
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -492,21 +498,33 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService
         """
-        if params is not None:
-            _warn_deprecated_param("params", "NvidiaSegmentedSTTSettings")
-
-        _params = params or NvidiaSegmentedSTTService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = NvidiaSegmentedSTTSettings(
             model=model_function_map.get("model_name"),
-            language=self.language_to_service_language(_params.language or Language.EN_US)
-            or "en-US",
-            profanity_filter=_params.profanity_filter,
-            automatic_punctuation=_params.automatic_punctuation,
-            verbatim_transcripts=_params.verbatim_transcripts,
-            boosted_lm_words=_params.boosted_lm_words,
-            boosted_lm_score=_params.boosted_lm_score,
+            language=language_to_nvidia_riva_language(Language.EN_US) or "en-US",
+            profanity_filter=False,
+            automatic_punctuation=True,
+            verbatim_transcripts=False,
+            boosted_lm_words=None,
+            boosted_lm_score=4.0,
         )
+
+        # 2. (no deprecated direct args for this service)
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", NvidiaSegmentedSTTSettings)
+            if not settings:
+                default_settings.language = (
+                    language_to_nvidia_riva_language(params.language or Language.EN_US) or "en-US"
+                )
+                default_settings.profanity_filter = params.profanity_filter
+                default_settings.automatic_punctuation = params.automatic_punctuation
+                default_settings.verbatim_transcripts = params.verbatim_transcripts
+                default_settings.boosted_lm_words = params.boosted_lm_words
+                default_settings.boosted_lm_score = params.boosted_lm_score
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

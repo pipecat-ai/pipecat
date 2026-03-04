@@ -126,11 +126,6 @@ class HumeTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent class.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "HumeTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "HumeTTSSettings")
-
         api_key = api_key or os.getenv("HUME_API_KEY")
         if not api_key:
             raise ValueError("HumeTTSService requires an API key (env HUME_API_KEY or api_key=)")
@@ -140,16 +135,30 @@ class HumeTTSService(TTSService):
                 f"Hume TTS streams at {HUME_SAMPLE_RATE} Hz; configured sample_rate={sample_rate}"
             )
 
-        _params = params or HumeTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = HumeTTSSettings(
             model=None,
-            voice=voice_id,
+            voice=None,
             language=None,  # Not applicable here
-            description=_params.description,
-            speed=_params.speed,
-            trailing_silence=_params.trailing_silence,
+            description=None,
+            speed=None,
+            trailing_silence=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", HumeTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", HumeTTSSettings)
+            if not settings:
+                default_settings.description = params.description
+                default_settings.speed = params.speed
+                default_settings.trailing_silence = params.trailing_silence
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

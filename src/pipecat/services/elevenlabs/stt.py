@@ -275,20 +275,29 @@ class ElevenLabsSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "ElevenLabsSTTSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "ElevenLabsSTTSettings")
-
-        _params = params or ElevenLabsSTTService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = ElevenLabsSTTSettings(
-            model=model or "scribe_v2",
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else "eng",
-            tag_audio_events=_params.tag_audio_events,
+            model="scribe_v2",
+            language="eng",
+            tag_audio_events=True,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", ElevenLabsSTTSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", ElevenLabsSTTSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = (
+                        self.language_to_service_language(params.language) or "eng"
+                    )
+                default_settings.tag_audio_events = params.tag_audio_events
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -515,25 +524,40 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "ElevenLabsRealtimeSTTSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "ElevenLabsRealtimeSTTSettings")
-
-        _params = params or ElevenLabsRealtimeSTTService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = ElevenLabsRealtimeSTTSettings(
-            model=model or "scribe_v2_realtime",
-            language=_params.language_code,
-            commit_strategy=_params.commit_strategy,
-            vad_silence_threshold_secs=_params.vad_silence_threshold_secs,
-            vad_threshold=_params.vad_threshold,
-            min_speech_duration_ms=_params.min_speech_duration_ms,
-            min_silence_duration_ms=_params.min_silence_duration_ms,
-            include_timestamps=_params.include_timestamps,
-            enable_logging=_params.enable_logging,
-            include_language_detection=_params.include_language_detection,
+            model="scribe_v2_realtime",
+            language=None,
+            commit_strategy=CommitStrategy.MANUAL,
+            vad_silence_threshold_secs=None,
+            vad_threshold=None,
+            min_speech_duration_ms=None,
+            min_silence_duration_ms=None,
+            include_timestamps=False,
+            enable_logging=False,
+            include_language_detection=False,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", ElevenLabsRealtimeSTTSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", ElevenLabsRealtimeSTTSettings)
+            if not settings:
+                default_settings.language = params.language_code
+                default_settings.commit_strategy = params.commit_strategy
+                default_settings.vad_silence_threshold_secs = params.vad_silence_threshold_secs
+                default_settings.vad_threshold = params.vad_threshold
+                default_settings.min_speech_duration_ms = params.min_speech_duration_ms
+                default_settings.min_silence_duration_ms = params.min_silence_duration_ms
+                default_settings.include_timestamps = params.include_timestamps
+                default_settings.enable_logging = params.enable_logging
+                default_settings.include_language_detection = params.include_language_detection
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

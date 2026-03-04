@@ -98,20 +98,26 @@ class DeepgramTTSService(WebsocketTTSService):
         Raises:
             ValueError: If encoding is not in SUPPORTED_ENCODINGS.
         """
-        if voice is not None:
-            _warn_deprecated_param("voice", "DeepgramTTSSettings", "voice")
-
         if encoding.lower() not in self.SUPPORTED_ENCODINGS:
             raise ValueError(
                 f"Unsupported encoding '{encoding}'. Must be one of {', '.join(self.SUPPORTED_ENCODINGS)} for WebSocket TTS."
             )
 
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = DeepgramTTSSettings(
-            model=voice or "aura-2-helena-en",
-            voice=voice or "aura-2-helena-en",
+            model="aura-2-helena-en",
+            voice="aura-2-helena-en",
             language=None,
             encoding=encoding,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice is not None:
+            _warn_deprecated_param("voice", DeepgramTTSSettings, "voice")
+            default_settings.model = voice
+            default_settings.voice = voice
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -414,15 +420,21 @@ class DeepgramHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        if voice is not None:
-            _warn_deprecated_param("voice", "DeepgramTTSSettings", "voice")
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = DeepgramTTSSettings(
-            model=voice or "aura-2-helena-en",
-            voice=voice or "aura-2-helena-en",
+            model="aura-2-helena-en",
+            voice="aura-2-helena-en",
             language=None,
             encoding=encoding,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice is not None:
+            _warn_deprecated_param("voice", DeepgramTTSSettings, "voice")
+            default_settings.model = voice
+            default_settings.voice = voice
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

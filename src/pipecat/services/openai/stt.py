@@ -94,22 +94,34 @@ class OpenAISTTService(BaseWhisperSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to BaseWhisperSTTService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "BaseWhisperSTTSettings", "model")
-
-        super().__init__(
-            model=model or "gpt-4o-transcribe",
-            api_key=api_key,
+        # --- 1. Hardcoded defaults ---
+        _language = language or Language.EN
+        default_settings = BaseWhisperSTTSettings(
+            model="gpt-4o-transcribe",
+            language=self.language_to_service_language(_language),
             base_url=base_url,
-            language=language,
             prompt=prompt,
             temperature=temperature,
+        )
+
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            _warn_deprecated_param("model", BaseWhisperSTTSettings, "model")
+            default_settings.model = model
+
+        # --- 3. (no params object for this service) ---
+
+        # --- 4. Settings delta (canonical API, always wins) ---
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            settings=default_settings,
             ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )
-
-        if settings is not None:
-            self._settings.apply_update(settings)
 
     async def _transcribe(self, audio: bytes) -> Transcription:
         assert self._language is not None  # Assigned in the BaseWhisperSTTService class
@@ -242,14 +254,21 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                 "Install it with: pip install pipecat-ai[openai]"
             )
 
-        if model is not None:
-            _warn_deprecated_param("model", "OpenAIRealtimeSTTSettings", "model")
-
+        # --- 1. Hardcoded defaults ---
         default_settings = OpenAIRealtimeSTTSettings(
-            model=model or "gpt-4o-transcribe",
+            model="gpt-4o-transcribe",
             language=language,
             prompt=prompt,
         )
+
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            _warn_deprecated_param("model", OpenAIRealtimeSTTSettings, "model")
+            default_settings.model = model
+
+        # --- 3. (no params object for this service) ---
+
+        # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -262,7 +281,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._base_url = base_url
 
-        self._prompt = prompt
+        self._prompt = self._settings.prompt
         self._turn_detection = turn_detection
         self._noise_reduction = noise_reduction
         self._should_interrupt = should_interrupt

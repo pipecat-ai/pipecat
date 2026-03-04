@@ -114,26 +114,35 @@ class GroqTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        if model_name is not None:
-            _warn_deprecated_param("model_name", "GroqTTSSettings", "model")
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "GroqTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "GroqTTSSettings")
-
         if sample_rate != self.GROQ_SAMPLE_RATE:
             logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
 
-        _params = params or GroqTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GroqTTSSettings(
-            model=model_name or "canopylabs/orpheus-v1-english",
-            voice=voice_id or "autumn",
-            language=str(_params.language) if _params.language else "en",
+            model="canopylabs/orpheus-v1-english",
+            voice="autumn",
+            language="en",
             output_format=output_format,
-            speed=_params.speed,
+            speed=1.0,
             groq_sample_rate=sample_rate,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model_name is not None:
+            _warn_deprecated_param("model_name", GroqTTSSettings, "model")
+            default_settings.model = model_name
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", GroqTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GroqTTSSettings)
+            if not settings:
+                default_settings.language = str(params.language) if params.language else "en"
+                default_settings.speed = params.speed
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

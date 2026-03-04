@@ -90,17 +90,21 @@ class GoogleImageGenService(ImageGenService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent ImageGenService.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = GoogleImageGenSettings(model="imagen-3.0-generate-002")
+
+        # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", "GoogleImageGenSettings")
+            _warn_deprecated_param("params", GoogleImageGenSettings)
+            if not settings:
+                default_settings.model = params.model
 
-        params = params or GoogleImageGenService.InputParams()
-
-        default_settings = GoogleImageGenSettings(model=params.model)
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
         super().__init__(settings=default_settings, **kwargs)
-        self._params = params
+        self._params = params or GoogleImageGenService.InputParams()
 
         # Add client header
         http_options = update_google_client_http_options(http_options)

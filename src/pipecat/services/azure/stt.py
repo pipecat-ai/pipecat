@@ -107,15 +107,22 @@ class AzureSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
-        if language != Language.EN_US:
-            _warn_deprecated_param("language", "AzureSTTSettings", "language")
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AzureSTTSettings(
             model=None,
             region=region,
-            language=language_to_azure_language(language) if language else None,
+            language=language_to_azure_language(Language.EN_US),
             sample_rate=sample_rate,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if language is not None and language != Language.EN_US:
+            _warn_deprecated_param("language", AzureSTTSettings, "language")
+            default_settings.language = language_to_azure_language(language)
+
+        # 3. No params to apply
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -150,24 +150,41 @@ class BaseOpenAILLMService(LLMService):
             system_instruction: Optional system instruction to prepend to messages.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
-        _params = params or BaseOpenAILLMService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = OpenAILLMSettings(
-            model=model or "gpt-4o",
-            frequency_penalty=_params.frequency_penalty,
-            presence_penalty=_params.presence_penalty,
-            seed=_params.seed,
-            temperature=_params.temperature,
-            top_p=_params.top_p,
+            model="gpt-4o",
+            frequency_penalty=NOT_GIVEN,
+            presence_penalty=NOT_GIVEN,
+            seed=NOT_GIVEN,
+            temperature=NOT_GIVEN,
+            top_p=NOT_GIVEN,
             top_k=None,
-            max_tokens=_params.max_tokens,
-            max_completion_tokens=_params.max_completion_tokens,
-            service_tier=_params.service_tier,
+            max_tokens=NOT_GIVEN,
+            max_completion_tokens=NOT_GIVEN,
+            service_tier=NOT_GIVEN,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            extra=_params.extra if isinstance(_params.extra, dict) else {},
+            extra={},
         )
 
+        # 2. Apply direct init arg overrides (no warnings in base class)
+        if model is not None:
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None and not settings:
+            default_settings.frequency_penalty = params.frequency_penalty
+            default_settings.presence_penalty = params.presence_penalty
+            default_settings.seed = params.seed
+            default_settings.temperature = params.temperature
+            default_settings.top_p = params.top_p
+            default_settings.max_tokens = params.max_tokens
+            default_settings.max_completion_tokens = params.max_completion_tokens
+            default_settings.service_tier = params.service_tier
+            if isinstance(params.extra, dict):
+                default_settings.extra = params.extra
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -25,7 +25,14 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import _S, NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.services.settings import (
+    _S,
+    NOT_GIVEN,
+    STTSettings,
+    _NotGiven,
+    _warn_deprecated_param,
+    is_given,
+)
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -303,6 +310,7 @@ class DeepgramSTTService(STTService):
                 )
             base_url = url
 
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = DeepgramSTTSettings(
             model="nova-3-general",
             language=Language.EN,
@@ -317,13 +325,19 @@ class DeepgramSTTService(STTService):
             endpointing=None,
         )
 
-        if live_options:
-            lo_dict = live_options.to_dict()
-            delta = DeepgramSTTSettings.from_mapping(
-                {k: v for k, v in lo_dict.items() if k != "sample_rate"}
-            )
-            default_settings.apply_update(delta)
+        # 2. (no deprecated direct args like model= for this service)
 
+        # 3. Apply live_options overrides — only if settings not provided
+        if live_options is not None:
+            _warn_deprecated_param("live_options", DeepgramSTTSettings)
+            if not settings:
+                lo_dict = live_options.to_dict()
+                delta = DeepgramSTTSettings.from_mapping(
+                    {k: v for k, v in lo_dict.items() if k != "sample_rate"}
+                )
+                default_settings.apply_update(delta)
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -708,36 +708,63 @@ class GeminiLiveLLMService(LLMService):
                     DeprecationWarning,
                     stacklevel=2,
                 )
-        if model is not None:
-            _warn_deprecated_param("model", "GeminiLiveLLMSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "GeminiLiveLLMSettings")
 
-        _params = params or InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GeminiLiveLLMSettings(
-            model=model or "models/gemini-2.5-flash-native-audio-preview-12-2025",
-            frequency_penalty=_params.frequency_penalty,
-            max_tokens=_params.max_tokens,
-            presence_penalty=_params.presence_penalty,
-            temperature=_params.temperature,
-            top_k=_params.top_k,
-            top_p=_params.top_p,
+            model="models/gemini-2.5-flash-native-audio-preview-12-2025",
+            frequency_penalty=None,
+            max_tokens=4096,
+            presence_penalty=None,
+            temperature=None,
+            top_k=None,
+            top_p=None,
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            modalities=_params.modalities,
-            language=language_to_gemini_language(_params.language) if _params.language else "en-US",
-            media_resolution=_params.media_resolution,
-            vad=_params.vad,
-            context_window_compression=_params.context_window_compression.model_dump()
-            if _params.context_window_compression
-            else {},
-            thinking=_params.thinking or {},
-            enable_affective_dialog=_params.enable_affective_dialog or False,
-            proactivity=_params.proactivity or {},
-            extra=_params.extra if isinstance(_params.extra, dict) else {},
+            modalities=GeminiModalities.AUDIO,
+            language="en-US",
+            media_resolution=GeminiMediaResolution.UNSPECIFIED,
+            vad=None,
+            context_window_compression={},
+            thinking={},
+            enable_affective_dialog=False,
+            proactivity={},
+            extra={},
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GeminiLiveLLMSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GeminiLiveLLMSettings)
+            if not settings:
+                default_settings.frequency_penalty = params.frequency_penalty
+                default_settings.max_tokens = params.max_tokens
+                default_settings.presence_penalty = params.presence_penalty
+                default_settings.temperature = params.temperature
+                default_settings.top_k = params.top_k
+                default_settings.top_p = params.top_p
+                default_settings.modalities = params.modalities
+                default_settings.language = (
+                    language_to_gemini_language(params.language) if params.language else "en-US"
+                )
+                default_settings.media_resolution = params.media_resolution
+                default_settings.vad = params.vad
+                default_settings.context_window_compression = (
+                    params.context_window_compression.model_dump()
+                    if params.context_window_compression
+                    else {}
+                )
+                default_settings.thinking = params.thinking or {}
+                default_settings.enable_affective_dialog = params.enable_affective_dialog or False
+                default_settings.proactivity = params.proactivity or {}
+                if isinstance(params.extra, dict):
+                    default_settings.extra = params.extra
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -750,7 +777,7 @@ class GeminiLiveLLMService(LLMService):
         self._last_sent_time = 0
         self._base_url = base_url
         self._voice_id = voice_id
-        self._language_code = _params.language
+        self._language_code = params.language if params is not None else Language.EN_US
 
         self._system_instruction_from_init = system_instruction
         self._tools_from_init = tools

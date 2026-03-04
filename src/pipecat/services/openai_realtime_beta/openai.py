@@ -167,15 +167,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 stacklevel=2,
             )
 
-        if model is not None:
-            _warn_deprecated_param("model", "OpenAIRealtimeBetaLLMSettings", "model")
-        if session_properties is not None:
-            _warn_deprecated_param(
-                "session_properties", "OpenAIRealtimeBetaLLMSettings", "session_properties"
-            )
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = OpenAIRealtimeBetaLLMSettings(
-            model=model or "gpt-4o-realtime-preview-2025-06-03",
+            model="gpt-4o-realtime-preview-2025-06-03",
             temperature=None,
             max_tokens=None,
             top_p=None,
@@ -185,8 +179,20 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            session_properties=session_properties or events.SessionProperties(),
+            session_properties=events.SessionProperties(),
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", OpenAIRealtimeBetaLLMSettings, "model")
+            default_settings.model = model
+        if session_properties is not None:
+            _warn_deprecated_param(
+                "session_properties", OpenAIRealtimeBetaLLMSettings, "session_properties"
+            )
+            default_settings.session_properties = session_properties
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

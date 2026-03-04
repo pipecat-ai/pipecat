@@ -102,7 +102,7 @@ class DeepgramSageMakerTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         if voice is not None:
-            _warn_deprecated_param("voice", "DeepgramSageMakerTTSSettings", "voice")
+            _warn_deprecated_param("voice", DeepgramSageMakerTTSSettings, "voice")
 
         voice = voice or "aura-2-helena-en"
 

@@ -102,10 +102,15 @@ class GrokLLMService(OpenAILLMService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = OpenAILLMSettings(model="grok-3-beta")
 
-        default_settings = OpenAILLMSettings(model=model or "grok-3-beta")
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            default_settings.model = model
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

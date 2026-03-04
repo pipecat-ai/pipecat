@@ -118,15 +118,20 @@ class XTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "XTTSTTSSettings", "voice")
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = XTTSTTSSettings(
             model=None,
-            voice=voice_id,
+            voice=None,
             language=self.language_to_service_language(language),
             base_url=base_url,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", XTTSTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

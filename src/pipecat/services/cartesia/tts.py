@@ -11,7 +11,7 @@ import json
 import warnings
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncGenerator, List, Literal, Mapping, Optional
+from typing import Any, AsyncGenerator, List, Literal, Mapping, Optional, Self
 
 import aiohttp
 from loguru import logger
@@ -212,7 +212,7 @@ class CartesiaTTSSettings(TTSSettings):
     pronunciation_dict_id: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
-    def from_mapping(cls, settings: Mapping[str, Any]) -> "CartesiaTTSSettings":
+    def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
         """Construct settings from a plain dict, destructuring legacy nested ``output_format``."""
         flat = dict(settings)
         nested = flat.pop("output_format", None)
@@ -312,13 +312,6 @@ class CartesiaTTSService(AudioContextTTSService):
 
             **kwargs: Additional arguments passed to the parent service.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "CartesiaTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "CartesiaTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "CartesiaTTSSettings")
-
         # By default, we aggregate sentences before sending to TTS. This adds
         # ~200-300ms of latency per sentence (waiting for the sentence-ending
         # punctuation token from the LLM). Setting
@@ -332,22 +325,39 @@ class CartesiaTTSService(AudioContextTTSService):
         # if we're interrupted. Cartesia gives us word-by-word timestamps. We
         # can use those to generate text frames ourselves aligned with the
         # playout timing of the audio!
-        _params = params or CartesiaTTSService.InputParams()
 
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = CartesiaTTSSettings(
-            model=model or "sonic-3",
-            voice=voice_id,
+            model="sonic-3",
             output_container=container,
             output_encoding=encoding,
             output_sample_rate=0,
-            language=(
-                self.language_to_service_language(_params.language) if _params.language else None
-            ),
-            speed=_params.speed,
-            emotion=_params.emotion,
-            generation_config=_params.generation_config,
-            pronunciation_dict_id=_params.pronunciation_dict_id,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", CartesiaTTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", CartesiaTTSSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", CartesiaTTSSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = self.language_to_service_language(params.language)
+                if params.speed is not None:
+                    default_settings.speed = params.speed
+                if params.emotion is not None:
+                    default_settings.emotion = params.emotion
+                if params.generation_config is not None:
+                    default_settings.generation_config = params.generation_config
+                if params.pronunciation_dict_id is not None:
+                    default_settings.pronunciation_dict_id = params.pronunciation_dict_id
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -781,29 +791,38 @@ class CartesiaHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "CartesiaTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "CartesiaTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "CartesiaTTSSettings")
-
-        _params = params or CartesiaHttpTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = CartesiaTTSSettings(
-            model=model or "sonic-3",
-            voice=voice_id,
+            model="sonic-3",
             output_container=container,
             output_encoding=encoding,
             output_sample_rate=0,
-            language=(
-                self.language_to_service_language(_params.language) if _params.language else None
-            ),
-            speed=_params.speed,
-            emotion=_params.emotion,
-            generation_config=_params.generation_config,
-            pronunciation_dict_id=_params.pronunciation_dict_id,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", CartesiaTTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", CartesiaTTSSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", CartesiaTTSSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = self.language_to_service_language(params.language)
+                if params.speed is not None:
+                    default_settings.speed = params.speed
+                if params.emotion is not None:
+                    default_settings.emotion = params.emotion
+                if params.generation_config is not None:
+                    default_settings.generation_config = params.generation_config
+                if params.pronunciation_dict_id is not None:
+                    default_settings.pronunciation_dict_id = params.pronunciation_dict_id
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

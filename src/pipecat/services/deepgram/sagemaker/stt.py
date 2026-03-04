@@ -14,7 +14,7 @@ languages, and various Deepgram features.
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -32,8 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.deepgram.stt import DeepgramSTTSettings
-from pipecat.services.settings import STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -51,13 +50,14 @@ except ModuleNotFoundError as e:
 
 
 @dataclass
-class DeepgramSageMakerSTTSettings(_DeepgramSTTSettingsBase):
+class DeepgramSageMakerSTTSettings(STTSettings):
     """Settings for the Deepgram SageMaker STT service.
 
-    See ``_DeepgramSTTSettingsBase`` for full documentation.
+    Parameters:
+        live_options: Deepgram LiveOptions for the SageMaker connection.
     """
 
-    pass
+    live_options: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramSageMakerSTTService(STTService):
@@ -130,13 +130,29 @@ class DeepgramSageMakerSTTService(STTService):
             punctuate=True,
         )
 
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = DeepgramSageMakerSTTSettings(
-            model=default_options.model,
-            language=default_options.language,
+            model="nova-3",
+            language=Language.EN,
             live_options=default_options,
         )
-        if live_options:
-            default_settings._merge_live_options_delta(live_options)
+
+        # 2. (no deprecated direct args like model= for this service)
+
+        # 3. Apply live_options overrides — only if settings not provided
+        if live_options is not None:
+            _warn_deprecated_param("live_options", DeepgramSageMakerSTTSettings)
+            if not settings:
+                # Merge user live_options onto defaults
+                merged_dict = {**default_options.to_dict(), **live_options.to_dict()}
+                merged_live_options = LiveOptions(**merged_dict)
+                default_settings.live_options = merged_live_options
+                if hasattr(live_options, "model") and live_options.model is not None:
+                    default_settings.model = live_options.model
+                if hasattr(live_options, "language") and live_options.language is not None:
+                    default_settings.language = live_options.language
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

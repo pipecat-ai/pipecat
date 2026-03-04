@@ -153,11 +153,7 @@ class GrokRealtimeLLMService(LLMService):
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        if session_properties is not None:
-            _warn_deprecated_param(
-                "session_properties", "GrokRealtimeLLMSettings", "session_properties"
-            )
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GrokRealtimeLLMSettings(
             model=None,
             temperature=None,
@@ -169,8 +165,17 @@ class GrokRealtimeLLMService(LLMService):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            session_properties=session_properties or events.SessionProperties(),
+            session_properties=events.SessionProperties(),
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if session_properties is not None:
+            _warn_deprecated_param(
+                "session_properties", GrokRealtimeLLMSettings, "session_properties"
+            )
+            default_settings.session_properties = session_properties
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

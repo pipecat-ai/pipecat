@@ -509,26 +509,44 @@ class GoogleSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        if params is not None:
-            _warn_deprecated_param("params", "GoogleSTTSettings")
-
-        _params = params or GoogleSTTService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GoogleSTTSettings(
             language=None,
-            languages=list(_params.language_list),
+            languages=[Language.EN_US],
             language_codes=None,
-            model=_params.model,
-            use_separate_recognition_per_channel=_params.use_separate_recognition_per_channel,
-            enable_automatic_punctuation=_params.enable_automatic_punctuation,
-            enable_spoken_punctuation=_params.enable_spoken_punctuation,
-            enable_spoken_emojis=_params.enable_spoken_emojis,
-            profanity_filter=_params.profanity_filter,
-            enable_word_time_offsets=_params.enable_word_time_offsets,
-            enable_word_confidence=_params.enable_word_confidence,
-            enable_interim_results=_params.enable_interim_results,
-            enable_voice_activity_events=_params.enable_voice_activity_events,
+            model="latest_long",
+            use_separate_recognition_per_channel=False,
+            enable_automatic_punctuation=True,
+            enable_spoken_punctuation=False,
+            enable_spoken_emojis=False,
+            profanity_filter=False,
+            enable_word_time_offsets=False,
+            enable_word_confidence=False,
+            enable_interim_results=True,
+            enable_voice_activity_events=False,
         )
+
+        # 2. No direct init arg overrides
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GoogleSTTSettings)
+            if not settings:
+                default_settings.languages = list(params.language_list)
+                default_settings.model = params.model
+                default_settings.use_separate_recognition_per_channel = (
+                    params.use_separate_recognition_per_channel
+                )
+                default_settings.enable_automatic_punctuation = params.enable_automatic_punctuation
+                default_settings.enable_spoken_punctuation = params.enable_spoken_punctuation
+                default_settings.enable_spoken_emojis = params.enable_spoken_emojis
+                default_settings.profanity_filter = params.profanity_filter
+                default_settings.enable_word_time_offsets = params.enable_word_time_offsets
+                default_settings.enable_word_confidence = params.enable_word_confidence
+                default_settings.enable_interim_results = params.enable_interim_results
+                default_settings.enable_voice_activity_events = params.enable_voice_activity_events
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

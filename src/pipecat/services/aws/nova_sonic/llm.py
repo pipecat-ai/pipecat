@@ -270,30 +270,40 @@ class AWSNovaSonicLLMService(LLMService):
 
             **kwargs: Additional arguments passed to the parent LLMService.
         """
-        # Check for deprecated parameter usage
-        if model != "amazon.nova-2-sonic-v1:0":
-            _warn_deprecated_param("model", "AWSNovaSonicLLMSettings", "model")
-        if voice_id != "matthew":
-            _warn_deprecated_param("voice_id", "AWSNovaSonicLLMSettings", "voice_id")
-        if params is not None:
-            _warn_deprecated_param("params", "AWSNovaSonicLLMSettings")
-
-        _params = params or Params()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AWSNovaSonicLLMSettings(
-            model=model,
-            voice_id=voice_id,
-            temperature=_params.temperature,
-            max_tokens=_params.max_tokens,
-            top_p=_params.top_p,
+            model="amazon.nova-2-sonic-v1:0",
+            voice_id="matthew",
+            temperature=0.7,
+            max_tokens=1024,
+            top_p=0.9,
             top_k=None,
             frequency_penalty=None,
             presence_penalty=None,
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            endpointing_sensitivity=_params.endpointing_sensitivity,
+            endpointing_sensitivity=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model != "amazon.nova-2-sonic-v1:0":
+            _warn_deprecated_param("model", AWSNovaSonicLLMSettings, "model")
+            default_settings.model = model
+        if voice_id != "matthew":
+            _warn_deprecated_param("voice_id", AWSNovaSonicLLMSettings, "voice_id")
+            default_settings.voice_id = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AWSNovaSonicLLMSettings)
+            if not settings:
+                default_settings.temperature = params.temperature
+                default_settings.max_tokens = params.max_tokens
+                default_settings.top_p = params.top_p
+                default_settings.endpointing_sensitivity = params.endpointing_sensitivity
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -308,12 +318,13 @@ class AWSNovaSonicLLMService(LLMService):
         self._client: Optional[BedrockRuntimeClient] = None
 
         # Audio I/O config (hardware settings, not runtime-tunable)
-        self._input_sample_rate = _params.input_sample_rate
-        self._input_sample_size = _params.input_sample_size
-        self._input_channel_count = _params.input_channel_count
-        self._output_sample_rate = _params.output_sample_rate
-        self._output_sample_size = _params.output_sample_size
-        self._output_channel_count = _params.output_channel_count
+        _audio_params = params or Params()
+        self._input_sample_rate = _audio_params.input_sample_rate
+        self._input_sample_size = _audio_params.input_sample_size
+        self._input_channel_count = _audio_params.input_channel_count
+        self._output_sample_rate = _audio_params.output_sample_rate
+        self._output_sample_size = _audio_params.output_sample_size
+        self._output_channel_count = _audio_params.output_channel_count
         self._system_instruction = system_instruction
         self._tools = tools
 

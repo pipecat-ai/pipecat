@@ -12,7 +12,7 @@ for streaming text-to-speech synthesis.
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, ClassVar, Dict, Mapping, Optional
+from typing import Any, AsyncGenerator, ClassVar, Dict, Mapping, Optional, Self
 
 import aiohttp
 from loguru import logger
@@ -123,7 +123,7 @@ class MiniMaxTTSSettings(TTSSettings):
     _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
 
     @classmethod
-    def from_mapping(cls, settings: Mapping[str, Any]) -> "MiniMaxTTSSettings":
+    def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
         """Construct settings from a plain dict, destructuring legacy nested dicts.
 
         Handles ``voice_setting`` (with ``vol`` → ``volume`` rename) and
@@ -245,74 +245,82 @@ class MiniMaxHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "MiniMaxTTSSettings", "model")
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "MiniMaxTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "MiniMaxTTSSettings")
-
-        _params = params or MiniMaxHttpTTSService.InputParams()
-
-        # Resolve language boost
-        language_boost = None
-        if _params.language:
-            service_lang = self.language_to_service_language(_params.language)
-            if service_lang:
-                language_boost = service_lang
-
-        # Resolve emotion
-        emotion = None
-        if _params.emotion:
-            supported_emotions = [
-                "happy",
-                "sad",
-                "angry",
-                "fearful",
-                "disgusted",
-                "surprised",
-                "neutral",
-                "fluent",
-            ]
-            if _params.emotion in supported_emotions:
-                emotion = _params.emotion
-            else:
-                logger.warning(
-                    f"Unsupported emotion: {_params.emotion}. Supported emotions: {supported_emotions}"
-                )
-
-        # Resolve text_normalization
-        text_normalization = None
-        if _params.english_normalization is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter `english_normalization` is deprecated and will be removed in a future version. Use `text_normalization` instead.",
-                    DeprecationWarning,
-                )
-            text_normalization = _params.english_normalization
-        if _params.text_normalization is not None:
-            text_normalization = _params.text_normalization
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = MiniMaxTTSSettings(
-            model=model or "speech-02-turbo",
-            voice=voice_id or "Calm_Woman",
+            model="speech-02-turbo",
+            voice="Calm_Woman",
             language=None,
             stream=True,
-            speed=_params.speed,
-            volume=_params.volume,
-            pitch=_params.pitch,
-            language_boost=language_boost,
-            emotion=emotion,
-            text_normalization=text_normalization,
-            latex_read=_params.latex_read,
+            speed=1.0,
+            volume=1.0,
+            pitch=0,
+            language_boost=None,
+            emotion=None,
+            text_normalization=None,
+            latex_read=None,
             audio_bitrate=128000,
             audio_format="pcm",
             audio_channel=1,
             audio_sample_rate=0,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", MiniMaxTTSSettings, "model")
+            default_settings.model = model
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", MiniMaxTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", MiniMaxTTSSettings)
+            if not settings:
+                default_settings.speed = params.speed
+                default_settings.volume = params.volume
+                default_settings.pitch = params.pitch
+                default_settings.latex_read = params.latex_read
+
+                # Resolve language boost
+                if params.language:
+                    service_lang = self.language_to_service_language(params.language)
+                    if service_lang:
+                        default_settings.language_boost = service_lang
+
+                # Resolve emotion
+                if params.emotion:
+                    supported_emotions = [
+                        "happy",
+                        "sad",
+                        "angry",
+                        "fearful",
+                        "disgusted",
+                        "surprised",
+                        "neutral",
+                        "fluent",
+                    ]
+                    if params.emotion in supported_emotions:
+                        default_settings.emotion = params.emotion
+                    else:
+                        logger.warning(
+                            f"Unsupported emotion: {params.emotion}. Supported emotions: {supported_emotions}"
+                        )
+
+                # Resolve text_normalization
+                if params.english_normalization is not None:
+                    import warnings
+
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("always")
+                        warnings.warn(
+                            "Parameter `english_normalization` is deprecated and will be removed in a future version. Use `text_normalization` instead.",
+                            DeprecationWarning,
+                        )
+                    default_settings.text_normalization = params.english_normalization
+                if params.text_normalization is not None:
+                    default_settings.text_normalization = params.text_normalization
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

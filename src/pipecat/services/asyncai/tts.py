@@ -10,7 +10,7 @@ import asyncio
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Mapping, Optional
+from typing import Any, AsyncGenerator, Mapping, Optional, Self
 
 import aiohttp
 from loguru import logger
@@ -88,7 +88,7 @@ class AsyncAITTSSettings(TTSSettings):
     output_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
-    def from_mapping(cls, settings: Mapping[str, Any]) -> "AsyncAITTSSettings":
+    def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
         """Construct settings from a plain dict, destructuring legacy nested ``output_format``."""
         flat = dict(settings)
         nested = flat.pop("output_format", None)
@@ -171,25 +171,33 @@ class AsyncAITTSService(AudioContextTTSService):
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to the parent service.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "AsyncAITTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "AsyncAITTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "AsyncAITTSSettings")
-
-        _params = params or AsyncAITTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AsyncAITTSSettings(
-            model=model or "async_flash_v1.0",
-            voice=voice_id,
+            model="async_flash_v1.0",
+            voice=None,
+            language=None,
             output_container=container,
             output_encoding=encoding,
             output_sample_rate=0,
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", AsyncAITTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", AsyncAITTSSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AsyncAITTSSettings)
+            if not settings:
+                default_settings.language = (
+                    self.language_to_service_language(params.language) if params.language else None
+                )
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -554,25 +562,33 @@ class AsyncAIHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "AsyncAITTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "AsyncAITTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "AsyncAITTSSettings")
-
-        _params = params or AsyncAIHttpTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AsyncAITTSSettings(
-            model=model or "async_flash_v1.0",
-            voice=voice_id,
+            model="async_flash_v1.0",
+            voice=None,
+            language=None,
             output_container=container,
             output_encoding=encoding,
             output_sample_rate=0,
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", AsyncAITTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", AsyncAITTSSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AsyncAITTSSettings)
+            if not settings:
+                default_settings.language = (
+                    self.language_to_service_language(params.language) if params.language else None
+                )
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -45,10 +45,15 @@ class GroqLLMService(OpenAILLMService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = OpenAILLMSettings(model="llama-3.3-70b-versatile")
 
-        default_settings = OpenAILLMSettings(model=model or "llama-3.3-70b-versatile")
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            default_settings.model = model
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

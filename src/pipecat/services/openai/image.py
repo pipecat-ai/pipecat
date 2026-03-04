@@ -70,10 +70,15 @@ class OpenAIImageGenService(ImageGenService):
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "OpenAIImageGenSettings", "model")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = OpenAIImageGenSettings(model="dall-e-3")
 
-        default_settings = OpenAIImageGenSettings(model=model or "dall-e-3")
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", OpenAIImageGenSettings, "model")
+            default_settings.model = model
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -150,34 +150,43 @@ class OpenAITTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to TTSService.
         """
-        if voice is not None:
-            _warn_deprecated_param("voice", "OpenAITTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "OpenAITTSSettings", "model")
-        if instructions is not None:
-            _warn_deprecated_param("instructions", "OpenAITTSSettings", "instructions")
-        if speed is not None:
-            _warn_deprecated_param("speed", "OpenAITTSSettings", "speed")
-        if params is not None:
-            _warn_deprecated_param("params", "OpenAITTSSettings")
-
         if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
             logger.warning(
                 f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
 
-        _params = params or OpenAITTSService.InputParams()
-        _instructions = instructions if instructions is not None else _params.instructions
-        _speed = speed if speed is not None else _params.speed
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = OpenAITTSSettings(
-            model=model or "gpt-4o-mini-tts",
-            voice=voice or "alloy",
+            model="gpt-4o-mini-tts",
+            voice="alloy",
             language=None,
-            instructions=_instructions,
-            speed=_speed,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice is not None:
+            _warn_deprecated_param("voice", OpenAITTSSettings, "voice")
+            default_settings.voice = voice
+        if model is not None:
+            _warn_deprecated_param("model", OpenAITTSSettings, "model")
+            default_settings.model = model
+        if instructions is not None:
+            _warn_deprecated_param("instructions", OpenAITTSSettings, "instructions")
+            default_settings.instructions = instructions
+        if speed is not None:
+            _warn_deprecated_param("speed", OpenAITTSSettings, "speed")
+            default_settings.speed = speed
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", OpenAITTSSettings)
+            if not settings:
+                if params.instructions is not None:
+                    default_settings.instructions = params.instructions
+                if params.speed is not None:
+                    default_settings.speed = params.speed
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

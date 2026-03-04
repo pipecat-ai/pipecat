@@ -102,10 +102,15 @@ class MoondreamService(VisionService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent VisionService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "MoondreamSettings", "model")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = MoondreamSettings(model="vikhyatk/moondream2")
 
-        default_settings = MoondreamSettings(model=model or "vikhyatk/moondream2")
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", MoondreamSettings, "model")
+            default_settings.model = model
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
