@@ -30,6 +30,10 @@ from pipecat.frames.frames import (
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.utils.enums import EndTaskReason
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from pipecat.serializers.call_strategies import TransferStrategy, HangupStrategy
+
 
 class TwilioFrameSerializer(FrameSerializer):
     """Serializer for Twilio Media Streams WebSocket protocol.
@@ -65,6 +69,8 @@ class TwilioFrameSerializer(FrameSerializer):
         auth_token: Optional[str] = None,
         region: Optional[str] = None,
         edge: Optional[str] = None,
+        transfer_strategy: Optional["TransferStrategy"] = None,
+        hangup_strategy: Optional["HangupStrategy"] = None,
         params: Optional[InputParams] = None,
     ):
         """Initialize the TwilioFrameSerializer.
@@ -76,6 +82,8 @@ class TwilioFrameSerializer(FrameSerializer):
             auth_token: Twilio auth token (required for auto hang-up).
             region: Twilio region (e.g., "au1", "ie1"). Must be specified with edge.
             edge: Twilio edge location (e.g., "sydney", "dublin"). Must be specified with region.
+            transfer_strategy: Strategy for handling call transfers.
+            hangup_strategy: Strategy for handling call hangups.
             params: Configuration parameters.
         """
         super().__init__(params or TwilioFrameSerializer.InputParams())
@@ -111,6 +119,8 @@ class TwilioFrameSerializer(FrameSerializer):
         self._auth_token = auth_token
         self._region = region
         self._edge = edge
+        self._transfer_strategy = transfer_strategy
+        self._hangup_strategy = hangup_strategy
 
         self._twilio_sample_rate = self._params.twilio_sample_rate
         self._sample_rate = 0  # Pipeline input rate
@@ -148,10 +158,34 @@ class TwilioFrameSerializer(FrameSerializer):
         if isinstance(frame, (EndFrame, CancelFrame)):
             if frame_reason == EndTaskReason.TRANSFER_CALL.value and not self._transfer_attempted:
                 self._transfer_attempted = True
-                await self._transfer_call()
+                if self._transfer_strategy:
+                    context = {
+                        "call_sid": self._call_sid,
+                        "account_sid": self._account_sid,
+                        "auth_token": self._auth_token,
+                        "region": self._region,
+                        "edge": self._edge,
+                    }
+                    success = await self._transfer_strategy.execute_transfer(context)
+                    if not success:
+                        logger.error(f"Transfer strategy failed for call {self._call_sid}")
+                else:
+                    logger.warning(f"No transfer strategy configured for call {self._call_sid}")
             elif self._params.auto_hang_up and not self._hangup_attempted:
                 self._hangup_attempted = True
-                await self._hang_up_call()
+                if self._hangup_strategy:
+                    context = {
+                        "call_sid": self._call_sid,
+                        "account_sid": self._account_sid,
+                        "auth_token": self._auth_token,
+                        "region": self._region,
+                        "edge": self._edge,
+                    }
+                    success = await self._hangup_strategy.execute_hangup(context)
+                    if not success:
+                        logger.error(f"Hangup strategy failed for call {self._call_sid}")
+                else:
+                    logger.warning(f"No hangup strategy configured for call {self._call_sid}")
                 return None
         elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
@@ -183,111 +217,7 @@ class TwilioFrameSerializer(FrameSerializer):
         # Return None for unhandled frames
         return None
 
-    async def _hang_up_call(self):
-        """Hang up the Twilio call using Twilio's REST API."""
-        try:
-            import aiohttp
 
-            account_sid = self._account_sid
-            auth_token = self._auth_token
-            call_sid = self._call_sid
-            region = self._region
-            edge = self._edge
-
-            region_prefix = f"{region}." if region else ""
-            edge_prefix = f"{edge}." if edge else ""
-
-            # Twilio API endpoint for updating calls
-            endpoint = f"https://api.{edge_prefix}{region_prefix}twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
-
-            # Create basic auth from account_sid and auth_token
-            auth = aiohttp.BasicAuth(account_sid, auth_token)
-
-            # Parameters to set the call status to "completed" (hang up)
-            params = {"Status": "completed"}
-
-            # Make the POST request to update the call
-            async with aiohttp.ClientSession() as session:
-                async with session.post(endpoint, auth=auth, data=params) as response:
-                    if response.status == 200:
-                        logger.info(f"Successfully terminated Twilio call {call_sid}")
-                    elif response.status == 404:
-                        # Handle the case where the call has already ended
-                        # Error code 20404: "The requested resource was not found"
-                        # Source: https://www.twilio.com/docs/errors/20404
-                        try:
-                            error_data = await response.json()
-                            if error_data.get("code") == 20404:
-                                logger.debug(f"Twilio call {call_sid} was already terminated")
-                                return
-                        except Exception:
-                            pass  # Fall through to log the raw error
-
-                        # Log other 404 errors
-                        error_text = await response.text()
-                        logger.error(
-                            f"Failed to terminate Twilio call {call_sid}: "
-                            f"Status {response.status}, Response: {error_text}"
-                        )
-                    else:
-                        # Log other errors
-                        error_text = await response.text()
-                        logger.error(
-                            f"Failed to terminate Twilio call {call_sid}: "
-                            f"Status {response.status}, Response: {error_text}"
-                        )
-
-        except Exception as e:
-            logger.error(f"Failed to hang up Twilio call: {e}")
-
-    async def _transfer_call(self):
-        """Transfer the Twilio call to a conference using Twilio's REST API."""
-        try:
-            account_sid = self._account_sid
-            auth_token = self._auth_token
-            call_sid = self._call_sid
-            region = self._region
-            edge = self._edge
-
-            region_prefix = f"{region}." if region else ""
-            edge_prefix = f"{edge}." if edge else ""
-
-            # Twilio API endpoint for updating calls
-            endpoint = f"https://api.{edge_prefix}{region_prefix}twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
-
-            # Create basic auth from account_sid and auth_token
-            auth = aiohttp.BasicAuth(account_sid, auth_token)
-
-            conference_name = f"transfer-{call_sid}"
-            twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Dial>
-        <Conference endConferenceOnExit="true">{conference_name}</Conference>
-    </Dial>
-</Response>"""
-
-            logger.debug(f"Transferring call to conference: {conference_name}")
-            # Make the POST request to transfer the call
-            async with aiohttp.ClientSession() as session:
-                async with session.post(endpoint, auth=auth, data={"Twiml": twiml}) as response:
-                    response_text = await response.text()
-
-                    if response.status == 200:
-                        logger.info(
-                            f"Successfully transferred Twilio call {call_sid} to conference {conference_name}"
-                        )
-                    elif response.status == 404:
-                        logger.error(
-                            f"Failed to transfer Twilio call {call_sid}: Call not found (404)"
-                        )
-                    else:
-                        logger.error(
-                            f"Failed to transfer Twilio call {call_sid} to conference {conference_name}: "
-                            f"Status {response.status}, Response: {response_text}"
-                        )
-
-        except Exception as e:
-            logger.error(f"Failed to transfer Twilio call {call_sid}: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Twilio WebSocket data to Pipecat frames.

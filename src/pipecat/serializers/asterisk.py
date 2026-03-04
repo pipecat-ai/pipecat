@@ -20,6 +20,11 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.utils.enums import EndTaskReason
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from pipecat.serializers.call_strategies import TransferStrategy, HangupStrategy
 
 
 class AsteriskFrameSerializer(FrameSerializer):
@@ -52,6 +57,8 @@ class AsteriskFrameSerializer(FrameSerializer):
         ari_endpoint: str,
         app_name: str,
         app_password: str,
+        transfer_strategy: Optional["TransferStrategy"] = None,
+        hangup_strategy: Optional["HangupStrategy"] = None,
         params: Optional[InputParams] = None,
     ):
         """Initialize the AsteriskFrameSerializer.
@@ -61,6 +68,8 @@ class AsteriskFrameSerializer(FrameSerializer):
             ari_endpoint: ARI REST endpoint URL (e.g. http://localhost:8088).
             app_name: ARI application name for authentication.
             app_password: ARI application password for authentication.
+            transfer_strategy: Strategy for handling call transfers.
+            hangup_strategy: Strategy for handling call hangups.
             params: Configuration parameters.
         """
         super().__init__(params or AsteriskFrameSerializer.InputParams())
@@ -69,6 +78,8 @@ class AsteriskFrameSerializer(FrameSerializer):
         self._ari_endpoint = ari_endpoint
         self._app_name = app_name
         self._app_password = app_password
+        self._transfer_strategy = transfer_strategy
+        self._hangup_strategy = hangup_strategy
 
         self._asterisk_sample_rate = self._params.asterisk_sample_rate
         self._sample_rate = 0  # Pipeline input rate, set in setup()
@@ -76,6 +87,7 @@ class AsteriskFrameSerializer(FrameSerializer):
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
+        self._transfer_attempted = False
 
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
@@ -96,14 +108,44 @@ class AsteriskFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as bytes (ulaw audio) or None if the frame isn't handled.
         """
-        if (
-            self._params.auto_hang_up
-            and not self._hangup_attempted
-            and isinstance(frame, (EndFrame, CancelFrame))
-        ):
-            self._hangup_attempted = True
-            await self._hang_up_call()
-            return None
+        if isinstance(frame, (EndFrame, CancelFrame)):
+            frame_reason = getattr(frame, "reason", None)
+            logger.debug(f"Processing {type(frame).__name__} with reason: {frame_reason}")
+
+            if frame_reason == EndTaskReason.TRANSFER_CALL.value and not self._transfer_attempted:
+                self._transfer_attempted = True
+                if self._transfer_strategy:
+                    context = {
+                        "channel_id": self._channel_id,
+                        "ari_endpoint": self._ari_endpoint,
+                        "app_name": self._app_name,
+                        "app_password": self._app_password,
+                    }
+                    success = await self._transfer_strategy.execute_transfer(context)
+                    if not success:
+                        logger.error(f"Transfer strategy failed for channel {self._channel_id}")
+                else:
+                    logger.warning(f"No transfer strategy configured for channel {self._channel_id}")
+                return None
+            elif (
+                self._params.auto_hang_up
+                and not self._hangup_attempted
+                and frame_reason != EndTaskReason.TRANSFER_CALL.value
+            ):
+                self._hangup_attempted = True
+                if self._hangup_strategy:
+                    context = {
+                        "channel_id": self._channel_id,
+                        "ari_endpoint": self._ari_endpoint,
+                        "app_name": self._app_name,
+                        "app_password": self._app_password,
+                    }
+                    success = await self._hangup_strategy.execute_hangup(context)
+                    if not success:
+                        logger.error(f"Hangup strategy failed for channel {self._channel_id}")
+                else:
+                    logger.warning(f"No hangup strategy configured for channel {self._channel_id}")
+                return None
         elif isinstance(frame, InterruptionFrame):
             # Asterisk doesn't have a buffer clear command over the audio websocket.
             # Returning None; the transport will stop sending audio.
@@ -163,33 +205,3 @@ class AsteriskFrameSerializer(FrameSerializer):
                 logger.warning(f"Failed to parse JSON message from Asterisk: {data}")
                 return None
 
-    async def _hang_up_call(self):
-        """Hang up the Asterisk channel via ARI REST API."""
-        try:
-            import aiohttp
-            from aiohttp import BasicAuth
-
-            if not self._channel_id or not self._ari_endpoint:
-                logger.warning(
-                    "Cannot hang up Asterisk channel: missing channel_id or ari_endpoint"
-                )
-                return
-
-            endpoint = f"{self._ari_endpoint}/ari/channels/{self._channel_id}"
-            auth = BasicAuth(self._app_name, self._app_password)
-
-            async with aiohttp.ClientSession() as session:
-                async with session.delete(endpoint, auth=auth) as response:
-                    if response.status in (200, 204):
-                        logger.info(f"Successfully terminated Asterisk channel {self._channel_id}")
-                    elif response.status == 404:
-                        logger.debug(f"Asterisk channel {self._channel_id} was already terminated")
-                    else:
-                        error_text = await response.text()
-                        logger.error(
-                            f"Failed to terminate Asterisk channel {self._channel_id}: "
-                            f"Status {response.status}, Response: {error_text}"
-                        )
-
-        except Exception as e:
-            logger.exception(f"Failed to hang up Asterisk channel: {e}")
