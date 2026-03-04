@@ -6,6 +6,7 @@
 
 """SambaNova's Speech-to-Text service implementation for real-time transcription."""
 
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from loguru import logger
@@ -18,6 +19,13 @@ from pipecat.services.whisper.base_stt import (
     Transcription,
 )
 from pipecat.transcriptions.language import Language
+
+
+@dataclass
+class SambaNovaSTTSettings(BaseWhisperSTTSettings):
+    """Settings for the SambaNova STT service."""
+
+    pass
 
 
 class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
@@ -36,7 +44,7 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
         language: Optional[Language] = None,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
-        settings: Optional[BaseWhisperSTTSettings] = None,
+        settings: Optional[SambaNovaSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = SAMBANOVA_TTFS_P99,
         **kwargs: Any,
     ) -> None:
@@ -46,24 +54,24 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
             model: Whisper model to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=BaseWhisperSTTSettings(model=...)`` instead.
+                    Use ``settings=SambaNovaSTTSettings(model=...)`` instead.
 
             api_key: SambaNova API key. Defaults to None.
             base_url: API base URL. Defaults to "https://api.sambanova.ai/v1".
             language: Language of the audio input.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=BaseWhisperSTTSettings(language=...)`` instead.
+                    Use ``settings=SambaNovaSTTSettings(language=...)`` instead.
 
             prompt: Optional text to guide the model's style or continue a previous segment.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=BaseWhisperSTTSettings(prompt=...)`` instead.
+                    Use ``settings=SambaNovaSTTSettings(prompt=...)`` instead.
 
             temperature: Optional sampling temperature between 0 and 1.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=BaseWhisperSTTSettings(temperature=...)`` instead.
+                    Use ``settings=SambaNovaSTTSettings(temperature=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -72,24 +80,25 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
             **kwargs: Additional arguments passed to `pipecat.services.whisper.base_stt.BaseWhisperSTTService`.
         """
         # --- 1. Hardcoded defaults ---
-        default_settings = BaseWhisperSTTSettings(
+        default_settings = SambaNovaSTTSettings(
             model="Whisper-Large-v3",
             language=self.language_to_service_language(Language.EN),
-            base_url=base_url,
+            prompt=None,
+            temperature=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", BaseWhisperSTTSettings, "model")
+            _warn_deprecated_param("model", SambaNovaSTTSettings, "model")
             default_settings.model = model
         if language is not None:
-            _warn_deprecated_param("language", BaseWhisperSTTSettings, "language")
+            _warn_deprecated_param("language", SambaNovaSTTSettings, "language")
             default_settings.language = self.language_to_service_language(language)
         if prompt is not None:
-            _warn_deprecated_param("prompt", BaseWhisperSTTSettings, "prompt")
+            _warn_deprecated_param("prompt", SambaNovaSTTSettings, "prompt")
             default_settings.prompt = prompt
         if temperature is not None:
-            _warn_deprecated_param("temperature", BaseWhisperSTTSettings, "temperature")
+            _warn_deprecated_param("temperature", SambaNovaSTTSettings, "temperature")
             default_settings.temperature = temperature
 
         # --- 3. (no params object for this service) ---
@@ -107,7 +116,7 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
         )
 
     async def _transcribe(self, audio: bytes) -> Transcription:
-        assert self._language is not None  # Assigned in the BaseWhisperSTTService class
+        assert self._settings.language is not None
 
         if self._include_prob_metrics:
             # https://docs.sambanova.ai/docs/en/features/audio#request-parameters
@@ -122,13 +131,13 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
             "file": ("audio.wav", audio, "audio/wav"),
             "model": self._settings.model,
             "response_format": "json",
-            "language": self._language,
+            "language": self._settings.language,
         }
 
-        if self._prompt is not None:
-            kwargs["prompt"] = self._prompt
+        if self._settings.prompt is not None:
+            kwargs["prompt"] = self._settings.prompt
 
-        if self._temperature is not None:
-            kwargs["temperature"] = self._temperature
+        if self._settings.temperature is not None:
+            kwargs["temperature"] = self._settings.temperature
 
         return await self._client.audio.transcriptions.create(**kwargs)

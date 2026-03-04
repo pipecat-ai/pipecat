@@ -179,13 +179,9 @@ class WhisperSTTSettings(STTSettings):
     """Settings for the local Whisper (Faster Whisper) STT service.
 
     Parameters:
-        device: Inference device ('cpu', 'cuda', or 'auto').
-        compute_type: Compute type for inference ('default', 'int8', etc.).
         no_speech_prob: Probability threshold for filtering non-speech segments.
     """
 
-    device: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    compute_type: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     no_speech_prob: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -217,8 +213,8 @@ class WhisperSTTService(SegmentedSTTService):
         self,
         *,
         model: Optional[str | Model] = None,
-        device: Optional[str] = None,
-        compute_type: Optional[str] = None,
+        device: str = "auto",
+        compute_type: str = "default",
         no_speech_prob: Optional[float] = None,
         language: Optional[Language] = None,
         settings: Optional[WhisperSTTSettings] = None,
@@ -233,15 +229,9 @@ class WhisperSTTService(SegmentedSTTService):
                     Use ``settings=WhisperSTTSettings(model=...)`` instead.
 
             device: The device to run inference on ('cpu', 'cuda', or 'auto').
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=WhisperSTTSettings(device=...)`` instead.
-
-            compute_type: The compute type for inference ('default', 'int8', 'int8_float16', etc.).
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=WhisperSTTSettings(compute_type=...)`` instead.
-
+                Defaults to ``"auto"``.
+            compute_type: The compute type for inference ('default', 'int8',
+                'int8_float16', etc.). Defaults to ``"default"``.
             no_speech_prob: Probability threshold for filtering out non-speech segments.
 
                 .. deprecated:: 0.0.105
@@ -260,8 +250,6 @@ class WhisperSTTService(SegmentedSTTService):
         default_settings = WhisperSTTSettings(
             model=Model.DISTIL_MEDIUM_EN.value,
             language=Language.EN,
-            device="auto",
-            compute_type="default",
             no_speech_prob=0.4,
         )
 
@@ -269,12 +257,6 @@ class WhisperSTTService(SegmentedSTTService):
         if model is not None:
             _warn_deprecated_param("model", WhisperSTTSettings, "model")
             default_settings.model = model if isinstance(model, str) else model.value
-        if device is not None:
-            _warn_deprecated_param("device", WhisperSTTSettings, "device")
-            default_settings.device = device
-        if compute_type is not None:
-            _warn_deprecated_param("compute_type", WhisperSTTSettings, "compute_type")
-            default_settings.compute_type = compute_type
         if no_speech_prob is not None:
             _warn_deprecated_param("no_speech_prob", WhisperSTTSettings, "no_speech_prob")
             default_settings.no_speech_prob = no_speech_prob
@@ -292,9 +274,11 @@ class WhisperSTTService(SegmentedSTTService):
             settings=default_settings,
             **kwargs,
         )
-        self._device: str = self._settings.device
-        self._compute_type = self._settings.compute_type
-        self._no_speech_prob = self._settings.no_speech_prob
+
+        # Init-only inference config
+        self._device = device
+        self._compute_type = compute_type
+
         self._model: Optional[WhisperModel] = None
 
         self._load()
@@ -373,7 +357,7 @@ class WhisperSTTService(SegmentedSTTService):
         )
         text: str = ""
         for segment in segments:
-            if segment.no_speech_prob < self._no_speech_prob:
+            if segment.no_speech_prob < self._settings.no_speech_prob:
                 text += f"{segment.text} "
 
         await self.stop_processing_metrics()
@@ -471,9 +455,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             **kwargs,
         )
 
-        self._no_speech_prob = self._settings.no_speech_prob
-        self._temperature = self._settings.temperature
-
         # No need to call _load() as MLX Whisper loads models on demand
 
     @override
@@ -514,7 +495,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 mlx_whisper.transcribe,
                 audio_float,
                 path_or_hf_repo=self._settings.model,
-                temperature=self._temperature,
+                temperature=self._settings.temperature,
                 language=self._settings.language,
             )
             text: str = ""
@@ -523,7 +504,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 if segment.get("compression_ratio", None) == 0.5555555555555556:
                     continue
 
-                if segment.get("no_speech_prob", 0.0) < self._no_speech_prob:
+                if segment.get("no_speech_prob", 0.0) < self._settings.no_speech_prob:
                     text += f"{segment.get('text', '')} "
 
             if len(text.strip()) == 0:

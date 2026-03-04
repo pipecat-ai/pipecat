@@ -11,7 +11,7 @@ Speech SDK for real-time audio transcription.
 """
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import STTSettings, _warn_deprecated_param
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -53,15 +53,9 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AzureSTTSettings(STTSettings):
-    """Settings for the Azure STT service.
+    """Settings for the Azure STT service."""
 
-    Parameters:
-        region: Azure region for the Speech service.
-        sample_rate: Audio sample rate in Hz.
-    """
-
-    region: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class AzureSTTService(STTService):
@@ -110,9 +104,7 @@ class AzureSTTService(STTService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = AzureSTTSettings(
             model=None,
-            region=region,
             language=language_to_azure_language(Language.EN_US),
-            sample_rate=sample_rate,
         )
 
         # 2. Apply direct init arg overrides (deprecated)

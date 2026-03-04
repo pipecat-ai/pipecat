@@ -100,7 +100,6 @@ class SpeechmaticsSTTSettings(STTSettings):
         focus_mode: Speaker focus mode for diarization.
         known_speakers: List of known speaker labels and identifiers.
         additional_vocab: List of additional vocabulary entries.
-        audio_encoding: Audio encoding format.
         operating_point: Operating point for accuracy vs. latency.
         max_delay: Maximum delay in seconds for transcription.
         end_of_utterance_silence_trigger: Maximum delay for end of utterance trigger.
@@ -126,7 +125,6 @@ class SpeechmaticsSTTSettings(STTSettings):
     additional_vocab: list[AdditionalVocabEntry] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    audio_encoding: AudioEncoding | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     operating_point: OperatingPoint | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_delay: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     end_of_utterance_silence_trigger: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -344,8 +342,8 @@ class SpeechmaticsSTTService(STTService):
     class UpdateParams(BaseModel):
         """Update parameters for Speechmatics STT service.
 
-        These are the only parameters that can be changed once a session has started. If you need to
-        change the language, etc., then you must create a new instance of the service.
+        .. deprecated:: 0.0.104
+            Use ``SpeechmaticsSTTSettings`` with ``STTUpdateSettingsFrame`` instead.
 
         Parameters:
             focus_speakers: List of speaker IDs to focus on. When enabled, only these speakers are
@@ -379,6 +377,7 @@ class SpeechmaticsSTTService(STTService):
         api_key: str | None = None,
         base_url: str | None = None,
         sample_rate: int | None = None,
+        encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
         params: InputParams | None = None,
         should_interrupt: bool = True,
         settings: SpeechmaticsSTTSettings | None = None,
@@ -393,6 +392,7 @@ class SpeechmaticsSTTService(STTService):
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
                 or defaults to `wss://eu2.rt.speechmatics.com/v2`.
             sample_rate: Optional audio sample rate in Hz.
+            encoding: Audio encoding format. Defaults to ``AudioEncoding.PCM_S16LE``.
             params: Input parameters for the service.
 
                 .. deprecated:: 0.0.105
@@ -423,7 +423,7 @@ class SpeechmaticsSTTService(STTService):
         _params = params or SpeechmaticsSTTService.InputParams()
         self._check_deprecated_args(kwargs, _params)
 
-        # 1. Initialize default_settings with hardcoded defaults
+        # --- 1. Hardcoded defaults ---
         default_settings = SpeechmaticsSTTSettings(
             model=None,  # Will be resolved from operating_point after config is built
             language=Language.EN,
@@ -436,7 +436,6 @@ class SpeechmaticsSTTService(STTService):
             focus_mode=SpeakerFocusMode.RETAIN,
             known_speakers=[],
             additional_vocab=[],
-            audio_encoding=AudioEncoding.PCM_S16LE,
             operating_point=None,
             max_delay=None,
             end_of_utterance_silence_trigger=None,
@@ -451,9 +450,9 @@ class SpeechmaticsSTTService(STTService):
             extra_params=None,
         )
 
-        # 2. No direct init arg overrides
+        # --- 2. No direct init arg overrides ---
 
-        # 3. Apply params overrides — only if settings not provided
+        # --- 3. Deprecated params overrides ---
         if params is not None:
             _warn_deprecated_param("params", SpeechmaticsSTTSettings)
             if not settings:
@@ -475,7 +474,7 @@ class SpeechmaticsSTTService(STTService):
                 default_settings.focus_mode = _params.focus_mode
                 default_settings.known_speakers = _params.known_speakers
                 default_settings.additional_vocab = _params.additional_vocab
-                default_settings.audio_encoding = _params.audio_encoding
+                encoding = _params.audio_encoding
                 default_settings.operating_point = _params.operating_point
                 default_settings.max_delay = _params.max_delay
                 default_settings.end_of_utterance_silence_trigger = (
@@ -493,10 +492,11 @@ class SpeechmaticsSTTService(STTService):
 
         # Build SDK config from settings, then resolve model from operating_point
         self._client: VoiceAgentClient | None = None
+        self._audio_encoding = encoding
         self._config: VoiceAgentConfig = self._build_config(default_settings)
         default_settings.model = self._config.operating_point.value
 
-        # 4. Apply settings delta (canonical API, always wins)
+        # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -720,6 +720,9 @@ class SpeechmaticsSTTService(STTService):
         # Preset from turn detection mode
         config = VoiceAgentConfigPreset.load(s.turn_detection_mode.value)
 
+        # Audio encoding (init-only, stored as instance attribute)
+        config.audio_encoding = self._audio_encoding
+
         # Language + domain
         language = s.language
         config.language = self._language_to_speechmatics_language(language)
@@ -773,7 +776,7 @@ class SpeechmaticsSTTService(STTService):
     ) -> None:
         """Updates the speaker configuration.
 
-        .. deprecated::
+        .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame`` with
             ``SpeechmaticsSTTSettings(...)`` instead.
 

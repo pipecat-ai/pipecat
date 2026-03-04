@@ -14,7 +14,7 @@ languages, and various Deepgram features.
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, fields
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -32,32 +32,23 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.deepgram.stt import DeepgramSTTSettings, LiveOptions
+from pipecat.services.settings import STTSettings, _warn_deprecated_param, is_given
 from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
-try:
-    from deepgram import LiveOptions
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use DeepgramSageMakerSTTService, you need to `pip install pipecat-ai[deepgram,sagemaker]`."
-    )
-    raise Exception(f"Missing module: {e}")
-
 
 @dataclass
-class DeepgramSageMakerSTTSettings(STTSettings):
+class DeepgramSageMakerSTTSettings(DeepgramSTTSettings):
     """Settings for the Deepgram SageMaker STT service.
 
-    Parameters:
-        live_options: Deepgram LiveOptions for the SageMaker connection.
+    Inherits all fields from :class:`DeepgramSTTSettings`.
     """
 
-    live_options: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class DeepgramSageMakerSTTService(STTService):
@@ -72,14 +63,13 @@ class DeepgramSageMakerSTTService(STTService):
 
     - AWS credentials configured (via environment variables, AWS CLI, or instance metadata)
     - A deployed SageMaker endpoint with Deepgram model: https://developers.deepgram.com/docs/deploy-amazon-sagemaker
-    - Deepgram SDK for LiveOptions configuration
 
     Example::
 
         stt = DeepgramSageMakerSTTService(
             endpoint_name="my-deepgram-endpoint",
             region="us-east-2",
-            live_options=LiveOptions(
+            settings=DeepgramSageMakerSTTSettings(
                 model="nova-3",
                 language="en",
                 interim_results=True,
@@ -95,7 +85,11 @@ class DeepgramSageMakerSTTService(STTService):
         *,
         endpoint_name: str,
         region: str,
+        encoding: str = "linear16",
+        channels: int = 1,
+        multichannel: bool = False,
         sample_rate: Optional[int] = None,
+        mip_opt_out: Optional[bool] = None,
         live_options: Optional[LiveOptions] = None,
         settings: Optional[DeepgramSageMakerSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = DEEPGRAM_SAGEMAKER_TTFS_P99,
@@ -107,11 +101,20 @@ class DeepgramSageMakerSTTService(STTService):
             endpoint_name: Name of the SageMaker endpoint with Deepgram model
                 deployed (e.g., "my-deepgram-nova-3-endpoint").
             region: AWS region where the endpoint is deployed (e.g., "us-east-2").
-            sample_rate: Audio sample rate in Hz. If None, uses value from
-                live_options or defaults to the value from StartFrame.
-            live_options: Deepgram LiveOptions configuration. Treated as a
-                delta from a set of sensible defaults — only the fields you
-                set are overridden; all others keep their default values.
+            encoding: Audio encoding format. Defaults to "linear16".
+            channels: Number of audio channels. Defaults to 1.
+            multichannel: Transcribe each audio channel independently.
+                Defaults to False.
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline
+                sample rate.
+            mip_opt_out: Opt out of Deepgram model improvement program.
+            live_options: Legacy configuration options.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=DeepgramSageMakerSTTSettings(...)`` for
+                    runtime-updatable fields and direct init parameters for
+                    connection-level config.
+
             settings: Runtime-updatable settings. When provided alongside
                 ``live_options``, ``settings`` values take precedence (applied
                 after the ``live_options`` merge).
@@ -119,42 +122,62 @@ class DeepgramSageMakerSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
         """
-        sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-
-        default_options = LiveOptions(
-            encoding="linear16",
-            language=Language.EN,
-            model="nova-3",
-            channels=1,
-            interim_results=True,
-            punctuate=True,
-        )
-
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = DeepgramSageMakerSTTSettings(
             model="nova-3",
             language=Language.EN,
-            live_options=default_options,
+            detect_entities=False,
+            diarize=False,
+            dictation=False,
+            endpointing=None,
+            interim_results=True,
+            keyterm=None,
+            keywords=None,
+            numerals=False,
+            profanity_filter=True,
+            punctuate=True,
+            redact=None,
+            replace=None,
+            search=None,
+            smart_format=False,
+            utterance_end_ms=None,
+            vad_events=False,
         )
 
-        # 2. (no deprecated direct args like model= for this service)
-
-        # 3. Apply live_options overrides — only if settings not provided
+        # 2. Apply live_options overrides — only if settings not provided
         if live_options is not None:
             _warn_deprecated_param("live_options", DeepgramSageMakerSTTSettings)
             if not settings:
-                # Merge user live_options onto defaults
-                merged_dict = {**default_options.to_dict(), **live_options.to_dict()}
-                merged_live_options = LiveOptions(**merged_dict)
-                default_settings.live_options = merged_live_options
-                if hasattr(live_options, "model") and live_options.model is not None:
-                    default_settings.model = live_options.model
-                if hasattr(live_options, "language") and live_options.language is not None:
-                    default_settings.language = live_options.language
+                # Extract init-only fields from live_options
+                if live_options.sample_rate is not None and sample_rate is None:
+                    sample_rate = live_options.sample_rate
+                if live_options.encoding is not None:
+                    encoding = live_options.encoding
+                if live_options.channels is not None:
+                    channels = live_options.channels
+                if live_options.multichannel is not None:
+                    multichannel = live_options.multichannel
+                if live_options.mip_opt_out is not None:
+                    mip_opt_out = live_options.mip_opt_out
 
-        # 4. Apply settings delta (canonical API, always wins)
+                # Build settings delta from remaining fields
+                init_only = {
+                    "sample_rate",
+                    "encoding",
+                    "channels",
+                    "multichannel",
+                    "mip_opt_out",
+                }
+                lo_dict = {k: v for k, v in live_options.to_dict().items() if k not in init_only}
+                delta = DeepgramSageMakerSTTSettings.from_mapping(lo_dict)
+                default_settings.apply_update(delta)
+
+        # 3. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        # Sync extra to top-level fields so self._settings is unambiguous
+        default_settings._sync_extra_to_fields()
 
         super().__init__(
             sample_rate=sample_rate,
@@ -165,6 +188,12 @@ class DeepgramSageMakerSTTService(STTService):
 
         self._endpoint_name = endpoint_name
         self._region = region
+
+        # Init-only connection config (not runtime-updatable).
+        self._encoding = encoding
+        self._channels = channels
+        self._multichannel = multichannel
+        self._mip_opt_out = mip_opt_out
 
         self._client: Optional[SageMakerBidiClient] = None
         self._response_task: Optional[asyncio.Task] = None
@@ -184,6 +213,10 @@ class DeepgramSageMakerSTTService(STTService):
 
         if not changed:
             return changed
+
+        # Sync extra to fields after the update so self._settings stays unambiguous
+        if isinstance(self._settings, DeepgramSTTSettings):
+            self._settings._sync_extra_to_fields()
 
         # TODO: someday we could reconnect here to apply updated settings.
         # Code might look something like the below:
@@ -237,6 +270,43 @@ class DeepgramSageMakerSTTService(STTService):
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
         yield None
 
+    def _build_query_string(self) -> str:
+        """Build query string from current settings and init-only connection config."""
+        params = {}
+        s = self._settings
+
+        # Declared Deepgram-specific fields from settings
+        for f in fields(s):
+            if f.name in ("model", "language", "extra") or f.name.startswith("_"):
+                continue
+            value = getattr(s, f.name)
+            if not is_given(value) or value is None:
+                continue
+            params[f.name] = str(value).lower() if isinstance(value, bool) else str(value)
+
+        # model and language
+        if is_given(s.model) and s.model is not None:
+            params["model"] = str(s.model)
+        if is_given(s.language) and s.language is not None:
+            params["language"] = str(s.language)
+
+        # Init-only connection config
+        params["encoding"] = self._encoding
+        params["channels"] = str(self._channels)
+        params["multichannel"] = str(self._multichannel).lower()
+        params["sample_rate"] = str(self.sample_rate)
+
+        if self._mip_opt_out is not None:
+            params["mip_opt_out"] = str(self._mip_opt_out).lower()
+
+        # Any remaining values in extra
+        if s.extra:
+            for key, value in s.extra.items():
+                if value is not None:
+                    params[key] = str(value).lower() if isinstance(value, bool) else str(value)
+
+        return "&".join(f"{k}={v}" for k, v in params.items())
+
     async def _connect(self):
         """Connect to the SageMaker endpoint and start the BiDi session.
 
@@ -246,21 +316,7 @@ class DeepgramSageMakerSTTService(STTService):
         """
         logger.debug("Connecting to Deepgram on SageMaker...")
 
-        live_options = LiveOptions(
-            **{**self._settings.live_options.to_dict(), "sample_rate": self.sample_rate}
-        )
-
-        # Build query string from live_options, converting booleans to strings
-        query_params = {}
-        for key, value in live_options.to_dict().items():
-            if value is not None:
-                # Convert boolean values to lowercase strings for Deepgram API
-                if isinstance(value, bool):
-                    query_params[key] = str(value).lower()
-                else:
-                    query_params[key] = str(value)
-
-        query_string = "&".join(f"{k}={v}" for k, v in query_params.items())
+        query_string = self._build_query_string()
 
         # Create BiDi client
         self._client = SageMakerBidiClient(
