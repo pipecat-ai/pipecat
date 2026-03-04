@@ -80,7 +80,7 @@ class FalImageGenService(ImageGenService):
             aiohttp_session: HTTP client session for downloading generated images.
             model: The Fal.ai model to use for generation. Defaults to "fal-ai/fast-sdxl".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=FalImageGenSettings(model=...)`` instead.
 
             key: Optional API key for Fal.ai. If provided, sets FAL_KEY environment variable.

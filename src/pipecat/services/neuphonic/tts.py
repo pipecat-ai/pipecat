@@ -102,7 +102,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         """Input parameters for Neuphonic TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=NeuphonicTTSSettings(...)`` instead.
 
         Parameters:
@@ -133,7 +133,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             api_key: Neuphonic API key for authentication.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=NeuphonicTTSSettings(voice=...)`` instead.
 
             url: WebSocket URL for the Neuphonic API.
@@ -141,7 +141,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             encoding: Audio encoding format. Defaults to "pcm_linear".
             params: Additional input parameters for TTS configuration.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=NeuphonicTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -451,7 +451,7 @@ class NeuphonicHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Neuphonic HTTP TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=NeuphonicTTSSettings(...)`` instead.
 
         Parameters:
@@ -481,7 +481,7 @@ class NeuphonicHttpTTSService(TTSService):
             api_key: Neuphonic API key for authentication.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=NeuphonicTTSSettings(voice=...)`` instead.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
@@ -490,7 +490,7 @@ class NeuphonicHttpTTSService(TTSService):
             encoding: Audio encoding format. Defaults to "pcm_linear".
             params: Additional input parameters for TTS configuration.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=NeuphonicTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

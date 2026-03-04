@@ -65,7 +65,7 @@ class PiperTTSService(TTSService):
         Args:
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=PiperTTSSettings(voice=...)`` instead.
 
             download_dir: Directory for storing voice model files. Defaults to
@@ -222,7 +222,7 @@ class PiperHttpTTSService(TTSService):
             aiohttp_session: aiohttp ClientSession for making HTTP requests.
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=PiperHttpTTSSettings(voice=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

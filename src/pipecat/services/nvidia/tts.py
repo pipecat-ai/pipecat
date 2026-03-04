@@ -68,7 +68,7 @@ class NvidiaTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Riva TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``NvidiaTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -102,14 +102,14 @@ class NvidiaTTSService(TTSService):
             server: gRPC server endpoint. Defaults to NVIDIA's cloud endpoint.
             voice_id: Voice model identifier. Defaults to multilingual Aria voice.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=NvidiaTTSSettings(voice=...)`` instead.
 
             sample_rate: Audio sample rate. If None, uses service default.
             model_function_map: Dictionary containing function_id and model_name for the TTS model.
             params: Additional configuration parameters for TTS synthesis.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=NvidiaTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

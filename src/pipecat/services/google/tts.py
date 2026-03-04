@@ -566,7 +566,7 @@ class GoogleHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Google HTTP TTS voice customization.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``GoogleHttpTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -609,13 +609,13 @@ class GoogleHttpTTSService(TTSService):
             location: Google Cloud location for regional endpoint (e.g., "us-central1").
             voice_id: Google TTS voice identifier (e.g., "en-US-Standard-A").
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GoogleHttpTTSSettings(voice=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses default.
             params: Voice customization parameters including pitch, rate, volume, etc.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GoogleHttpTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -1029,7 +1029,7 @@ class GoogleTTSService(GoogleBaseTTSService):
     class InputParams(BaseModel):
         """Input parameters for Google streaming TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``GoogleStreamTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -1061,14 +1061,14 @@ class GoogleTTSService(GoogleBaseTTSService):
             location: Google Cloud location for regional endpoint (e.g., "us-central1").
             voice_id: Google TTS voice identifier (e.g., "en-US-Chirp3-HD-Charon").
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GoogleStreamTTSSettings(voice=...)`` instead.
 
             voice_cloning_key: The voice cloning key for Chirp 3 custom voices.
             sample_rate: Audio sample rate in Hz. If None, uses default.
             params: Language configuration parameters.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GoogleStreamTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -1242,7 +1242,7 @@ class GeminiTTSService(GoogleBaseTTSService):
     class InputParams(BaseModel):
         """Input parameters for Gemini TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``GeminiTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -1283,7 +1283,7 @@ class GeminiTTSService(GoogleBaseTTSService):
             model: Gemini TTS model to use. Must be a TTS model like
                    "gemini-2.5-flash-tts" or "gemini-2.5-pro-tts".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GeminiTTSSettings(model=...)`` instead.
 
             credentials: JSON string containing Google Cloud service account credentials.
@@ -1291,13 +1291,13 @@ class GeminiTTSService(GoogleBaseTTSService):
             location: Google Cloud location for regional endpoint (e.g., "us-central1").
             voice_id: Voice name from the available Gemini voices.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GeminiTTSSettings(voice=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses Google's default 24kHz.
             params: TTS configuration parameters.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GeminiTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

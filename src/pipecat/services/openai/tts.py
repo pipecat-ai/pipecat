@@ -90,7 +90,7 @@ class OpenAITTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for OpenAI TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=OpenAITTSSettings(...)`` instead.
 
         Parameters:
@@ -122,28 +122,28 @@ class OpenAITTSService(TTSService):
             base_url: Custom base URL for OpenAI API. If None, uses default.
             voice: Voice ID to use for synthesis. Defaults to "alloy".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSSettings(voice=...)`` instead.
 
             model: TTS model to use. Defaults to "gpt-4o-mini-tts".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSSettings(model=...)`` instead.
 
             sample_rate: Output audio sample rate in Hz. If None, uses OpenAI's default 24kHz.
             instructions: Optional instructions to guide voice synthesis behavior.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSSettings(instructions=...)`` instead.
 
             speed: Voice speed control (0.25 to 4.0, default 1.0).
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSSettings(speed=...)`` instead.
 
             params: Optional synthesis controls (acting instructions, speed, ...).
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAITTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

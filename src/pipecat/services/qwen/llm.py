@@ -38,7 +38,7 @@ class QwenLLMService(OpenAILLMService):
             base_url: Base URL for Qwen API. Defaults to "https://dashscope-intl.aliyuncs.com/compatible-mode/v1".
             model: The model identifier to use. Defaults to "qwen-plus".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

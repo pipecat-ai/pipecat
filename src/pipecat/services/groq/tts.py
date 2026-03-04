@@ -64,7 +64,7 @@ class GroqTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Groq TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=GroqTTSSettings(...)`` instead.
 
         Parameters:
@@ -96,17 +96,17 @@ class GroqTTSService(TTSService):
             output_format: Audio output format. Defaults to "wav".
             params: Additional input parameters for voice customization.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GroqTTSSettings(...)`` instead.
 
             model_name: TTS model to use.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GroqTTSSettings(model=...)`` instead.
 
             voice_id: Voice identifier to use.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GroqTTSSettings(voice=...)`` instead.
 
             sample_rate: Audio sample rate. Must be 48000 Hz for Groq TTS.

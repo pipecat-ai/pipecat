@@ -331,7 +331,7 @@ class ElevenLabsTTSService(AudioContextTTSService):
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=ElevenLabsTTSSettings(...)`` instead.
 
         Parameters:
@@ -381,12 +381,12 @@ class ElevenLabsTTSService(AudioContextTTSService):
             api_key: ElevenLabs API key for authentication.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSSettings(voice=...)`` instead.
 
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSSettings(model=...)`` instead.
 
             url: WebSocket URL for ElevenLabs TTS API.
@@ -395,7 +395,7 @@ class ElevenLabsTTSService(AudioContextTTSService):
                 locators to use.
             params: Additional input parameters for voice customization.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -921,7 +921,7 @@ class ElevenLabsHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs HTTP TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=ElevenLabsHttpTTSSettings(...)`` instead.
 
         Parameters:
@@ -968,13 +968,13 @@ class ElevenLabsHttpTTSService(TTSService):
             api_key: ElevenLabs API key for authentication.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSSettings(voice=...)`` instead.
 
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSSettings(model=...)`` instead.
 
             base_url: Base URL for ElevenLabs HTTP API.
@@ -983,7 +983,7 @@ class ElevenLabsHttpTTSService(TTSService):
                 locators to use.
             params: Additional input parameters for voice customization.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=ElevenLabsHttpTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

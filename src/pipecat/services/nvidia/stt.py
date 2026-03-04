@@ -130,7 +130,7 @@ class NvidiaSTTService(STTService):
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva STT service.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=NvidiaSTTSettings(...)`` instead.
 
         Parameters:
@@ -164,7 +164,7 @@ class NvidiaSTTService(STTService):
             sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
             params: Additional configuration parameters for NVIDIA Riva.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=NvidiaSTTSettings(...)`` instead.
 
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
@@ -444,7 +444,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva segmented STT service.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=NvidiaSegmentedSTTSettings(...)`` instead.
 
         Parameters:
@@ -488,7 +488,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate
             params: Additional configuration parameters for NVIDIA Riva
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=NvidiaSegmentedSTTSettings(...)`` instead.
 
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.

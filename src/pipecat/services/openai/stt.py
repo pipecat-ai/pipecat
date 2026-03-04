@@ -80,7 +80,7 @@ class OpenAISTTService(BaseWhisperSTTService):
         Args:
             model: Model to use — either gpt-4o or Whisper.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=BaseWhisperSTTSettings(model=...)`` instead.
 
             api_key: OpenAI API key. Defaults to None.
@@ -222,7 +222,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             model: Transcription model. Supported values are
                 ``"gpt-4o-transcribe"`` and ``"gpt-4o-mini-transcribe"``.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeSTTSettings(model=...)`` instead.
 
             base_url: WebSocket base URL for the Realtime API.

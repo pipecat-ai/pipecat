@@ -110,7 +110,7 @@ class AsyncAITTSService(AudioContextTTSService):
     class InputParams(BaseModel):
         """Input parameters for Async TTS configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``AsyncAITTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -143,14 +143,14 @@ class AsyncAITTSService(AudioContextTTSService):
             voice_id: UUID of the voice to use for synthesis. See docs for a full list:
                 https://docs.async.com/list-voices-16699698e0
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSSettings(voice=...)`` instead.
 
             version: Async API version.
             url: WebSocket URL for Async TTS API.
             model: TTS model to use (e.g., "async_flash_v1.0").
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSSettings(model=...)`` instead.
 
             sample_rate: Audio sample rate.
@@ -158,7 +158,7 @@ class AsyncAITTSService(AudioContextTTSService):
             container: Audio container format.
             params: Additional input parameters for voice customization.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -508,7 +508,7 @@ class AsyncAIHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Async API.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``AsyncAITTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -539,13 +539,13 @@ class AsyncAIHttpTTSService(TTSService):
             api_key: Async API key.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSSettings(voice=...)`` instead.
 
             aiohttp_session: An aiohttp session for making HTTP requests.
             model: TTS model to use (e.g., "async_flash_v1.0").
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSSettings(model=...)`` instead.
 
             url: Base URL for Async API.
@@ -555,7 +555,7 @@ class AsyncAIHttpTTSService(TTSService):
             container: Audio container format.
             params: Additional input parameters for voice customization.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=AsyncAITTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

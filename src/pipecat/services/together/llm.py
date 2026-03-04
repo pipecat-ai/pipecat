@@ -38,7 +38,7 @@ class TogetherLLMService(OpenAILLMService):
             base_url: The base URL for Together.ai API. Defaults to "https://api.together.xyz/v1".
             model: The model identifier to use. Defaults to "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

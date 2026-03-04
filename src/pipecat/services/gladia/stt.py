@@ -272,12 +272,12 @@ class GladiaSTTService(WebsocketSTTService):
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             model: Model to use for transcription.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GladiaSTTSettings(model=...)`` instead.
 
             params: Additional configuration parameters for Gladia service.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GladiaSTTSettings(...)`` instead.
 
             max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
