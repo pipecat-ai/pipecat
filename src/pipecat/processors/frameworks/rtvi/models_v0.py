@@ -12,7 +12,6 @@ server messages instead.
 """
 
 from typing import (
-    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
@@ -26,9 +25,6 @@ from typing import (
 from pydantic import BaseModel, Field, PrivateAttr
 
 import pipecat.processors.frameworks.rtvi.models_v1 as RTVI
-
-if TYPE_CHECKING:
-    from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
 ActionResult = Union[bool, int, float, str, list, dict]
 
@@ -46,9 +42,7 @@ class RTVIServiceOption(BaseModel):
 
     name: str
     type: Literal["bool", "number", "string", "array", "object"]
-    handler: Callable[["RTVIProcessor", str, "RTVIServiceOptionConfig"], Awaitable[None]] = Field(
-        exclude=True
-    )
+    handler: Callable[..., Awaitable[None]] = Field(exclude=True)
 
 
 class RTVIService(BaseModel):
@@ -117,9 +111,7 @@ class RTVIAction(BaseModel):
     action: str
     arguments: List[RTVIActionArgument] = Field(default_factory=list)
     result: Literal["bool", "number", "string", "array", "object"]
-    handler: Callable[["RTVIProcessor", str, Dict[str, Any]], Awaitable[ActionResult]] = Field(
-        exclude=True
-    )
+    handler: Callable[..., Awaitable[ActionResult]] = Field(exclude=True)
     _arguments_dict: Dict[str, RTVIActionArgument] = PrivateAttr(default={})
 
     def model_post_init(self, __context: Any) -> None:
