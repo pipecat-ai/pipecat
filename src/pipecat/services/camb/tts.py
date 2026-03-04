@@ -310,7 +310,9 @@ class CambTTSService(TTSService):
                 tts_kwargs["user_instructions"] = self._settings.user_instructions
 
             await self.start_tts_usage_metrics(text)
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                yield TTSStartedFrame(context_id=context_id)
 
             assert self._client is not None, "Camb.ai TTS service not initialized"
 
@@ -346,5 +348,3 @@ class CambTTSService(TTSService):
 
         except Exception as e:
             yield ErrorFrame(error=f"Camb.ai TTS error: {e}")
-        finally:
-            yield TTSStoppedFrame(context_id=context_id)

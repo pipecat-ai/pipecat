@@ -820,13 +820,12 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
             try:
                 if not self.audio_context_available(context_id):
+                    await self.create_audio_context(context_id)
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
                     self._cumulative_time = 0
                     self._partial_word = ""
                     self._partial_word_start_time = 0.0
-
-                    await self.create_audio_context(context_id)
 
                     # Initialize context with voice settings and pronunciation dictionaries
                     msg = {"text": " ", "context_id": context_id}
@@ -1170,8 +1169,10 @@ class ElevenLabsHttpTTSService(TTSService):
                 await self.start_tts_usage_metrics(text)
 
                 # Start TTS sequence
-                await self.start_word_timestamps()
-                yield TTSStartedFrame(context_id=context_id)
+                if not self.audio_context_available(context_id):
+                    await self.create_audio_context(context_id)
+                    await self.start_word_timestamps()
+                    yield TTSStartedFrame(context_id=context_id)
 
                 # Track the duration of this utterance based on the last character's end time
                 utterance_duration = 0

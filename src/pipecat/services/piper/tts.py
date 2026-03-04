@@ -141,7 +141,9 @@ class PiperTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                yield TTSStartedFrame(context_id=context_id)
 
             async for frame in self._stream_audio_frames_from_iterator(
                 async_iterator(self._voice.synthesize(text)),
@@ -156,7 +158,6 @@ class PiperTTSService(TTSService):
         finally:
             logger.debug(f"{self}: Finished TTS [{text}]")
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)
 
 
 # This assumes a running TTS service running:
@@ -238,6 +239,10 @@ class PiperHttpTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
+            # Create audio context upfront so the finally path can always append frames.
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+
             data = {
                 "text": text,
                 "voice": self._settings.voice,
@@ -268,4 +273,3 @@ class PiperHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)

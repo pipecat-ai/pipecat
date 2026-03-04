@@ -433,13 +433,13 @@ class ResembleAITTSService(WebsocketTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                await self.start_ttfb_metrics()
+                yield TTSStartedFrame(context_id=context_id)
 
             # Map request_id to context_id for tracking
             self._request_id_to_context[self._request_id_counter] = context_id
-
-            await self.create_audio_context(context_id)
 
             msg = self._build_msg(text=text)
 

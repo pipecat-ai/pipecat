@@ -239,7 +239,9 @@ class NvidiaTTSService(TTSService):
             assert self._config is not None, "Synthesis configuration not created"
 
             await self.start_ttfb_metrics()
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                yield TTSStartedFrame(context_id=context_id)
 
             logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -256,7 +258,6 @@ class NvidiaTTSService(TTSService):
                 yield frame
 
             await self.start_tts_usage_metrics(text)
-            yield TTSStoppedFrame(context_id=context_id)
         except asyncio.TimeoutError as e:
             logger.error(f"{self} timeout waiting for audio response")
             yield ErrorFrame(error=f"{self} error: {e}")

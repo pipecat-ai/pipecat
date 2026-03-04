@@ -332,9 +332,9 @@ class GradiumTTSService(WebsocketTTSService):
 
             try:
                 if not self.audio_context_available(context_id):
+                    await self.create_audio_context(context_id)
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
-                    await self.create_audio_context(context_id)
 
                 msg = self._build_msg(text=text, context_id=context_id)
                 await self._get_websocket().send(json.dumps(msg))

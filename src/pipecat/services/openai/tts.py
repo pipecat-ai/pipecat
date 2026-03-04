@@ -223,12 +223,13 @@ class OpenAITTSService(TTSService):
 
                 CHUNK_SIZE = self.chunk_size
 
-                yield TTSStartedFrame(context_id=context_id)
+                if not self.audio_context_available(context_id):
+                    await self.create_audio_context(context_id)
+                    yield TTSStartedFrame(context_id=context_id)
                 async for chunk in r.iter_bytes(CHUNK_SIZE):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
                         frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                         yield frame
-                yield TTSStoppedFrame(context_id=context_id)
         except BadRequestError as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")

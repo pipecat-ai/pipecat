@@ -344,12 +344,12 @@ class DeepgramSageMakerTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._ttfb_started:
-                await self.start_ttfb_metrics()
-                self._ttfb_started = True
-            await self.start_tts_usage_metrics(text)
-
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                if not self._ttfb_started:
+                    await self.start_ttfb_metrics()
+                    self._ttfb_started = True
+                yield TTSStartedFrame(context_id=context_id)
             self._context_id = context_id
 
             await self._client.send_json({"type": "Speak", "text": text})

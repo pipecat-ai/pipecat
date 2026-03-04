@@ -159,7 +159,9 @@ class HathoraTTSService(TTSService):
                     {"name": option.name, "value": option.value} for option in self._settings.config
                 ]
 
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                yield TTSStartedFrame(context_id=context_id)
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -188,4 +190,3 @@ class HathoraTTSService(TTSService):
         finally:
             await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
-            yield TTSStoppedFrame(context_id=context_id)

@@ -658,8 +658,10 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
                 return
 
             try:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
+                if not self.audio_context_available(context_id):
+                    await self.create_audio_context(context_id)
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame(context_id=context_id)
                 self._first_chunk = True
                 self._current_context_id = context_id
 
@@ -824,7 +826,9 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         if result.reason == ResultReason.SynthesizingAudioCompleted:
             await self.start_tts_usage_metrics(text)
             await self.stop_ttfb_metrics()
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                yield TTSStartedFrame(context_id=context_id)
             # Azure always sends a 44-byte header. Strip it off.
             yield TTSAudioRawFrame(
                 audio=result.audio_data[44:],
@@ -832,7 +836,6 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
                 num_channels=1,
                 context_id=context_id,
             )
-            yield TTSStoppedFrame(context_id=context_id)
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
             logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")

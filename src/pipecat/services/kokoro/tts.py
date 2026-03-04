@@ -180,7 +180,9 @@ class KokoroTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
             await self.start_tts_usage_metrics(text)
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                yield TTSStartedFrame(context_id=context_id)
 
             stream = self._kokoro.create_stream(
                 text, voice=self._settings.voice, lang=self._lang_code, speed=1.0
@@ -204,4 +206,3 @@ class KokoroTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)

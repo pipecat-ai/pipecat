@@ -324,10 +324,12 @@ class LmntTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
+                if not self.audio_context_available(context_id):
+                    await self.create_audio_context(context_id)
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame(context_id=context_id)
                 # Store context_id for use in _receive_messages
                 self._context_id = context_id
-                yield TTSStartedFrame(context_id=context_id)
 
                 # Send text to LMNT
                 await self._get_websocket().send(json.dumps({"text": text}))

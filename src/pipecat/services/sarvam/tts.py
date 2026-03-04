@@ -591,7 +591,9 @@ class SarvamHttpTTSService(TTSService):
 
             url = f"{self._base_url}/text-to-speech"
 
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                yield TTSStartedFrame(context_id=context_id)
 
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
@@ -630,7 +632,6 @@ class SarvamHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Error generating TTS: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)
 
 
 class SarvamTTSService(InterruptibleTTSService):
@@ -1150,10 +1151,13 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
+                if not self.audio_context_available(context_id):
+                    await self.create_audio_context(context_id)
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame(context_id=context_id)
                 # Store context_id for use in _receive_messages
                 self._context_id = context_id
-                yield TTSStartedFrame(context_id=context_id)
+
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:

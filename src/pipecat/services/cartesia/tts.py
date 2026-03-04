@@ -666,9 +666,9 @@ class CartesiaTTSService(WebsocketTTSService):
                 await self._connect()
 
             if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame(context_id=context_id)
-                await self.create_audio_context(context_id)
 
             msg = self._build_msg(text=text, context_id=context_id)
 
@@ -877,7 +877,9 @@ class CartesiaHttpTTSService(TTSService):
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
 
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                yield TTSStartedFrame(context_id=context_id)
 
             session = await self._client._get_session()
 
@@ -912,4 +914,3 @@ class CartesiaHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)

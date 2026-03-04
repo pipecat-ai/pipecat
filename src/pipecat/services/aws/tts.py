@@ -325,7 +325,9 @@ class AWSPollyTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                yield TTSStartedFrame(context_id=context_id)
+                if not self.audio_context_available(context_id):
+                    await self.create_audio_context(context_id)
+                    yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
@@ -336,13 +338,9 @@ class AWSPollyTTSService(TTSService):
                         frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                         yield frame
 
-                yield TTSStoppedFrame(context_id=context_id)
         except (BotoCoreError, ClientError) as error:
             error_message = f"AWS Polly TTS error: {str(error)}"
             yield ErrorFrame(error=error_message)
-
-        finally:
-            yield TTSStoppedFrame(context_id=context_id)
 
 
 class PollyTTSService(AWSPollyTTSService):

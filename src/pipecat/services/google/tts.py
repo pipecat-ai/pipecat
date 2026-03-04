@@ -804,7 +804,9 @@ class GoogleHttpTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                yield TTSStartedFrame(context_id=context_id)
 
             # Skip the first 44 bytes to remove the WAV header
             audio_content = response.audio_content[44:]
@@ -818,8 +820,6 @@ class GoogleHttpTTSService(TTSService):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                 yield frame
-
-            yield TTSStoppedFrame(context_id=context_id)
 
         except Exception as e:
             error_message = f"TTS generation error: {str(e)}"
@@ -931,7 +931,9 @@ class GoogleBaseTTSService(TTSService):
         streaming_responses = await self._client.streaming_synthesize(request_generator())
         await self.start_tts_usage_metrics(text)
 
-        yield TTSStartedFrame(context_id=context_id)
+        if not self.audio_context_available(context_id):
+            await self.create_audio_context(context_id)
+            yield TTSStartedFrame(context_id=context_id)
 
         audio_buffer = b""
         first_chunk_for_ttfb = False
@@ -955,8 +957,6 @@ class GoogleBaseTTSService(TTSService):
 
         if audio_buffer:
             yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1, context_id=context_id)
-
-        yield TTSStoppedFrame(context_id=context_id)
 
 
 class GoogleTTSService(GoogleBaseTTSService):

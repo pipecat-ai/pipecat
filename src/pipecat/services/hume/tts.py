@@ -281,7 +281,8 @@ class HumeTTSService(TTSService):
         await self.start_tts_usage_metrics(text)
 
         # Start TTS sequence if not already started
-        if not self._started:
+        if not self.audio_context_available(context_id):
+            await self.create_audio_context(context_id)
             await self.start_word_timestamps()
             yield TTSStartedFrame(context_id=context_id)
             self._started = True
