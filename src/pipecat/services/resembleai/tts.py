@@ -8,8 +8,8 @@
 
 import base64
 import json
-from dataclasses import dataclass, field
-from typing import AsyncGenerator, ClassVar, Dict, Optional
+from dataclasses import dataclass
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import AudioContextTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -38,22 +38,9 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class ResembleAITTSSettings(TTSSettings):
-    """Settings for Resemble AI TTS service.
+    """Settings for Resemble AI TTS service."""
 
-    Parameters:
-        precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).
-        output_format: Audio format (wav or mp3).
-        resemble_sample_rate: Audio sample rate sent to the API.
-    """
-
-    precision: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    output_format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    resemble_sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-    _aliases: ClassVar[Dict[str, str]] = {
-        "voice_id": "voice",
-        "sample_rate": "resemble_sample_rate",
-    }
+    pass
 
 
 class ResembleAITTSService(AudioContextTTSService):
@@ -100,21 +87,12 @@ class ResembleAITTSService(AudioContextTTSService):
             model=None,
             voice=None,
             language=None,
-            precision="PCM_16",
-            output_format="wav",
-            resemble_sample_rate=22050,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
             _warn_deprecated_param("voice_id", ResembleAITTSSettings, "voice")
             default_settings.voice = voice_id
-        if precision is not None:
-            default_settings.precision = precision
-        if output_format is not None:
-            default_settings.output_format = output_format
-        if sample_rate is not None:
-            default_settings.resemble_sample_rate = sample_rate
 
         # 3. No params for this service
 
@@ -132,6 +110,11 @@ class ResembleAITTSService(AudioContextTTSService):
 
         self._api_key = api_key
         self._url = url
+
+        # Init-only audio format config (not runtime-updatable).
+        self._precision = precision or "PCM_16"
+        self._output_format = output_format or "wav"
+        self._resemble_sample_rate = 0  # Set in start()
 
         self._websocket = None
         self._request_id_counter = 0
@@ -174,9 +157,9 @@ class ResembleAITTSService(AudioContextTTSService):
             "data": text,
             "binary_response": False,  # Use JSON frames to get timestamps
             "request_id": self._request_id_counter,  # ResembleAI only accepts number
-            "output_format": self._settings.output_format,
-            "sample_rate": self._settings.resemble_sample_rate,
-            "precision": self._settings.precision,
+            "output_format": self._output_format,
+            "sample_rate": self._resemble_sample_rate,
+            "precision": self._precision,
             "no_audio_header": True,
         }
 
@@ -190,7 +173,7 @@ class ResembleAITTSService(AudioContextTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.resemble_sample_rate = self.sample_rate
+        self._resemble_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):

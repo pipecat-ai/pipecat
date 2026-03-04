@@ -11,7 +11,7 @@ for generating speech from text using various voice models.
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -47,13 +47,9 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class DeepgramTTSSettings(TTSSettings):
-    """Settings for Deepgram TTS service.
+    """Settings for Deepgram TTS service."""
 
-    Parameters:
-        encoding: Audio encoding format (linear16, mulaw, alaw).
-    """
-
-    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class DeepgramTTSService(WebsocketTTSService):
@@ -105,10 +101,9 @@ class DeepgramTTSService(WebsocketTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = DeepgramTTSSettings(
-            model="aura-2-helena-en",
+            model=None,
             voice="aura-2-helena-en",
             language=None,
-            encoding=encoding,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -132,6 +127,7 @@ class DeepgramTTSService(WebsocketTTSService):
 
         self._api_key = api_key
         self._base_url = base_url
+        self._encoding = encoding
 
         self._receive_task = None
         self._context_id: Optional[str] = None
@@ -236,7 +232,7 @@ class DeepgramTTSService(WebsocketTTSService):
             # Build WebSocket URL with query parameters
             params = []
             params.append(f"model={self._settings.voice}")
-            params.append(f"encoding={self._settings.encoding}")
+            params.append(f"encoding={self._encoding}")
             params.append(f"sample_rate={self.sample_rate}")
 
             url = f"{self._base_url}/v1/speak?{'&'.join(params)}"
@@ -422,10 +418,9 @@ class DeepgramHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = DeepgramTTSSettings(
-            model="aura-2-helena-en",
+            model=None,
             voice="aura-2-helena-en",
             language=None,
-            encoding=encoding,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -447,6 +442,7 @@ class DeepgramHttpTTSService(TTSService):
         self._api_key = api_key
         self._session = aiohttp_session
         self._base_url = base_url
+        self._encoding = encoding
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -476,7 +472,7 @@ class DeepgramHttpTTSService(TTSService):
 
         params = {
             "model": self._settings.voice,
-            "encoding": self._settings.encoding,
+            "encoding": self._encoding,
             "sample_rate": self.sample_rate,
             "container": "none",
         }

@@ -73,7 +73,6 @@ class AzureTTSSettings(TTSSettings):
 
     Parameters:
         emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
-        language: Language for synthesis. Defaults to English (US).
         pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
         rate: Speech rate adjustment (e.g., "1.0", "1.25", "slow", "fast").
         role: Voice role for expression (e.g., "YoungAdultFemale").
@@ -83,7 +82,6 @@ class AzureTTSSettings(TTSSettings):
     """
 
     emphasis: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     role: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -143,7 +141,6 @@ class AzureBaseTTSService:
         *,
         api_key: str,
         region: str,
-        voice: str = "en-US-SaraNeural",
     ):
         """Initialize Azure-specific configuration.
 
@@ -152,7 +149,6 @@ class AzureBaseTTSService:
         Args:
             api_key: Azure Cognitive Services subscription key.
             region: Azure region identifier (e.g., "eastus", "westus2").
-            voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
         """
         self._api_key = api_key
         self._region = region
@@ -343,7 +339,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         )
 
         # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, voice=default_settings.voice)
+        self._init_azure_base(api_key=api_key, region=region)
 
         self._speech_config = None
         self._speech_synthesizer = None
@@ -842,7 +838,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         )
 
         # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, voice=default_settings.voice)
+        self._init_azure_base(api_key=api_key, region=region)
 
         self._speech_config = None
         self._speech_synthesizer = None

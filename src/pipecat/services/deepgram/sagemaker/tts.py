@@ -14,7 +14,7 @@ streaming audio output.
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -33,20 +33,16 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
 @dataclass
 class DeepgramSageMakerTTSSettings(TTSSettings):
-    """Settings for Deepgram SageMaker TTS service.
+    """Settings for Deepgram SageMaker TTS service."""
 
-    Parameters:
-        encoding: Audio encoding format (e.g. "linear16").
-    """
-
-    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class DeepgramSageMakerTTSService(TTSService):
@@ -107,10 +103,9 @@ class DeepgramSageMakerTTSService(TTSService):
         voice = voice or "aura-2-helena-en"
 
         default_settings = DeepgramSageMakerTTSSettings(
-            model=voice,
+            model=None,
             voice=voice,
             language=None,
-            encoding=encoding,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -126,6 +121,7 @@ class DeepgramSageMakerTTSService(TTSService):
 
         self._endpoint_name = endpoint_name
         self._region = region
+        self._encoding = encoding
 
         self._client: Optional[SageMakerBidiClient] = None
         self._response_task: Optional[asyncio.Task] = None

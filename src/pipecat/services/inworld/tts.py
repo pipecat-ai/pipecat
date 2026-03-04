@@ -71,8 +71,6 @@ class InworldTTSSettings(TTSSettings):
     """Settings for Inworld TTS services.
 
     Parameters:
-        audio_encoding: Audio encoding format (e.g. LINEAR16).
-        audio_sample_rate: Audio sample rate in Hz.
         speaking_rate: Speaking rate for speech synthesis.
         temperature: Temperature for speech synthesis.
         auto_mode: Whether to use auto mode. Recommended when texts are sent
@@ -84,8 +82,6 @@ class InworldTTSSettings(TTSSettings):
         timestamp_transport_strategy: Strategy for timestamp transport ("ASYNC" or "SYNC").
     """
 
-    audio_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    audio_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaking_rate: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     auto_mode: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -93,7 +89,6 @@ class InworldTTSSettings(TTSSettings):
     timestamp_transport_strategy: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {
-        "voice_id": "voice",
         "voiceId": "voice",
         "modelId": "model",
         "applyTextNormalization": "apply_text_normalization",
@@ -107,8 +102,6 @@ class InworldTTSSettings(TTSSettings):
         flat = dict(settings)
         nested = flat.pop("audioConfig", None)
         if isinstance(nested, dict):
-            flat.setdefault("audio_encoding", nested.get("audioEncoding"))
-            flat.setdefault("audio_sample_rate", nested.get("sampleRateHertz"))
             flat.setdefault("speaking_rate", nested.get("speakingRate"))
         return super().from_mapping(flat)
 
@@ -184,8 +177,6 @@ class InworldHttpTTSService(TTSService):
             model="inworld-tts-1.5-max",
             voice="Ashley",
             language=None,
-            audio_encoding=encoding,
-            audio_sample_rate=0,
             speaking_rate=None,
             temperature=None,
             timestamp_transport_strategy="ASYNC",
@@ -239,6 +230,10 @@ class InworldHttpTTSService(TTSService):
 
         self._cumulative_time = 0.0
 
+        # Init-only audio format config (not runtime-updatable).
+        self._audio_encoding = encoding
+        self._audio_sample_rate = 0  # Set in start()
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -254,7 +249,7 @@ class InworldHttpTTSService(TTSService):
             frame: The start frame.
         """
         await super().start(frame)
-        self._settings.audio_sample_rate = self.sample_rate
+        self._audio_sample_rate = self.sample_rate
 
     async def stop(self, frame: EndFrame):
         """Stop the Inworld TTS service.
@@ -334,8 +329,8 @@ class InworldHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}] (streaming={self._streaming})")
 
         audio_config = {
-            "audioEncoding": self._settings.audio_encoding,
-            "sampleRateHertz": self._settings.audio_sample_rate,
+            "audioEncoding": self._audio_encoding,
+            "sampleRateHertz": self._audio_sample_rate,
         }
         if self._settings.speaking_rate is not None:
             audio_config["speakingRate"] = self._settings.speaking_rate
@@ -611,8 +606,6 @@ class InworldTTSService(AudioContextTTSService):
             model="inworld-tts-1.5-max",
             voice="Ashley",
             language=None,
-            audio_encoding=encoding,
-            audio_sample_rate=0,
             speaking_rate=None,
             temperature=None,
             apply_text_normalization=None,
@@ -686,6 +679,10 @@ class InworldTTSService(AudioContextTTSService):
         # Track the end time of the last word in the current generation
         self._generation_end_time = 0.0
 
+        # Init-only audio format config (not runtime-updatable).
+        self._audio_encoding = encoding
+        self._audio_sample_rate = 0  # Set in start()
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -701,7 +698,7 @@ class InworldTTSService(AudioContextTTSService):
             frame: The start frame.
         """
         await super().start(frame)
-        self._settings.audio_sample_rate = self.sample_rate
+        self._audio_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -1051,8 +1048,8 @@ class InworldTTSService(AudioContextTTSService):
             context_id: The context ID.
         """
         audio_config = {
-            "audioEncoding": self._settings.audio_encoding,
-            "sampleRateHertz": self._settings.audio_sample_rate,
+            "audioEncoding": self._audio_encoding,
+            "sampleRateHertz": self._audio_sample_rate,
         }
         if self._settings.speaking_rate is not None:
             audio_config["speakingRate"] = self._settings.speaking_rate

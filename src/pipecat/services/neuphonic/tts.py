@@ -80,13 +80,9 @@ class NeuphonicTTSSettings(TTSSettings):
 
     Parameters:
         speed: Speech speed multiplier. Defaults to 1.0.
-        encoding: Audio encoding format.
-        sampling_rate: Audio sample rate.
     """
 
     speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    sampling_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NeuphonicTTSService(InterruptibleTTSService):
@@ -160,8 +156,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
             voice=None,
             language=self.language_to_service_language(Language.EN),
             speed=1.0,
-            encoding=encoding,
-            sampling_rate=sample_rate,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -200,6 +194,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
         self._receive_task = None
         self._keepalive_task = None
         self._context_id: Optional[str] = None
+        self._encoding = encoding
+        self._sampling_rate = sample_rate
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -327,8 +323,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
             tts_config = {
                 "lang_code": self._settings.language,
                 "speed": self._settings.speed,
-                "encoding": self._settings.encoding,
-                "sampling_rate": self._settings.sampling_rate,
+                "encoding": self._encoding,
+                "sampling_rate": self._sampling_rate,
                 "voice_id": self._settings.voice,
             }
 
@@ -503,8 +499,6 @@ class NeuphonicHttpTTSService(TTSService):
             voice=None,
             language=self.language_to_service_language(Language.EN) or "en",
             speed=1.0,
-            encoding=encoding,
-            sampling_rate=sample_rate,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -536,6 +530,7 @@ class NeuphonicHttpTTSService(TTSService):
         self._api_key = api_key
         self._session = aiohttp_session
         self._base_url = url.rstrip("/")
+        self._encoding = encoding
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -629,7 +624,7 @@ class NeuphonicHttpTTSService(TTSService):
         payload = {
             "text": text,
             "lang_code": self._settings.language,
-            "encoding": self._settings.encoding,
+            "encoding": self._encoding,
             "sampling_rate": self.sample_rate,
             "speed": self._settings.speed,
         }

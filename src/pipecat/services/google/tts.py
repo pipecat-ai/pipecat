@@ -494,7 +494,6 @@ class GoogleHttpTTSSettings(TTSSettings):
             Range [0.25, 2.0].
         volume: Volume adjustment (e.g., "loud", "soft", "+6dB").
         emphasis: Emphasis level for the text.
-        language: Language for synthesis. Defaults to English.
         gender: Voice gender preference.
         google_style: Google-specific voice style.
     """
@@ -506,7 +505,6 @@ class GoogleHttpTTSSettings(TTSSettings):
     emphasis: Literal["strong", "moderate", "reduced", "none"] | None | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    language: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     gender: Literal["male", "female", "neutral"] | None | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -520,11 +518,9 @@ class GoogleStreamTTSSettings(TTSSettings):
     """Settings for Google streaming TTS service.
 
     Parameters:
-        language: Language for synthesis. Defaults to English.
         speaking_rate: The speaking rate, in the range [0.25, 2.0].
     """
 
-    language: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -533,13 +529,11 @@ class GeminiTTSSettings(TTSSettings):
     """Settings for Gemini TTS service.
 
     Parameters:
-        language: Language for synthesis. Defaults to English.
         prompt: Optional style instructions for how to synthesize the content.
         multi_speaker: Whether to enable multi-speaker support.
         speaker_configs: List of speaker configurations for multi-speaker mode.
     """
 
-    language: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     multi_speaker: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_configs: list[dict[str, Any]] | None | _NotGiven = field(
