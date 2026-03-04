@@ -211,14 +211,16 @@ class LLMContextSummarizer(BaseObject):
 
         Evaluates whether the current context has reached either the token
         threshold or message count threshold that warrants compression.
+        Either threshold can be ``None`` to disable that check; at least one
+        must be set (enforced at config construction time).
 
         Returns:
             True if all conditions are met:
             - ``auto_trigger`` is enabled
             - No summarization currently in progress
             - AND either:
-              - Token count exceeds ``max_context_tokens``
-              - OR message count exceeds ``max_unsummarized_messages`` since last summary
+              - Token count exceeds ``max_context_tokens`` (when set)
+              - OR message count exceeds ``max_unsummarized_messages`` since last summary (when set)
         """
         logger.trace(f"{self}: Checking if context summarization is needed")
 
@@ -235,19 +237,20 @@ class LLMContextSummarizer(BaseObject):
 
         # Check if we've reached the token limit
         token_limit = self._auto_config.max_context_tokens
-        token_limit_exceeded = total_tokens >= token_limit
+        token_limit_exceeded = token_limit is not None and total_tokens >= token_limit
 
         # Check if we've exceeded max unsummarized messages
         messages_since_summary = len(self._context.messages) - 1
+        message_threshold = self._auto_config.max_unsummarized_messages
         message_threshold_exceeded = (
-            messages_since_summary >= self._auto_config.max_unsummarized_messages
+            message_threshold is not None and messages_since_summary >= message_threshold
         )
 
         logger.trace(
             f"{self}: Context has {num_messages} messages, "
-            f"~{total_tokens} tokens (limit: {token_limit}), "
+            f"~{total_tokens} tokens (limit: {token_limit if token_limit is not None else 'disabled'}), "
             f"{messages_since_summary} messages since last summary "
-            f"(message threshold: {self._auto_config.max_unsummarized_messages})"
+            f"(message threshold: {message_threshold if message_threshold is not None else 'disabled'})"
         )
 
         # Trigger if either limit is exceeded
@@ -261,9 +264,7 @@ class LLMContextSummarizer(BaseObject):
         if token_limit_exceeded:
             reason.append(f"~{total_tokens} tokens (>={token_limit} limit)")
         if message_threshold_exceeded:
-            reason.append(
-                f"{messages_since_summary} messages (>={self._auto_config.max_unsummarized_messages} threshold)"
-            )
+            reason.append(f"{messages_since_summary} messages (>={message_threshold} threshold)")
 
         logger.debug(f"{self}: ✓ Summarization needed - {', '.join(reason)}")
         return True
