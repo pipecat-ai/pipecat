@@ -199,13 +199,13 @@ async def run_test(
     #
     # Down frames
     #
-    received_down_frames: Sequence[Frame] = []
-    if expected_down_frames is not None:
-        while not received_down.empty():
-            frame = await received_down.get()
-            if not isinstance(frame, EndFrame) or not send_end_frame:
-                received_down_frames.append(frame)
+    received_down_frames: list[Frame] = []
+    while not received_down.empty():
+        frame = await received_down.get()
+        if not isinstance(frame, EndFrame) or not send_end_frame:
+            received_down_frames.append(frame)
 
+    if expected_down_frames is not None:
         down_frames_printed = "["
         for frame in received_down_frames:
             down_frames_printed += f"{frame.__class__.__name__}, "
@@ -225,12 +225,12 @@ async def run_test(
     #
     # Up frames
     #
-    received_up_frames: Sequence[Frame] = []
-    if expected_up_frames is not None:
-        while not received_up.empty():
-            frame = await received_up.get()
-            received_up_frames.append(frame)
+    received_up_frames: list[Frame] = []
+    while not received_up.empty():
+        frame = await received_up.get()
+        received_up_frames.append(frame)
 
+    if expected_up_frames is not None:
         print("received UP frames =", received_up_frames)
         print("expected UP frames =", expected_up_frames)
 
