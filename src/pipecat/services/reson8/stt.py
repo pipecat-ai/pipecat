@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 
 from loguru import logger
 
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -187,6 +188,7 @@ class Reson8STTService(WebsocketSTTService):
                 ws_url,
                 additional_headers={
                     "Authorization": f"ApiKey {self._api_key}",
+                    "User-Agent": f"pipecat/{pipecat_version()}",
                 },
             )
 
@@ -229,12 +231,21 @@ class Reson8STTService(WebsocketSTTService):
                     text = msg.get("text", "")
                     is_final = msg.get("is_final", True)
 
+                    result = {}
+                    if "start_ms" in msg:
+                        result["start_ms"] = msg["start_ms"]
+                    if "duration_ms" in msg:
+                        result["duration_ms"] = msg["duration_ms"]
+                    if "words" in msg:
+                        result["words"] = msg["words"]
+
                     if is_final:
                         await self.push_frame(
                             TranscriptionFrame(
                                 text=text,
                                 user_id=self._user_id,
                                 timestamp=time_now_iso8601(),
+                                result=result or None,
                                 finalized=True,
                             )
                         )
@@ -249,6 +260,7 @@ class Reson8STTService(WebsocketSTTService):
                                 text=text,
                                 user_id=self._user_id,
                                 timestamp=time_now_iso8601(),
+                                result=result or None,
                             )
                         )
                 elif msg_type == "flush_confirmation":
@@ -270,12 +282,19 @@ class Reson8STTService(WebsocketSTTService):
         await self._websocket.send(silence)
 
     async def _update_settings(self, delta: Reson8STTSettings) -> dict[str, Any]:
+        """Apply settings delta, reconnecting to apply changes.
+
+        Settings like language, phrases, and bias_strength are encoded in the
+        WebSocket URL, so a reconnect is required to apply them.
+        """
         changed = await super()._update_settings(delta)
 
         if not changed:
             return changed
 
-        self._warn_unhandled_updated_settings(changed)
+        logger.info(f"Reson8 STT settings changed ({', '.join(changed.keys())}), reconnecting")
+        await self._disconnect()
+        await self._connect()
 
         return changed
 
