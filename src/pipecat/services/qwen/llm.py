@@ -6,6 +6,7 @@
 
 """Qwen LLM service implementation using OpenAI-compatible interface."""
 
+from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
@@ -13,6 +14,13 @@ from loguru import logger
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class QwenLLMSettings(OpenAILLMSettings):
+    """Settings for Qwen LLM service."""
+
+    pass
 
 
 class QwenLLMService(OpenAILLMService):
@@ -28,7 +36,7 @@ class QwenLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         model: Optional[str] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[QwenLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Qwen LLM service.
@@ -46,11 +54,11 @@ class QwenLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="qwen-plus")
+        default_settings = QwenLLMSettings(model="qwen-plus")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", QwenLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

@@ -12,6 +12,7 @@ API format through Google's Gemini API OpenAI compatibility layer.
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Optional
 
 from openai import AsyncStream
@@ -30,6 +31,13 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class GoogleOpenAILLMSettings(OpenAILLMSettings):
+    """Settings for Google OpenAI-compatible LLM service."""
+
+    pass
 
 
 class GoogleLLMOpenAIBetaService(OpenAILLMService):
@@ -56,7 +64,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/",
         model: Optional[str] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[GoogleOpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Google LLM service.
@@ -85,11 +93,11 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="gemini-2.0-flash")
+        default_settings = GoogleOpenAILLMSettings(model="gemini-2.0-flash")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", GoogleOpenAILLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

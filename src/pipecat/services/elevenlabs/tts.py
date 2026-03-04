@@ -418,6 +418,14 @@ class ElevenLabsTTSService(AudioContextTTSService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = ElevenLabsTTSSettings(
             model="eleven_turbo_v2_5",
+            voice=None,
+            language=None,
+            stability=None,
+            similarity_boost=None,
+            style=None,
+            use_speaker_boost=None,
+            speed=None,
+            apply_text_normalization=None,
         )
 
         # Track init-only URL params through the override chain
@@ -986,6 +994,15 @@ class ElevenLabsHttpTTSService(TTSService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = ElevenLabsHttpTTSSettings(
             model="eleven_turbo_v2_5",
+            voice=None,
+            language=None,
+            optimize_streaming_latency=None,
+            stability=None,
+            similarity_boost=None,
+            style=None,
+            use_speaker_boost=None,
+            speed=None,
+            apply_text_normalization=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)

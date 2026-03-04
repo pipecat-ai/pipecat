@@ -70,6 +70,13 @@ class GrokContextAggregatorPair:
         return self._assistant
 
 
+@dataclass
+class GrokLLMSettings(OpenAILLMSettings):
+    """Settings for Grok LLM service."""
+
+    pass
+
+
 class GrokLLMService(OpenAILLMService):
     """A service for interacting with Grok's API using the OpenAI-compatible interface.
 
@@ -85,7 +92,7 @@ class GrokLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.x.ai/v1",
         model: Optional[str] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[GrokLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the GrokLLMService with API key and model.
@@ -103,11 +110,11 @@ class GrokLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="grok-3-beta")
+        default_settings = GrokLLMSettings(model="grok-3-beta")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", GrokLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

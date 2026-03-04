@@ -301,6 +301,7 @@ class CartesiaTTSService(AudioContextTTSService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = CartesiaTTSSettings(
             model="sonic-3",
+            voice=None,
             language=language_to_cartesia_language(Language.EN),
             generation_config=None,
             pronunciation_dict_id=None,
@@ -745,6 +746,7 @@ class CartesiaHttpTTSService(TTSService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = CartesiaTTSSettings(
             model="sonic-3",
+            voice=None,
             language=language_to_cartesia_language(Language.EN),
             generation_config=None,
             pronunciation_dict_id=None,

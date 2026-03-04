@@ -98,6 +98,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = AWSTranscribeSTTSettings(
+            model=None,
             language=self.language_to_service_language(Language.EN) or "en-US",
         )
 

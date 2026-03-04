@@ -6,9 +6,11 @@
 
 """Azure OpenAI Realtime LLM service implementation."""
 
+from dataclasses import dataclass
+
 from loguru import logger
 
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService, OpenAIRealtimeLLMSettings
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -16,6 +18,13 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Azure Realtime, you need to `pip install pipecat-ai[openai]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class AzureRealtimeLLMSettings(OpenAIRealtimeLLMSettings):
+    """Settings for Azure Realtime LLM service."""
+
+    pass
 
 
 class AzureRealtimeLLMService(OpenAIRealtimeLLMService):

@@ -12,6 +12,7 @@ streaming responses, and tool usage.
 """
 
 import json
+from dataclasses import dataclass
 from typing import List, Optional, Union
 
 from loguru import logger
@@ -41,6 +42,13 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class GeminiLiveVertexLLMSettings(GeminiLiveLLMSettings):
+    """Settings for Gemini Live Vertex LLM service."""
+
+    pass
+
+
 class GeminiLiveVertexLLMService(GeminiLiveLLMService):
     """Provides access to Google's Gemini Live model via Vertex AI.
 
@@ -63,7 +71,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         system_instruction: Optional[str] = None,
         tools: Optional[Union[List[dict], ToolsSchema]] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[GeminiLiveLLMSettings] = None,
+        settings: Optional[GeminiLiveVertexLLMSettings] = None,
         inference_on_context_initialization: bool = True,
         file_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/files",
         http_options: Optional[HttpOptions] = None,
@@ -122,7 +130,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         # double deprecation warnings from the parent.
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GeminiLiveLLMSettings(
+        default_settings = GeminiLiveVertexLLMSettings(
             model="google/gemini-live-2.5-flash-native-audio",
             frequency_penalty=None,
             max_tokens=4096,
@@ -146,12 +154,12 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GeminiLiveLLMSettings, "model")
+            _warn_deprecated_param("model", GeminiLiveVertexLLMSettings, "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GeminiLiveLLMSettings)
+            _warn_deprecated_param("params", GeminiLiveVertexLLMSettings)
             if not settings:
                 default_settings.frequency_penalty = params.frequency_penalty
                 default_settings.max_tokens = params.max_tokens

@@ -12,6 +12,7 @@ extending the GoogleLLMService with Vertex AI authentication.
 
 import json
 import os
+from dataclasses import dataclass
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -37,6 +38,13 @@ except ModuleNotFoundError as e:
         "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_APPLICATION_CREDENTIALS` environment variable."
     )
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class GoogleVertexLLMSettings(GoogleLLMSettings):
+    """Settings for Google Vertex LLM service."""
+
+    pass
 
 
 class GoogleVertexLLMService(GoogleLLMService):
@@ -104,7 +112,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         location: Optional[str] = None,
         project_id: Optional[str] = None,
         params: Optional[GoogleLLMService.InputParams] = None,
-        settings: Optional[GoogleLLMSettings] = None,
+        settings: Optional[GoogleVertexLLMSettings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[list] = None,
         tool_config: Optional[dict] = None,
@@ -183,7 +191,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         self._location = location
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GoogleLLMSettings(
+        default_settings = GoogleVertexLLMSettings(
             model="gemini-2.5-flash",
             max_tokens=4096,
             temperature=None,
@@ -200,12 +208,12 @@ class GoogleVertexLLMService(GoogleLLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GoogleLLMSettings, "model")
+            _warn_deprecated_param("model", GoogleVertexLLMSettings, "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GoogleLLMSettings)
+            _warn_deprecated_param("params", GoogleVertexLLMSettings)
             if not settings:
                 default_settings.max_tokens = params.max_tokens
                 default_settings.temperature = params.temperature

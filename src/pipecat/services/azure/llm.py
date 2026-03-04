@@ -6,6 +6,7 @@
 
 """Azure OpenAI service implementation for the Pipecat AI framework."""
 
+from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
@@ -14,6 +15,13 @@ from openai import AsyncAzureOpenAI
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class AzureLLMSettings(OpenAILLMSettings):
+    """Settings for Azure OpenAI LLM service."""
+
+    pass
 
 
 class AzureLLMService(OpenAILLMService):
@@ -30,7 +38,7 @@ class AzureLLMService(OpenAILLMService):
         endpoint: str,
         model: Optional[str] = None,
         api_version: str = "2024-09-01-preview",
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[AzureLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Azure LLM service.
@@ -49,11 +57,11 @@ class AzureLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="gpt-4o")
+        default_settings = AzureLLMSettings(model="gpt-4o")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", AzureLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)
