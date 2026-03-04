@@ -161,6 +161,8 @@ class OpenAITTSService(TTSService):
             model="gpt-4o-mini-tts",
             voice="alloy",
             language=None,
+            instructions=None,
+            speed=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)

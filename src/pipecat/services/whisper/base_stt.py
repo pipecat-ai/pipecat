@@ -10,15 +10,15 @@ This module provides common functionality for services implementing the Whisper 
 interface, including language mapping, metrics generation, and error handling.
 """
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Optional
+from dataclasses import dataclass
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from openai import AsyncOpenAI
 from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import WHISPER_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -31,15 +31,13 @@ class BaseWhisperSTTSettings(STTSettings):
     """Settings for Whisper API-based STT services.
 
     Parameters:
-        base_url: API base URL.
         prompt: Optional text to guide the model's style or continue
             a previous segment.
         temperature: Sampling temperature between 0 and 1.
     """
 
-    base_url: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prompt: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | None | _NotGiven = None
+    temperature: float | None | _NotGiven = None
 
 
 def language_to_whisper_language(language: Language) -> Optional[str]:
@@ -178,7 +176,6 @@ class BaseWhisperSTTService(SegmentedSTTService):
         default_settings = BaseWhisperSTTSettings(
             model=None,
             language=None,
-            base_url=base_url,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -207,30 +204,10 @@ class BaseWhisperSTTService(SegmentedSTTService):
             **kwargs,
         )
         self._client = self._create_client(api_key, base_url)
-        self._language = self._settings.language
-        self._prompt = self._settings.prompt
-        self._temperature = self._settings.temperature
         self._include_prob_metrics = include_prob_metrics
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
-
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta, syncing instance variables.
-
-        Keeps ``_language``, ``_prompt``, and ``_temperature`` in sync with
-        the settings fields.
-        """
-        changed = await super()._update_settings(delta)
-
-        if "language" in changed:
-            self._language = self._settings.language
-        if "prompt" in changed:
-            self._prompt = self._settings.prompt
-        if "temperature" in changed:
-            self._temperature = self._settings.temperature
-
-        return changed
 
     def can_generate_metrics(self) -> bool:
         """Whether this service can generate processing metrics.
@@ -278,7 +255,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             text = response.text.strip()
 
             if text:
-                await self._handle_transcription(text, True, self._language)
+                await self._handle_transcription(text, True, self._settings.language)
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(
                     text,

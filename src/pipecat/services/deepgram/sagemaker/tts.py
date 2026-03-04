@@ -187,8 +187,7 @@ class DeepgramSageMakerTTSService(TTSService):
         logger.debug("Connecting to Deepgram TTS on SageMaker...")
 
         query_string = (
-            f"model={self._settings.voice}&encoding={self._settings.encoding}"
-            f"&sample_rate={self.sample_rate}"
+            f"model={self._settings.voice}&encoding={self._encoding}&sample_rate={self.sample_rate}"
         )
 
         self._client = SageMakerBidiClient(

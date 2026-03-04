@@ -81,20 +81,16 @@ class DeepgramFluxSTTSettings(STTSettings):
         eot_timeout_ms: Time in ms after speech to finish a turn regardless of EOT
             confidence (default 5000).
         keyterm: Keyterms to boost recognition accuracy for specialized terminology.
-        mip_opt_out: Opt out of the Deepgram Model Improvement Program (default False).
         tag: Tags to label requests for identification during usage reporting.
         min_confidence: Minimum confidence required to create a TranscriptionFrame.
-        encoding: Audio encoding format (e.g. ``"linear16"``).
     """
 
     eager_eot_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     eot_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     eot_timeout_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterm: list | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    mip_opt_out: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     tag: list | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_confidence: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramFluxSTTService(WebsocketSTTService):
@@ -158,6 +154,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         api_key: str,
         url: str = "wss://api.deepgram.com/v2/listen",
         sample_rate: Optional[int] = None,
+        mip_opt_out: Optional[bool] = None,
         model: Optional[str] = None,
         flux_encoding: str = "linear16",
         params: Optional[InputParams] = None,
@@ -170,7 +167,9 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Args:
             api_key: Deepgram API key for authentication. Required for API access.
             url: WebSocket URL for the Deepgram Flux API. Defaults to the preview endpoint.
-            sample_rate: Audio sample rate in Hz. If None, uses the rate from params or 16000.
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline
+                sample rate.
+            mip_opt_out: Opt out of the Deepgram Model Improvement Program.
             model: Deepgram Flux model to use for transcription.
 
                 .. deprecated:: 0.0.105
@@ -221,12 +220,10 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         default_settings = DeepgramFluxSTTSettings(
             model="flux-general-en",
             language=Language.EN,
-            encoding=flux_encoding,
             eager_eot_threshold=None,
             eot_threshold=None,
             eot_timeout_ms=None,
             keyterm=[],
-            mip_opt_out=None,
             tag=[],
             min_confidence=None,
         )
@@ -244,9 +241,10 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 default_settings.eot_threshold = params.eot_threshold
                 default_settings.eot_timeout_ms = params.eot_timeout_ms
                 default_settings.keyterm = params.keyterm or []
-                default_settings.mip_opt_out = params.mip_opt_out
                 default_settings.tag = params.tag or []
                 default_settings.min_confidence = params.min_confidence
+                if params.mip_opt_out is not None:
+                    mip_opt_out = params.mip_opt_out
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -261,8 +259,11 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._url = url
         self._should_interrupt = should_interrupt
+        self._encoding = flux_encoding
+        self._mip_opt_out = mip_opt_out
         self._websocket_url = None
         self._receive_task = None
+
         # Flux event handlers
         self._register_event_handler("on_start_of_turn")
         self._register_event_handler("on_turn_resumed")
@@ -448,7 +449,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         url_params = [
             f"model={self._settings.model}",
             f"sample_rate={self.sample_rate}",
-            f"encoding={self._settings.encoding}",
+            f"encoding={self._encoding}",
         ]
 
         if self._settings.eager_eot_threshold is not None:
@@ -460,8 +461,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         if self._settings.eot_timeout_ms is not None:
             url_params.append(f"eot_timeout_ms={self._settings.eot_timeout_ms}")
 
-        if self._settings.mip_opt_out is not None:
-            url_params.append(f"mip_opt_out={str(self._settings.mip_opt_out).lower()}")
+        if self._mip_opt_out is not None:
+            url_params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
 
         # Add keyterm parameters (can have multiple)
         for keyterm in self._settings.keyterm:

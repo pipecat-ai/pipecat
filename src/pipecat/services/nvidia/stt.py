@@ -8,7 +8,7 @@
 
 import asyncio
 from concurrent.futures import CancelledError as FuturesCancelledError
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, List, Mapping, Optional
 
 from loguru import logger
@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import STTSettings, _warn_deprecated_param
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -110,11 +110,11 @@ class NvidiaSegmentedSTTSettings(STTSettings):
         boosted_lm_score: Score boost for specified words.
     """
 
-    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    verbatim_transcripts: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_words: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_score: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool = False
+    automatic_punctuation: bool = True
+    verbatim_transcripts: bool = False
+    boosted_lm_words: Optional[List[str]] = None
+    boosted_lm_score: float = 4.0
 
 
 class NvidiaSTTService(STTService):
@@ -586,19 +586,18 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     def _create_recognition_config(self):
         """Create the NVIDIA Riva ASR recognition configuration."""
         # Create base configuration
+        s = self._settings
         config = riva.client.RecognitionConfig(
             language_code=self._get_language_code(),
             max_alternatives=1,
-            profanity_filter=self._settings.profanity_filter,
-            enable_automatic_punctuation=self._settings.automatic_punctuation,
-            verbatim_transcripts=self._settings.verbatim_transcripts,
+            profanity_filter=s.profanity_filter,
+            enable_automatic_punctuation=s.automatic_punctuation,
+            verbatim_transcripts=s.verbatim_transcripts,
         )
 
         # Add word boosting if specified
-        if self._settings.boosted_lm_words:
-            riva.client.add_word_boosting_to_config(
-                config, self._settings.boosted_lm_words, self._settings.boosted_lm_score
-            )
+        if s.boosted_lm_words:
+            riva.client.add_word_boosting_to_config(config, s.boosted_lm_words, s.boosted_lm_score)
 
         # Add voice activity detection parameters
         riva.client.add_endpoint_parameters_to_config(
