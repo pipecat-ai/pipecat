@@ -108,7 +108,7 @@ class DailyRoomProperties(BaseModel):
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = False
     enable_dialout: Optional[bool] = None
-    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
+    enable_recording: Optional[Literal["cloud", "cloud-audio-only", "local", "raw-tracks"]] = None
     enable_transcription_storage: Optional[bool] = None
     geo: Optional[str] = None
     max_participants: Optional[int] = None
@@ -202,7 +202,7 @@ class DailyMeetingTokenProperties(BaseModel):
     enable_screenshare: Optional[bool] = None
     start_video_off: Optional[bool] = None
     start_audio_off: Optional[bool] = None
-    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
+    enable_recording: Optional[Literal["cloud", "cloud-audio-only", "local", "raw-tracks"]] = None
     enable_prejoin_ui: Optional[bool] = None
     start_cloud_recording: Optional[bool] = None
     permissions: Optional[Dict[str, Any]] = None
