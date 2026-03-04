@@ -4,8 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for SIP transport: SIPServerTransport, SIPSession, port allocation,
-call lifecycle, ACK timeout, duplicate INVITE rejection, and OPTIONS handling.
+"""Tests for FreeSWITCH SIP transport: FreeSwitchSIPServerTransport,
+FreeSwitchSIPSession, port allocation, call lifecycle, ACK timeout,
+duplicate INVITE rejection, and OPTIONS handling.
 """
 
 import asyncio
@@ -14,13 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pipecat.transports.sip.params import SIPParams
+from pipecat.transports.sip.params import FreeSwitchSIPParams
 from pipecat.transports.sip.rtp import RTPSession
 from pipecat.transports.sip.signaling import SIPMessage, build_200_ok_options
 from pipecat.transports.sip.transport import (
-    SIPCallTransport,
-    SIPServerTransport,
-    SIPSession,
+    FreeSwitchSIPCallTransport,
+    FreeSwitchSIPServerTransport,
+    FreeSwitchSIPSession,
 )
 
 # ---------------------------------------------------------------------------
@@ -111,14 +112,14 @@ REMOTE_ADDR = ("10.0.0.1", 5060)
 
 
 # ---------------------------------------------------------------------------
-# SIPSession unit tests
+# FreeSwitchSIPSession unit tests
 # ---------------------------------------------------------------------------
 
 
-class TestSIPSession:
+class TestFreeSwitchSIPSession:
     def test_session_creation(self):
-        """SIPSession creates an RTPSession with correct port."""
-        session = SIPSession(
+        """FreeSwitchSIPSession creates an RTPSession with correct port."""
+        session = FreeSwitchSIPSession(
             call_id="call-1",
             local_tag="bot-1",
             remote_tag="abc",
@@ -136,8 +137,8 @@ class TestSIPSession:
         assert not session._stopped
 
     def test_session_prebuffer_forwarded(self):
-        """SIPSession forwards prebuffer_frames to RTPSession."""
-        session = SIPSession(
+        """FreeSwitchSIPSession forwards prebuffer_frames to RTPSession."""
+        session = FreeSwitchSIPSession(
             call_id="call-2",
             local_tag="bot-2",
             remote_tag="abc",
@@ -154,8 +155,8 @@ class TestSIPSession:
         assert session.rtp_session._prebuffer_frames == 5
 
     def test_session_dtmf_forwarded(self):
-        """SIPSession forwards dtmf_enabled to RTPSession."""
-        session = SIPSession(
+        """FreeSwitchSIPSession forwards dtmf_enabled to RTPSession."""
+        session = FreeSwitchSIPSession(
             call_id="call-3",
             local_tag="bot-3",
             remote_tag="abc",
@@ -174,7 +175,7 @@ class TestSIPSession:
     @pytest.mark.asyncio
     async def test_session_stop_idempotent(self):
         """Calling stop() twice is safe."""
-        session = SIPSession(
+        session = FreeSwitchSIPSession(
             call_id="call-4",
             local_tag="bot-4",
             remote_tag="abc",
@@ -194,7 +195,7 @@ class TestSIPSession:
 
     def test_send_bye_uses_transport(self):
         """send_bye() sends a BYE message via the SIP transport."""
-        session = SIPSession(
+        session = FreeSwitchSIPSession(
             call_id="call-5",
             local_tag="bot-5",
             remote_tag="abc",
@@ -216,7 +217,7 @@ class TestSIPSession:
 
     def test_send_bye_idempotent(self):
         """send_bye() only sends once."""
-        session = SIPSession(
+        session = FreeSwitchSIPSession(
             call_id="call-6",
             local_tag="bot-6",
             remote_tag="abc",
@@ -244,8 +245,8 @@ class TestSIPSession:
 class TestPortAllocation:
     def test_allocate_and_release(self):
         """Ports are allocated and released correctly."""
-        params = SIPParams(rtp_port_range=(30000, 30002), max_calls=10)
-        server = SIPServerTransport(params=params)
+        params = FreeSwitchSIPParams(rtp_port_range=(30000, 30002), max_calls=10)
+        server = FreeSwitchSIPServerTransport(params=params)
         p1 = server._allocate_rtp_port()
         p2 = server._allocate_rtp_port()
         p3 = server._allocate_rtp_port()
@@ -260,26 +261,26 @@ class TestPortAllocation:
 
     def test_release_unknown_port_safe(self):
         """Releasing a port not in use does not raise."""
-        params = SIPParams(rtp_port_range=(30000, 30010))
-        server = SIPServerTransport(params=params)
+        params = FreeSwitchSIPParams(rtp_port_range=(30000, 30010))
+        server = FreeSwitchSIPServerTransport(params=params)
         server._release_rtp_port(99999)  # Should not raise
 
 
 # ---------------------------------------------------------------------------
-# SIPServerTransport message handling
+# FreeSwitchSIPServerTransport message handling
 # ---------------------------------------------------------------------------
 
 
-class TestSIPServerTransportHandleMessage:
-    def _make_server(self, **param_overrides) -> SIPServerTransport:
+class TestFreeSwitchSIPServerTransportHandleMessage:
+    def _make_server(self, **param_overrides) -> FreeSwitchSIPServerTransport:
         """Create a server with a mock UDP transport attached."""
-        params = SIPParams(
+        params = FreeSwitchSIPParams(
             rtp_port_range=(30000, 30100),
             ack_timeout_ms=500,
             rtp_dead_timeout_ms=0,  # Disable for non-timeout tests
             **param_overrides,
         )
-        server = SIPServerTransport(params=params)
+        server = FreeSwitchSIPServerTransport(params=params)
         server._transport = _mock_transport()
         server._local_port = 5060
         server._running = True
@@ -294,8 +295,8 @@ class TestSIPServerTransportHandleMessage:
 
         assert "call-100" in server._active_calls
         session, call_transport = server._active_calls["call-100"]
-        assert isinstance(session, SIPSession)
-        assert isinstance(call_transport, SIPCallTransport)
+        assert isinstance(session, FreeSwitchSIPSession)
+        assert isinstance(call_transport, FreeSwitchSIPCallTransport)
         # Should have sent 100 Trying + 200 OK = 2 messages
         assert server._transport.sendto.call_count == 2
         await server.stop()
@@ -380,12 +381,12 @@ class TestACKTimeout:
     @pytest.mark.asyncio
     async def test_ack_timeout_cleans_up_call(self):
         """Call is cleaned up after ACK timeout."""
-        params = SIPParams(
+        params = FreeSwitchSIPParams(
             rtp_port_range=(30000, 30100),
             ack_timeout_ms=100,  # Very short for test
             rtp_dead_timeout_ms=0,
         )
-        server = SIPServerTransport(params=params)
+        server = FreeSwitchSIPServerTransport(params=params)
         server._transport = _mock_transport()
         server._local_port = 5060
         server._running = True
@@ -403,12 +404,12 @@ class TestACKTimeout:
     @pytest.mark.asyncio
     async def test_ack_cancels_timeout(self):
         """ACK cancels the timeout timer."""
-        params = SIPParams(
+        params = FreeSwitchSIPParams(
             rtp_port_range=(30000, 30100),
             ack_timeout_ms=5000,  # Long timeout
             rtp_dead_timeout_ms=0,
         )
-        server = SIPServerTransport(params=params)
+        server = FreeSwitchSIPServerTransport(params=params)
         server._transport = _mock_transport()
         server._local_port = 5060
         server._running = True
@@ -417,7 +418,7 @@ class TestACKTimeout:
         assert "call-ack" in server._pending_acks
 
         # Send ACK — should cancel timeout and start call
-        with patch.object(SIPSession, "start_rtp", new_callable=AsyncMock):
+        with patch.object(FreeSwitchSIPSession, "start_rtp", new_callable=AsyncMock):
             server._handle_message(_make_ack("call-ack"), REMOTE_ADDR)
 
         assert "call-ack" not in server._pending_acks
@@ -436,12 +437,12 @@ class TestRTPDeadTimeout:
     @pytest.mark.asyncio
     async def test_rtp_dead_timeout_triggers_cleanup(self):
         """Call is cleaned up when no RTP received within timeout."""
-        params = SIPParams(
+        params = FreeSwitchSIPParams(
             rtp_port_range=(30000, 30100),
             ack_timeout_ms=5000,
             rtp_dead_timeout_ms=200,  # Very short for test
         )
-        server = SIPServerTransport(params=params)
+        server = FreeSwitchSIPServerTransport(params=params)
         server._transport = _mock_transport()
         server._local_port = 5060
         server._running = True
@@ -455,7 +456,7 @@ class TestRTPDeadTimeout:
         server._handle_message(_make_invite("call-dead"), REMOTE_ADDR)
 
         # Simulate ACK with mocked start_rtp (avoid real UDP binding)
-        with patch.object(SIPSession, "start_rtp", new_callable=AsyncMock):
+        with patch.object(FreeSwitchSIPSession, "start_rtp", new_callable=AsyncMock):
             server._handle_message(_make_ack("call-dead"), REMOTE_ADDR)
 
         # Wait enough for the monitor to trigger. The _last_rtp_time was
@@ -473,14 +474,14 @@ class TestRTPDeadTimeout:
 
 
 # ---------------------------------------------------------------------------
-# SIPCallTransport
+# FreeSwitchSIPCallTransport
 # ---------------------------------------------------------------------------
 
 
-class TestSIPCallTransport:
+class TestFreeSwitchSIPCallTransport:
     def test_input_output_creation(self):
-        """SIPCallTransport creates input/output transports."""
-        session = SIPSession(
+        """FreeSwitchSIPCallTransport creates input/output transports."""
+        session = FreeSwitchSIPSession(
             call_id="call-ct",
             local_tag="bot-ct",
             remote_tag="abc",
@@ -493,8 +494,8 @@ class TestSIPCallTransport:
             local_ip="192.168.1.1",
             local_sip_port=5060,
         )
-        params = SIPParams()
-        ct = SIPCallTransport(session=session, params=params)
+        params = FreeSwitchSIPParams()
+        ct = FreeSwitchSIPCallTransport(session=session, params=params)
         inp = ct.input()
         out = ct.output()
         assert inp is ct.input()  # Same instance
@@ -531,12 +532,12 @@ class TestServerStop:
     @pytest.mark.asyncio
     async def test_stop_cleans_all(self):
         """stop() cleans up all active calls and pending ACKs."""
-        params = SIPParams(
+        params = FreeSwitchSIPParams(
             rtp_port_range=(30000, 30100),
             ack_timeout_ms=60000,
             rtp_dead_timeout_ms=0,
         )
-        server = SIPServerTransport(params=params)
+        server = FreeSwitchSIPServerTransport(params=params)
         server._transport = _mock_transport()
         server._local_port = 5060
         server._running = True

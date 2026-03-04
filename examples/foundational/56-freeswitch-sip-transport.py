@@ -4,11 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""SIP Transport Example - Conversational AI Agent
+"""FreeSWITCH SIP Transport Example (LAN / Dial-in Only)
 
-Accepts incoming SIP calls via FreeSWITCH and runs a full STT -> LLM -> TTS
-conversational agent pipeline per call. Audio is exchanged over RTP using
-G.711 codecs with automatic 8kHz/16kHz resampling.
+Accepts incoming SIP calls routed by FreeSWITCH and runs a full
+STT -> LLM -> TTS conversational agent pipeline per call. Audio is
+exchanged over RTP using G.711 codecs with automatic 8kHz/16kHz resampling.
+
+Constraints:
+    - LAN-only: no NAT traversal, STUN, or ICE support.
+    - Dial-in only: no SIP REGISTER; relies on FreeSWITCH to route calls.
+    - UAS role only: the bot does not originate outbound calls.
 
 Typical setup:
     1. Configure FreeSWITCH to route calls to this bot's IP:port
@@ -44,7 +49,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.sip import SIPCallTransport, SIPParams, SIPServerTransport
+from pipecat.transports.sip import (
+    FreeSwitchSIPCallTransport,
+    FreeSwitchSIPParams,
+    FreeSwitchSIPServerTransport,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,15 +63,15 @@ async def main():
     sip_host = os.getenv("SIP_HOST", "0.0.0.0")
     sip_port = int(os.getenv("SIP_PORT", "5060"))
 
-    params = SIPParams(
+    params = FreeSwitchSIPParams(
         sip_listen_host=sip_host,
         sip_listen_port=sip_port,
     )
 
-    server = SIPServerTransport(params=params)
+    server = FreeSwitchSIPServerTransport(params=params)
 
     @server.event_handler("on_call_started")
-    async def on_call(server, call_transport: SIPCallTransport):
+    async def on_call(server, call_transport: FreeSwitchSIPCallTransport):
         logger.info("Call started: %s", call_transport.session.call_id)
 
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
@@ -119,7 +128,7 @@ async def main():
         logger.info("Call ended: %s", call_transport.session.call_id)
 
     @server.event_handler("on_call_ended")
-    async def on_call_ended(server, call_transport: SIPCallTransport):
+    async def on_call_ended(server, call_transport: FreeSwitchSIPCallTransport):
         logger.info("Call ended (BYE): %s", call_transport.session.call_id)
 
     await server.start()

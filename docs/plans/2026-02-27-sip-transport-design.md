@@ -2,27 +2,33 @@
 
 ## Summary
 
-Add a SIP UAS transport to Pipecat that allows PBX/SBC SIP calls to enter a pipeline directly. Pure Python (numpy for codecs), G.711 PCMU/PCMA, 20ms RTP packetization, RFC 2833 DTMF detection.
+Add a FreeSWITCH-scoped SIP UAS transport to Pipecat that allows PBX/SBC SIP calls to enter a pipeline directly. Pure Python (numpy for codecs), G.711 PCMU/PCMA, 20ms RTP packetization, RFC 2833 DTMF detection.
+
+### Constraints
+
+- **LAN-only:** No NAT traversal, STUN, or ICE. Both FreeSWITCH and the bot must share a reachable network.
+- **No SIP REGISTER:** Dial-in only — FreeSWITCH routes calls to the bot's IP:port directly.
+- **UAS role only:** The bot accepts incoming INVITEs; it does not originate outbound calls.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│        SIPServerTransport           │
-│  (UDP SIP listener, port manager)   │
-│                                     │
-│  on INVITE → create SIPCallTransport│
-│  on BYE    → teardown call          │
-└──────────────┬──────────────────────┘
+┌──────────────────────────────────────────────────┐
+│        FreeSwitchSIPServerTransport              │
+│  (UDP SIP listener, port manager)                │
+│                                                  │
+│  on INVITE → create FreeSwitchSIPCallTransport   │
+│  on BYE    → teardown call                       │
+└──────────────┬───────────────────────────────────┘
                │ emits per call
-    ┌──────────▼──────────────┐
-    │    SIPCallTransport     │
-    │   (extends BaseTransport)│
-    │                         │
-    │  .input()  → SIPInputTransport  (BaseInputTransport)
-    │  .output() → SIPOutputTransport (BaseOutputTransport)
-    │  .session  → SIPSession (call metadata)
-    └──────────┬──────────────┘
+    ┌──────────▼──────────────────────┐
+    │  FreeSwitchSIPCallTransport     │
+    │   (extends BaseTransport)       │
+    │                                 │
+    │  .input()  → FreeSwitchSIPInputTransport  (BaseInputTransport)
+    │  .output() → FreeSwitchSIPOutputTransport (BaseOutputTransport)
+    │  .session  → FreeSwitchSIPSession (call metadata)
+    └──────────┬──────────────────────┘
                │ owns
     ┌──────────▼──────────────┐
     │      RTPSession         │
@@ -35,10 +41,10 @@ Add a SIP UAS transport to Pipecat that allows PBX/SBC SIP calls to enter a pipe
 **User API:**
 
 ```python
-server = SIPServerTransport(params=SIPParams(...))
+server = FreeSwitchSIPServerTransport(params=FreeSwitchSIPParams(...))
 
 @server.event_handler("on_call_started")
-async def on_call(server, call_transport: SIPCallTransport):
+async def on_call(server, call_transport: FreeSwitchSIPCallTransport):
     pipeline = Pipeline([
         call_transport.input(), stt, llm, tts, call_transport.output()
     ])
@@ -58,9 +64,9 @@ await server.start()
 
 ```
 src/pipecat/transports/sip/
-├── __init__.py      # Exports SIPServerTransport, SIPCallTransport, SIPParams
-├── params.py        # SIPParams (extends TransportParams)
-├── transport.py     # SIPServerTransport, SIPCallTransport, SIPInput/OutputTransport
+├── __init__.py      # Exports FreeSwitchSIPServerTransport, FreeSwitchSIPCallTransport, FreeSwitchSIPParams
+├── params.py        # FreeSwitchSIPParams (extends TransportParams)
+├── transport.py     # FreeSwitchSIPServerTransport, FreeSwitchSIPCallTransport, FreeSwitchSIPInput/OutputTransport
 ├── signaling.py     # SIP message parsing, response building, UDP protocol
 ├── sdp.py           # SDP parse/generate
 ├── rtp.py           # RTPSession (send/recv loops, pre-buffering)
@@ -69,7 +75,7 @@ src/pipecat/transports/sip/
 
 ## Components
 
-### SIPParams
+### FreeSwitchSIPParams
 
 Extends `TransportParams`:
 
@@ -88,7 +94,7 @@ Extends `TransportParams`:
 
 Inherited defaults set: `audio_in_enabled=True`, `audio_out_enabled=True`, `audio_in_sample_rate=16000`, `audio_out_sample_rate=16000`.
 
-### SIPSession
+### FreeSwitchSIPSession
 
 Per-call state dataclass:
 
@@ -109,7 +115,7 @@ UDP `asyncio.DatagramProtocol`. Handles:
 4. Allocate local RTP port from pool
 5. Build SDP answer, send 200 OK
 6. Start ACK timeout timer
-7. ACK received → cancel timer, create SIPCallTransport, start RTP, fire on_call_started
+7. ACK received → cancel timer, create FreeSwitchSIPCallTransport, start RTP, fire on_call_started
 8. Timeout → send BYE, release port
 
 **BYE (inbound):** Respond 200 OK, stop RTP, release port, fire on_call_ended.
@@ -146,21 +152,21 @@ Required headers: Via, From/To (tagged), Call-ID, CSeq, Contact, Content-Length.
 
 ### Transport Classes
 
-**SIPInputTransport (BaseInputTransport):**
+**FreeSwitchSIPInputTransport (BaseInputTransport):**
 - `_rx_loop` task: pull RTP rx_queue → resample 8k→16k → push_audio_frame()
 - `_dtmf_loop` task: pull dtmf_queue → push InputTransportMessageFrame
 - BaseInputTransport handles VAD, filtering, turn detection
 
-**SIPOutputTransport (BaseOutputTransport):**
+**FreeSwitchSIPOutputTransport (BaseOutputTransport):**
 - Override `write_audio_frame()`: resample to 8k → G.711 encode → buffer to 320-byte frames → push to tx_queue
 - BaseOutputTransport handles buffering, chunking, interruptions via MediaSender
 
-**SIPCallTransport (BaseTransport):**
+**FreeSwitchSIPCallTransport (BaseTransport):**
 - Lazy-creates input/output transports
-- Exposes `session: SIPSession`
+- Exposes `session: FreeSwitchSIPSession`
 - Provides `hangup()` for UAS-initiated BYE
 
-**SIPServerTransport (BaseObject):**
+**FreeSwitchSIPServerTransport (BaseObject):**
 - `start()`: create UDP SIP listener
 - `stop()`: close listener, teardown all calls
 - Events: on_call_started, on_call_ended, on_call_failed

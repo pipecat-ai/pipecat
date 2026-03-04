@@ -4,11 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""SIP/RTP transport for Pipecat.
+"""FreeSWITCH SIP/RTP transport for Pipecat.
 
-Provides SIPServerTransport (SIP listener + port manager) that produces
-SIPCallTransport instances (BaseTransport) per incoming call. Each call
-gets its own input/output processors for pipeline integration.
+Provides FreeSwitchSIPServerTransport (SIP listener + port manager) that
+produces FreeSwitchSIPCallTransport instances (BaseTransport) per incoming
+call. Each call gets its own input/output processors for pipeline
+integration. Scoped for LAN use with FreeSWITCH (no NAT/STUN, no
+REGISTER, dial-in only).
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.sip.codecs import G711Codec, resample_down, resample_up
-from pipecat.transports.sip.params import SIPParams
+from pipecat.transports.sip.params import FreeSwitchSIPParams
 from pipecat.transports.sip.rtp import RTPSession
 from pipecat.transports.sip.sdp import parse_sdp
 from pipecat.transports.sip.signaling import (
@@ -52,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SIPSession:
+class FreeSwitchSIPSession:
     """Per-call SIP session state.
 
     Parameters:
@@ -142,19 +144,19 @@ class SIPSession:
         await self.rtp_session.stop()
 
 
-class SIPInputTransport(BaseInputTransport):
+class FreeSwitchSIPInputTransport(BaseInputTransport):
     """Pulls PCM16 from RTP rx_queue, resamples 8k->16k, pushes to pipeline.
 
     Args:
-        session: The SIPSession for this call.
+        session: The FreeSwitchSIPSession for this call.
         params: Transport parameters.
     """
 
-    def __init__(self, session: SIPSession, params: SIPParams, **kwargs):
+    def __init__(self, session: FreeSwitchSIPSession, params: FreeSwitchSIPParams, **kwargs):
         """Initialize the SIP input transport.
 
         Args:
-            session: The SIPSession for this call.
+            session: The FreeSwitchSIPSession for this call.
             params: Transport parameters.
             **kwargs: Additional arguments passed to parent.
         """
@@ -232,19 +234,19 @@ class SIPInputTransport(BaseInputTransport):
                 await self.push_error(f"SIP DTMF error: {e}", exception=e)
 
 
-class SIPOutputTransport(BaseOutputTransport):
+class FreeSwitchSIPOutputTransport(BaseOutputTransport):
     """Receives pipeline audio, resamples to 8k, encodes G.711, sends via RTP.
 
     Args:
-        session: The SIPSession for this call.
+        session: The FreeSwitchSIPSession for this call.
         params: Transport parameters.
     """
 
-    def __init__(self, session: SIPSession, params: SIPParams, **kwargs):
+    def __init__(self, session: FreeSwitchSIPSession, params: FreeSwitchSIPParams, **kwargs):
         """Initialize the SIP output transport.
 
         Args:
-            session: The SIPSession for this call.
+            session: The FreeSwitchSIPSession for this call.
             params: Transport parameters.
             **kwargs: Additional arguments passed to parent.
         """
@@ -294,54 +296,58 @@ class SIPOutputTransport(BaseOutputTransport):
         return True
 
 
-class SIPCallTransport(BaseTransport):
+class FreeSwitchSIPCallTransport(BaseTransport):
     """Per-call transport wrapping SIP session with input/output processors.
 
-    Created by SIPServerTransport for each incoming call. Provides standard
+    Created by FreeSwitchSIPServerTransport for each incoming call. Provides standard
     BaseTransport interface with input()/output() for pipeline integration.
 
     Args:
-        session: The SIPSession for this call.
+        session: The FreeSwitchSIPSession for this call.
         params: Transport parameters.
     """
 
-    def __init__(self, session: SIPSession, params: SIPParams, **kwargs):
+    def __init__(self, session: FreeSwitchSIPSession, params: FreeSwitchSIPParams, **kwargs):
         """Initialize the SIP call transport.
 
         Args:
-            session: The SIPSession for this call.
+            session: The FreeSwitchSIPSession for this call.
             params: Transport parameters.
             **kwargs: Additional arguments passed to parent.
         """
         super().__init__(**kwargs)
         self._session = session
         self._params = params
-        self._input: Optional[SIPInputTransport] = None
-        self._output: Optional[SIPOutputTransport] = None
+        self._input: Optional[FreeSwitchSIPInputTransport] = None
+        self._output: Optional[FreeSwitchSIPOutputTransport] = None
 
     @property
-    def session(self) -> SIPSession:
+    def session(self) -> FreeSwitchSIPSession:
         """Access the SIP session state (call_id, headers, etc.)."""
         return self._session
 
-    def input(self) -> SIPInputTransport:
+    def input(self) -> FreeSwitchSIPInputTransport:
         """Get the input frame processor for this call transport.
 
         Returns:
             The SIP input transport that handles incoming RTP audio.
         """
         if not self._input:
-            self._input = SIPInputTransport(self._session, self._params, name=self._input_name)
+            self._input = FreeSwitchSIPInputTransport(
+                self._session, self._params, name=self._input_name
+            )
         return self._input
 
-    def output(self) -> SIPOutputTransport:
+    def output(self) -> FreeSwitchSIPOutputTransport:
         """Get the output frame processor for this call transport.
 
         Returns:
             The SIP output transport that handles outgoing RTP audio.
         """
         if not self._output:
-            self._output = SIPOutputTransport(self._session, self._params, name=self._output_name)
+            self._output = FreeSwitchSIPOutputTransport(
+                self._session, self._params, name=self._output_name
+            )
         return self._output
 
     async def hangup(self):
@@ -349,10 +355,10 @@ class SIPCallTransport(BaseTransport):
         await self._session.stop()
 
 
-class _SIPServerProtocol(asyncio.DatagramProtocol):
+class _FreeSwitchSIPServerProtocol(asyncio.DatagramProtocol):
     """Asyncio UDP protocol for SIP signaling."""
 
-    def __init__(self, server: SIPServerTransport):
+    def __init__(self, server: FreeSwitchSIPServerTransport):
         self._server = server
 
     def datagram_received(self, data: bytes, addr: Tuple[str, int]):
@@ -362,11 +368,11 @@ class _SIPServerProtocol(asyncio.DatagramProtocol):
         logger.error("SIP protocol error: %s", exc)
 
 
-class SIPServerTransport(BaseObject):
+class FreeSwitchSIPServerTransport(BaseObject):
     """SIP UAS server that listens for incoming calls.
 
     Manages a UDP SIP listener and RTP port pool. Each incoming INVITE
-    creates a SIPCallTransport and fires the on_call_started event.
+    creates a FreeSwitchSIPCallTransport and fires the on_call_started event.
 
     Event handlers available:
 
@@ -379,7 +385,7 @@ class SIPServerTransport(BaseObject):
 
     Example::
 
-        server = SIPServerTransport(params=SIPParams())
+        server = FreeSwitchSIPServerTransport(params=FreeSwitchSIPParams())
 
         @server.event_handler("on_call_started")
         async def on_call(server, call_transport):
@@ -392,7 +398,7 @@ class SIPServerTransport(BaseObject):
         await server.start()
     """
 
-    def __init__(self, params: SIPParams, **kwargs):
+    def __init__(self, params: FreeSwitchSIPParams, **kwargs):
         """Initialize the SIP server transport.
 
         Args:
@@ -402,7 +408,7 @@ class SIPServerTransport(BaseObject):
         super().__init__(**kwargs)
         self._params = params
         self._transport: Optional[asyncio.DatagramTransport] = None
-        self._active_calls: Dict[str, Tuple[SIPSession, SIPCallTransport]] = {}
+        self._active_calls: Dict[str, Tuple[FreeSwitchSIPSession, FreeSwitchSIPCallTransport]] = {}
         self._pending_acks: Dict[str, asyncio.Task] = {}
         self._background_tasks: Set[asyncio.Task] = set()
         self._used_ports: Set[int] = set()
@@ -419,7 +425,7 @@ class SIPServerTransport(BaseObject):
         self._running = True
         loop = asyncio.get_running_loop()
         self._transport, _ = await loop.create_datagram_endpoint(
-            lambda: _SIPServerProtocol(self),
+            lambda: _FreeSwitchSIPServerProtocol(self),
             local_addr=(self._params.sip_listen_host, self._params.sip_listen_port),
         )
         actual_addr = self._transport.get_extra_info("sockname")
@@ -552,7 +558,7 @@ class SIPServerTransport(BaseObject):
                     remote_tag = part.strip()[4:]
                     break
 
-        session = SIPSession(
+        session = FreeSwitchSIPSession(
             call_id=msg.call_id,
             local_tag=local_tag,
             remote_tag=remote_tag,
@@ -579,7 +585,7 @@ class SIPServerTransport(BaseObject):
         )
         self._transport.sendto(ok, addr)
 
-        call_transport = SIPCallTransport(session=session, params=self._params)
+        call_transport = FreeSwitchSIPCallTransport(session=session, params=self._params)
 
         self._active_calls[msg.call_id] = (session, call_transport)
 
@@ -608,7 +614,9 @@ class SIPServerTransport(BaseObject):
 
         self._create_background_task(self._start_call(session, call_transport))
 
-    async def _start_call(self, session: SIPSession, call_transport: SIPCallTransport):
+    async def _start_call(
+        self, session: FreeSwitchSIPSession, call_transport: FreeSwitchSIPCallTransport
+    ):
         """Start RTP session and fire on_call_started event."""
         try:
             await session.start_rtp()
@@ -621,7 +629,7 @@ class SIPServerTransport(BaseObject):
             await self._call_event_handler("on_call_failed", call_transport, e)
             await self._cleanup_call(session.call_id)
 
-    async def _run_rtp(self, session: SIPSession):
+    async def _run_rtp(self, session: FreeSwitchSIPSession):
         """Run RTP send loop, cleanup on completion."""
         try:
             await session.rtp_session.run()
@@ -637,7 +645,9 @@ class SIPServerTransport(BaseObject):
                 await self._call_event_handler("on_call_ended", call_transport)
             await self._cleanup_call(session.call_id)
 
-    async def _rtp_dead_monitor(self, session: SIPSession, call_transport: SIPCallTransport):
+    async def _rtp_dead_monitor(
+        self, session: FreeSwitchSIPSession, call_transport: FreeSwitchSIPCallTransport
+    ):
         """Monitor RTP liveness; teardown call if no packets received within timeout."""
         timeout_s = self._params.rtp_dead_timeout_ms / 1000
         poll_interval = min(timeout_s / 2, 1.0)
@@ -685,7 +695,9 @@ class SIPServerTransport(BaseObject):
         else:
             logger.debug("BYE for unknown call %s", msg.call_id)
 
-    async def _on_bye_received(self, session: SIPSession, call_transport: SIPCallTransport):
+    async def _on_bye_received(
+        self, session: FreeSwitchSIPSession, call_transport: FreeSwitchSIPCallTransport
+    ):
         """Handle BYE received: stop session, fire event, cleanup."""
         await session.stop()
         await self._call_event_handler("on_call_ended", call_transport)

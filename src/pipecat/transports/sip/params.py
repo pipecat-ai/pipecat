@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""SIP transport parameters."""
+"""FreeSWITCH SIP transport parameters."""
 
 from __future__ import annotations
 
@@ -13,11 +13,12 @@ from typing import List, Tuple
 from pipecat.transports.base_transport import TransportParams
 
 
-class SIPParams(TransportParams):
-    """Parameters for SIP/RTP transport.
+class FreeSwitchSIPParams(TransportParams):
+    """Parameters for FreeSWITCH SIP/RTP transport.
 
     Extends TransportParams with SIP-specific configuration for signaling,
-    RTP media, and codec settings.
+    RTP media, and codec settings. Scoped for LAN use with FreeSWITCH
+    (no NAT/STUN, no REGISTER, dial-in only).
 
     Parameters:
         sip_listen_host: Bind address for SIP UDP listener.

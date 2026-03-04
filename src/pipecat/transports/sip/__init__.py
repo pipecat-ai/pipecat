@@ -4,22 +4,23 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""SIP/RTP transport for Pipecat.
+"""FreeSWITCH SIP/RTP transport for Pipecat.
 
-Provides SIPServerTransport for accepting incoming SIP calls and routing
-them through Pipecat pipelines with G.711 audio over RTP.
+Provides FreeSwitchSIPServerTransport for accepting incoming SIP calls and
+routing them through Pipecat pipelines with G.711 audio over RTP. Scoped for
+LAN use with FreeSWITCH (no NAT/STUN, no REGISTER, dial-in only).
 """
 
-from pipecat.transports.sip.params import SIPParams
+from pipecat.transports.sip.params import FreeSwitchSIPParams
 from pipecat.transports.sip.transport import (
-    SIPCallTransport,
-    SIPServerTransport,
-    SIPSession,
+    FreeSwitchSIPCallTransport,
+    FreeSwitchSIPServerTransport,
+    FreeSwitchSIPSession,
 )
 
 __all__ = [
-    "SIPCallTransport",
-    "SIPParams",
-    "SIPServerTransport",
-    "SIPSession",
+    "FreeSwitchSIPCallTransport",
+    "FreeSwitchSIPParams",
+    "FreeSwitchSIPServerTransport",
+    "FreeSwitchSIPSession",
 ]

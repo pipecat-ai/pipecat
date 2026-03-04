@@ -2,9 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a SIP UAS transport to Pipecat enabling PBX/SBC calls to enter pipelines directly via G.711 RTP.
+**Goal:** Add a FreeSWITCH-scoped SIP UAS transport to Pipecat enabling PBX/SBC calls to enter pipelines directly via G.711 RTP.
 
-**Architecture:** `SIPServerTransport` (BaseObject) manages a UDP SIP listener and RTP port pool. Each incoming call produces a `SIPCallTransport` (BaseTransport) with per-call `input()`/`output()` processors. Audio flows as 20ms G.711 RTP frames, decoded/resampled to 16kHz PCM for the pipeline.
+**Architecture:** `FreeSwitchSIPServerTransport` (BaseObject) manages a UDP SIP listener and RTP port pool. Each incoming call produces a `FreeSwitchSIPCallTransport` (BaseTransport) with per-call `input()`/`output()` processors. Audio flows as 20ms G.711 RTP frames, decoded/resampled to 16kHz PCM for the pipeline.
+
+**Constraints:** LAN-only (no NAT/STUN/ICE), no SIP REGISTER (dial-in only via FreeSWITCH), UAS role only (does not originate calls).
 
 **Tech Stack:** Python 3.10+, asyncio UDP, numpy (G.711 LUT codec + resampling), struct (RTP headers)
 
