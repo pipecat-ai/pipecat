@@ -52,24 +52,18 @@ class FishAudioTTSSettings(TTSSettings):
     """Settings for Fish Audio TTS service.
 
     Parameters:
-        fish_sample_rate: Audio sample rate sent to the API.
         latency: Latency mode ("normal" or "balanced"). Defaults to "normal".
-        format: Audio output format.
         normalize: Whether to normalize audio output. Defaults to True.
         prosody_speed: Speech speed multiplier (0.5-2.0). Defaults to 1.0.
         prosody_volume: Volume adjustment in dB. Defaults to 0.
         reference_id: Reference ID of the voice model.
     """
 
-    fish_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latency: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     normalize: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prosody_speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prosody_volume: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "fish_sample_rate"}
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
@@ -179,9 +173,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         default_settings = FishAudioTTSSettings(
             model="s1",
             voice=None,
-            fish_sample_rate=0,
             latency="normal",
-            format=output_format,
             normalize=True,
             prosody_speed=1.0,
             prosody_volume=0,
@@ -228,6 +220,10 @@ class FishAudioTTSService(InterruptibleTTSService):
         self._receive_task = None
         self._request_id = None
 
+        # Init-only audio format config (not runtime-updatable).
+        self._fish_sample_rate = 0  # Set in start()
+        self._output_format = output_format
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -262,7 +258,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.fish_sample_rate = self.sample_rate
+        self._fish_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -312,9 +308,9 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             # Send initial start message with ormsgpack
             request_settings = {
-                "sample_rate": self._settings.fish_sample_rate,
+                "sample_rate": self._fish_sample_rate,
                 "latency": self._settings.latency,
-                "format": self._settings.format,
+                "format": self._output_format,
                 "normalize": self._settings.normalize,
                 "prosody": {
                     "speed": self._settings.prosody_speed,

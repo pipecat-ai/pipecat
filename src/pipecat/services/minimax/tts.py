@@ -12,7 +12,7 @@ for streaming text-to-speech synthesis.
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, ClassVar, Dict, Mapping, Optional, Self
+from typing import Any, AsyncGenerator, Mapping, Optional, Self
 
 import aiohttp
 from loguru import logger
@@ -100,10 +100,6 @@ class MiniMaxTTSSettings(TTSSettings):
             "disgusted", "surprised", "calm", "fluent").
         text_normalization: Enable text normalization (Chinese/English).
         latex_read: Enable LaTeX formula reading.
-        audio_bitrate: Audio bitrate in bps.
-        audio_format: Audio output format.
-        audio_channel: Number of audio channels.
-        audio_sample_rate: Audio sample rate in Hz.
         language_boost: Language boost string for multilingual support.
     """
 
@@ -114,13 +110,7 @@ class MiniMaxTTSSettings(TTSSettings):
     emotion: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latex_read: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    audio_bitrate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    audio_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    audio_channel: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    audio_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_boost: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
@@ -139,13 +129,6 @@ class MiniMaxTTSSettings(TTSSettings):
             flat.setdefault("emotion", voice.get("emotion"))
             flat.setdefault("text_normalization", voice.get("text_normalization"))
             flat.setdefault("latex_read", voice.get("latex_read"))
-
-        audio = flat.pop("audio_setting", None)
-        if isinstance(audio, dict):
-            flat.setdefault("audio_bitrate", audio.get("bitrate"))
-            flat.setdefault("audio_format", audio.get("format"))
-            flat.setdefault("audio_channel", audio.get("channel"))
-            flat.setdefault("audio_sample_rate", audio.get("sample_rate"))
 
         return super().from_mapping(flat)
 
@@ -258,10 +241,6 @@ class MiniMaxHttpTTSService(TTSService):
             emotion=None,
             text_normalization=None,
             latex_read=None,
-            audio_bitrate=128000,
-            audio_format="pcm",
-            audio_channel=1,
-            audio_sample_rate=0,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -335,6 +314,12 @@ class MiniMaxHttpTTSService(TTSService):
         self._base_url = f"{base_url}?GroupId={group_id}"
         self._session = aiohttp_session
 
+        # Init-only audio format config
+        self._audio_bitrate = 128000
+        self._audio_format = "pcm"
+        self._audio_channel = 1
+        self._audio_sample_rate = 0  # Set in start()
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -361,7 +346,7 @@ class MiniMaxHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.audio_sample_rate = self.sample_rate
+        self._audio_sample_rate = self.sample_rate
         logger.debug(f"MiniMax TTS initialized with sample_rate: {self.sample_rate}")
 
     @traced_tts
@@ -399,10 +384,10 @@ class MiniMaxHttpTTSService(TTSService):
 
         # Build audio_setting dict for API
         audio_setting = {
-            "bitrate": self._settings.audio_bitrate,
-            "format": self._settings.audio_format,
-            "channel": self._settings.audio_channel,
-            "sample_rate": self._settings.audio_sample_rate,
+            "bitrate": self._audio_bitrate,
+            "format": self._audio_format,
+            "channel": self._audio_channel,
+            "sample_rate": self._audio_sample_rate,
         }
 
         # Create payload from settings

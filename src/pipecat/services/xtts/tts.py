@@ -10,7 +10,7 @@ This module provides integration with Coqui XTTS streaming server for
 text-to-speech synthesis using local Docker deployment.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import AsyncGenerator, Dict, Optional
 
 import aiohttp
@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -72,13 +72,9 @@ def language_to_xtts_language(language: Language) -> Optional[str]:
 
 @dataclass
 class XTTSTTSSettings(TTSSettings):
-    """Settings for XTTS TTS service.
+    """Settings for XTTS TTS service."""
 
-    Parameters:
-        base_url: Base URL of the XTTS streaming server.
-    """
-
-    base_url: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class XTTSService(TTSService):
@@ -123,7 +119,6 @@ class XTTSService(TTSService):
             model=None,
             voice=None,
             language=self.language_to_service_language(language),
-            base_url=base_url,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -140,6 +135,10 @@ class XTTSService(TTSService):
             settings=default_settings,
             **kwargs,
         )
+
+        # Init-only fields (not runtime-updatable)
+        self._base_url = base_url
+
         self._studio_speakers: Optional[Dict[str, Any]] = None
         self._aiohttp_session = aiohttp_session
 
@@ -175,7 +174,7 @@ class XTTSService(TTSService):
         if self._studio_speakers:
             return
 
-        async with self._aiohttp_session.get(self._settings.base_url + "/studio_speakers") as r:
+        async with self._aiohttp_session.get(self._base_url + "/studio_speakers") as r:
             if r.status != 200:
                 text = await r.text()
                 await self.push_error(
@@ -203,7 +202,7 @@ class XTTSService(TTSService):
 
         embeddings = self._studio_speakers[self._settings.voice]
 
-        url = self._settings.base_url + "/tts_stream"
+        url = self._base_url + "/tts_stream"
 
         payload = {
             "text": text.replace(".", "").replace("*", ""),

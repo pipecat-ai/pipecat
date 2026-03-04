@@ -6,7 +6,7 @@
 
 import base64
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import AudioContextTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -40,13 +40,9 @@ SAMPLE_RATE = 48000
 
 @dataclass
 class GradiumTTSSettings(TTSSettings):
-    """Settings for the Gradium TTS service.
+    """Settings for the Gradium TTS service."""
 
-    Parameters:
-        output_format: Audio output format.
-    """
-
-    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class GradiumTTSService(AudioContextTTSService):
@@ -108,7 +104,6 @@ class GradiumTTSService(AudioContextTTSService):
             model="default",
             voice="YTpq7expH9539ERJ",
             language=None,
-            output_format="pcm",
         )
 
         # 2. Apply direct init arg overrides (deprecated)

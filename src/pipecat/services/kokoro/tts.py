@@ -7,7 +7,7 @@
 """Kokoro TTS service implementation using kokoro-onnx."""
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -91,13 +91,9 @@ def language_to_kokoro_language(language: Language) -> str:
 
 @dataclass
 class KokoroTTSSettings(TTSSettings):
-    """Settings for the Kokoro TTS service.
+    """Settings for the Kokoro TTS service."""
 
-    Parameters:
-        lang_code: Kokoro language code for synthesis.
-    """
-
-    lang_code: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class KokoroTTSService(TTSService):
@@ -156,7 +152,6 @@ class KokoroTTSService(TTSService):
             model=None,
             voice=None,
             language=language_to_kokoro_language(Language.EN),
-            lang_code=language_to_kokoro_language(Language.EN),
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -168,9 +163,7 @@ class KokoroTTSService(TTSService):
         if params is not None:
             _warn_deprecated_param("params", KokoroTTSSettings)
             if not settings:
-                lang_code = language_to_kokoro_language(params.language)
-                default_settings.language = lang_code
-                default_settings.lang_code = lang_code
+                default_settings.language = language_to_kokoro_language(params.language)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -180,8 +173,6 @@ class KokoroTTSService(TTSService):
             settings=default_settings,
             **kwargs,
         )
-
-        self._lang_code = default_settings.lang_code
 
         model_file = Path(model_path) if model_path else KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
         voices = Path(voices_path) if voices_path else KOKORO_CACHE_DIR / "voices-v1.0.bin"
@@ -195,6 +186,17 @@ class KokoroTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         """Indicate that this service supports TTFB and usage metrics."""
         return True
+
+    def language_to_service_language(self, language: Language) -> str:
+        """Convert a Language enum to kokoro-onnx language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The kokoro-onnx language code.
+        """
+        return language_to_kokoro_language(language)
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -215,7 +217,7 @@ class KokoroTTSService(TTSService):
             yield TTSStartedFrame(context_id=context_id)
 
             stream = self._kokoro.create_stream(
-                text, voice=self._settings.voice, lang=self._lang_code, speed=1.0
+                text, voice=self._settings.voice, lang=self._settings.language, speed=1.0
             )
 
             async for samples, sample_rate in stream:

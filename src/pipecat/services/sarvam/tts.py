@@ -250,7 +250,6 @@ class SarvamHttpTTSSettings(TTSSettings):
     """Settings for Sarvam HTTP TTS service.
 
     Parameters:
-        language: Sarvam language code.
         enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
             **Note:** Always enabled for bulbul:v3-beta (cannot be disabled).
         pace: Speech pace multiplier. Defaults to 1.0.
@@ -263,16 +262,13 @@ class SarvamHttpTTSSettings(TTSSettings):
         temperature: Controls output randomness for bulbul:v3-beta (0.01 to 1.0).
             Lower values = more deterministic, higher = more random. Defaults to 0.6.
             **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
-        sample_rate: Audio sample rate.
     """
 
-    language: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pace: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     loudness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    sarvam_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -280,19 +276,12 @@ class SarvamTTSSettings(TTSSettings):
     """Settings for Sarvam WebSocket TTS service.
 
     Parameters:
-        language: Sarvam language code (e.g. ``"hi-IN"``).  Uses the standard
-            ``TTSSettings.language`` field.
-        speech_sample_rate: Audio sample rate as string.
         enable_preprocessing: Enable text preprocessing. Defaults to False.
             **Note:** Always enabled for bulbul:v3-beta.
         min_buffer_size: Minimum characters to buffer before generating audio.
             Lower values reduce latency but may affect quality. Defaults to 50.
         max_chunk_length: Maximum characters processed in a single chunk.
             Controls memory usage and processing efficiency. Defaults to 150.
-        output_audio_codec: Audio codec format. Options: linear16, mulaw, alaw,
-            opus, flac, aac, wav, mp3. Defaults to "linear16".
-        output_audio_bitrate: Audio bitrate (32k, 64k, 96k, 128k, 192k).
-            Defaults to "128k".
         pace: Speech pace multiplier. Defaults to 1.0.
             - bulbul:v2: Range 0.3 to 3.0
             - bulbul:v3-beta: Range 0.5 to 2.0
@@ -307,12 +296,9 @@ class SarvamTTSSettings(TTSSettings):
 
     _aliases: ClassVar[Dict[str, str]] = {"target_language_code": "language"}
 
-    speech_sample_rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_buffer_size: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_chunk_length: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    output_audio_codec: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    output_audio_bitrate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pace: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     loudness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -587,7 +573,6 @@ class SarvamHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.sarvam_sample_rate = self.sample_rate
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -881,12 +866,9 @@ class SarvamTTSService(InterruptibleTTSService):
             model="bulbul:v2",
             voice="anushka",
             language="en-IN",
-            speech_sample_rate="22050",
             enable_preprocessing=False,
             min_buffer_size=50,
             max_chunk_length=150,
-            output_audio_codec="linear16",
-            output_audio_bitrate="128k",
             pace=1.0,
             pitch=None,
             loudness=None,
@@ -900,6 +882,10 @@ class SarvamTTSService(InterruptibleTTSService):
         if voice_id is not None:
             _warn_deprecated_param("voice_id", SarvamTTSSettings, "voice")
             default_settings.voice = voice_id
+
+        # Init-only audio format fields (not runtime-updatable)
+        output_audio_codec = "linear16"
+        output_audio_bitrate = "128k"
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -916,9 +902,9 @@ class SarvamTTSService(InterruptibleTTSService):
                 if params.max_chunk_length is not None:
                     default_settings.max_chunk_length = params.max_chunk_length
                 if params.output_audio_codec is not None:
-                    default_settings.output_audio_codec = params.output_audio_codec
+                    output_audio_codec = params.output_audio_codec
                 if params.output_audio_bitrate is not None:
-                    default_settings.output_audio_bitrate = params.output_audio_bitrate
+                    output_audio_bitrate = params.output_audio_bitrate
                 if params.pace is not None:
                     default_settings.pace = params.pace
                 if params.pitch is not None:
@@ -943,7 +929,6 @@ class SarvamTTSService(InterruptibleTTSService):
         # Set default sample rate based on model if not specified
         if sample_rate is None:
             sample_rate = self._config.default_sample_rate
-            default_settings.speech_sample_rate = str(sample_rate)
 
         # Set default voice based on model if not specified via any mechanism
         if voice_id is None and (settings is None or settings.voice is NOT_GIVEN):
@@ -986,6 +971,11 @@ class SarvamTTSService(InterruptibleTTSService):
             **kwargs,
         )
 
+        # Init-only audio format fields (not runtime-updatable)
+        self._speech_sample_rate = str(sample_rate)
+        self._output_audio_codec = output_audio_codec
+        self._output_audio_bitrate = output_audio_bitrate
+
         # WebSocket endpoint URL with model query parameter
         self._websocket_url = f"{url}?model={resolved_model}"
         self._api_key = api_key
@@ -1022,7 +1012,7 @@ class SarvamTTSService(InterruptibleTTSService):
         await super().start(frame)
 
         # WebSocket API expects sample rate as string
-        self._settings.speech_sample_rate = str(self.sample_rate)
+        self._speech_sample_rate = str(self.sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -1140,12 +1130,12 @@ class SarvamTTSService(InterruptibleTTSService):
         config_data = {
             "target_language_code": self._settings.language,
             "speaker": self._settings.voice,
-            "speech_sample_rate": self._settings.speech_sample_rate,
+            "speech_sample_rate": self._speech_sample_rate,
             "enable_preprocessing": self._settings.enable_preprocessing,
             "min_buffer_size": self._settings.min_buffer_size,
             "max_chunk_length": self._settings.max_chunk_length,
-            "output_audio_codec": self._settings.output_audio_codec,
-            "output_audio_bitrate": self._settings.output_audio_bitrate,
+            "output_audio_codec": self._output_audio_codec,
+            "output_audio_bitrate": self._output_audio_bitrate,
             "pace": self._settings.pace,
             "model": self._settings.model,
         }

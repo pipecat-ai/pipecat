@@ -9,8 +9,8 @@
 import asyncio
 import base64
 import json
-from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Mapping, Optional, Self
+from dataclasses import dataclass
+from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import AudioContextTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -75,28 +75,9 @@ def language_to_async_language(language: Language) -> Optional[str]:
 
 @dataclass
 class AsyncAITTSSettings(TTSSettings):
-    """Settings for Async AI TTS services.
+    """Settings for Async AI TTS services."""
 
-    Parameters:
-        output_container: Audio container format (e.g. "raw").
-        output_encoding: Audio encoding format (e.g. "pcm_s16le").
-        output_sample_rate: Audio sample rate in Hz.
-    """
-
-    output_container: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    output_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    output_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-    @classmethod
-    def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
-        """Construct settings from a plain dict, destructuring legacy nested ``output_format``."""
-        flat = dict(settings)
-        nested = flat.pop("output_format", None)
-        if isinstance(nested, dict):
-            flat.setdefault("output_container", nested.get("container"))
-            flat.setdefault("output_encoding", nested.get("encoding"))
-            flat.setdefault("output_sample_rate", nested.get("sample_rate"))
-        return super().from_mapping(flat)
+    pass
 
 
 class AsyncAITTSService(AudioContextTTSService):
@@ -176,9 +157,6 @@ class AsyncAITTSService(AudioContextTTSService):
             model="async_flash_v1.0",
             voice=None,
             language=None,
-            output_container=container,
-            output_encoding=encoding,
-            output_sample_rate=0,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -214,6 +192,11 @@ class AsyncAITTSService(AudioContextTTSService):
         self._api_key = api_key
         self._api_version = version
         self._url = url
+
+        # Init-only audio format config (not runtime-updatable).
+        self._output_container = container
+        self._output_encoding = encoding
+        self._output_sample_rate = 0  # Set in start()
 
         self._receive_task = None
         self._keepalive_task = None
@@ -262,7 +245,7 @@ class AsyncAITTSService(AudioContextTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.output_sample_rate = self.sample_rate
+        self._output_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -319,9 +302,9 @@ class AsyncAITTSService(AudioContextTTSService):
                 "model_id": self._settings.model,
                 "voice": {"mode": "id", "id": self._settings.voice},
                 "output_format": {
-                    "container": self._settings.output_container,
-                    "encoding": self._settings.output_encoding,
-                    "sample_rate": self._settings.output_sample_rate,
+                    "container": self._output_container,
+                    "encoding": self._output_encoding,
+                    "sample_rate": self._output_sample_rate,
                 },
                 "language": self._settings.language,
             }
@@ -567,9 +550,6 @@ class AsyncAIHttpTTSService(TTSService):
             model="async_flash_v1.0",
             voice=None,
             language=None,
-            output_container=container,
-            output_encoding=encoding,
-            output_sample_rate=0,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -602,6 +582,11 @@ class AsyncAIHttpTTSService(TTSService):
         self._base_url = url
         self._api_version = version
 
+        # Init-only audio format config (not runtime-updatable).
+        self._output_container = container
+        self._output_encoding = encoding
+        self._output_sample_rate = 0  # Set in start()
+
         self._session = aiohttp_session
 
     def can_generate_metrics(self) -> bool:
@@ -630,7 +615,7 @@ class AsyncAIHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.output_sample_rate = self.sample_rate
+        self._output_sample_rate = self.sample_rate
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -653,9 +638,9 @@ class AsyncAIHttpTTSService(TTSService):
                 "transcript": text,
                 "voice": voice_config,
                 "output_format": {
-                    "container": self._settings.output_container,
-                    "encoding": self._settings.output_encoding,
-                    "sample_rate": self._settings.output_sample_rate,
+                    "container": self._output_container,
+                    "encoding": self._output_encoding,
+                    "sample_rate": self._output_sample_rate,
                 },
                 "language": self._settings.language,
             }

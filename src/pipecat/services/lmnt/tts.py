@@ -7,7 +7,7 @@
 """LMNT text-to-speech service implementation."""
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -17,14 +17,13 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -75,13 +74,9 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
 
 @dataclass
 class LmntTTSSettings(TTSSettings):
-    """Settings for LMNT TTS service.
+    """Settings for LMNT TTS service."""
 
-    Parameters:
-        format: Audio output format. Defaults to "raw".
-    """
-
-    format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class LmntTTSService(InterruptibleTTSService):
@@ -130,7 +125,6 @@ class LmntTTSService(InterruptibleTTSService):
             model="blizzard",
             voice=None,
             language=self.language_to_service_language(language),
-            format="raw",
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -156,6 +150,7 @@ class LmntTTSService(InterruptibleTTSService):
         )
 
         self._api_key = api_key
+        self._output_format = "raw"
         self._receive_task = None
         self._context_id: Optional[str] = None
 
@@ -262,7 +257,7 @@ class LmntTTSService(InterruptibleTTSService):
             init_msg = {
                 "X-API-Key": self._api_key,
                 "voice": self._settings.voice,
-                "format": self._settings.format,
+                "format": self._output_format,
                 "sample_rate": self.sample_rate,
                 "language": self._settings.language,
                 "model": self._settings.model,

@@ -201,9 +201,6 @@ class ElevenLabsTTSSettings(TTSSettings):
         style: Style control for voice expression (0.0 to 1.0).
         use_speaker_boost: Whether to use speaker boost enhancement.
         speed: Voice speed control (0.7 to 1.2).
-        auto_mode: Whether to enable automatic mode optimization.
-        enable_ssml_parsing: Whether to parse SSML tags in text.
-        enable_logging: Whether to enable ElevenLabs logging.
         apply_text_normalization: Text normalization mode ("auto", "on", "off").
     """
 
@@ -212,9 +209,6 @@ class ElevenLabsTTSSettings(TTSSettings):
     style: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     use_speaker_boost: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    auto_mode: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_ssml_parsing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_logging: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     apply_text_normalization: Literal["auto", "on", "off"] | None | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -227,8 +221,6 @@ class ElevenLabsTTSSettings(TTSSettings):
     VOICE_SETTINGS_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {"stability", "similarity_boost", "style", "use_speaker_boost", "speed"}
     )
-
-    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
 
 
 @dataclass
@@ -254,8 +246,6 @@ class ElevenLabsHttpTTSSettings(TTSSettings):
     apply_text_normalization: Literal["auto", "on", "off"] | None | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-
-    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
 
 
 def calculate_word_times(
@@ -430,6 +420,11 @@ class ElevenLabsTTSService(AudioContextTTSService):
             model="eleven_turbo_v2_5",
         )
 
+        # Track init-only URL params through the override chain
+        _auto_mode = True
+        _enable_ssml_parsing = None
+        _enable_logging = None
+
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
             _warn_deprecated_param("voice_id", ElevenLabsTTSSettings, "voice")
@@ -456,11 +451,11 @@ class ElevenLabsTTSService(AudioContextTTSService):
                 if params.speed is not None:
                     default_settings.speed = params.speed
                 if params.auto_mode is not None:
-                    default_settings.auto_mode = str(params.auto_mode).lower()
+                    _auto_mode = str(params.auto_mode).lower()
                 if params.enable_ssml_parsing is not None:
-                    default_settings.enable_ssml_parsing = params.enable_ssml_parsing
+                    _enable_ssml_parsing = params.enable_ssml_parsing
                 if params.enable_logging is not None:
-                    default_settings.enable_logging = params.enable_logging
+                    _enable_logging = params.enable_logging
                 if params.apply_text_normalization is not None:
                     default_settings.apply_text_normalization = params.apply_text_normalization
                 if _pronunciation_dictionary_locators is None:
@@ -484,6 +479,11 @@ class ElevenLabsTTSService(AudioContextTTSService):
 
         self._api_key = api_key
         self._url = url
+
+        # Init-only WebSocket URL params (not runtime-updatable).
+        self._auto_mode = _auto_mode
+        self._enable_ssml_parsing = _enable_ssml_parsing
+        self._enable_logging = _enable_logging
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
@@ -518,20 +518,7 @@ class ElevenLabsTTSService(AudioContextTTSService):
         return language_to_elevenlabs_language(language)
 
     def _set_voice_settings(self):
-        ts = self._settings
-        voice_setting_keys = [
-            "stability",
-            "similarity_boost",
-            "style",
-            "use_speaker_boost",
-            "speed",
-        ]
-        voice_settings = {}
-        for key in voice_setting_keys:
-            val = getattr(ts, key, None)
-            if val is not None:
-                voice_settings[key] = val
-        return voice_settings or None
+        return build_elevenlabs_voice_settings(self._settings)
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta, reconnecting as needed.
@@ -670,13 +657,13 @@ class ElevenLabsTTSService(AudioContextTTSService):
             voice_id = self._settings.voice
             model = self._settings.model
             output_format = self._output_format
-            url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings.auto_mode}"
+            url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={self._auto_mode}"
 
-            if self._settings.enable_ssml_parsing:
-                url += f"&enable_ssml_parsing={self._settings.enable_ssml_parsing}"
+            if self._enable_ssml_parsing:
+                url += f"&enable_ssml_parsing={self._enable_ssml_parsing}"
 
-            if self._settings.enable_logging:
-                url += f"&enable_logging={self._settings.enable_logging}"
+            if self._enable_logging:
+                url += f"&enable_logging={self._enable_logging}"
 
             if self._settings.apply_text_normalization is not None:
                 url += f"&apply_text_normalization={self._settings.apply_text_normalization}"

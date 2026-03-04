@@ -9,7 +9,7 @@
 import io
 import wave
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, ClassVar, Dict, Optional
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -39,16 +39,10 @@ class GroqTTSSettings(TTSSettings):
     """Settings for the Groq TTS service.
 
     Parameters:
-        output_format: Audio output format.
         speed: Speech speed multiplier. Defaults to 1.0.
-        groq_sample_rate: Audio sample rate.
     """
 
-    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    groq_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "groq_sample_rate"}
 
 
 class GroqTTSService(TTSService):
@@ -122,9 +116,7 @@ class GroqTTSService(TTSService):
             model="canopylabs/orpheus-v1-english",
             voice="autumn",
             language="en",
-            output_format=output_format,
             speed=1.0,
-            groq_sample_rate=sample_rate,
         )
 
         # 2. Apply direct init arg overrides (deprecated)

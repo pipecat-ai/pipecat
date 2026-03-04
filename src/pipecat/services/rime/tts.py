@@ -76,8 +76,6 @@ class RimeTTSSettings(TTSSettings):
     """Settings for Rime WS JSON and HTTP TTS services.
 
     Parameters:
-        audioFormat: Audio output format.
-        samplingRate: Audio sample rate.
         segment: Text segmentation mode ("immediate", "bySentence", "never").
         speedAlpha: Speech speed multiplier (mistv2 only).
         reduceLatency: Whether to reduce latency at potential quality cost (mistv2 only).
@@ -91,8 +89,6 @@ class RimeTTSSettings(TTSSettings):
         top_p: Cumulative probability threshold (arcana only, 0.0-1.0).
     """
 
-    audioFormat: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    samplingRate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speedAlpha: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     reduceLatency: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -113,16 +109,12 @@ class RimeNonJsonTTSSettings(TTSSettings):
     """Settings for Rime non-JSON WS TTS service.
 
     Parameters:
-        audioFormat: Audio output format.
-        samplingRate: Audio sample rate.
         segment: Text segmentation mode ("immediate", "bySentence", "never").
         repetition_penalty: Token repetition penalty (1.0-2.0).
         temperature: Sampling temperature (0.0-1.0).
         top_p: Cumulative probability threshold (0.0-1.0).
     """
 
-    audioFormat: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    samplingRate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     repetition_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -230,8 +222,6 @@ class RimeTTSService(AudioContextTTSService):
         default_settings = RimeTTSSettings(
             model="arcana",
             voice=None,
-            audioFormat="pcm",
-            samplingRate=0,  # updated in start()
             language=None,
             segment=None,
             inlineSpeedAlpha=None,
@@ -293,6 +283,10 @@ class RimeTTSService(AudioContextTTSService):
             **kwargs,
         )
 
+        # Init-only audio format fields (not runtime-updatable)
+        self._audio_format = "pcm"
+        self._sampling_rate = 0  # updated in start()
+
         if not text_aggregator:
             # Always skip tags added for spelled-out text
             # Note: This is primarily to support backwards compatibility.
@@ -342,8 +336,8 @@ class RimeTTSService(AudioContextTTSService):
         params: dict[str, Any] = {
             "speaker": self._settings.voice,
             "modelId": self._settings.model,
-            "audioFormat": self._settings.audioFormat,
-            "samplingRate": self._settings.samplingRate,
+            "audioFormat": self._audio_format,
+            "samplingRate": self._sampling_rate,
         }
         if self._settings.language is not None:
             params["lang"] = self._settings.language
@@ -437,7 +431,7 @@ class RimeTTSService(AudioContextTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.samplingRate = self.sample_rate
+        self._sampling_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -737,8 +731,6 @@ class RimeHttpTTSService(TTSService):
             model="mistv2",
             voice=None,
             language="eng",
-            audioFormat="pcm",
-            samplingRate=0,
             segment=None,
             speedAlpha=None,
             reduceLatency=None,
@@ -788,6 +780,9 @@ class RimeHttpTTSService(TTSService):
         self._api_key = api_key
         self._session = aiohttp_session
         self._base_url = "https://users.rime.ai/v1/rime-tts"
+
+        # Init-only audio format fields (not runtime-updatable)
+        self._audio_format = "pcm"
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -974,8 +969,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         default_settings = RimeNonJsonTTSSettings(
             voice=None,
             model="arcana",
-            audioFormat=audio_format,
-            samplingRate=sample_rate,
             language=None,
             segment=None,
             repetition_penalty=None,
@@ -1017,6 +1010,11 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             settings=default_settings,
             **kwargs,
         )
+
+        # Init-only audio format fields (not runtime-updatable)
+        self._audio_format = audio_format
+        self._sampling_rate = sample_rate
+
         self._api_key = api_key
         self._url = url
         # Add any extra parameters for future compatibility
@@ -1053,7 +1051,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.samplingRate = self.sample_rate
+        self._sampling_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -1101,8 +1099,8 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             settings_dict = {
                 "speaker": self._settings.voice,
                 "modelId": self._settings.model,
-                "audioFormat": self._settings.audioFormat,
-                "samplingRate": self._settings.samplingRate,
+                "audioFormat": self._audio_format,
+                "samplingRate": self._sampling_rate,
             }
             if self._settings.language is not None:
                 settings_dict["lang"] = self._settings.language
