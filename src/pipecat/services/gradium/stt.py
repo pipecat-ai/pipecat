@@ -148,16 +148,23 @@ class GradiumSTTService(WebsocketSTTService):
                 stacklevel=2,
             )
 
-        if params is not None:
-            _warn_deprecated_param("params", "GradiumSTTSettings")
-
-        _params = params or GradiumSTTService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GradiumSTTSettings(
             model=None,
-            language=_params.language,
-            delay_in_frames=_params.delay_in_frames or None,
+            language=None,
+            delay_in_frames=None,
         )
+
+        # 2. (no deprecated direct args for this service)
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GradiumSTTSettings)
+            if not settings:
+                default_settings.language = params.language
+                default_settings.delay_in_frames = params.delay_in_frames
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -95,10 +95,15 @@ class FalImageGenService(ImageGenService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent ImageGenService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "FalImageGenSettings", "model")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = FalImageGenSettings(model="fal-ai/fast-sdxl")
 
-        default_settings = FalImageGenSettings(model=model or "fal-ai/fast-sdxl")
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", FalImageGenSettings, "model")
+            default_settings.model = model
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

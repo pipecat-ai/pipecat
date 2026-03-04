@@ -289,23 +289,6 @@ class GladiaSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService parent class.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "GladiaSTTSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "GladiaSTTSettings")
-
-        params = params or GladiaInputParams()
-
-        if params.language is not None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'language' parameter is deprecated and will be removed in a future version. "
-                    "Use 'language_config' instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
         if confidence:
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
@@ -316,28 +299,64 @@ class GladiaSTTService(WebsocketSTTService):
                     stacklevel=2,
                 )
 
-        # Resolve deprecated language → language_config at init time
-        language_config = params.language_config
-        if not language_config and params.language:
-            language_code = self.language_to_service_language(params.language)
-            if language_code:
-                language_config = LanguageConfig(languages=[language_code], code_switching=False)
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GladiaSTTSettings(
-            model=model or "solaria-1",
+            model="solaria-1",
             language=None,
-            encoding=params.encoding,
-            bit_depth=params.bit_depth,
-            channels=params.channels,
-            custom_metadata=params.custom_metadata,
-            endpointing=params.endpointing,
-            maximum_duration_without_endpointing=params.maximum_duration_without_endpointing,
-            language_config=language_config,
-            pre_processing=params.pre_processing,
-            realtime_processing=params.realtime_processing,
-            messages_config=params.messages_config,
-            enable_vad=params.enable_vad,
+            encoding="wav/pcm",
+            bit_depth=16,
+            channels=1,
+            custom_metadata=None,
+            endpointing=None,
+            maximum_duration_without_endpointing=5,
+            language_config=None,
+            pre_processing=None,
+            realtime_processing=None,
+            messages_config=None,
+            enable_vad=False,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GladiaSTTSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GladiaSTTSettings)
+            if params.language is not None:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "The 'language' parameter is deprecated and will be removed in a future "
+                        "version. Use 'language_config' instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+            if not settings:
+                default_settings.encoding = params.encoding
+                default_settings.bit_depth = params.bit_depth
+                default_settings.channels = params.channels
+                default_settings.custom_metadata = params.custom_metadata
+                default_settings.endpointing = params.endpointing
+                default_settings.maximum_duration_without_endpointing = (
+                    params.maximum_duration_without_endpointing
+                )
+                default_settings.pre_processing = params.pre_processing
+                default_settings.realtime_processing = params.realtime_processing
+                default_settings.messages_config = params.messages_config
+                default_settings.enable_vad = params.enable_vad
+                # Resolve deprecated language → language_config at init time
+                language_config = params.language_config
+                if not language_config and params.language:
+                    language_code = self.language_to_service_language(params.language)
+                    if language_code:
+                        language_config = LanguageConfig(
+                            languages=[language_code], code_switching=False
+                        )
+                default_settings.language_config = language_config
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

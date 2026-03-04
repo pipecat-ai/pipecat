@@ -18,7 +18,18 @@ import base64
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, ClassVar, Dict, List, Literal, Mapping, Optional, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Self,
+    Tuple,
+)
 
 import aiohttp
 import websockets
@@ -91,7 +102,7 @@ class InworldTTSSettings(TTSSettings):
     }
 
     @classmethod
-    def from_mapping(cls, settings: Mapping[str, Any]) -> "InworldTTSSettings":
+    def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
         """Construct settings from a plain dict, destructuring legacy nested ``audioConfig``."""
         flat = dict(settings)
         nested = flat.pop("audioConfig", None)
@@ -168,27 +179,42 @@ class InworldHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent class.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "InworldTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "InworldTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "InworldTTSSettings")
-
-        _params = params or InworldHttpTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = InworldTTSSettings(
-            model=model or "inworld-tts-1.5-max",
-            voice=voice_id or "Ashley",
+            model="inworld-tts-1.5-max",
+            voice="Ashley",
             language=None,
             audio_encoding=encoding,
             audio_sample_rate=0,
-            speaking_rate=_params.speaking_rate,
-            temperature=_params.temperature,
-            timestamp_transport_strategy=_params.timestamp_transport_strategy,
+            speaking_rate=None,
+            temperature=None,
+            timestamp_transport_strategy="ASYNC",
             auto_mode=None,  # Not applicable for HTTP TTS
             apply_text_normalization=None,  # Not applicable for HTTP TTS
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", InworldTTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", InworldTTSSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", InworldTTSSettings)
+            if not settings:
+                if params.speaking_rate is not None:
+                    default_settings.speaking_rate = params.speaking_rate
+                if params.temperature is not None:
+                    default_settings.temperature = params.temperature
+                if params.timestamp_transport_strategy is not None:
+                    default_settings.timestamp_transport_strategy = (
+                        params.timestamp_transport_strategy
+                    )
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -580,27 +606,50 @@ class InworldTTSService(AudioContextTTSService):
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
             **kwargs: Additional arguments passed to the parent class.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "InworldTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "InworldTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "InworldTTSSettings")
-
-        _params = params or InworldTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = InworldTTSSettings(
-            model=model or "inworld-tts-1.5-max",
-            voice=voice_id or "Ashley",
+            model="inworld-tts-1.5-max",
+            voice="Ashley",
             language=None,
             audio_encoding=encoding,
             audio_sample_rate=0,
-            speaking_rate=_params.speaking_rate,
-            temperature=_params.temperature,
-            apply_text_normalization=_params.apply_text_normalization,
-            timestamp_transport_strategy=_params.timestamp_transport_strategy,
-            auto_mode=_params.auto_mode if _params.auto_mode is not None else aggregate_sentences,
+            speaking_rate=None,
+            temperature=None,
+            apply_text_normalization=None,
+            timestamp_transport_strategy="ASYNC",
+            auto_mode=True if aggregate_sentences is None else aggregate_sentences,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", InworldTTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", InworldTTSSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        _buffer_max_delay_ms = None
+        _buffer_char_threshold = None
+        if params is not None:
+            _warn_deprecated_param("params", InworldTTSSettings)
+            if not settings:
+                if params.speaking_rate is not None:
+                    default_settings.speaking_rate = params.speaking_rate
+                if params.temperature is not None:
+                    default_settings.temperature = params.temperature
+                if params.apply_text_normalization is not None:
+                    default_settings.apply_text_normalization = params.apply_text_normalization
+                if params.timestamp_transport_strategy is not None:
+                    default_settings.timestamp_transport_strategy = (
+                        params.timestamp_transport_strategy
+                    )
+                if params.auto_mode is not None:
+                    default_settings.auto_mode = params.auto_mode
+            _buffer_max_delay_ms = params.max_buffer_delay_ms
+            _buffer_char_threshold = params.buffer_char_threshold
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -622,8 +671,8 @@ class InworldTTSService(AudioContextTTSService):
         self._timestamp_type = "WORD"
 
         self._buffer_settings = {
-            "maxBufferDelayMs": _params.max_buffer_delay_ms,
-            "bufferCharThreshold": _params.buffer_char_threshold,
+            "maxBufferDelayMs": _buffer_max_delay_ms,
+            "bufferCharThreshold": _buffer_char_threshold,
         }
 
         self._receive_task = None

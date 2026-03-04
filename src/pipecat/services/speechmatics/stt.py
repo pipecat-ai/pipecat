@@ -417,57 +417,86 @@ class SpeechmaticsSTTService(STTService):
         if not self._base_url:
             raise ValueError("Missing Speechmatics base URL")
 
-        if params is not None:
-            _warn_deprecated_param("params", "SpeechmaticsSTTSettings")
-
-        # Default params
-        params = params or SpeechmaticsSTTService.InputParams()
         self._should_interrupt = should_interrupt
 
-        # Deprecation check
-        self._check_deprecated_args(kwargs, params)
+        # Deprecation check (mutates params in-place for legacy kwargs migration)
+        _params = params or SpeechmaticsSTTService.InputParams()
+        self._check_deprecated_args(kwargs, _params)
 
-        # Output formatting defaults
-        speaker_active_format = params.speaker_active_format
-        if speaker_active_format is None:
-            speaker_active_format = (
-                "@{speaker_id}: {text}" if params.enable_diarization else "{text}"
-            )
-        speaker_passive_format = params.speaker_passive_format or speaker_active_format
-
-        # Settings — seeded from InputParams
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = SpeechmaticsSTTSettings(
             model=None,  # Will be resolved from operating_point after config is built
-            language=params.language,
-            domain=params.domain,
-            turn_detection_mode=params.turn_detection_mode,
-            speaker_active_format=speaker_active_format,
-            speaker_passive_format=speaker_passive_format,
-            focus_speakers=params.focus_speakers,
-            ignore_speakers=params.ignore_speakers,
-            focus_mode=params.focus_mode,
-            known_speakers=params.known_speakers,
-            additional_vocab=params.additional_vocab,
-            audio_encoding=params.audio_encoding,
-            operating_point=params.operating_point,
-            max_delay=params.max_delay,
-            end_of_utterance_silence_trigger=params.end_of_utterance_silence_trigger,
-            end_of_utterance_max_delay=params.end_of_utterance_max_delay,
-            punctuation_overrides=params.punctuation_overrides,
-            include_partials=params.include_partials,
-            split_sentences=params.split_sentences,
-            enable_diarization=params.enable_diarization,
-            speaker_sensitivity=params.speaker_sensitivity,
-            max_speakers=params.max_speakers,
-            prefer_current_speaker=params.prefer_current_speaker,
-            extra_params=params.extra_params,
+            language=Language.EN,
+            domain=None,
+            turn_detection_mode=TurnDetectionMode.EXTERNAL,
+            speaker_active_format="{text}",
+            speaker_passive_format="{text}",
+            focus_speakers=[],
+            ignore_speakers=[],
+            focus_mode=SpeakerFocusMode.RETAIN,
+            known_speakers=[],
+            additional_vocab=[],
+            audio_encoding=AudioEncoding.PCM_S16LE,
+            operating_point=None,
+            max_delay=None,
+            end_of_utterance_silence_trigger=None,
+            end_of_utterance_max_delay=None,
+            punctuation_overrides=None,
+            include_partials=None,
+            split_sentences=None,
+            enable_diarization=None,
+            speaker_sensitivity=None,
+            max_speakers=None,
+            prefer_current_speaker=None,
+            extra_params=None,
         )
+
+        # 2. No direct init arg overrides
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", SpeechmaticsSTTSettings)
+            if not settings:
+                default_settings.language = _params.language
+                default_settings.domain = _params.domain
+                default_settings.turn_detection_mode = _params.turn_detection_mode
+                # Output formatting defaults
+                speaker_active_format = _params.speaker_active_format
+                if speaker_active_format is None:
+                    speaker_active_format = (
+                        "@{speaker_id}: {text}" if _params.enable_diarization else "{text}"
+                    )
+                default_settings.speaker_active_format = speaker_active_format
+                default_settings.speaker_passive_format = (
+                    _params.speaker_passive_format or speaker_active_format
+                )
+                default_settings.focus_speakers = _params.focus_speakers
+                default_settings.ignore_speakers = _params.ignore_speakers
+                default_settings.focus_mode = _params.focus_mode
+                default_settings.known_speakers = _params.known_speakers
+                default_settings.additional_vocab = _params.additional_vocab
+                default_settings.audio_encoding = _params.audio_encoding
+                default_settings.operating_point = _params.operating_point
+                default_settings.max_delay = _params.max_delay
+                default_settings.end_of_utterance_silence_trigger = (
+                    _params.end_of_utterance_silence_trigger
+                )
+                default_settings.end_of_utterance_max_delay = _params.end_of_utterance_max_delay
+                default_settings.punctuation_overrides = _params.punctuation_overrides
+                default_settings.include_partials = _params.include_partials
+                default_settings.split_sentences = _params.split_sentences
+                default_settings.enable_diarization = _params.enable_diarization
+                default_settings.speaker_sensitivity = _params.speaker_sensitivity
+                default_settings.max_speakers = _params.max_speakers
+                default_settings.prefer_current_speaker = _params.prefer_current_speaker
+                default_settings.extra_params = _params.extra_params
 
         # Build SDK config from settings, then resolve model from operating_point
         self._client: VoiceAgentClient | None = None
         self._config: VoiceAgentConfig = self._build_config(default_settings)
         default_settings.model = self._config.operating_point.value
 
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -496,7 +525,7 @@ class SpeechmaticsSTTService(STTService):
         self._bot_speaking: bool = False
 
         # Event handlers
-        if params.enable_diarization:
+        if default_settings.enable_diarization:
             self._register_event_handler("on_speakers_result")
 
     # ============================================================================

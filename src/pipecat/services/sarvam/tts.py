@@ -467,55 +467,89 @@ class SarvamHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "SarvamHttpTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "SarvamHttpTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "SarvamHttpTTSSettings")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = SarvamHttpTTSSettings(
+            model="bulbul:v2",
+            voice="anushka",
+            language="en-IN",
+            enable_preprocessing=False,
+            pace=1.0,
+            pitch=None,
+            loudness=None,
+            temperature=None,
+        )
 
-        model = model or "bulbul:v2"
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", SarvamHttpTTSSettings, "model")
+            default_settings.model = model
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", SarvamHttpTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", SarvamHttpTTSSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = (
+                        self.language_to_service_language(params.language) or "en-IN"
+                    )
+                if params.enable_preprocessing is not None:
+                    default_settings.enable_preprocessing = params.enable_preprocessing
+                if params.pace is not None:
+                    default_settings.pace = params.pace
+                if params.pitch is not None:
+                    default_settings.pitch = params.pitch
+                if params.loudness is not None:
+                    default_settings.loudness = params.loudness
+                if params.temperature is not None:
+                    default_settings.temperature = params.temperature
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         # Get model configuration (validates model exists)
-        if model not in TTS_MODEL_CONFIGS:
+        resolved_model = default_settings.model
+        if resolved_model not in TTS_MODEL_CONFIGS:
             allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
-            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
+            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
-        self._config = TTS_MODEL_CONFIGS[model]
+        self._config = TTS_MODEL_CONFIGS[resolved_model]
 
         # Set default sample rate based on model if not specified
         if sample_rate is None:
             sample_rate = self._config.default_sample_rate
 
-        _params = params or SarvamHttpTTSService.InputParams()
-
-        # Set default voice based on model if not specified
-        if voice_id is None:
-            voice_id = self._config.default_speaker
+        # Set default voice based on model if not specified via any mechanism
+        if voice_id is None and (settings is None or settings.voice is NOT_GIVEN):
+            default_settings.voice = self._config.default_speaker
 
         # Validate and clamp pace to model's valid range
-        pace = _params.pace
+        pace = default_settings.pace
         pace_min, pace_max = self._config.pace_range
         if pace is not None and (pace < pace_min or pace > pace_max):
             logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")
-            pace = max(pace_min, min(pace_max, pace))
+            default_settings.pace = max(pace_min, min(pace_max, pace))
 
-        default_settings = SarvamHttpTTSSettings(
-            language=(
-                self.language_to_service_language(_params.language) if _params.language else "en-IN"
-            ),
-            enable_preprocessing=(
-                True if self._config.preprocessing_always_enabled else _params.enable_preprocessing
-            ),
-            pace=pace,
-            pitch=None,
-            loudness=None,
-            temperature=None,
-            model=model,
-            voice=voice_id,
-        )
-        if settings is not None:
-            default_settings.apply_update(settings)
+        # Force preprocessing for models that require it
+        if self._config.preprocessing_always_enabled:
+            default_settings.enable_preprocessing = True
+
+        # Warn about unsupported model-specific parameters
+        if not self._config.supports_pitch and default_settings.pitch not in (None, 0.0):
+            logger.warning(f"pitch parameter is ignored for {resolved_model}")
+            default_settings.pitch = None
+        if not self._config.supports_loudness and default_settings.loudness not in (None, 1.0):
+            logger.warning(f"loudness parameter is ignored for {resolved_model}")
+            default_settings.loudness = None
+        if not self._config.supports_temperature and default_settings.temperature not in (
+            None,
+            0.6,
+        ):
+            logger.warning(f"temperature parameter is ignored for {resolved_model}")
+            default_settings.temperature = None
 
         super().__init__(
             sample_rate=sample_rate,
@@ -526,22 +560,6 @@ class SarvamHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = base_url
         self._session = aiohttp_session
-
-        # Add parameters based on model support
-        if self._config.supports_pitch:
-            self._settings.pitch = _params.pitch
-        elif _params.pitch != 0.0:
-            logger.warning(f"pitch parameter is ignored for {model}")
-
-        if self._config.supports_loudness:
-            self._settings.loudness = _params.loudness
-        elif _params.loudness != 1.0:
-            logger.warning(f"loudness parameter is ignored for {model}")
-
-        if self._config.supports_temperature:
-            self._settings.temperature = _params.temperature
-        elif _params.temperature != 0.6:
-            logger.warning(f"temperature parameter is ignored for {model}")
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -858,62 +876,105 @@ class SarvamTTSService(InterruptibleTTSService):
 
         See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream
         """
-        if model is not None:
-            _warn_deprecated_param("model", "SarvamTTSSettings", "model")
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "SarvamTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "SarvamTTSSettings")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = SarvamTTSSettings(
+            model="bulbul:v2",
+            voice="anushka",
+            language="en-IN",
+            speech_sample_rate="22050",
+            enable_preprocessing=False,
+            min_buffer_size=50,
+            max_chunk_length=150,
+            output_audio_codec="linear16",
+            output_audio_bitrate="128k",
+            pace=1.0,
+            pitch=None,
+            loudness=None,
+            temperature=None,
+        )
 
-        model = model or "bulbul:v2"
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", SarvamTTSSettings, "model")
+            default_settings.model = model
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", SarvamTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", SarvamTTSSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = (
+                        self.language_to_service_language(params.language) or "en-IN"
+                    )
+                if params.enable_preprocessing is not None:
+                    default_settings.enable_preprocessing = params.enable_preprocessing
+                if params.min_buffer_size is not None:
+                    default_settings.min_buffer_size = params.min_buffer_size
+                if params.max_chunk_length is not None:
+                    default_settings.max_chunk_length = params.max_chunk_length
+                if params.output_audio_codec is not None:
+                    default_settings.output_audio_codec = params.output_audio_codec
+                if params.output_audio_bitrate is not None:
+                    default_settings.output_audio_bitrate = params.output_audio_bitrate
+                if params.pace is not None:
+                    default_settings.pace = params.pace
+                if params.pitch is not None:
+                    default_settings.pitch = params.pitch
+                if params.loudness is not None:
+                    default_settings.loudness = params.loudness
+                if params.temperature is not None:
+                    default_settings.temperature = params.temperature
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         # Get model configuration (validates model exists)
-        if model not in TTS_MODEL_CONFIGS:
+        resolved_model = default_settings.model
+        if resolved_model not in TTS_MODEL_CONFIGS:
             allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
-            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
+            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
-        self._config = TTS_MODEL_CONFIGS[model]
+        self._config = TTS_MODEL_CONFIGS[resolved_model]
 
         # Set default sample rate based on model if not specified
         if sample_rate is None:
             sample_rate = self._config.default_sample_rate
+            default_settings.speech_sample_rate = str(sample_rate)
 
-        # Set default voice based on model if not specified
-        if voice_id is None:
-            voice_id = self._config.default_speaker
-
-        _params = params or SarvamTTSService.InputParams()
+        # Set default voice based on model if not specified via any mechanism
+        if voice_id is None and (settings is None or settings.voice is NOT_GIVEN):
+            default_settings.voice = self._config.default_speaker
 
         # Validate and clamp pace to model's valid range
-        pace = _params.pace
+        pace = default_settings.pace
         pace_min, pace_max = self._config.pace_range
         if pace is not None and (pace < pace_min or pace > pace_max):
             logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")
-            pace = max(pace_min, min(pace_max, pace))
+            default_settings.pace = max(pace_min, min(pace_max, pace))
 
-        default_settings = SarvamTTSSettings(
-            language=(
-                self.language_to_service_language(_params.language) if _params.language else "en-IN"
-            ),
-            speech_sample_rate=str(sample_rate),
-            enable_preprocessing=(
-                True if self._config.preprocessing_always_enabled else _params.enable_preprocessing
-            ),
-            min_buffer_size=_params.min_buffer_size,
-            max_chunk_length=_params.max_chunk_length,
-            output_audio_codec=_params.output_audio_codec,
-            output_audio_bitrate=_params.output_audio_bitrate,
-            pace=pace,
-            pitch=None,
-            loudness=None,
-            temperature=None,
-            model=model,
-            voice=voice_id,
-        )
-        if settings is not None:
-            default_settings.apply_update(settings)
+        # Force preprocessing for models that require it
+        if self._config.preprocessing_always_enabled:
+            default_settings.enable_preprocessing = True
 
-        # Initialize parent class first
+        # Warn about unsupported model-specific parameters
+        if not self._config.supports_pitch and default_settings.pitch not in (None, 0.0):
+            logger.warning(f"pitch parameter is ignored for {resolved_model}")
+            default_settings.pitch = None
+        if not self._config.supports_loudness and default_settings.loudness not in (None, 1.0):
+            logger.warning(f"loudness parameter is ignored for {resolved_model}")
+            default_settings.loudness = None
+        if not self._config.supports_temperature and default_settings.temperature not in (
+            None,
+            0.6,
+        ):
+            logger.warning(f"temperature parameter is ignored for {resolved_model}")
+            default_settings.temperature = None
+
+        # Initialize parent class
         super().__init__(
             aggregate_sentences=aggregate_sentences,
             text_aggregation_mode=text_aggregation_mode,
@@ -926,24 +987,8 @@ class SarvamTTSService(InterruptibleTTSService):
         )
 
         # WebSocket endpoint URL with model query parameter
-        self._websocket_url = f"{url}?model={model}"
+        self._websocket_url = f"{url}?model={resolved_model}"
         self._api_key = api_key
-
-        # Add parameters based on model support
-        if self._config.supports_pitch:
-            self._settings.pitch = _params.pitch
-        elif _params.pitch != 0.0:
-            logger.warning(f"pitch parameter is ignored for {model}")
-
-        if self._config.supports_loudness:
-            self._settings.loudness = _params.loudness
-        elif _params.loudness != 1.0:
-            logger.warning(f"loudness parameter is ignored for {model}")
-
-        if self._config.supports_temperature:
-            self._settings.temperature = _params.temperature
-        elif _params.temperature != 0.6:
-            logger.warning(f"temperature parameter is ignored for {model}")
 
         self._receive_task = None
         self._keepalive_task = None

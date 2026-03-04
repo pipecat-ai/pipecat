@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -108,9 +108,9 @@ class AssemblyAISTTService(WebsocketSTTService):
         self,
         *,
         api_key: str,
-        language: Language = Language.EN,  # AssemblyAI only supports English
+        language: Optional[Language] = None,
         api_endpoint_base_url: str = "wss://streaming.assemblyai.com/v3/ws",
-        connection_params: AssemblyAIConnectionParams = AssemblyAIConnectionParams(),
+        connection_params: Optional[AssemblyAIConnectionParams] = None,
         vad_force_turn_endpoint: bool = True,
         should_interrupt: bool = True,
         speaker_format: Optional[str] = None,
@@ -151,20 +151,23 @@ class AssemblyAISTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
+        # Resolve connection_params early — needed for validation and turn mode config
+        _connection_params = connection_params or AssemblyAIConnectionParams()
+
         # AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires the
         # SpeechStarted event for reliable barge-in. Only u3-rt-pro supports
         # this. Other models must use Pipecat turn detection.
-        is_u3_pro = connection_params.speech_model == "u3-rt-pro"
+        is_u3_pro = _connection_params.speech_model == "u3-rt-pro"
         if not vad_force_turn_endpoint and not is_u3_pro:
             raise ValueError(
                 f"AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires "
                 f"u3-rt-pro for SpeechStarted support. Either set "
-                f"vad_force_turn_endpoint=True for {connection_params.speech_model}, "
+                f"vad_force_turn_endpoint=True for {_connection_params.speech_model}, "
                 f"or use speech_model='u3-rt-pro'."
             )
 
         # Validate that prompt and keyterms_prompt are not both set
-        if connection_params.prompt is not None and connection_params.keyterms_prompt is not None:
+        if _connection_params.prompt is not None and _connection_params.keyterms_prompt is not None:
             raise ValueError(
                 "The prompt and keyterms_prompt parameters cannot be used in the same request. "
                 "Please choose either one or the other based on your use case. When you use "
@@ -174,7 +177,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             )
 
         # Warn if user sets a custom prompt (recommend testing without one first)
-        if connection_params.prompt is not None:
+        if _connection_params.prompt is not None:
             logger.warning(
                 "Custom prompt detected. Prompting is a beta feature. We recommend testing "
                 "with no prompt first, as this will use our optimized default prompt for "
@@ -186,18 +189,32 @@ class AssemblyAISTTService(WebsocketSTTService):
         # When vad_force_turn_endpoint is enabled, configure connection params
         # for Pipecat turn detection mode (fast finals for smart turn analyzer)
         if vad_force_turn_endpoint:
-            connection_params = self._configure_pipecat_turn_mode(connection_params, is_u3_pro)
+            _connection_params = self._configure_pipecat_turn_mode(_connection_params, is_u3_pro)
 
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AssemblyAISTTSettings(
             model=None,
-            language=language,
-            connection_params=connection_params,
+            language=Language.EN,
+            connection_params=AssemblyAIConnectionParams(),
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if language is not None:
+            _warn_deprecated_param("language", AssemblyAISTTSettings, "language")
+            default_settings.language = language
+
+        # 3. Apply connection_params overrides — only if settings not provided
+        if connection_params is not None:
+            _warn_deprecated_param("connection_params", AssemblyAISTTSettings)
+            if not settings:
+                default_settings.connection_params = _connection_params
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
         super().__init__(
-            sample_rate=connection_params.sample_rate,
+            sample_rate=_connection_params.sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             settings=default_settings,
             **kwargs,

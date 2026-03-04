@@ -151,19 +151,28 @@ class KokoroTTSService(TTSService):
             **kwargs: Additional arguments passed to parent `TTSService`.
 
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "KokoroTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "KokoroTTSSettings")
-
-        _params = params or KokoroTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = KokoroTTSSettings(
             model=None,
-            voice=voice_id,
-            language=language_to_kokoro_language(_params.language),
-            lang_code=language_to_kokoro_language(_params.language),
+            voice=None,
+            language=language_to_kokoro_language(Language.EN),
+            lang_code=language_to_kokoro_language(Language.EN),
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", KokoroTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", KokoroTTSSettings)
+            if not settings:
+                lang_code = language_to_kokoro_language(params.language)
+                default_settings.language = lang_code
+                default_settings.lang_code = lang_code
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -172,14 +181,14 @@ class KokoroTTSService(TTSService):
             **kwargs,
         )
 
-        self._lang_code = language_to_kokoro_language(_params.language)
+        self._lang_code = default_settings.lang_code
 
-        model = Path(model_path) if model_path else KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
+        model_file = Path(model_path) if model_path else KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
         voices = Path(voices_path) if voices_path else KOKORO_CACHE_DIR / "voices-v1.0.bin"
 
-        _ensure_model_files(model, voices)
+        _ensure_model_files(model_file, voices)
 
-        self._kokoro = Kokoro(str(model), str(voices))
+        self._kokoro = Kokoro(str(model_file), str(voices))
 
         self._resampler = create_stream_resampler()
 

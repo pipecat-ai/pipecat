@@ -125,17 +125,25 @@ class LmntTTSService(InterruptibleTTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "LmntTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "LmntTTSSettings", "model")
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = LmntTTSSettings(
-            model=model or "blizzard",
-            voice=voice_id,
+            model="blizzard",
+            voice=None,
             language=self.language_to_service_language(language),
             format="raw",
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", LmntTTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", LmntTTSSettings, "model")
+            default_settings.model = model
+
+        # 3. No params for this service
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

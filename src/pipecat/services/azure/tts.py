@@ -290,27 +290,43 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent WordTTSService.
         """
-        if voice is not None:
-            _warn_deprecated_param("voice", "AzureTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "AzureTTSSettings")
-
-        _params = params or AzureBaseTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AzureTTSSettings(
             model=None,
-            emphasis=_params.emphasis,
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else "en-US",
-            pitch=_params.pitch,
-            rate=_params.rate,
-            role=_params.role,
-            style=_params.style,
-            style_degree=_params.style_degree,
-            voice=voice or "en-US-SaraNeural",
-            volume=_params.volume,
+            voice="en-US-SaraNeural",
+            language="en-US",
+            emphasis=None,
+            pitch=None,
+            rate=None,
+            role=None,
+            style=None,
+            style_degree=None,
+            volume=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice is not None:
+            _warn_deprecated_param("voice", AzureTTSSettings, "voice")
+            default_settings.voice = voice
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AzureTTSSettings)
+            if not settings:
+                default_settings.emphasis = params.emphasis
+                default_settings.language = (
+                    self.language_to_service_language(params.language)
+                    if params.language
+                    else "en-US"
+                )
+                default_settings.pitch = params.pitch
+                default_settings.rate = params.rate
+                default_settings.role = params.role
+                default_settings.style = params.style
+                default_settings.style_degree = params.style_degree
+                default_settings.volume = params.volume
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -779,27 +795,43 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        if voice is not None:
-            _warn_deprecated_param("voice", "AzureTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "AzureTTSSettings")
-
-        _params = params or AzureBaseTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AzureTTSSettings(
             model=None,
-            emphasis=_params.emphasis,
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else "en-US",
-            pitch=_params.pitch,
-            rate=_params.rate,
-            role=_params.role,
-            style=_params.style,
-            style_degree=_params.style_degree,
-            voice=voice or "en-US-SaraNeural",
-            volume=_params.volume,
+            voice="en-US-SaraNeural",
+            language="en-US",
+            emphasis=None,
+            pitch=None,
+            rate=None,
+            role=None,
+            style=None,
+            style_degree=None,
+            volume=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice is not None:
+            _warn_deprecated_param("voice", AzureTTSSettings, "voice")
+            default_settings.voice = voice
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AzureTTSSettings)
+            if not settings:
+                default_settings.emphasis = params.emphasis
+                default_settings.language = (
+                    self.language_to_service_language(params.language)
+                    if params.language
+                    else "en-US"
+                )
+                default_settings.pitch = params.pitch
+                default_settings.rate = params.rate
+                default_settings.role = params.role
+                default_settings.style = params.style
+                default_settings.style_degree = params.style_degree
+                default_settings.volume = params.volume
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -117,19 +117,29 @@ class NvidiaTTSService(TTSService):
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "NvidiaTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "NvidiaTTSSettings")
-
-        _params = params or NvidiaTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = NvidiaTTSSettings(
             model=model_function_map.get("model_name"),
-            voice=voice_id or "Magpie-Multilingual.EN-US.Aria",
-            language=_params.language,
-            quality=_params.quality,
+            voice="Magpie-Multilingual.EN-US.Aria",
+            language=Language.EN_US,
+            quality=20,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", NvidiaTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", NvidiaTTSSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.quality is not None:
+                    default_settings.quality = params.quality
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

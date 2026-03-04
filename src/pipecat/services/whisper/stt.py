@@ -256,30 +256,35 @@ class WhisperSTTService(SegmentedSTTService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "WhisperSTTSettings", "model")
-        if device is not None:
-            _warn_deprecated_param("device", "WhisperSTTSettings", "device")
-        if compute_type is not None:
-            _warn_deprecated_param("compute_type", "WhisperSTTSettings", "compute_type")
-        if no_speech_prob is not None:
-            _warn_deprecated_param("no_speech_prob", "WhisperSTTSettings", "no_speech_prob")
-        if language is not None:
-            _warn_deprecated_param("language", "WhisperSTTSettings", "language")
-
-        _model = model if model is not None else Model.DISTIL_MEDIUM_EN
-        _device = device or "auto"
-        _compute_type = compute_type or "default"
-        _no_speech_prob = no_speech_prob if no_speech_prob is not None else 0.4
-        _language = language or Language.EN
-
+        # --- 1. Hardcoded defaults ---
         default_settings = WhisperSTTSettings(
-            model=_model if isinstance(_model, str) else _model.value,
-            language=_language,
-            device=_device,
-            compute_type=_compute_type,
-            no_speech_prob=_no_speech_prob,
+            model=Model.DISTIL_MEDIUM_EN.value,
+            language=Language.EN,
+            device="auto",
+            compute_type="default",
+            no_speech_prob=0.4,
         )
+
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            _warn_deprecated_param("model", WhisperSTTSettings, "model")
+            default_settings.model = model if isinstance(model, str) else model.value
+        if device is not None:
+            _warn_deprecated_param("device", WhisperSTTSettings, "device")
+            default_settings.device = device
+        if compute_type is not None:
+            _warn_deprecated_param("compute_type", WhisperSTTSettings, "compute_type")
+            default_settings.compute_type = compute_type
+        if no_speech_prob is not None:
+            _warn_deprecated_param("no_speech_prob", WhisperSTTSettings, "no_speech_prob")
+            default_settings.no_speech_prob = no_speech_prob
+        if language is not None:
+            _warn_deprecated_param("language", WhisperSTTSettings, "language")
+            default_settings.language = language
+
+        # --- 3. (no params object for this service) ---
+
+        # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -430,27 +435,32 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "WhisperMLXSTTSettings", "model")
-        if no_speech_prob is not None:
-            _warn_deprecated_param("no_speech_prob", "WhisperMLXSTTSettings", "no_speech_prob")
-        if language is not None:
-            _warn_deprecated_param("language", "WhisperMLXSTTSettings", "language")
-        if temperature is not None:
-            _warn_deprecated_param("temperature", "WhisperMLXSTTSettings", "temperature")
-
-        _model = model if model is not None else MLXModel.TINY
-        _no_speech_prob = no_speech_prob if no_speech_prob is not None else 0.6
-        _language = language or Language.EN
-        _temperature = temperature if temperature is not None else 0.0
-
+        # --- 1. Hardcoded defaults ---
         default_settings = WhisperMLXSTTSettings(
-            model=_model if isinstance(_model, str) else _model.value,
-            language=_language,
-            no_speech_prob=_no_speech_prob,
-            temperature=_temperature,
+            model=MLXModel.TINY.value,
+            language=Language.EN,
+            no_speech_prob=0.6,
+            temperature=0.0,
             engine="mlx",
         )
+
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            _warn_deprecated_param("model", WhisperMLXSTTSettings, "model")
+            default_settings.model = model if isinstance(model, str) else model.value
+        if no_speech_prob is not None:
+            _warn_deprecated_param("no_speech_prob", WhisperMLXSTTSettings, "no_speech_prob")
+            default_settings.no_speech_prob = no_speech_prob
+        if language is not None:
+            _warn_deprecated_param("language", WhisperMLXSTTSettings, "language")
+            default_settings.language = language
+        if temperature is not None:
+            _warn_deprecated_param("temperature", WhisperMLXSTTSettings, "temperature")
+            default_settings.temperature = temperature
+
+        # --- 3. (no params object for this service) ---
+
+        # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
 

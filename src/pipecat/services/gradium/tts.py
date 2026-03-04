@@ -103,19 +103,28 @@ class GradiumTTSService(AudioContextTTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent class.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "GradiumTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "GradiumTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "GradiumTTSSettings")
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GradiumTTSSettings(
-            model=model or "default",
-            voice=voice_id or "YTpq7expH9539ERJ",
+            model="default",
+            voice="YTpq7expH9539ERJ",
             language=None,
             output_format="pcm",
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GradiumTTSSettings, "model")
+            default_settings.model = model
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", GradiumTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GradiumTTSSettings)
+            # Note: params.temp has no corresponding settings field
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -249,43 +249,57 @@ class AnthropicLLMService(LLMService):
             system_instruction: Optional system instruction to use as the system prompt.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "AnthropicLLMSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "AnthropicLLMSettings")
-
-        _params = params or AnthropicLLMService.InputParams()
-
-        # Handle existing enable_prompt_caching_beta deprecation
-        enable_prompt_caching = _params.enable_prompt_caching
-        if _params.enable_prompt_caching_beta is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "enable_prompt_caching_beta is deprecated. Use enable_prompt_caching instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            if enable_prompt_caching is None:
-                enable_prompt_caching = _params.enable_prompt_caching_beta
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AnthropicLLMSettings(
-            model=model or "claude-sonnet-4-6",
-            max_tokens=_params.max_tokens,
-            enable_prompt_caching=enable_prompt_caching or False,
-            temperature=_params.temperature,
-            top_k=_params.top_k,
-            top_p=_params.top_p,
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            enable_prompt_caching=False,
+            temperature=NOT_GIVEN,
+            top_k=NOT_GIVEN,
+            top_p=NOT_GIVEN,
             frequency_penalty=None,
             presence_penalty=None,
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            thinking=_params.thinking,
-            extra=_params.extra if isinstance(_params.extra, dict) else {},
+            thinking=NOT_GIVEN,
+            extra={},
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", AnthropicLLMSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AnthropicLLMSettings)
+            if not settings:
+                default_settings.max_tokens = params.max_tokens
+                default_settings.temperature = params.temperature
+                default_settings.top_k = params.top_k
+                default_settings.top_p = params.top_p
+                default_settings.thinking = params.thinking
+                if isinstance(params.extra, dict):
+                    default_settings.extra = params.extra
+                # Handle enable_prompt_caching / enable_prompt_caching_beta
+                enable_prompt_caching = params.enable_prompt_caching
+                if params.enable_prompt_caching_beta is not None:
+                    import warnings
+
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("always")
+                        warnings.warn(
+                            "enable_prompt_caching_beta is deprecated. "
+                            "Use enable_prompt_caching instead.",
+                            DeprecationWarning,
+                            stacklevel=2,
+                        )
+                    if enable_prompt_caching is None:
+                        enable_prompt_caching = params.enable_prompt_caching_beta
+                default_settings.enable_prompt_caching = enable_prompt_caching or False
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

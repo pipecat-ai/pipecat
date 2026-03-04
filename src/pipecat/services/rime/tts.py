@@ -226,38 +226,57 @@ class RimeTTSService(AudioContextTTSService):
 
             **kwargs: Additional arguments passed to parent class.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "RimeTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "RimeTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "RimeTTSSettings")
-
-        # Initialize with parent class settings for proper frame handling
-        _params = params or RimeTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = RimeTTSSettings(
-            model=model or "arcana",
-            voice=voice_id,
+            model="arcana",
+            voice=None,
             audioFormat="pcm",
             samplingRate=0,  # updated in start()
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else None,
-            segment=_params.segment,
-            inlineSpeedAlpha=None,  # Not applicable here
-            speedAlpha=_params.speed_alpha,
+            language=None,
+            segment=None,
+            inlineSpeedAlpha=None,
+            speedAlpha=None,
             # Arcana params
-            repetition_penalty=_params.repetition_penalty,
-            temperature=_params.temperature,
-            top_p=_params.top_p,
+            repetition_penalty=None,
+            temperature=None,
+            top_p=None,
             # Mistv2 params
-            reduceLatency=_params.reduce_latency,
-            pauseBetweenBrackets=_params.pause_between_brackets,
-            phonemizeBetweenBrackets=_params.phonemize_between_brackets,
-            noTextNormalization=_params.no_text_normalization,
-            saveOovs=_params.save_oovs,
+            reduceLatency=None,
+            pauseBetweenBrackets=None,
+            phonemizeBetweenBrackets=None,
+            noTextNormalization=None,
+            saveOovs=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", RimeTTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", RimeTTSSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", RimeTTSSettings)
+            if not settings:
+                default_settings.language = (
+                    self.language_to_service_language(params.language) if params.language else None
+                )
+                default_settings.segment = params.segment
+                default_settings.speedAlpha = params.speed_alpha
+                # Arcana params
+                default_settings.repetition_penalty = params.repetition_penalty
+                default_settings.temperature = params.temperature
+                default_settings.top_p = params.top_p
+                # Mistv2 params
+                default_settings.reduceLatency = params.reduce_latency
+                default_settings.pauseBetweenBrackets = params.pause_between_brackets
+                default_settings.phonemizeBetweenBrackets = params.phonemize_between_brackets
+                default_settings.noTextNormalization = params.no_text_normalization
+                default_settings.saveOovs = params.save_oovs
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -713,35 +732,50 @@ class RimeHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "RimeTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "RimeTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "RimeTTSSettings")
-
-        _params = params or RimeHttpTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = RimeTTSSettings(
-            model=model or "mistv2",
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else "eng",
+            model="mistv2",
+            voice=None,
+            language="eng",
             audioFormat="pcm",
             samplingRate=0,
             segment=None,
-            speedAlpha=_params.speed_alpha,
-            reduceLatency=_params.reduce_latency,
-            pauseBetweenBrackets=_params.pause_between_brackets,
-            phonemizeBetweenBrackets=_params.phonemize_between_brackets,
+            speedAlpha=None,
+            reduceLatency=None,
+            pauseBetweenBrackets=None,
+            phonemizeBetweenBrackets=None,
             noTextNormalization=None,
             saveOovs=None,
-            inlineSpeedAlpha=_params.inline_speed_alpha if _params.inline_speed_alpha else None,
+            inlineSpeedAlpha=None,
             repetition_penalty=None,
             temperature=None,
             top_p=None,
-            voice=voice_id,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", RimeTTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", RimeTTSSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", RimeTTSSettings)
+            if not settings:
+                default_settings.language = (
+                    self.language_to_service_language(params.language) if params.language else "eng"
+                )
+                default_settings.speedAlpha = params.speed_alpha
+                default_settings.reduceLatency = params.reduce_latency
+                default_settings.pauseBetweenBrackets = params.pause_between_brackets
+                default_settings.phonemizeBetweenBrackets = params.phonemize_between_brackets
+                default_settings.inlineSpeedAlpha = (
+                    params.inline_speed_alpha if params.inline_speed_alpha else None
+                )
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -936,28 +970,40 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent class.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "RimeNonJsonTTSSettings", "voice")
-        if model is not None:
-            _warn_deprecated_param("model", "RimeNonJsonTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "RimeNonJsonTTSSettings")
-
-        _params = params or RimeNonJsonTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = RimeNonJsonTTSSettings(
-            voice=voice_id,
-            model=model or "arcana",
+            voice=None,
+            model="arcana",
             audioFormat=audio_format,
             samplingRate=sample_rate,
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else None,
-            segment=_params.segment,
-            repetition_penalty=_params.repetition_penalty,
-            temperature=_params.temperature,
-            top_p=_params.top_p,
+            language=None,
+            segment=None,
+            repetition_penalty=None,
+            temperature=None,
+            top_p=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", RimeNonJsonTTSSettings, "voice")
+            default_settings.voice = voice_id
+        if model is not None:
+            _warn_deprecated_param("model", RimeNonJsonTTSSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", RimeNonJsonTTSSettings)
+            if not settings:
+                default_settings.language = (
+                    self.language_to_service_language(params.language) if params.language else None
+                )
+                default_settings.segment = params.segment
+                default_settings.repetition_penalty = params.repetition_penalty
+                default_settings.temperature = params.temperature
+                default_settings.top_p = params.top_p
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -974,8 +1020,8 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         self._api_key = api_key
         self._url = url
         # Add any extra parameters for future compatibility
-        if _params.extra:
-            self._settings.extra.update(_params.extra)
+        if params and params.extra:
+            self._settings.extra.update(params.extra)
 
         self._receive_task = None
         self._context_id: Optional[str] = None

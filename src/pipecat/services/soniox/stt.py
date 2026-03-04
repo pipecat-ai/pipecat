@@ -218,25 +218,42 @@ class SonioxSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "SonioxSTTSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "SonioxSTTSettings")
-
-        _params = params or SonioxInputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = SonioxSTTSettings(
-            model=model or _params.model,
+            model="stt-rt-v4",
             language=None,
-            audio_format=_params.audio_format,
-            num_channels=_params.num_channels,
-            language_hints=_params.language_hints,
-            language_hints_strict=_params.language_hints_strict,
-            context=_params.context,
-            enable_speaker_diarization=_params.enable_speaker_diarization,
-            enable_language_identification=_params.enable_language_identification,
-            client_reference_id=_params.client_reference_id,
+            audio_format="pcm_s16le",
+            num_channels=1,
+            language_hints=None,
+            language_hints_strict=None,
+            context=None,
+            enable_speaker_diarization=False,
+            enable_language_identification=False,
+            client_reference_id=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", SonioxSTTSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", SonioxSTTSettings)
+            if not settings:
+                default_settings.model = params.model
+                default_settings.audio_format = params.audio_format
+                default_settings.num_channels = params.num_channels
+                default_settings.language_hints = params.language_hints
+                default_settings.language_hints_strict = params.language_hints_strict
+                default_settings.context = params.context
+                default_settings.enable_speaker_diarization = params.enable_speaker_diarization
+                default_settings.enable_language_identification = (
+                    params.enable_language_identification
+                )
+                default_settings.client_reference_id = params.client_reference_id
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

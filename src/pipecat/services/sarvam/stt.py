@@ -238,44 +238,56 @@ class SarvamSTTService(STTService):
             keepalive_interval: Seconds between idle checks when keepalive is enabled.
             **kwargs: Additional arguments passed to the parent STTService.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = SarvamSTTSettings(
+            model="saarika:v2.5",
+            language=None,
+            prompt=None,
+            mode=None,
+            vad_signals=None,
+            high_vad_sensitivity=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", "SarvamSTTSettings", "model")
+            _warn_deprecated_param("model", SarvamSTTSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", "SarvamSTTSettings")
+            _warn_deprecated_param("params", SarvamSTTSettings)
+            if not settings:
+                default_settings.language = params.language
+                default_settings.prompt = params.prompt
+                default_settings.mode = params.mode
+                default_settings.vad_signals = params.vad_signals
+                default_settings.high_vad_sensitivity = params.high_vad_sensitivity
 
-        model = model or "saarika:v2.5"
-        _params = params or SarvamSTTService.InputParams()
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
-        # Get model configuration (validates model exists)
-        if model not in MODEL_CONFIGS:
+        # Resolve model config and validate (after all overrides)
+        resolved_model = default_settings.model
+        if resolved_model not in MODEL_CONFIGS:
             allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
-            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
+            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
-        self._config = MODEL_CONFIGS[model]
+        self._config = MODEL_CONFIGS[resolved_model]
 
         # Validate parameters against model capabilities
-        if _params.prompt is not None and not self._config.supports_prompt:
-            raise ValueError(f"Model '{model}' does not support prompt parameter.")
-        if _params.mode is not None and not self._config.supports_mode:
-            raise ValueError(f"Model '{model}' does not support mode parameter.")
-        if _params.language is not None and not self._config.supports_language:
+        if default_settings.prompt is not None and not self._config.supports_prompt:
+            raise ValueError(f"Model '{resolved_model}' does not support prompt parameter.")
+        if default_settings.mode is not None and not self._config.supports_mode:
+            raise ValueError(f"Model '{resolved_model}' does not support mode parameter.")
+        if default_settings.language is not None and not self._config.supports_language:
             raise ValueError(
-                f"Model '{model}' does not support language parameter (auto-detects language)."
+                f"Model '{resolved_model}' does not support language parameter (auto-detects language)."
             )
 
         # Resolve mode default from model config
-        mode = _params.mode if _params.mode is not None else self._config.default_mode
-
-        default_settings = SarvamSTTSettings(
-            model=model,
-            language=_params.language,
-            prompt=_params.prompt,
-            mode=mode,
-            vad_signals=_params.vad_signals,
-            high_vad_sensitivity=_params.high_vad_sensitivity,
-        )
-        if settings is not None:
-            default_settings.apply_update(settings)
+        if default_settings.mode is None:
+            default_settings.mode = self._config.default_mode
 
         super().__init__(
             sample_rate=sample_rate,
@@ -301,7 +313,7 @@ class SarvamSTTService(STTService):
         self._socket_client = None
         self._receive_task = None
 
-        if _params.vad_signals:
+        if default_settings.vad_signals:
             self._register_event_handler("on_speech_started")
             self._register_event_handler("on_speech_stopped")
             self._register_event_handler("on_utterance_end")

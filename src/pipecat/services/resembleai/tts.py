@@ -95,17 +95,30 @@ class ResembleAITTSService(AudioContextTTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent service.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "ResembleAITTSSettings", "voice")
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = ResembleAITTSSettings(
             model=None,
-            voice=voice_id,
+            voice=None,
             language=None,
-            precision=precision,
-            output_format=output_format,
-            resemble_sample_rate=sample_rate,
+            precision="PCM_16",
+            output_format="wav",
+            resemble_sample_rate=22050,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", ResembleAITTSSettings, "voice")
+            default_settings.voice = voice_id
+        if precision is not None:
+            default_settings.precision = precision
+        if output_format is not None:
+            default_settings.output_format = output_format
+        if sample_rate is not None:
+            default_settings.resemble_sample_rate = sample_rate
+
+        # 3. No params for this service
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

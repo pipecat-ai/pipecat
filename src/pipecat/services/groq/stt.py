@@ -69,27 +69,30 @@ class GroqSTTService(BaseWhisperSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to BaseWhisperSTTService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "BaseWhisperSTTSettings", "model")
-        if language is not None:
-            _warn_deprecated_param("language", "BaseWhisperSTTSettings", "language")
-        if prompt is not None:
-            _warn_deprecated_param("prompt", "BaseWhisperSTTSettings", "prompt")
-        if temperature is not None:
-            _warn_deprecated_param("temperature", "BaseWhisperSTTSettings", "temperature")
-
-        model = model or "whisper-large-v3-turbo"
-        language = language or Language.EN
-
-        # Build settings from deprecated params and pass via settings=
-        # to avoid double deprecation warnings in BaseWhisperSTTService.
+        # --- 1. Hardcoded defaults ---
         default_settings = BaseWhisperSTTSettings(
-            model=model,
-            language=self.language_to_service_language(language),
+            model="whisper-large-v3-turbo",
+            language=self.language_to_service_language(Language.EN),
             base_url=base_url,
-            prompt=prompt,
-            temperature=temperature,
         )
+
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            _warn_deprecated_param("model", BaseWhisperSTTSettings, "model")
+            default_settings.model = model
+        if language is not None:
+            _warn_deprecated_param("language", BaseWhisperSTTSettings, "language")
+            default_settings.language = self.language_to_service_language(language)
+        if prompt is not None:
+            _warn_deprecated_param("prompt", BaseWhisperSTTSettings, "prompt")
+            default_settings.prompt = prompt
+        if temperature is not None:
+            _warn_deprecated_param("temperature", BaseWhisperSTTSettings, "temperature")
+            default_settings.temperature = temperature
+
+        # --- 3. (no params object for this service) ---
+
+        # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
 

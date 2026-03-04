@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -177,26 +177,34 @@ class CartesiaSTTService(WebsocketSTTService):
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
 
-        default_options = CartesiaLiveOptions(
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = CartesiaSTTSettings(
             model="ink-whisper",
             language=Language.EN.value,
             encoding="pcm_s16le",
-            sample_rate=sample_rate,
         )
 
-        merged_options = default_options.to_dict()
-        if live_options:
-            merged_options.update(live_options.to_dict())
-            # Filter out "None" string values
-            merged_options = {
-                k: v for k, v in merged_options.items() if not isinstance(v, str) or v != "None"
-            }
+        # 2. (no deprecated direct args for this service)
 
-        default_settings = CartesiaSTTSettings(
-            model=merged_options["model"],
-            language=merged_options.get("language"),
-            encoding=merged_options.get("encoding", "pcm_s16le"),
-        )
+        # 3. Apply live_options overrides — only if settings not provided
+        if live_options is not None:
+            _warn_deprecated_param("live_options", CartesiaSTTSettings)
+            if not settings:
+                lo_dict = live_options.to_dict()
+                # Filter out "None" string values
+                lo_dict = {
+                    k: v
+                    for k, v in lo_dict.items()
+                    if (not isinstance(v, str) or v != "None") and k != "sample_rate"
+                }
+                if "model" in lo_dict:
+                    default_settings.model = lo_dict["model"]
+                if "language" in lo_dict:
+                    default_settings.language = lo_dict["language"]
+                if "encoding" in lo_dict:
+                    default_settings.encoding = lo_dict["encoding"]
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

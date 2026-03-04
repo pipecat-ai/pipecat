@@ -816,37 +816,53 @@ class AWSBedrockLLMService(LLMService):
             system_instruction: Optional system instruction to use as the system prompt.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        if model is not None:
-            _warn_deprecated_param("model", "AWSBedrockLLMSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "AWSBedrockLLMSettings")
-
-        _params = params or AWSBedrockLLMService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AWSBedrockLLMSettings(
-            model=model or "us.amazon.nova-lite-v1:0",
-            max_tokens=_params.max_tokens,
-            temperature=_params.temperature,
-            top_p=_params.top_p,
+            model="us.amazon.nova-lite-v1:0",
+            max_tokens=None,
+            temperature=None,
+            top_p=None,
             top_k=None,
             frequency_penalty=None,
             presence_penalty=None,
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            latency=_params.latency,
-            additional_model_request_fields=_params.additional_model_request_fields
-            if isinstance(_params.additional_model_request_fields, dict)
-            else {},
+            latency=None,
+            additional_model_request_fields={},
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", AWSBedrockLLMSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AWSBedrockLLMSettings)
+            if not settings:
+                default_settings.max_tokens = params.max_tokens
+                default_settings.temperature = params.temperature
+                default_settings.top_p = params.top_p
+                default_settings.latency = params.latency
+                if isinstance(params.additional_model_request_fields, dict):
+                    default_settings.additional_model_request_fields = (
+                        params.additional_model_request_fields
+                    )
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
         super().__init__(settings=default_settings, **kwargs)
 
-        self._stop_sequences = (
-            stop_sequences if stop_sequences is not None else (_params.stop_sequences or [])
-        )
+        # Handle stop_sequences (not a settings field)
+        if stop_sequences is not None:
+            self._stop_sequences = stop_sequences
+        elif params is not None:
+            self._stop_sequences = params.stop_sequences or []
+        else:
+            self._stop_sequences = []
 
         # Initialize the AWS Bedrock client
         if not client_config:

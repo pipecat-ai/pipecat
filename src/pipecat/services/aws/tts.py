@@ -209,25 +209,39 @@ class AWSPollyTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "AWSPollyTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "AWSPollyTTSSettings")
-
-        _params = params or AWSPollyTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AWSPollyTTSSettings(
             model=None,
-            voice=voice_id or "Joanna",
-            engine=_params.engine,
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else "en-US",
-            pitch=_params.pitch,
-            rate=_params.rate,
-            volume=_params.volume,
-            lexicon_names=_params.lexicon_names,
+            voice="Joanna",
+            language="en-US",
+            engine=None,
+            pitch=None,
+            rate=None,
+            volume=None,
+            lexicon_names=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", AWSPollyTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AWSPollyTTSSettings)
+            if not settings:
+                default_settings.engine = params.engine
+                default_settings.language = (
+                    self.language_to_service_language(params.language)
+                    if params.language
+                    else "en-US"
+                )
+                default_settings.pitch = params.pitch
+                default_settings.rate = params.rate
+                default_settings.volume = params.volume
+                default_settings.lexicon_names = params.lexicon_names
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

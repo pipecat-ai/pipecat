@@ -186,6 +186,7 @@ class UltravoxRealtimeLLMService(LLMService):
                 May only be set with OneShotInputParams.
             **kwargs: Additional arguments passed to parent LLMService.
         """
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = UltravoxRealtimeLLMSettings(
             model=None,
             temperature=None,
@@ -199,6 +200,10 @@ class UltravoxRealtimeLLMService(LLMService):
             user_turn_completion_config=None,
             output_medium=None,
         )
+
+        # (No step 2/3 — params is required and not deprecated)
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

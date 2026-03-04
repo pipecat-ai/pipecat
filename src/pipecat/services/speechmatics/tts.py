@@ -104,24 +104,32 @@ class SpeechmaticsTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "SpeechmaticsTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "SpeechmaticsTTSSettings")
-
         if sample_rate and sample_rate != self.SPEECHMATICS_SAMPLE_RATE:
             logger.warning(
                 f"Speechmatics TTS only supports {self.SPEECHMATICS_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        _params = params or SpeechmaticsTTSService.InputParams()
 
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = SpeechmaticsTTSSettings(
             model=None,
-            voice=voice_id or "sarah",
+            voice="sarah",
             language=None,
-            max_retries=_params.max_retries,
+            max_retries=5,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", SpeechmaticsTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", SpeechmaticsTTSSettings)
+            if not settings:
+                default_settings.max_retries = params.max_retries
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

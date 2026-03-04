@@ -12,7 +12,7 @@ for streaming text-to-speech synthesis with customizable voice parameters.
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, ClassVar, Dict, Literal, Mapping, Optional
+from typing import Any, AsyncGenerator, ClassVar, Dict, Literal, Mapping, Optional, Self
 
 from loguru import logger
 from pydantic import BaseModel
@@ -72,7 +72,7 @@ class FishAudioTTSSettings(TTSSettings):
     _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "fish_sample_rate"}
 
     @classmethod
-    def from_mapping(cls, settings: Mapping[str, Any]) -> "FishAudioTTSSettings":
+    def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
         """Construct settings from a plain dict, destructuring legacy nested ``prosody``."""
         flat = dict(settings)
         nested = flat.pop("prosody", None)
@@ -156,15 +156,6 @@ class FishAudioTTSService(InterruptibleTTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent service.
         """
-        if reference_id is not None:
-            _warn_deprecated_param("reference_id", "FishAudioTTSSettings", "voice")
-        if model_id is not None:
-            _warn_deprecated_param("model_id", "FishAudioTTSSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "FishAudioTTSSettings")
-
-        _params = params or FishAudioTTSService.InputParams()
-
         # Validation for model and reference_id parameters
         if model and reference_id:
             raise ValueError(
@@ -184,17 +175,42 @@ class FishAudioTTSService(InterruptibleTTSService):
                 )
             reference_id = model
 
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = FishAudioTTSSettings(
-            model=model_id or "s1",
-            voice=reference_id,
+            model="s1",
+            voice=None,
             fish_sample_rate=0,
-            latency=_params.latency,
+            latency="normal",
             format=output_format,
-            normalize=_params.normalize,
-            prosody_speed=_params.prosody_speed,
-            prosody_volume=_params.prosody_volume,
-            reference_id=reference_id,
+            normalize=True,
+            prosody_speed=1.0,
+            prosody_volume=0,
+            reference_id=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if reference_id is not None:
+            _warn_deprecated_param("reference_id", FishAudioTTSSettings, "voice")
+            default_settings.voice = reference_id
+            default_settings.reference_id = reference_id
+        if model_id is not None:
+            _warn_deprecated_param("model_id", FishAudioTTSSettings, "model")
+            default_settings.model = model_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", FishAudioTTSSettings)
+            if not settings:
+                if params.latency is not None:
+                    default_settings.latency = params.latency
+                if params.normalize is not None:
+                    default_settings.normalize = params.normalize
+                if params.prosody_speed is not None:
+                    default_settings.prosody_speed = params.prosody_speed
+                if params.prosody_volume is not None:
+                    default_settings.prosody_volume = params.prosody_volume
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

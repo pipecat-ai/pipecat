@@ -148,15 +148,9 @@ class GoogleVertexLLMService(GoogleLLMService):
                 "Invalid parameter 'api_key'. Use 'credentials' or 'credentials_path' for Vertex AI authentication."
             )
 
-        if model is not None:
-            _warn_deprecated_param("model", "GoogleLLMSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "GoogleLLMSettings")
-
-        # Handle deprecated InputParams fields
+        # Handle deprecated InputParams fields (location/project_id extraction
+        # must happen before validation, regardless of settings)
         if params and isinstance(params, GoogleVertexLLMService.InputParams):
-            # Extract location and project_id from params if not provided
-            # directly, for backward compatibility
             if project_id is None:
                 project_id = params.project_id
             if location is None:
@@ -188,22 +182,40 @@ class GoogleVertexLLMService(GoogleLLMService):
         self._project_id = project_id
         self._location = location
 
-        # Build default_settings from deprecated args
-        _params = params or GoogleLLMService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GoogleLLMSettings(
-            model=model or "gemini-2.5-flash",
-            max_tokens=_params.max_tokens,
-            temperature=_params.temperature,
-            top_k=_params.top_k,
-            top_p=_params.top_p,
+            model="gemini-2.5-flash",
+            max_tokens=4096,
+            temperature=None,
+            top_k=None,
+            top_p=None,
             frequency_penalty=None,
             presence_penalty=None,
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            thinking=_params.thinking,
-            extra=_params.extra if isinstance(_params.extra, dict) else {},
+            thinking=None,
+            extra={},
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GoogleLLMSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GoogleLLMSettings)
+            if not settings:
+                default_settings.max_tokens = params.max_tokens
+                default_settings.temperature = params.temperature
+                default_settings.top_k = params.top_k
+                default_settings.top_p = params.top_p
+                default_settings.thinking = params.thinking
+                if isinstance(params.extra, dict):
+                    default_settings.extra = params.extra
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

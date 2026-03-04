@@ -622,27 +622,40 @@ class GoogleHttpTTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "GoogleHttpTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "GoogleHttpTTSSettings")
-
-        _params = params or GoogleHttpTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GoogleHttpTTSSettings(
             model=None,
-            pitch=_params.pitch,
-            rate=_params.rate,
-            speaking_rate=_params.speaking_rate,
-            volume=_params.volume,
-            emphasis=_params.emphasis,
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else "en-US",
-            gender=_params.gender,
-            google_style=_params.google_style,
-            voice=voice_id or "en-US-Chirp3-HD-Charon",
+            voice="en-US-Chirp3-HD-Charon",
+            language="en-US",
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", GoogleHttpTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GoogleHttpTTSSettings)
+            if not settings:
+                if params.pitch is not None:
+                    default_settings.pitch = params.pitch
+                if params.rate is not None:
+                    default_settings.rate = params.rate
+                if params.speaking_rate is not None:
+                    default_settings.speaking_rate = params.speaking_rate
+                if params.volume is not None:
+                    default_settings.volume = params.volume
+                if params.emphasis is not None:
+                    default_settings.emphasis = params.emphasis
+                if params.language is not None:
+                    default_settings.language = self.language_to_service_language(params.language)
+                if params.gender is not None:
+                    default_settings.gender = params.gender
+                if params.google_style is not None:
+                    default_settings.google_style = params.google_style
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -1062,21 +1075,28 @@ class GoogleTTSService(GoogleBaseTTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "GoogleStreamTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "GoogleStreamTTSSettings")
-
-        _params = params or GoogleTTSService.InputParams()
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GoogleStreamTTSSettings(
             model=None,
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else "en-US",
-            speaking_rate=_params.speaking_rate,
-            voice=voice_id or "en-US-Chirp3-HD-Charon",
+            voice="en-US-Chirp3-HD-Charon",
+            language="en-US",
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", GoogleStreamTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GoogleStreamTTSSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = self.language_to_service_language(params.language)
+                if params.speaking_rate is not None:
+                    default_settings.speaking_rate = params.speaking_rate
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -1292,34 +1312,47 @@ class GeminiTTSService(GoogleBaseTTSService):
                 DeprecationWarning,
                 stacklevel=2,
             )
-        if model is not None:
-            _warn_deprecated_param("model", "GeminiTTSSettings", "model")
-        if voice_id is not None:
-            _warn_deprecated_param("voice_id", "GeminiTTSSettings", "voice")
-        if params is not None:
-            _warn_deprecated_param("params", "GeminiTTSSettings")
 
         if sample_rate and sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
                 f"Google TTS only supports {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        _params = params or GeminiTTSService.InputParams()
 
-        voice_id = voice_id or "Kore"
-        if voice_id not in self.AVAILABLE_VOICES:
-            logger.warning(f"Voice '{voice_id}' not in known voices list. Using anyway.")
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = GeminiTTSSettings(
-            model=model or "gemini-2.5-flash-tts",
-            language=self.language_to_service_language(_params.language)
-            if _params.language
-            else "en-US",
-            prompt=_params.prompt,
-            multi_speaker=_params.multi_speaker,
-            speaker_configs=_params.speaker_configs,
-            voice=voice_id,
+            model="gemini-2.5-flash-tts",
+            voice="Kore",
+            language="en-US",
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GeminiTTSSettings, "model")
+            default_settings.model = model
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", GeminiTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        if default_settings.voice not in self.AVAILABLE_VOICES:
+            logger.warning(
+                f"Voice '{default_settings.voice}' not in known voices list. Using anyway."
+            )
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GeminiTTSSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = self.language_to_service_language(params.language)
+                if params.prompt is not None:
+                    default_settings.prompt = params.prompt
+                if params.multi_speaker is not None:
+                    default_settings.multi_speaker = params.multi_speaker
+                if params.speaker_configs is not None:
+                    default_settings.speaker_configs = params.speaker_configs
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 

@@ -110,22 +110,27 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        if sample_rate is not None:
-            _warn_deprecated_param("sample_rate", "AWSTranscribeSTTSettings", "sample_rate")
-        if language is not None:
-            _warn_deprecated_param("language", "AWSTranscribeSTTSettings", "language")
-
-        _sample_rate = sample_rate or 16000
-        _language = language or Language.EN
-
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = AWSTranscribeSTTSettings(
-            language=self.language_to_service_language(_language) or "en-US",
-            sample_rate=_sample_rate,
+            language=self.language_to_service_language(Language.EN) or "en-US",
+            sample_rate=16000,
             media_encoding="linear16",
             number_of_channels=1,
             show_speaker_label=False,
             enable_channel_identification=False,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if sample_rate is not None:
+            _warn_deprecated_param("sample_rate", AWSTranscribeSTTSettings, "sample_rate")
+            default_settings.sample_rate = sample_rate
+        if language is not None:
+            _warn_deprecated_param("language", AWSTranscribeSTTSettings, "language")
+            default_settings.language = self.language_to_service_language(language) or "en-US"
+
+        # 3. No params to apply
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -136,9 +141,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         )
 
         # Validate sample rate - AWS Transcribe only supports 8000 Hz or 16000 Hz
-        if _sample_rate not in [8000, 16000]:
+        if default_settings.sample_rate not in [8000, 16000]:
             logger.warning(
-                f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. Converting from {_sample_rate} Hz to 16000 Hz."
+                f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. Converting from {default_settings.sample_rate} Hz to 16000 Hz."
             )
             self._settings.sample_rate = 16000
 

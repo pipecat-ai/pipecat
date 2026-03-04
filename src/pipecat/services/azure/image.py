@@ -68,7 +68,7 @@ class AzureImageGenServiceREST(ImageGenService):
                 parameters, ``settings`` values take precedence.
         """
         if model is not None:
-            _warn_deprecated_param("model", "AzureImageGenSettings", "model")
+            _warn_deprecated_param("model", AzureImageGenSettings, "model")
 
         default_settings = AzureImageGenSettings(model=model)
         if settings is not None:

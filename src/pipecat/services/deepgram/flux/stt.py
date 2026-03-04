@@ -206,10 +206,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                     ),
                 )
         """
-        if model is not None:
-            _warn_deprecated_param("model", "DeepgramFluxSTTSettings", "model")
-        if params is not None:
-            _warn_deprecated_param("params", "DeepgramFluxSTTSettings")
         # Note: For DeepgramFluxSTTService, differently from other processes, we need to create
         # the _receive_task inside _connect_websocket, because the websocket should only be
         # considered connected and ready to send audio once we receive from Flux the message
@@ -220,20 +216,39 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         # was never destroyed.
         # So we can keep it here as false, because inside the method send_with_retry, it will
         # already try to reconnect if needed.
-        _params = params or DeepgramFluxSTTService.InputParams()
 
+        # 1. Initialize default_settings with hardcoded defaults
         default_settings = DeepgramFluxSTTSettings(
-            model=model or "flux-general-en",
+            model="flux-general-en",
             language=Language.EN,
             encoding=flux_encoding,
-            eager_eot_threshold=_params.eager_eot_threshold,
-            eot_threshold=_params.eot_threshold,
-            eot_timeout_ms=_params.eot_timeout_ms,
-            keyterm=_params.keyterm or [],
-            mip_opt_out=_params.mip_opt_out,
-            tag=_params.tag or [],
-            min_confidence=_params.min_confidence,
+            eager_eot_threshold=None,
+            eot_threshold=None,
+            eot_timeout_ms=None,
+            keyterm=[],
+            mip_opt_out=None,
+            tag=[],
+            min_confidence=None,
         )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", DeepgramFluxSTTSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", DeepgramFluxSTTSettings)
+            if not settings:
+                default_settings.eager_eot_threshold = params.eager_eot_threshold
+                default_settings.eot_threshold = params.eot_threshold
+                default_settings.eot_timeout_ms = params.eot_timeout_ms
+                default_settings.keyterm = params.keyterm or []
+                default_settings.mip_opt_out = params.mip_opt_out
+                default_settings.tag = params.tag or []
+                default_settings.min_confidence = params.min_confidence
+
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
