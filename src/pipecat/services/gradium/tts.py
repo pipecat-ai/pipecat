@@ -57,7 +57,7 @@ class GradiumTTSService(AudioContextTTSService):
     class InputParams(BaseModel):
         """Configuration parameters for Gradium TTS service.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``GradiumTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -84,19 +84,19 @@ class GradiumTTSService(AudioContextTTSService):
             api_key: Gradium API key for authentication.
             voice_id: the voice identifier.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GradiumTTSSettings(voice=...)`` instead.
 
             url: Gradium websocket API endpoint.
             model: Model ID to use for synthesis.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GradiumTTSSettings(model=...)`` instead.
 
             json_config: Optional JSON configuration string for additional model settings.
             params: Additional configuration parameters.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=GradiumTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

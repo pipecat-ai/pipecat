@@ -166,7 +166,7 @@ class MiniMaxHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Configuration parameters for MiniMax TTS.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``MiniMaxTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
@@ -226,19 +226,19 @@ class MiniMaxHttpTTSService(TTSService):
                 "speech-02-hd", "speech-02-turbo",
                 "speech-01-hd", "speech-01-turbo".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=MiniMaxTTSSettings(model=...)`` instead.
 
             voice_id: Voice identifier. Defaults to "Calm_Woman".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=MiniMaxTTSSettings(voice=...)`` instead.
 
             aiohttp_session: aiohttp.ClientSession for API communication.
             sample_rate: Output audio sample rate in Hz. If None, uses pipeline default.
             params: Additional configuration parameters.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=MiniMaxTTSSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

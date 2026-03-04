@@ -79,7 +79,7 @@ class SonioxContextObject(BaseModel):
 class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
 
-    .. deprecated:: 1.0.0
+    .. deprecated:: 0.0.105
         Use ``settings=SonioxSTTSettings(...)`` instead.
 
     See Soniox WebSocket API documentation for more details:
@@ -201,13 +201,13 @@ class SonioxSTTService(WebsocketSTTService):
             sample_rate: Audio sample rate.
             model: Soniox model to use for transcription.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=SonioxSTTSettings(model=...)`` instead.
 
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=SonioxSTTSettings(...)`` instead.
 
             vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox.

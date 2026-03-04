@@ -59,7 +59,7 @@ class AzureImageGenServiceREST(ImageGenService):
             endpoint: Azure OpenAI endpoint URL.
             model: The image generation model to use.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=AzureImageGenSettings(model=...)`` instead.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.

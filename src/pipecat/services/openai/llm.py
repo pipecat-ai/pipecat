@@ -85,12 +85,12 @@ class OpenAILLMService(BaseOpenAILLMService):
         Args:
             model: The OpenAI model name to use. Defaults to "gpt-4.1".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             params: Input parameters for model configuration.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

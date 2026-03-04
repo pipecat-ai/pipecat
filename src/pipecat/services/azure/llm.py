@@ -40,7 +40,7 @@ class AzureLLMService(OpenAILLMService):
             endpoint: The Azure endpoint URL.
             model: The model identifier to use. Defaults to "gpt-4o".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             api_version: Azure API version. Defaults to "2024-09-01-preview".

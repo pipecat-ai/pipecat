@@ -96,12 +96,12 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             region: AWS region for the service.
             sample_rate: Audio sample rate in Hz. Must be 8000 or 16000.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=AWSTranscribeSTTSettings(sample_rate=...)`` instead.
 
             language: Language for transcription.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=AWSTranscribeSTTSettings(language=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

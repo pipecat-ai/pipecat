@@ -177,7 +177,7 @@ class SarvamSTTService(STTService):
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam STT service.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=SarvamSTTSettings(...)`` instead.
 
         Parameters:
@@ -219,14 +219,14 @@ class SarvamSTTService(STTService):
             api_key: Sarvam API key for authentication.
             model: Sarvam model to use for transcription.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=SarvamSTTSettings(model=...)`` instead.
 
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=SarvamSTTSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

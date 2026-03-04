@@ -111,14 +111,14 @@ class LmntTTSService(InterruptibleTTSService):
             api_key: LMNT API key for authentication.
             voice_id: ID of the voice to use for synthesis.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=LmntTTSSettings(voice=...)`` instead.
 
             sample_rate: Audio sample rate. If None, uses default.
             language: Language for synthesis. Defaults to English.
             model: TTS model to use.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=LmntTTSSettings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated

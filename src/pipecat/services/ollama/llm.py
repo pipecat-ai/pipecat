@@ -35,7 +35,7 @@ class OLLamaLLMService(OpenAILLMService):
         Args:
             model: The OLLama model to use. Defaults to "llama2".
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             base_url: The base URL for the OLLama API endpoint.

@@ -93,7 +93,7 @@ class MoondreamService(VisionService):
         Args:
             model: Hugging Face model identifier for the Moondream model.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=MoondreamSettings(model=...)`` instead.
 
             revision: Specific model revision to use.

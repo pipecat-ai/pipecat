@@ -75,7 +75,7 @@ class BaseOpenAILLMService(LLMService):
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
 
-        .. deprecated:: 1.0.0
+        .. deprecated:: 0.0.105
             Use ``settings=OpenAILLMSettings(...)`` instead of
             ``params=InputParams(...)``.
 
@@ -130,7 +130,7 @@ class BaseOpenAILLMService(LLMService):
         Args:
             model: The OpenAI model name to use (e.g., "gpt-4.1", "gpt-4o").
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
             api_key: OpenAI API key. If None, uses environment variable.
@@ -140,7 +140,7 @@ class BaseOpenAILLMService(LLMService):
             default_headers: Additional HTTP headers to include in requests.
             params: Input parameters for model configuration and behavior.
 
-                .. deprecated:: 1.0.0
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMSettings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
