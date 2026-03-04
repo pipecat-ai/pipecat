@@ -239,6 +239,43 @@ class TestLLMAutoContextSummarizationConfig(unittest.TestCase):
         )
         self.assertLessEqual(config.summary_config.target_context_tokens, config.max_context_tokens)
 
+    def test_max_context_tokens_none(self):
+        """Test that max_context_tokens can be None when max_unsummarized_messages is set."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=None,
+            max_unsummarized_messages=20,
+        )
+        self.assertIsNone(config.max_context_tokens)
+        self.assertEqual(config.max_unsummarized_messages, 20)
+
+    def test_max_unsummarized_messages_none(self):
+        """Test that max_unsummarized_messages can be None when max_context_tokens is set."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=8000,
+            max_unsummarized_messages=None,
+        )
+        self.assertEqual(config.max_context_tokens, 8000)
+        self.assertIsNone(config.max_unsummarized_messages)
+
+    def test_both_none_raises(self):
+        """Test that setting both thresholds to None raises ValueError."""
+        with self.assertRaises(ValueError) as cm:
+            LLMAutoContextSummarizationConfig(
+                max_context_tokens=None,
+                max_unsummarized_messages=None,
+            )
+        self.assertIn("at least one", str(cm.exception).lower())
+
+    def test_target_tokens_not_auto_adjusted_when_max_none(self):
+        """Test that target_context_tokens is not auto-adjusted when max_context_tokens is None."""
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=None,
+            max_unsummarized_messages=10,
+            summary_config=LLMContextSummaryConfig(target_context_tokens=9000),
+        )
+        # target_context_tokens should remain unchanged since there's no max to compare against
+        self.assertEqual(config.summary_config.target_context_tokens, 9000)
+
 
 class TestLLMContextSummarizationConfigDeprecated(unittest.TestCase):
     """Tests for deprecated LLMContextSummarizationConfig."""
