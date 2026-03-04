@@ -30,7 +30,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         Args:
             llms: List of LLM services to switch between.
             strategy_type: The strategy class to use for switching between LLMs.
-                Defaults to ``ServiceSwitcherStrategy`` (manual switching).
+                Defaults to ``ServiceSwitcherStrategy`` (the base strategy; manual switching only).
         """
         super().__init__(llms, strategy_type)
 
