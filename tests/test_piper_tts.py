@@ -94,13 +94,13 @@ async def test_run_piper_tts_success(aiohttp_client):
         started_idx = frame_types.index(TTSStartedFrame)
         stopped_idx = frame_types.index(TTSStoppedFrame)
         text_idx = frame_types.index(TTSTextFrame)
-        assert started_idx < stopped_idx < text_idx, (
-            "Expected: TTSStartedFrame < TTSStoppedFrame < TTSTextFrame"
+        assert started_idx < text_idx < stopped_idx, (
+            "Expected: TTSStartedFrame < TTSTextFrame < TTSStoppedFrame"
         )
 
-        # Frames between Started and Stopped must all be audio
+        # Frames between Started and Stopped must all be audio or text
         for i in range(started_idx + 1, stopped_idx):
-            assert frame_types[i] == TTSAudioRawFrame, (
+            assert frame_types[i] in (TTSAudioRawFrame, TTSTextFrame), (
                 f"Unexpected frame type between Started and Stopped: {frame_types[i]}"
             )
 
@@ -136,7 +136,7 @@ async def test_run_piper_tts_error(aiohttp_client):
             TTSSpeakFrame(text="Error case.", append_to_context=False),
         ]
 
-        expected_down_frames = [AggregatedTextFrame, TTSStoppedFrame, TTSTextFrame]
+        expected_down_frames = [AggregatedTextFrame, TTSTextFrame, TTSStoppedFrame]
 
         expected_up_frames = [ErrorFrame]
 
