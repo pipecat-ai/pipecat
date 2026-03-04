@@ -130,11 +130,7 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
 
     .. deprecated:: 0.0.104
         Manual switching is now the default behavior of ``ServiceSwitcher``.
-        Pass ``services`` without a ``strategy_type`` instead.
-
-    Example::
-
-        stt_switcher = ServiceSwitcher(services=[stt_1, stt_2])
+        Omit ``strategy_type`` when initializing.
     """
 
     def __init__(self, services: List[FrameProcessor]):
@@ -225,7 +221,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         Args:
             services: List of frame processors to switch between.
             strategy_type: The strategy class to use for switching between services.
-                Defaults to ``ServiceSwitcherStrategy`` (manual switching).
+                Defaults to ``ServiceSwitcherStrategy`` (the base strategy; manual switching only).
         """
         _strategy = strategy_type(services)
         super().__init__(*self._make_pipeline_definitions(services, _strategy))
