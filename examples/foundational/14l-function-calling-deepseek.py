@@ -67,7 +67,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = DeepSeekLLMService(api_key=os.getenv("DEEPSEEK_API_KEY"), model="deepseek-chat")
+    llm = DeepSeekLLMService(
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        model="deepseek-chat",
+        system_instruction="""You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
+
+You have one functions available:
+
+1. get_current_weather is used to get current weather information.
+
+Infer whether to use Fahrenheit or Celsius automatically based on the location, unless the user specifies a preference.
+
+Start by asking me for my location. Then, use 'get_weather_current' to give me a forecast.
+
+    Respond to what the user said in a creative and helpful way.""",
+    )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
@@ -93,24 +107,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         required=["location", "format"],
     )
     tools = ToolsSchema(standard_tools=[weather_function])
-    messages = [
-        {
-            "role": "system",
-            "content": """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
 
-You have one functions available:
-
-1. get_current_weather is used to get current weather information.
-
-Infer whether to use Fahrenheit or Celsius automatically based on the location, unless the user specifies a preference.
-
-Start by asking me for my location. Then, use 'get_weather_current' to give me a forecast.
-
-    Respond to what the user said in a creative and helpful way.""",
-        },
-    ]
-
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

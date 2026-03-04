@@ -221,23 +221,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # )
 
     # Initialize LLM service
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
-
-    messages = [
-        {
-            "role": "system",
-            "content": """You are a personal assistant. You can remember things about the person you are talking to.
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o-mini",
+        system_instruction="""You are a personal assistant. You can remember things about the person you are talking to.
                         Some Guidelines:
                         - Make sure your responses are friendly yet short and concise.
                         - If the user asks you to remember something, make sure to remember it.
                         - Greet the user by their name if you know about it.
                     """,
-        },
-    ]
+    )
 
     # Set up conversation context and management
     # The context_aggregator will automatically collect conversation context
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
