@@ -120,12 +120,15 @@ class FunctionCallRegistryItem:
         function_name: The name of the function (None for catch-all handler).
         handler: The handler for processing function call parameters.
         cancel_on_interruption: Whether to cancel the call on interruption.
+        timeout_secs: Optional per-tool timeout in seconds. Overrides the global
+            ``function_call_timeout_secs`` for this specific function.
     """
 
     function_name: Optional[str]
     handler: FunctionCallHandler | "DirectFunctionWrapper"
     cancel_on_interruption: bool
     handler_deprecated: bool
+    timeout_secs: Optional[float] = None
 
 
 @dataclass
@@ -540,6 +543,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         start_callback=None,
         *,
         cancel_on_interruption: bool = True,
+        timeout_secs: Optional[float] = None,
     ):
         """Register a function handler for LLM function calls.
 
@@ -556,6 +560,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
+            timeout_secs: Optional per-tool timeout in seconds. Overrides the global
+                ``function_call_timeout_secs`` for this specific function. Defaults to
+                None, which uses the global timeout.
         """
         signature = inspect.signature(handler)
         handler_deprecated = len(signature.parameters) > 1
@@ -574,6 +581,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             handler=handler,
             cancel_on_interruption=cancel_on_interruption,
             handler_deprecated=handler_deprecated,
+            timeout_secs=timeout_secs,
         )
 
         # Start callbacks are now deprecated.
@@ -592,6 +600,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         handler: DirectFunction,
         *,
         cancel_on_interruption: bool = True,
+        timeout_secs: Optional[float] = None,
     ):
         """Register a direct function handler for LLM function calls.
 
@@ -603,6 +612,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             handler: The direct function to register. Must follow DirectFunction protocol.
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
+            timeout_secs: Optional per-tool timeout in seconds. Overrides the global
+                ``function_call_timeout_secs`` for this specific function. Defaults to
+                None, which uses the global timeout.
         """
         wrapper = DirectFunctionWrapper(handler)
         self._functions[wrapper.name] = FunctionCallRegistryItem(
@@ -610,6 +622,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             handler=wrapper,
             cancel_on_interruption=cancel_on_interruption,
             handler_deprecated=False,
+            timeout_secs=timeout_secs,
         )
 
     def unregister_function(self, function_name: Optional[str]):
@@ -837,9 +850,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         # Start a timeout task for deferred function calls
         async def timeout_handler():
             try:
-                await asyncio.sleep(self._function_call_timeout_secs)
+                effective_timeout = (
+                    item.timeout_secs
+                    if item.timeout_secs is not None
+                    else self._function_call_timeout_secs
+                )
+                await asyncio.sleep(effective_timeout)
                 logger.warning(
-                    f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {self._function_call_timeout_secs} seconds"
+                    f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {effective_timeout} seconds."
+                    f" You can increase this timeout by passing `timeout_secs` to `register_function()`,"
+                    f" or set a global default via `function_call_timeout_secs` on the LLM constructor."
                 )
                 await function_call_result_callback(None)
             except asyncio.CancelledError:
