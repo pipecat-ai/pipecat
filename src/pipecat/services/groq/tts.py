@@ -170,4 +170,3 @@ class GroqTTSService(TTSService):
                     yield TTSAudioRawFrame(bytes, frame_rate, channels, context_id=context_id)
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
-
