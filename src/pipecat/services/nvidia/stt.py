@@ -8,7 +8,7 @@
 
 import asyncio
 from concurrent.futures import CancelledError as FuturesCancelledError
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, List, Mapping, Optional
 
 from loguru import logger
@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import STTSettings, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -110,11 +110,11 @@ class NvidiaSegmentedSTTSettings(STTSettings):
         boosted_lm_score: Score boost for specified words.
     """
 
-    profanity_filter: bool = False
-    automatic_punctuation: bool = True
-    verbatim_transcripts: bool = False
-    boosted_lm_words: Optional[List[str]] = None
-    boosted_lm_score: float = 4.0
+    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    verbatim_transcripts: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_words: List[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_score: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NvidiaSTTService(STTService):

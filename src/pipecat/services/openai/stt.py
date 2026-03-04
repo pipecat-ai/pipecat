@@ -16,7 +16,7 @@ Provides two STT services:
 
 import base64
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Literal, Optional, Union
 
 from loguru import logger
@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.services.whisper.base_stt import (
@@ -188,7 +188,7 @@ class OpenAIRealtimeSTTSettings(STTSettings):
         prompt: Optional prompt text to guide transcription style.
     """
 
-    prompt: str | None | _NotGiven = None
+    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAIRealtimeSTTService(WebsocketSTTService):

@@ -6,6 +6,7 @@
 
 """Together.ai LLM service implementation using OpenAI-compatible interface."""
 
+from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
@@ -13,6 +14,13 @@ from loguru import logger
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class TogetherLLMSettings(OpenAILLMSettings):
+    """Settings for Together LLM service."""
+
+    pass
 
 
 class TogetherLLMService(OpenAILLMService):
@@ -28,7 +36,7 @@ class TogetherLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.together.xyz/v1",
         model: Optional[str] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[TogetherLLMSettings] = None,
         **kwargs,
     ):
         """Initialize Together.ai LLM service.
@@ -46,11 +54,11 @@ class TogetherLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
+        default_settings = TogetherLLMSettings(model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", TogetherLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

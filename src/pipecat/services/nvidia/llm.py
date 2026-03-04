@@ -10,6 +10,7 @@ This module provides a service for interacting with NVIDIA's NIM (NVIDIA Inferen
 Microservice) API while maintaining compatibility with the OpenAI-style interface.
 """
 
+from dataclasses import dataclass
 from typing import Optional
 
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -18,6 +19,13 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class NvidiaLLMSettings(OpenAILLMSettings):
+    """Settings for NVIDIA LLM service."""
+
+    pass
 
 
 class NvidiaLLMService(OpenAILLMService):
@@ -34,7 +42,7 @@ class NvidiaLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://integrate.api.nvidia.com/v1",
         model: Optional[str] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[NvidiaLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the NvidiaLLMService.
@@ -53,11 +61,11 @@ class NvidiaLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="nvidia/llama-3.1-nemotron-70b-instruct")
+        default_settings = NvidiaLLMSettings(model="nvidia/llama-3.1-nemotron-70b-instruct")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", NvidiaLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

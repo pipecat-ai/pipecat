@@ -11,6 +11,7 @@ an OpenAI-compatible interface. It handles Perplexity's unique token usage
 reporting patterns while maintaining compatibility with the Pipecat framework.
 """
 
+from dataclasses import dataclass
 from typing import Optional
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
@@ -20,6 +21,13 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class PerplexityLLMSettings(OpenAILLMSettings):
+    """Settings for Perplexity LLM service."""
+
+    pass
 
 
 class PerplexityLLMService(OpenAILLMService):
@@ -36,7 +44,7 @@ class PerplexityLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.perplexity.ai",
         model: Optional[str] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[PerplexityLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Perplexity LLM service.
@@ -54,11 +62,11 @@ class PerplexityLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="sonar")
+        default_settings = PerplexityLLMSettings(model="sonar")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", PerplexityLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

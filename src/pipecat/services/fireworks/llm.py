@@ -6,6 +6,7 @@
 
 """Fireworks AI service implementation using OpenAI-compatible interface."""
 
+from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
@@ -14,6 +15,13 @@ from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class FireworksLLMSettings(OpenAILLMSettings):
+    """Settings for Fireworks LLM service."""
+
+    pass
 
 
 class FireworksLLMService(OpenAILLMService):
@@ -29,7 +37,7 @@ class FireworksLLMService(OpenAILLMService):
         api_key: str,
         model: Optional[str] = None,
         base_url: str = "https://api.fireworks.ai/inference/v1",
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[FireworksLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Fireworks LLM service.
@@ -47,11 +55,11 @@ class FireworksLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="accounts/fireworks/models/firefunction-v2")
+        default_settings = FireworksLLMSettings(model="accounts/fireworks/models/firefunction-v2")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", FireworksLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

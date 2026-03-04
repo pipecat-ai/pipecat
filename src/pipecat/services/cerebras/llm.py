@@ -6,6 +6,7 @@
 
 """Cerebras LLM service implementation using OpenAI-compatible interface."""
 
+from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
@@ -14,6 +15,13 @@ from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class CerebrasLLMSettings(OpenAILLMSettings):
+    """Settings for Cerebras LLM service."""
+
+    pass
 
 
 class CerebrasLLMService(OpenAILLMService):
@@ -29,7 +37,7 @@ class CerebrasLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.cerebras.ai/v1",
         model: Optional[str] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[CerebrasLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Cerebras LLM service.
@@ -47,11 +55,11 @@ class CerebrasLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="gpt-oss-120b")
+        default_settings = CerebrasLLMSettings(model="gpt-oss-120b")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", CerebrasLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

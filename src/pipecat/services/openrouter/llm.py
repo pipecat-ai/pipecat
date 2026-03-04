@@ -10,6 +10,7 @@ This module provides an OpenAI-compatible interface for interacting with OpenRou
 extending the base OpenAI LLM service functionality.
 """
 
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -17,6 +18,13 @@ from loguru import logger
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class OpenRouterLLMSettings(OpenAILLMSettings):
+    """Settings for OpenRouter LLM service."""
+
+    pass
 
 
 class OpenRouterLLMService(OpenAILLMService):
@@ -32,7 +40,7 @@ class OpenRouterLLMService(OpenAILLMService):
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         base_url: str = "https://openrouter.ai/api/v1",
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[OpenRouterLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the OpenRouter LLM service.
@@ -51,11 +59,11 @@ class OpenRouterLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="openai/gpt-4o-2024-11-20")
+        default_settings = OpenRouterLLMSettings(model="openai/gpt-4o-2024-11-20")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", OpenRouterLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

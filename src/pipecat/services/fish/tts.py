@@ -173,6 +173,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         default_settings = FishAudioTTSSettings(
             model="s1",
             voice=None,
+            language=None,
             latency="normal",
             normalize=True,
             prosody_speed=1.0,

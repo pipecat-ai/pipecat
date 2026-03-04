@@ -10,6 +10,7 @@ This module provides an OpenPipe-specific implementation of the OpenAI LLM servi
 enabling integration with OpenPipe's fine-tuning and monitoring capabilities.
 """
 
+from dataclasses import dataclass
 from typing import Dict, Optional
 
 from loguru import logger
@@ -25,6 +26,13 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenPipe, you need to `pip install pipecat-ai[openpipe]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class OpenPipeLLMSettings(OpenAILLMSettings):
+    """Settings for OpenPipe LLM service."""
+
+    pass
 
 
 class OpenPipeLLMService(OpenAILLMService):
@@ -44,7 +52,7 @@ class OpenPipeLLMService(OpenAILLMService):
         openpipe_api_key: Optional[str] = None,
         openpipe_base_url: str = "https://app.openpipe.ai/api/v1",
         tags: Optional[Dict[str, str]] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[OpenPipeLLMSettings] = None,
         **kwargs,
     ):
         """Initialize OpenPipe LLM service.
@@ -65,11 +73,11 @@ class OpenPipeLLMService(OpenAILLMService):
             **kwargs: Additional arguments passed to parent OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="gpt-4.1")
+        default_settings = OpenPipeLLMSettings(model="gpt-4.1")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", OpenPipeLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

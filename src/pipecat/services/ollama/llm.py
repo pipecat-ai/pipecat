@@ -6,6 +6,7 @@
 
 """OLLama LLM service implementation for Pipecat AI framework."""
 
+from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
@@ -13,6 +14,13 @@ from loguru import logger
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class OllamaLLMSettings(OpenAILLMSettings):
+    """Settings for Ollama LLM service."""
+
+    pass
 
 
 class OLLamaLLMService(OpenAILLMService):
@@ -27,7 +35,7 @@ class OLLamaLLMService(OpenAILLMService):
         *,
         model: Optional[str] = None,
         base_url: str = "http://localhost:11434/v1",
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[OllamaLLMSettings] = None,
         **kwargs,
     ):
         """Initialize OLLama LLM service.
@@ -45,11 +53,11 @@ class OLLamaLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="llama2")
+        default_settings = OllamaLLMSettings(model="llama2")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", OllamaLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

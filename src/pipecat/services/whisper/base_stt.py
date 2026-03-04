@@ -10,7 +10,7 @@ This module provides common functionality for services implementing the Whisper 
 interface, including language mapping, metrics generation, and error handling.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -18,7 +18,7 @@ from openai import AsyncOpenAI
 from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import WHISPER_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -36,8 +36,8 @@ class BaseWhisperSTTSettings(STTSettings):
         temperature: Sampling temperature between 0 and 1.
     """
 
-    prompt: str | None | _NotGiven = None
-    temperature: float | None | _NotGiven = None
+    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 def language_to_whisper_language(language: Language) -> Optional[str]:
@@ -176,6 +176,8 @@ class BaseWhisperSTTService(SegmentedSTTService):
         default_settings = BaseWhisperSTTSettings(
             model=None,
             language=None,
+            prompt=None,
+            temperature=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---

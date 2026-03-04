@@ -7,6 +7,7 @@
 """SambaNova LLM service implementation using OpenAI-compatible interface."""
 
 import json
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -27,6 +28,13 @@ from pipecat.services.settings import _warn_deprecated_param
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
+@dataclass
+class SambaNovaLLMSettings(OpenAILLMSettings):
+    """Settings for SambaNova LLM service."""
+
+    pass
+
+
 class SambaNovaLLMService(OpenAILLMService):  # type: ignore
     """A service for interacting with SambaNova using the OpenAI-compatible interface.
 
@@ -40,7 +48,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         api_key: str,
         model: Optional[str] = None,
         base_url: str = "https://api.sambanova.ai/v1",
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[SambaNovaLLMSettings] = None,
         **kwargs: Dict[Any, Any],
     ) -> None:
         """Initialize SambaNova LLM service.
@@ -58,11 +66,11 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(model="Llama-4-Maverick-17B-128E-Instruct")
+        default_settings = SambaNovaLLMSettings(model="Llama-4-Maverick-17B-128E-Instruct")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", SambaNovaLLMSettings, "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)
