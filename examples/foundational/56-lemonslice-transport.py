@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService, ElevenLabsTTSSettings
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.transports.lemonslice.transport import (
     LemonSliceNewSessionRequest,
@@ -62,7 +62,9 @@ async def main():
 
         tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
+            settings=ElevenLabsTTSSettings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
         )
 
         context = LLMContext()

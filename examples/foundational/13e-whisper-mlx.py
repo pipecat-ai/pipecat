@@ -18,7 +18,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
+from pipecat.services.whisper.stt import MLXModel, WhisperMLXSTTSettings, WhisperSTTServiceMLX
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -77,7 +77,11 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = WhisperSTTServiceMLX(model=MLXModel.LARGE_V3_TURBO)
+    stt = WhisperSTTServiceMLX(
+        settings=WhisperMLXSTTSettings(
+            model=MLXModel.LARGE_V3_TURBO,
+        ),
+    )
 
     tl = TranscriptionLogger()
 

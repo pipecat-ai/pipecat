@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.hume.tts import HUME_SAMPLE_RATE, HumeTTSService
+from pipecat.services.hume.tts import HUME_SAMPLE_RATE, HumeTTSService, HumeTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -59,7 +59,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = HumeTTSService(
         api_key=os.getenv("HUME_API_KEY"),
         # Replace with your Hume voice ID
-        voice_id="f898a92e-685f-43fa-985b-a46920f0650b",
+        settings=HumeTTSSettings(
+            voice="f898a92e-685f-43fa-985b-a46920f0650b",
+        ),
     )
 
     llm = OpenAILLMService(

@@ -320,7 +320,7 @@ class BaseOpenAILLMService(LLMService):
             "top_p": self._settings.top_p,
             "max_tokens": self._settings.max_tokens,
             "max_completion_tokens": self._settings.max_completion_tokens,
-            "service_tier": self._service_tier,
+            "service_tier": self._service_tier if self._service_tier is not None else NOT_GIVEN,
         }
 
         # Messages, tools, tool_choice

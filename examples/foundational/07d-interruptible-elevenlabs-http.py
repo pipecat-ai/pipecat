@@ -24,7 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.elevenlabs.stt import ElevenLabsSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService, ElevenLabsHttpTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -63,8 +63,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = ElevenLabsHttpTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
             aiohttp_session=session,
+            settings=ElevenLabsHttpTTSSettings(
+                voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
+            ),
         )
 
         llm = OpenAILLMService(

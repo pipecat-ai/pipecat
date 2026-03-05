@@ -272,37 +272,22 @@ class SarvamHttpTTSSettings(TTSSettings):
 
 
 @dataclass
-class SarvamTTSSettings(TTSSettings):
+class SarvamTTSSettings(SarvamHttpTTSSettings):
     """Settings for Sarvam WebSocket TTS service.
 
+    Extends :class:`SarvamHttpTTSSettings` with WebSocket-specific buffering parameters.
+
     Parameters:
-        enable_preprocessing: Enable text preprocessing. Defaults to False.
-            **Note:** Always enabled for bulbul:v3-beta.
         min_buffer_size: Minimum characters to buffer before generating audio.
             Lower values reduce latency but may affect quality. Defaults to 50.
         max_chunk_length: Maximum characters processed in a single chunk.
             Controls memory usage and processing efficiency. Defaults to 150.
-        pace: Speech pace multiplier. Defaults to 1.0.
-            - bulbul:v2: Range 0.3 to 3.0
-            - bulbul:v3-beta: Range 0.5 to 2.0
-        pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
-            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
-        loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
-            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
-        temperature: Controls output randomness for bulbul:v3-beta (0.01 to 1.0).
-            Lower = more deterministic, higher = more random. Defaults to 0.6.
-            **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
     """
 
     _aliases: ClassVar[Dict[str, str]] = {"target_language_code": "language"}
 
-    enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_buffer_size: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_chunk_length: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pace: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    loudness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamHttpTTSService(TTSService):

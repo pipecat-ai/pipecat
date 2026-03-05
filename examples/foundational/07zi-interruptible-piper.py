@@ -23,7 +23,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.piper.tts import PiperTTSService
+from pipecat.services.piper.tts import PiperTTSService, PiperTTSSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -54,7 +54,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = PiperTTSService(voice_id="en_US-ryan-high")
+    tts = PiperTTSService(
+        settings=PiperTTSSettings(
+            voice="en_US-ryan-high",
+        ),
+    )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),

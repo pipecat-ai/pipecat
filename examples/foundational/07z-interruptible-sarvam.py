@@ -22,8 +22,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.sarvam.stt import SarvamSTTService
-from pipecat.services.sarvam.tts import SarvamTTSService
+from pipecat.services.sarvam.stt import SarvamSTTService, SarvamSTTSettings
+from pipecat.services.sarvam.tts import SarvamTTSService, SarvamTTSSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -54,13 +54,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = SarvamSTTService(
         api_key=os.getenv("SARVAM_API_KEY"),
-        model="saarika:v2.5",
+        settings=SarvamSTTSettings(
+            model="saarika:v2.5",
+        ),
     )
 
     tts = SarvamTTSService(
         api_key=os.getenv("SARVAM_API_KEY"),
-        model="bulbul:v2",
-        voice_id="manisha",
+        settings=SarvamTTSSettings(
+            model="bulbul:v2",
+            voice="manisha",
+        ),
     )
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),

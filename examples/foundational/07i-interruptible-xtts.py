@@ -25,7 +25,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.xtts.tts import XTTSService
+from pipecat.services.xtts.tts import XTTSService, XTTSSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -59,7 +59,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = XTTSService(
             aiohttp_session=session,
-            voice_id="Claribel Dervla",
+            settings=XTTSSettings(
+                voice="Claribel Dervla",
+            ),
             base_url="http://localhost:8000",
         )
 

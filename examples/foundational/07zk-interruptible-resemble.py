@@ -23,7 +23,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.resembleai.tts import ResembleAITTSService
+from pipecat.services.resembleai.tts import ResembleAITTSService, ResembleAITTSSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -59,7 +59,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = ResembleAITTSService(
         api_key=os.getenv("RESEMBLE_API_KEY"),
-        voice_id=os.getenv("RESEMBLE_VOICE_UUID"),
+        settings=ResembleAITTSSettings(
+            voice=os.getenv("RESEMBLE_VOICE_UUID"),
+        ),
     )
 
     llm = OpenAILLMService(

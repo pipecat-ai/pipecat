@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.lmnt.tts import LmntTTSService
+from pipecat.services.lmnt.tts import LmntTTSService, LmntTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -54,7 +54,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = LmntTTSService(api_key=os.getenv("LMNT_API_KEY"), voice_id="morgan")
+    tts = LmntTTSService(
+        api_key=os.getenv("LMNT_API_KEY"),
+        settings=LmntTTSSettings(
+            voice="morgan",
+        ),
+    )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),

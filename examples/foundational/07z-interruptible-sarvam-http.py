@@ -25,7 +25,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
-from pipecat.services.sarvam.tts import SarvamHttpTTSService
+from pipecat.services.sarvam.tts import SarvamHttpTTSService, SarvamHttpTTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -65,7 +65,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tts = SarvamHttpTTSService(
             api_key=os.getenv("SARVAM_API_KEY"),
             aiohttp_session=session,
-            params=SarvamHttpTTSService.InputParams(language=Language.EN),
+            settings=SarvamHttpTTSSettings(
+                language=Language.EN,
+            ),
         )
 
         llm = OpenAILLMService(

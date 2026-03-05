@@ -21,8 +21,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gradium.stt import GradiumSTTService
-from pipecat.services.gradium.tts import GradiumTTSService
+from pipecat.services.gradium.stt import GradiumSTTService, GradiumSTTSettings
+from pipecat.services.gradium.tts import GradiumTTSService, GradiumTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -55,15 +55,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = GradiumSTTService(
         api_key=os.getenv("GRADIUM_API_KEY"),
         api_endpoint_base_url="wss://us.api.gradium.ai/api/speech/asr",
-        params=GradiumSTTService.InputParams(
+        settings=GradiumSTTSettings(
             language=Language.EN,
         ),
     )
 
     tts = GradiumTTSService(
         api_key=os.getenv("GRADIUM_API_KEY"),
-        voice_id="YTpq7expH9539ERJ",
         url="wss://us.api.gradium.ai/api/speech/tts",
+        settings=GradiumTTSSettings(
+            voice="YTpq7expH9539ERJ",
+        ),
     )
 
     llm = OpenAILLMService(
