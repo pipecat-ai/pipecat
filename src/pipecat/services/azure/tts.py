@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
