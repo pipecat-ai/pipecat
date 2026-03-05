@@ -159,9 +159,8 @@ class OpenAIWebSocketLLMService(LLMService, WebsocketService):
         self._context: Optional[LLMContext] = None
         self._previous_response_id: Optional[str] = None
 
-        # Function call tracking
-        self._current_function_call: Optional[dict] = None
-        self._function_call_arguments: str = ""
+        # Function call tracking: keyed by call_id to handle parallel calls
+        self._pending_function_calls: dict[str, dict] = {}
 
         self._register_event_handler("on_connection_error")
 
@@ -285,8 +284,7 @@ class OpenAIWebSocketLLMService(LLMService, WebsocketService):
             self._context = frame.context
             await self._send_response_create(frame.context)
         elif isinstance(frame, InterruptionFrame):
-            self._current_function_call = None
-            self._function_call_arguments = ""
+            self._pending_function_calls.clear()
             await self.stop_all_metrics()
         elif isinstance(frame, LLMSetToolsFrame):
             # Tools will be included in the next response.create request
@@ -420,8 +418,12 @@ class OpenAIWebSocketLLMService(LLMService, WebsocketService):
         """
         item = data.get("item", {})
         if item.get("type") == "function_call":
-            self._current_function_call = item
-            self._function_call_arguments = ""
+            call_id = item.get("call_id", "")
+            if call_id:
+                self._pending_function_calls[call_id] = {
+                    "name": item.get("name", ""),
+                    "arguments": "",
+                }
 
     async def _handle_function_call_arguments_delta(self, data: dict):
         """Handle response.function_call_arguments.delta - accumulate arguments.
@@ -429,8 +431,10 @@ class OpenAIWebSocketLLMService(LLMService, WebsocketService):
         Args:
             data: The parsed event data containing the argument delta.
         """
+        call_id = data.get("call_id", "")
         delta = data.get("delta", "")
-        self._function_call_arguments += delta
+        if call_id in self._pending_function_calls:
+            self._pending_function_calls[call_id]["arguments"] += delta
 
     async def _handle_function_call_arguments_done(self, data: dict):
         """Handle response.function_call_arguments.done - execute the function call.
@@ -438,32 +442,27 @@ class OpenAIWebSocketLLMService(LLMService, WebsocketService):
         Args:
             data: The parsed event data with complete arguments.
         """
-        if not self._current_function_call:
-            logger.warning(f"{self} Received function call done without tracked function call")
+        call_id = data.get("call_id", "")
+        fc = self._pending_function_calls.pop(call_id, None)
+        if not fc:
+            logger.warning(f"{self} No pending function call for call_id: {call_id}")
             return
 
+        arguments_str = data.get("arguments", fc["arguments"])
         try:
-            args = json.loads(self._function_call_arguments)
+            args = json.loads(arguments_str)
         except json.JSONDecodeError:
             args = {}
-            logger.error(
-                f"{self} Failed to parse function call arguments: {self._function_call_arguments}"
-            )
-
-        function_name = self._current_function_call.get("name", "")
-        call_id = data.get("call_id", self._current_function_call.get("call_id", ""))
+            logger.error(f"{self} Failed to parse function call arguments: {arguments_str}")
 
         function_calls = [
             FunctionCallFromLLM(
                 context=self._context,
                 tool_call_id=call_id,
-                function_name=function_name,
+                function_name=fc["name"],
                 arguments=args,
             )
         ]
-
-        self._current_function_call = None
-        self._function_call_arguments = ""
 
         await self.run_function_calls(function_calls)
 
