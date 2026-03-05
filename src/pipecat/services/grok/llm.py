@@ -86,6 +86,8 @@ class GrokLLMService(OpenAILLMService):
     processing and reports final totals.
     """
 
+    _settings: GrokLLMSettings
+
     def __init__(
         self,
         *,

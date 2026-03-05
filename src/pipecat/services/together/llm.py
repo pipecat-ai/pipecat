@@ -30,6 +30,8 @@ class TogetherLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    _settings: TogetherLLMSettings
+
     def __init__(
         self,
         *,

@@ -38,6 +38,8 @@ class PerplexityLLMService(OpenAILLMService):
     in token usage reporting between Perplexity (incremental) and OpenAI (final summary).
     """
 
+    _settings: PerplexityLLMSettings
+
     def __init__(
         self,
         *,

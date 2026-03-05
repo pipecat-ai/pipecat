@@ -610,6 +610,7 @@ class GeminiLiveLLMSettings(LLMSettings):
     """Settings for Gemini Live LLM services.
 
     Parameters:
+        voice: TTS voice identifier (e.g. ``"Charon"``).
         modalities: Response modalities.
         language: Language for generation.
         media_resolution: Media resolution setting.
@@ -620,6 +621,7 @@ class GeminiLiveLLMSettings(LLMSettings):
         proactivity: Proactivity configuration.
     """
 
+    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     modalities: GeminiModalities | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language: Language | str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     media_resolution: GeminiMediaResolution | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -680,6 +682,9 @@ class GeminiLiveLLMService(LLMService):
                     Use ``settings=GeminiLiveLLMSettings(model=...)`` instead.
 
             voice_id: TTS voice identifier. Defaults to "Charon".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GeminiLiveLLMSettings(voice=...)`` instead.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             system_instruction: System prompt for the model. Defaults to None.
@@ -712,6 +717,7 @@ class GeminiLiveLLMService(LLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = GeminiLiveLLMSettings(
             model="models/gemini-2.5-flash-native-audio-preview-12-2025",
+            voice="Charon",
             frequency_penalty=None,
             max_tokens=4096,
             presence_penalty=None,
@@ -736,6 +742,9 @@ class GeminiLiveLLMService(LLMService):
         if model is not None:
             _warn_deprecated_param("model", GeminiLiveLLMSettings, "model")
             default_settings.model = model
+        if voice_id != "Charon":
+            _warn_deprecated_param("voice_id", GeminiLiveLLMSettings, "voice")
+            default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -776,7 +785,6 @@ class GeminiLiveLLMService(LLMService):
 
         self._last_sent_time = 0
         self._base_url = base_url
-        self._voice_id = voice_id
         self._language_code = params.language if params is not None else Language.EN_US
 
         self._system_instruction_from_init = system_instruction
@@ -1184,7 +1192,7 @@ class GeminiLiveLLMService(LLMService):
                     response_modalities=[Modality(self._settings.modalities.value)],
                     speech_config=SpeechConfig(
                         voice_config=VoiceConfig(
-                            prebuilt_voice_config={"voice_name": self._voice_id}
+                            prebuilt_voice_config={"voice_name": self._settings.voice}
                         ),
                         language_code=self._settings.language,
                     ),

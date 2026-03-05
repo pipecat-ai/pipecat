@@ -33,6 +33,8 @@ class MistralLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    _settings: MistralLLMSettings
+
     def __init__(
         self,
         *,

@@ -58,6 +58,8 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
         https://ai.google.dev/gemini-api/docs/openai
     """
 
+    _settings: GoogleOpenAILLMSettings
+
     def __init__(
         self,
         *,

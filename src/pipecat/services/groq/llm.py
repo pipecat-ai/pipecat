@@ -30,6 +30,8 @@ class GroqLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    _settings: GroqLLMSettings
+
     def __init__(
         self,
         *,
