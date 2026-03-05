@@ -25,7 +25,6 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.metrics.metrics import STTUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.services.websocket_service import WebsocketService
@@ -387,18 +386,6 @@ class DograhSTTService(STTService, WebsocketService):
         await self.push_frame(UserStoppedSpeakingFrame())
         await self._call_event_handler("on_speech_ended")
 
-    async def _emit_stt_usage_metrics(self):
-        """Emit STT usage metrics."""
-        if self._session_start_time:
-            session_duration = time.time() - self._session_start_time
-            metrics_data = STTUsageMetricsData(
-                processor=self.name,
-                model=self._model,
-                value=session_duration,
-            )
-            frame = MetricsFrame(data=[metrics_data])
-            await self.push_frame(frame)
-
     async def start(self, frame: StartFrame):
         """Start the STT service.
 
@@ -416,7 +403,6 @@ class DograhSTTService(STTService, WebsocketService):
             frame: The end frame.
         """
         await super().stop(frame)
-        await self._emit_stt_usage_metrics()
         await self._disconnect()
         self._session_start_time = None
 
@@ -427,7 +413,6 @@ class DograhSTTService(STTService, WebsocketService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        await self._emit_stt_usage_metrics()
         await self._disconnect()
         self._session_start_time = None
 
