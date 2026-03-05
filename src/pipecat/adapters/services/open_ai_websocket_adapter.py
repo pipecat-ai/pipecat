@@ -182,28 +182,50 @@ class OpenAIWebSocketLLMAdapter(BaseLLMAdapter[OpenAIWebSocketLLMInvocationParam
     def _convert_user_message(message: LLMContextMessage) -> Dict[str, Any]:
         """Convert a user message to Responses API input format.
 
+        Handles text, image, and multipart content.
+
         Args:
             message: A user role context message.
 
         Returns:
-            Responses API message item with ``input_text`` content.
+            Responses API message item with appropriate content parts.
         """
         content = message.get("content")
         if isinstance(content, str):
-            text = content
+            return {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": content}],
+            }
         elif isinstance(content, list):
-            text_parts = []
+            converted_content = []
             for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    text_parts.append(item.get("text", ""))
-            text = " ".join(text_parts)
-        else:
-            text = ""
+                if not isinstance(item, dict):
+                    continue
+                item_type = item.get("type")
+                if item_type == "text":
+                    converted_content.append(
+                        {"type": "input_text", "text": item.get("text", "")}
+                    )
+                elif item_type == "image_url":
+                    converted_content.append(
+                        {
+                            "type": "input_image",
+                            "image_url": item.get("image_url", {}).get("url", ""),
+                        }
+                    )
+            if not converted_content:
+                converted_content = [{"type": "input_text", "text": ""}]
+            return {
+                "type": "message",
+                "role": "user",
+                "content": converted_content,
+            }
 
         return {
             "type": "message",
             "role": "user",
-            "content": [{"type": "input_text", "text": text}],
+            "content": [{"type": "input_text", "text": ""}],
         }
 
     @staticmethod

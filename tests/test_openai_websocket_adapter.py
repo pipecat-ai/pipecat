@@ -63,7 +63,29 @@ class TestSimpleUserMessage:
         params = adapter.get_llm_invocation_params(context)
 
         item = params["input"][0]
-        assert item["content"] == [{"type": "input_text", "text": "Part one Part two"}]
+        assert item["content"] == [
+            {"type": "input_text", "text": "Part one"},
+            {"type": "input_text", "text": "Part two"},
+        ]
+
+    def test_multipart_text_and_image(self, adapter):
+        context = LLMContext(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Describe this"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                    ],
+                }
+            ]
+        )
+        params = adapter.get_llm_invocation_params(context)
+
+        item = params["input"][0]
+        assert len(item["content"]) == 2
+        assert item["content"][0] == {"type": "input_text", "text": "Describe this"}
+        assert item["content"][1] == {"type": "input_image", "image_url": "data:image/png;base64,abc"}
 
 
 class TestSystemMessageExtraction:
