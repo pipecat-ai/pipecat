@@ -142,6 +142,9 @@ class GoogleVertexLLMService(GoogleLLMService):
                 deprecated parameters and *settings* are provided, *settings*
                 values take precedence.
             system_instruction: System instruction/prompt for the model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleVertexLLMSettings(system_instruction=...)`` instead.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
@@ -195,6 +198,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = GoogleVertexLLMSettings(
             model="gemini-2.5-flash",
+            system_instruction=None,
             max_tokens=4096,
             temperature=None,
             top_k=None,
@@ -212,6 +216,11 @@ class GoogleVertexLLMService(GoogleLLMService):
         if model is not None:
             _warn_deprecated_param("model", GoogleVertexLLMSettings, "model")
             default_settings.model = model
+        if system_instruction is not None:
+            _warn_deprecated_param(
+                "system_instruction", GoogleVertexLLMSettings, "system_instruction"
+            )
+            default_settings.system_instruction = system_instruction
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -234,7 +243,6 @@ class GoogleVertexLLMService(GoogleLLMService):
         super().__init__(
             api_key="dummy",
             settings=default_settings,
-            system_instruction=system_instruction,
             tools=tools,
             tool_config=tool_config,
             http_options=http_options,

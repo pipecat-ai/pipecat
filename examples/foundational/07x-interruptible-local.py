@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 
 load_dotenv(override=True)
@@ -51,7 +51,9 @@ async def main():
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenAILLMSettings(
+            system_instruction="You are a helpful LLM. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     context = LLMContext()

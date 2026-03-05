@@ -76,8 +76,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             model="gemini-2.5-flash",
             # force a certain amount of thinking if you want it
             # thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
     )
 
     context = LLMContext()

@@ -102,6 +102,7 @@ class OpenAILLMService(BaseOpenAILLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = OpenAILLMSettings(
             model="gpt-4.1",
+            system_instruction=None,
             frequency_penalty=NOT_GIVEN,
             presence_penalty=NOT_GIVEN,
             seed=NOT_GIVEN,

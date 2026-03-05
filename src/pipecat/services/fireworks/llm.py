@@ -112,4 +112,12 @@ class FireworksLLMService(OpenAILLMService):
         params.update(params_from_context)
 
         params.update(self._settings.extra)
+
+        # Prepend system instruction if set
+        if self._settings.system_instruction:
+            messages = params.get("messages", [])
+            params["messages"] = [
+                {"role": "system", "content": self._settings.system_instruction}
+            ] + messages
+
         return params

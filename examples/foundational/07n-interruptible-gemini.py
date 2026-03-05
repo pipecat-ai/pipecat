@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
 from pipecat.services.google.stt import GoogleSTTService, GoogleSTTSettings
 from pipecat.services.google.tts import GeminiTTSService, GeminiTTSSettings
 from pipecat.transcriptions.language import Language
@@ -73,7 +73,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         model="gemini-2.5-flash",
-        system_instruction="""You are a helpful AI assistant in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
+        settings=GoogleLLMSettings(
+            system_instruction="""You are a helpful AI assistant in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
 
             IMPORTANT: You're using Gemini TTS which supports expressive markup tags. You can use these tags in your responses:
             - [sigh] - Insert a sigh sound
@@ -91,6 +92,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             - "The answer is... [long pause] ...42!"
 
             Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.""",
+        ),
     )
 
     context = LLMContext()

@@ -58,7 +58,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -186,7 +186,9 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
     # Initialize LLM
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction=system_prompt,
+        settings=OpenAILLMSettings(
+            system_instruction=system_prompt,
+        ),
     )
 
     context = LLMContext()

@@ -31,7 +31,7 @@ from pipecat.runner.utils import (
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -126,7 +126,9 @@ indicate you should use the get_image tool are:
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_prompt,
+        settings=GoogleLLMSettings(
+            system_instruction=system_prompt,
+        ),
     )
     llm.register_function("get_weather", get_weather)
     llm.register_function("get_image", get_image)

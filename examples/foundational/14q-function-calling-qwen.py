@@ -27,7 +27,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.qwen.llm import QwenLLMService
+from pipecat.services.qwen.llm import QwenLLMService, QwenLLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -72,7 +72,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = QwenLLMService(
         api_key=os.getenv("QWEN_API_KEY"),
         model="qwen2.5-72b-instruct",
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=QwenLLMSettings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     # You can also register a function_name of None to get all functions
