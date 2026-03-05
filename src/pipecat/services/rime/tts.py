@@ -666,6 +666,8 @@ class RimeHttpTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_stop_frames=True,
+            push_start_frame=True,
             settings=RimeTTSSettings(
                 model=model,
                 language=self.language_to_service_language(params.language)
@@ -753,8 +755,6 @@ class RimeHttpTTSService(TTSService):
             need_to_strip_wav_header = False
 
         try:
-            await self.start_ttfb_metrics()
-
             async with self._session.post(
                 self._base_url, json=payload, headers=headers
             ) as response:
@@ -764,10 +764,6 @@ class RimeHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
@@ -863,6 +859,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             aggregate_sentences=aggregate_sentences,
             text_aggregation_mode=text_aggregation_mode,
             push_stop_frames=True,
+            push_start_frame=True,
             pause_frame_processing=True,
             append_trailing_space=True,
             settings=RimeNonJsonTTSSettings(
@@ -887,7 +884,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             self._settings.extra.update(params.extra)
 
         self._receive_task = None
-        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -1003,7 +999,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -1033,7 +1028,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                         audio=message,
                         sample_rate=self.sample_rate,
                         num_channels=1,
-                        context_id=self._context_id,
+                        context_id=self.get_active_audio_context_id(),
                     )
                     await self.push_frame(frame)
             except Exception as e:
@@ -1055,13 +1050,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
             try:
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame(context_id=context_id)
-                # Store context_id for use in _receive_messages
-                self._context_id = context_id
-
                 # Send bare text (not JSON)
                 await self._get_websocket().send(text)
                 await self.start_tts_usage_metrics(text)
