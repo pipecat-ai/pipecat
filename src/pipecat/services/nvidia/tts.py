@@ -28,8 +28,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
@@ -107,6 +105,8 @@ class NvidiaTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=NvidiaTTSSettings(
                 model=model_function_map.get("model_name"),
                 voice=voice_id,
@@ -237,11 +237,6 @@ class NvidiaTTSService(TTSService):
         try:
             assert self._service is not None, "TTS service not initialized"
             assert self._config is not None, "Synthesis configuration not created"
-
-            await self.start_ttfb_metrics()
-            if not self.audio_context_available(context_id):
-                await self.create_audio_context(context_id)
-                yield TTSStartedFrame(context_id=context_id)
 
             logger.debug(f"{self}: Generating TTS [{text}]")
 
