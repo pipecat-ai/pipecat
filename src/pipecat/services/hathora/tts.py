@@ -19,8 +19,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
@@ -111,6 +109,8 @@ class HathoraTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=HathoraTTSSettings(
                 model=model,
                 voice=voice_id,
@@ -158,10 +158,6 @@ class HathoraTTSService(TTSService):
                 payload["model_config"] = [
                     {"name": option.name, "value": option.value} for option in self._settings.config
                 ]
-
-            if not self.audio_context_available(context_id):
-                await self.create_audio_context(context_id)
-                yield TTSStartedFrame(context_id=context_id)
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
