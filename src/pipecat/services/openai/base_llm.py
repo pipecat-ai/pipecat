@@ -292,9 +292,14 @@ class BaseOpenAILLMService(LLMService):
 
         params.update(self._settings.extra)
 
-        # Prepend system instruction if set
+        # Prepend system instruction from constructor, replacing any context system message
         if self._system_instruction:
             messages = params.get("messages", [])
+            if messages and messages[0].get("role") == "system":
+                logger.warning(
+                    f"{self}: Both system_instruction and a system message in context are set."
+                    " Using system_instruction."
+                )
             params["messages"] = [
                 {"role": "system", "content": self._system_instruction}
             ] + messages
