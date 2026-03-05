@@ -100,7 +100,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             # min_turn_silence=100,  # Default
             # max_turn_silence=1000,  # Default
             # Optional: Boost accuracy for specific names/terms
-            # prompt="Names: Xiomara, Saoirse, Krzystof. Technical terms: API, OAuth.",
+            # keyterms_prompt=["Xiomara", "Saoirse", "Krzystof", "API", "OAuth"],
             # Optional: Enable speaker diarization
             # speaker_labels=True,
         ),
