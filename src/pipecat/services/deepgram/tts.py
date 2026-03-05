@@ -26,8 +26,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
@@ -100,6 +98,7 @@ class DeepgramTTSService(WebsocketTTSService):
             sample_rate=sample_rate,
             pause_frame_processing=True,
             push_stop_frames=True,
+            push_start_frame=True,
             append_trailing_space=True,
             settings=DeepgramTTSSettings(
                 model=voice,
@@ -114,7 +113,6 @@ class DeepgramTTSService(WebsocketTTSService):
         self._base_url = base_url
 
         self._receive_task = None
-        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -251,7 +249,6 @@ class DeepgramTTSService(WebsocketTTSService):
             logger.error(f"{self} exception: {e}")
             await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
-            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -283,7 +280,9 @@ class DeepgramTTSService(WebsocketTTSService):
             if isinstance(message, bytes):
                 # Binary message contains audio data
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(message, self.sample_rate, 1, context_id=self._context_id)
+                frame = TTSAudioRawFrame(
+                    message, self.sample_rate, 1, context_id=self.get_active_audio_context_id()
+                )
                 await self.push_frame(frame)
             elif isinstance(message, str):
                 # Text message contains metadata or control messages
@@ -341,13 +340,6 @@ class DeepgramTTSService(WebsocketTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            if not self.audio_context_available(context_id):
-                await self.create_audio_context(context_id)
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
-            # Store context_id for use in _receive_messages
-            self._context_id = context_id
-
             await self.start_tts_usage_metrics(text)
 
             # Send text message to Deepgram
@@ -397,6 +389,8 @@ class DeepgramHttpTTSService(TTSService):
         """
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=DeepgramTTSSettings(
                 model=voice,
                 voice=voice,
@@ -458,9 +452,6 @@ class DeepgramHttpTTSService(TTSService):
                     raise Exception(f"HTTP {response.status}: {error_text}")
 
                 await self.start_tts_usage_metrics(text)
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
