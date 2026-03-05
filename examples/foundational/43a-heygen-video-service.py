@@ -66,7 +66,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             voice_id="00967b2f-88a6-4a31-8153-110a92134b9f",
         )
 
-        llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = GoogleLLMService(
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+        )
 
         heyGen = HeyGenVideoService(
             api_key=os.getenv("HEYGEN_LIVE_AVATAR_API_KEY"),
@@ -80,14 +83,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         )
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
-            },
-        ]
-
-        context = LLMContext(messages)
+        context = LLMContext()
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -131,7 +127,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 )
 
             # Kick off the conversation.
-            messages.append(
+            context.add_message(
                 {
                     "role": "system",
                     "content": "Start by saying 'Hello' and then a short greeting.",

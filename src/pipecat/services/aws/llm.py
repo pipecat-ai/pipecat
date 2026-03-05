@@ -19,7 +19,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from PIL import Image
@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    LLMTextFrame,
     UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -781,6 +780,7 @@ class AWSBedrockLLMService(LLMService):
         client_config: Optional[Config] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
+        system_instruction: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the AWS Bedrock LLM service.
@@ -795,6 +795,7 @@ class AWSBedrockLLMService(LLMService):
             client_config: Custom boto3 client configuration.
             retry_timeout_secs: Request timeout in seconds for retry logic.
             retry_on_timeout: Whether to retry the request once if it times out.
+            system_instruction: Optional system instruction to use as the system prompt.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         params = params or AWSBedrockLLMService.InputParams()
@@ -840,8 +841,11 @@ class AWSBedrockLLMService(LLMService):
 
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
+        self._system_instruction = system_instruction
 
         logger.info(f"Using AWS Bedrock model: {model}")
+        if self._system_instruction:
+            logger.debug(f"{self}: Using system instruction: {self._system_instruction}")
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
@@ -1019,7 +1023,9 @@ class AWSBedrockLLMService(LLMService):
         # Universal LLMContext
         if isinstance(context, LLMContext):
             adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
-            params = adapter.get_llm_invocation_params(context)
+            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            if self._system_instruction:
+                params["system"] = [{"text": self._system_instruction}]
             return params
 
         # AWS Bedrock-specific context

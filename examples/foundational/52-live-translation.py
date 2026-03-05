@@ -62,16 +62,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        system_instruction="You are a live translation assistant. Your sole purpose is to translate English text into Spanish. When you receive English text from the user, immediately translate it into natural, fluent Spanish. Do not add explanations, commentary, or extra information—only provide the Spanish translation of the text you receive.",
+    )
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a live translation assistant. Your sole purpose is to translate English text into Spanish. When you receive English text from the user, immediately translate it into natural, fluent Spanish. Do not add explanations, commentary, or extra information—only provide the Spanish translation of the text you receive.",
-        },
-    ]
-
-    context = LLMContext(messages)
+    context = LLMContext()
 
     # We use the TranscriptionUserTurnStartStrategy to start a new user turn
     # every time a transcription is received. We disable interruptions, so the
