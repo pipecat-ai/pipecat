@@ -44,6 +44,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.rex import regex_list_matches
 from pipecat.utils.string import is_equivalent_basic
+from pipecat.services.stt_filters import contains_interruption_word
 from pipecat.utils.text import voicemail
 
 
@@ -1556,8 +1557,9 @@ class DeepgramSTTService(STTService):
             # Only allow interruption if it's a longer phrase (more than 2 words) and high confidence
             word_count = self._transcript_words_count(transcript)
             if word_count <= 2 or confidence < 0.95:
-                logger.debug(f"Ignoring backup interruption - bot speaking, low word count ({word_count}) or confidence ({confidence:.2f}): '{transcript}'")
-                return True
+                if not contains_interruption_word(transcript, self.language):
+                    logger.debug(f"Ignoring backup interruption - bot speaking, low word count ({word_count}) or confidence ({confidence:.2f}): '{transcript}'")
+                    return True
                 
             # Check if this transcript is very recent to when bot started speaking
             current_time = time.time()
@@ -1574,9 +1576,10 @@ class DeepgramSTTService(STTService):
                 logger.debug(f"Ignoring backup interruption - too soon after last transcript ({time.time() - self._last_time_transcription:.2f}s): '{transcript}'")
                 return True
         
-        if self._bot_speaking and self._transcript_words_count(transcript) == 1: 
-            logger.debug(f"Ignoring {'backup' if backup_source else 'primary'} interruption because bot is speaking (single word): {transcript}")
-            return True
+        if self._bot_speaking and self._transcript_words_count(transcript) == 1:
+            if not contains_interruption_word(transcript, self.language):
+                logger.debug(f"Ignoring {'backup' if backup_source else 'primary'} interruption because bot is speaking (single word): {transcript}")
+                return True
 
         return False
     

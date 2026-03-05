@@ -37,6 +37,7 @@ from pipecat.services.ai_services import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.string import is_equivalent_basic
+from pipecat.services.stt_filters import contains_interruption_word
 from pipecat.utils.text import voicemail
 
 try:
@@ -1106,9 +1107,13 @@ class SonioxSTTService(STTService):
                 logger.info(f"🔇 Echo rejected (bot speaking): confidence {confidence:.2f} < {self.CONFIDENCE_BOT_SPEAKING_MIN}, '{transcript}'")
                 return True
             # Also require substantial text to interrupt (short echo fragments)
+            # BUT allow through if it contains a known interruption word
             if word_count <= 3 or char_count < 20:
-                logger.info(f"🔇 Echo rejected (bot speaking, too short): words={word_count}, chars={char_count}, '{transcript}'")
-                return True
+                if contains_interruption_word(transcript, self._language):
+                    logger.info(f"✅ Short but contains interruption word, allowing: '{transcript}'")
+                else:
+                    logger.info(f"🔇 Echo rejected (bot speaking, too short): words={word_count}, chars={char_count}, '{transcript}'")
+                    return True
 
         # Check 3: Post-bot grace period — echo tail that finalizes right after bot stops
         if is_post_bot:
@@ -1117,8 +1122,11 @@ class SonioxSTTService(STTService):
                 logger.info(f"🔇 Echo tail rejected ({time_since:.1f}s after bot): confidence {confidence:.2f} < {self.CONFIDENCE_POST_BOT_MIN}, '{transcript}'")
                 return True
             if word_count <= 2 or char_count < 15:
-                logger.info(f"🔇 Echo tail rejected ({time_since:.1f}s after bot, too short): words={word_count}, chars={char_count}, '{transcript}'")
-                return True
+                if contains_interruption_word(transcript, self._language):
+                    logger.info(f"✅ Short post-bot but contains interruption word, allowing: '{transcript}'")
+                else:
+                    logger.info(f"🔇 Echo tail rejected ({time_since:.1f}s after bot, too short): words={word_count}, chars={char_count}, '{transcript}'")
+                    return True
 
         # Check 4: Fast greetings at start
         if self._should_ignore_fast_greeting(transcript, time_start):
