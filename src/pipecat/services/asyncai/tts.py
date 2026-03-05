@@ -159,8 +159,9 @@ class AsyncAITTSService(WebsocketTTSService):
             aggregate_sentences=aggregate_sentences,
             text_aggregation_mode=text_aggregation_mode,
             pause_frame_processing=True,
-            push_stop_frames=True,
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=AsyncAITTSSettings(
                 model=model,
                 voice=voice_id,
@@ -444,11 +445,6 @@ class AsyncAITTSService(WebsocketTTSService):
                 await self._connect()
 
             try:
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame(context_id=context_id)
-
                 msg = self._build_msg(text=text, force=True, context_id=context_id)
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
@@ -515,6 +511,8 @@ class AsyncAIHttpTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=AsyncAITTSSettings(
                 model=model,
                 voice=voice_id,
@@ -577,7 +575,7 @@ class AsyncAIHttpTTSService(TTSService):
 
         try:
             voice_config = {"mode": "id", "id": self._settings.voice}
-            await self.start_ttfb_metrics()
+
             payload = {
                 "model_id": self._settings.model,
                 "transcript": text,
@@ -589,9 +587,7 @@ class AsyncAIHttpTTSService(TTSService):
                 },
                 "language": self._settings.language,
             }
-            if not self.audio_context_available(context_id):
-                await self.create_audio_context(context_id)
-                yield TTSStartedFrame(context_id=context_id)
+
             headers = {
                 "version": self._api_version,
                 "x-api-key": self._api_key,
