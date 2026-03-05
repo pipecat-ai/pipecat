@@ -1,0 +1,83 @@
+name: Publish to GitHub Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      gitref:
+        type: string
+        description: 'Branch, tag, or commit to build (e.g., main, feature/xyz)'
+        required: true
+        default: 'main'
+
+jobs:
+  build-and-publish:
+    name: 'Build and publish to GitHub Packages'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.gitref || github.ref }}
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: 'latest'
+      
+      - name: Set up Python
+        run: uv python install 3.12
+      
+      - name: Install development dependencies
+        run: uv sync --group dev
+      
+      - name: Build project
+        run: uv build
+      
+      - name: Get version
+        id: get_version
+        run: |
+          # Extract version from built wheel filename
+          WHEEL_FILE=$(ls dist/*.whl | head -n 1)
+          VERSION=$(basename $WHEEL_FILE | sed -E 's/pipecat_ai-([^-]+)-.*/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+      
+      - name: Upload wheels as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipecat-wheels-${{ steps.get_version.outputs.version }}-${{ github.sha }}
+          path: ./dist
+          retention-days: 90
+      
+      - name: Create or Update Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ steps.get_version.outputs.version }}-${{ github.run_number }}
+          name: Pipecat Build ${{ steps.get_version.outputs.version }}
+          body: |
+            Automated build of pipecat-ai version ${{ steps.get_version.outputs.version }}
+            
+            **Branch:** ${{ github.ref_name }}
+            **Commit:** ${{ github.sha }}
+            
+            ## Installation
+            
+            To install this version directly:
+            ```bash
+            pip install https://github.com/Vonage/pipecat/releases/download/build-${{ steps.get_version.outputs.version }}-${{ github.run_number }}/pipecat_ai-${{ steps.get_version.outputs.version }}-py3-none-any.whl
+            ```
+            
+            Or add to requirements.txt:
+            ```
+            pipecat-ai @ https://github.com/Vonage/pipecat/releases/download/build-${{ steps.get_version.outputs.version }}-${{ github.run_number }}/pipecat_ai-${{ steps.get_version.outputs.version }}-py3-none-any.whl
+            ```
+          files: dist/*
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
