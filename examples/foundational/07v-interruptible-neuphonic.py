@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.neuphonic.tts import NeuphonicTTSService
+from pipecat.services.neuphonic.tts import NeuphonicTTSService, NeuphonicTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -56,7 +56,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = NeuphonicTTSService(
         api_key=os.getenv("NEUPHONIC_API_KEY"),
-        voice_id="fc854436-2dac-4d21-aa69-ae17b54e98eb",  # Emily
+        settings=NeuphonicTTSSettings(
+            voice="fc854436-2dac-4d21-aa69-ae17b54e98eb",  # Emily
+        ),
     )
 
     llm = OpenAILLMService(

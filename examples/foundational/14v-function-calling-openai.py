@@ -25,8 +25,8 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAISTTService
-from pipecat.services.openai.tts import OpenAITTSService
+from pipecat.services.openai.stt import OpenAISTTService, OpenAISTTSettings
+from pipecat.services.openai.tts import OpenAITTSService, OpenAITTSSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -65,15 +65,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-transcribe",
-        prompt="Expect words related weather, such as temperature and conditions. And restaurant names.",
+        settings=OpenAISTTSettings(
+            model="gpt-4o-transcribe",
+            prompt="Expect words related weather, such as temperature and conditions. And restaurant names.",
+        ),
     )
 
-    # voice choices: ash, ballad, or any other voice available in the OpenAI TTS API
-    # see https://www.openai.fm/
     tts = OpenAITTSService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        voice="ballad",
+        settings=OpenAITTSSettings(
+            voice="ballad",
+        ),
         instructions="Please speak clearly and at a moderate pace.",
     )
 

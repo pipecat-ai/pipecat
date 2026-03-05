@@ -24,7 +24,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.rime.tts import RimeTTSService
+from pipecat.services.rime.tts import RimeTTSService, RimeTTSSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -56,7 +56,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = RimeTTSService(
         api_key=os.getenv("RIME_API_KEY", ""),
-        voice_id="luna",
+        settings=RimeTTSSettings(
+            voice="luna",
+        ),
     )
 
     llm = OpenAILLMService(

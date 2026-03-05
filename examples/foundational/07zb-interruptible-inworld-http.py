@@ -24,7 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.inworld.tts import InworldHttpTTSService
+from pipecat.services.inworld.tts import InworldHttpTTSService, InworldTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -58,10 +58,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tts = InworldHttpTTSService(
             api_key=os.getenv("INWORLD_API_KEY", ""),
             aiohttp_session=session,
-            voice_id="Ashley",
-            model="inworld-tts-1",
-            # Set to False for non-streaming mode or True for streaming mode.
             streaming=True,
+            settings=InworldTTSSettings(
+                voice="Ashley",
+                model="inworld-tts-1",
+            ),
+            # Set to False for non-streaming mode or True for streaming mode.
         )
 
         llm = OpenAILLMService(

@@ -23,8 +23,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.google.stt import GoogleSTTService
-from pipecat.services.google.tts import GeminiTTSService
+from pipecat.services.google.stt import GoogleSTTService, GoogleSTTSettings
+from pipecat.services.google.tts import GeminiTTSService, GeminiTTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -54,15 +54,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot with Gemini TTS")
 
     stt = GoogleSTTService(
-        params=GoogleSTTService.InputParams(languages=Language.EN_US),
+        settings=GoogleSTTSettings(
+            languages=Language.EN_US,
+        ),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
     tts = GeminiTTSService(
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
-        model="gemini-2.5-flash-tts",
-        voice_id="Charon",
-        params=GeminiTTSService.InputParams(
+        settings=GeminiTTSSettings(
+            model="gemini-2.5-flash-tts",
+            voice="Charon",
             language=Language.EN_US,
             prompt="You are a helpful AI assistant. Speak in a natural, conversational tone.",
         ),

@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.aws.llm import AWSBedrockLLMService
+from pipecat.services.aws.llm import AWSBedrockLLMService, AWSBedrockLLMSettings
 from pipecat.services.aws.stt import AWSTranscribeSTTService
-from pipecat.services.aws.tts import AWSPollyTTSService
+from pipecat.services.aws.tts import AWSPollyTTSService, AWSPollyTTSSettings
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -66,14 +66,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = AWSPollyTTSService(
         region="us-west-2",  # only specific regions support generative TTS
-        voice_id="Joanna",
-        params=AWSPollyTTSService.InputParams(engine="generative", rate="1.1"),
+        settings=AWSPollyTTSSettings(
+            voice_id="Joanna",
+            engine="generative",
+            rate="1.1",
+        ),
     )
 
     llm = AWSBedrockLLMService(
         aws_region="us-west-2",
-        model="us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        params=AWSBedrockLLMService.InputParams(temperature=0.8),
+        settings=AWSBedrockLLMSettings(
+            model="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            temperature=0.8,
+        ),
         system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
     )
 

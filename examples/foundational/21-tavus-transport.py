@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.tavus.transport import TavusParams, TavusTransport
@@ -51,7 +51,9 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="a167e0f3-df7e-4d52-a9c3-f949145efdab",
+            settings=CartesiaTTSSettings(
+                voice="a167e0f3-df7e-4d52-a9c3-f949145efdab",
+            ),
         )
 
         llm = GoogleLLMService(

@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.inworld.tts import InworldTTSService
+from pipecat.services.inworld.tts import InworldTTSService, InworldTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -56,9 +56,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = InworldTTSService(
         api_key=os.getenv("INWORLD_API_KEY", ""),
-        voice_id="Ashley",
-        model="inworld-tts-1",
-        temperature=1.1,
+        settings=InworldTTSSettings(
+            voice="Ashley",
+            model="inworld-tts-1",
+            temperature=1.1,
+        ),
     )
 
     llm = OpenAILLMService(

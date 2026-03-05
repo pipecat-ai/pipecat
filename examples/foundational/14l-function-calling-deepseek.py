@@ -24,9 +24,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.deepseek.llm import DeepSeekLLMService
+from pipecat.services.deepseek.llm import DeepSeekLLMService, DeepSeekLLMSettings
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -64,12 +64,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSSettings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     llm = DeepSeekLLMService(
         api_key=os.getenv("DEEPSEEK_API_KEY"),
-        model="deepseek-chat",
+        settings=DeepSeekLLMSettings(
+            model="deepseek-chat",
+        ),
         system_instruction="""You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
 
 You have one functions available:
