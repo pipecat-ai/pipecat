@@ -22,8 +22,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
@@ -199,6 +197,8 @@ class AWSPollyTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=AWSPollyTTSSettings(
                 model=None,
                 voice=voice_id,
@@ -292,8 +292,6 @@ class AWSPollyTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             # Construct the parameters dictionary
             ssml = self._construct_ssml(text)
 
@@ -324,10 +322,6 @@ class AWSPollyTTSService(TTSService):
                 audio_data = await self._resampler.resample(audio_data, 16000, self.sample_rate)
 
                 await self.start_tts_usage_metrics(text)
-
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
