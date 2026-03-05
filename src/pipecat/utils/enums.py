@@ -32,3 +32,4 @@ class RealtimeFeedbackType(Enum):
     TTFB_METRIC = "rtf-ttfb-metric"
     NODE_TRANSITION = "rtf-node-transition"
     LATENCY_MEASURED = "rtf-latency-measured"
+    PIPELINE_ERROR = "rtf-pipeline-error"
