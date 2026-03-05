@@ -41,8 +41,6 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
-FILTERED_WORDS = ["apple", "banana", "car"]
-
 
 @dataclass
 class ContentApprovedFrame(ControlFrame):
@@ -58,6 +56,9 @@ class ContentRejectedFrame(ControlFrame):
     pass
 
 
+FILTERED_WORDS = ["apple", "banana", "car"]
+
+
 class ContentFilterProcessor(FrameProcessor):
     """Checks LLMContextFrames for filtered words and emits signal frames.
 
@@ -66,24 +67,27 @@ class ContentFilterProcessor(FrameProcessor):
     whether to let the LLM's output through.
     """
 
+    def _contains_filtered_words(self, context: "LLMContext") -> bool:
+        """Check if the last message in the context contains any filtered words."""
+        messages = context.messages
+        if messages:
+            last_message = messages[-1]
+            content = last_message.get("content", "") if isinstance(last_message, dict) else ""
+            if isinstance(content, str):
+                content_lower = content.lower()
+                if any(word in content_lower for word in FILTERED_WORDS):
+                    logger.info(f"Filtered content detected: {content}")
+                    return True
+        return False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, LLMContextFrame):
-            # Check the last user message for filtered words
-            messages = frame.context.messages
-            if messages:
-                last_message = messages[-1]
-                content = last_message.get("content", "") if isinstance(last_message, dict) else ""
-                if isinstance(content, str):
-                    content_lower = content.lower()
-                    if any(word in content_lower for word in FILTERED_WORDS):
-                        logger.info(f"Filtered content detected: {content}")
-                        await self.push_frame(ContentRejectedFrame(), direction)
-                        return
-
-            # Content is clean — approve it
-            await self.push_frame(ContentApprovedFrame(), direction)
+            if self._contains_filtered_words(frame.context):
+                await self.push_frame(ContentRejectedFrame(), direction)
+            else:
+                await self.push_frame(ContentApprovedFrame(), direction)
             return
 
         await self.push_frame(frame, direction)
