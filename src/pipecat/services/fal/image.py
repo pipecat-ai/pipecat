@@ -25,13 +25,6 @@ from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
 from pipecat.services.settings import ImageGenSettings
 
-try:
-    import fal_client
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Fal, you need to `pip install pipecat-ai[fal]`.")
-    raise Exception(f"Missing module: {e}")
-
 
 @dataclass
 class FalImageGenSettings(ImageGenSettings):
@@ -91,6 +84,7 @@ class FalImageGenService(ImageGenService):
         super().__init__(settings=FalImageGenSettings(model=model), **kwargs)
         self._params = params
         self._aiohttp_session = aiohttp_session
+        self._api_key = key or os.getenv("FAL_KEY", "")
         if key:
             os.environ["FAL_KEY"] = key
 
@@ -112,10 +106,22 @@ class FalImageGenService(ImageGenService):
 
         logger.debug(f"Generating image from prompt: {prompt}")
 
-        response = await fal_client.run_async(
-            self._settings.model,
-            arguments={"prompt": prompt, **self._params.model_dump(exclude_none=True)},
-        )
+        headers = {
+            "Authorization": f"Key {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {"prompt": prompt, **self._params.model_dump(exclude_none=True)}
+
+        async with self._aiohttp_session.post(
+            f"https://fal.run/{self._settings.model}",
+            json=payload,
+            headers=headers,
+        ) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                yield ErrorFrame(error=f"Fal API error ({resp.status}): {error_text}")
+                return
+            response = await resp.json()
 
         image_url = response["images"][0]["url"] if response else None
 

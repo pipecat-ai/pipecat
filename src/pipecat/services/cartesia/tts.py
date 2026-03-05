@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator, List, Literal, Mapping, Optional
 
+import aiohttp
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -33,13 +34,8 @@ from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
-# Suppress regex warnings from pydub (used by cartesia)
-warnings.filterwarnings("ignore", message="invalid escape sequence", category=SyntaxWarning)
-
-
 # See .env.example for Cartesia configuration needed
 try:
-    from cartesia import AsyncCartesia
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
@@ -721,6 +717,7 @@ class CartesiaHttpTTSService(TTSService):
         model: str = "sonic-3",
         base_url: str = "https://api.cartesia.ai",
         cartesia_version: str = "2024-11-13",
+        aiohttp_session: Optional[aiohttp.ClientSession] = None,
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
@@ -735,6 +732,8 @@ class CartesiaHttpTTSService(TTSService):
             model: TTS model to use (e.g., "sonic-3").
             base_url: Base URL for Cartesia HTTP API.
             cartesia_version: API version string for Cartesia service.
+            aiohttp_session: Optional aiohttp ClientSession for HTTP requests.
+                If not provided, a session will be created and managed internally.
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
             container: Audio container format.
@@ -766,10 +765,8 @@ class CartesiaHttpTTSService(TTSService):
         self._base_url = base_url
         self._cartesia_version = cartesia_version
 
-        self._client = AsyncCartesia(
-            api_key=api_key,
-            base_url=base_url,
-        )
+        self._session: aiohttp.ClientSession | None = aiohttp_session
+        self._owns_session = aiohttp_session is None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -798,6 +795,14 @@ class CartesiaHttpTTSService(TTSService):
         """
         await super().start(frame)
         self._settings.output_sample_rate = self.sample_rate
+        if self._owns_session:
+            self._session = aiohttp.ClientSession()
+
+    async def _close_session(self):
+        """Close the HTTP session if we own it."""
+        if self._owns_session and self._session:
+            await self._session.close()
+            self._session = None
 
     async def stop(self, frame: EndFrame):
         """Stop the Cartesia HTTP TTS service.
@@ -806,7 +811,7 @@ class CartesiaHttpTTSService(TTSService):
             frame: The end frame.
         """
         await super().stop(frame)
-        await self._client.close()
+        await self._close_session()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Cartesia HTTP TTS service.
@@ -815,7 +820,7 @@ class CartesiaHttpTTSService(TTSService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        await self._client.close()
+        await self._close_session()
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -874,8 +879,6 @@ class CartesiaHttpTTSService(TTSService):
 
             yield TTSStartedFrame(context_id=context_id)
 
-            session = await self._client._get_session()
-
             headers = {
                 "Cartesia-Version": self._cartesia_version,
                 "X-API-Key": self._api_key,
@@ -884,7 +887,7 @@ class CartesiaHttpTTSService(TTSService):
 
             url = f"{self._base_url}/tts/bytes"
 
-            async with session.post(url, json=payload, headers=headers) as response:
+            async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     yield ErrorFrame(error=f"Cartesia API error: {error_text}")
