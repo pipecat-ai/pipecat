@@ -1006,9 +1006,8 @@ class TTSService(AIService):
             # Only override append_to_context if explicitly set
             if append_tts_text_to_context is not None:
                 frame.append_to_context = append_tts_text_to_context
-            # For HTTP services route TTSTextFrame through the audio
-            # context so it arrives after all TTS audio frames (preserves ordering).
-            if self._is_yielding_frames_synchronously and self.audio_context_available(context_id):
+            # For services using the audio context we are appending to the context, so it preserves the ordering.
+            if self.audio_context_available(context_id):
                 await self.append_to_audio_context(context_id, frame)
                 if push_assistant_aggregation:
                     await self.append_to_audio_context(
