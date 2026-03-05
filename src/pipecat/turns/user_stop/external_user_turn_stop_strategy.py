@@ -107,6 +107,10 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._seen_interim_results = False
         # Reset aggregation timer.
         self._event.set()
+        
+        # If this transcription has arrived later than user stopped speaking,
+        # lets see if we can trigger a user turn stopped
+        await self._maybe_trigger_user_turn_stopped()
 
     async def _task_handler(self):
         """Asynchronously monitor transcriptions and trigger user end turn when ready.
