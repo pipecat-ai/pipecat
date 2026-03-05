@@ -19,6 +19,7 @@ class EndTaskReason(Enum):
     UNEXPECTED_ERROR = "unexpected_error"
     UNKNOWN = "unknown"
     TRANSFER_CALL = "transfer_call"
+    PIPELINE_ERROR = "pipeline_error"
 
 
 class RealtimeFeedbackType(Enum):
