@@ -25,7 +25,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
-from pipecat.services.groq.llm import GroqLLMService
+from pipecat.services.groq.llm import GroqLLMService, GroqLLMSettings
 from pipecat.services.groq.stt import GroqSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -71,7 +71,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GroqLLMService(
         api_key=os.getenv("GROQ_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=GroqLLMSettings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.

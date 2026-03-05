@@ -37,7 +37,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -92,7 +92,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     that the conversation history has been compressed.
                     """
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), system_instruction=system_prompt)
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMSettings(
+            system_instruction=system_prompt,
+        ),
+    )
 
     llm.register_function("summarize_conversation", summarize_conversation)
 

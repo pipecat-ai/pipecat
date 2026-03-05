@@ -24,7 +24,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -66,7 +66,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a live translation assistant. Your sole purpose is to translate English text into Spanish. When you receive English text from the user, immediately translate it into natural, fluent Spanish. Do not add explanations, commentary, or extra information—only provide the Spanish translation of the text you receive.",
+        settings=OpenAILLMSettings(
+            system_instruction="You are a live translation assistant. Your sole purpose is to translate English text into Spanish. When you receive English text from the user, immediately translate it into natural, fluent Spanish. Do not add explanations, commentary, or extra information—only provide the Spanish translation of the text you receive.",
+        ),
     )
 
     context = LLMContext()

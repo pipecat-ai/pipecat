@@ -199,8 +199,8 @@ Your response will be turned into speech so use only simple words and punctuatio
     llm = GoogleLLMService(
         settings=GoogleLLMSettings(
             model=VOICE_MODEL,
+            system_instruction=system_prompt,
         ),
-        system_instruction=system_prompt,
         api_key=os.getenv("GOOGLE_API_KEY"),
     )
     llm.register_function("query_knowledge_base", query_knowledge_base)

@@ -227,13 +227,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("OPENAI_API_KEY"),
         settings=OpenAILLMSettings(
             model="gpt-4o-mini",
-        ),
-        system_instruction="""You are a personal assistant. You can remember things about the person you are talking to.
+            system_instruction="""You are a personal assistant. You can remember things about the person you are talking to.
                         Some Guidelines:
                         - Make sure your responses are friendly yet short and concise.
                         - If the user asks you to remember something, make sure to remember it.
                         - Greet the user by their name if you know about it.
                     """,
+        ),
     )
 
     # Set up conversation context and management

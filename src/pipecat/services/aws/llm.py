@@ -788,7 +788,6 @@ class AWSBedrockLLMService(LLMService):
         client_config: Optional[Config] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
-        system_instruction: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the AWS Bedrock LLM service.
@@ -819,12 +818,12 @@ class AWSBedrockLLMService(LLMService):
             client_config: Custom boto3 client configuration.
             retry_timeout_secs: Request timeout in seconds for retry logic.
             retry_on_timeout: Whether to retry the request once if it times out.
-            system_instruction: Optional system instruction to use as the system prompt.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = AWSBedrockLLMSettings(
             model="us.amazon.nova-lite-v1:0",
+            system_instruction=None,
             max_tokens=None,
             temperature=None,
             top_p=None,
@@ -889,11 +888,10 @@ class AWSBedrockLLMService(LLMService):
 
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._system_instruction = system_instruction
 
         logger.info(f"Using AWS Bedrock model: {self._settings.model}")
-        if self._system_instruction:
-            logger.debug(f"{self}: Using system instruction: {self._system_instruction}")
+        if self._settings.system_instruction:
+            logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
@@ -1074,13 +1072,13 @@ class AWSBedrockLLMService(LLMService):
         if isinstance(context, LLMContext):
             adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
             params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
-            if self._system_instruction:
+            if self._settings.system_instruction:
                 if params["system"]:
                     logger.warning(
                         f"{self}: Both system_instruction and a system message in context are"
                         " set. Using system_instruction."
                     )
-                params["system"] = [{"text": self._system_instruction}]
+                params["system"] = [{"text": self._settings.system_instruction}]
             return params
 
         # AWS Bedrock-specific context

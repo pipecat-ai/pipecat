@@ -114,6 +114,13 @@ class PerplexityLLMService(OpenAILLMService):
         if self._settings.max_tokens is not None:
             params["max_tokens"] = self._settings.max_tokens
 
+        # Prepend system instruction if set
+        if self._settings.system_instruction:
+            messages = params.get("messages", [])
+            params["messages"] = [
+                {"role": "system", "content": self._settings.system_instruction}
+            ] + messages
+
         return params
 
     async def _process_context(self, context: OpenAILLMContext | LLMContext):

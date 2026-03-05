@@ -28,7 +28,7 @@ from pipecat.runner.utils import (
     get_transport_client_id,
     maybe_capture_participant_camera,
 )
-from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.anthropic.llm import AnthropicLLMService, AnthropicLLMSettings
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
@@ -98,7 +98,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Anthropic for vision analysis
     llm = AnthropicLLMService(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
+        settings=AnthropicLLMSettings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
+        ),
     )
     llm.register_function("fetch_user_image", fetch_user_image)
 

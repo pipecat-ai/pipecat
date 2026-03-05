@@ -809,6 +809,9 @@ class GoogleLLMService(LLMService):
                 deprecated parameters and *settings* are provided, *settings*
                 values take precedence.
             system_instruction: System instruction/prompt for the model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleLLMSettings(system_instruction=...)`` instead.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
@@ -817,6 +820,7 @@ class GoogleLLMService(LLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = GoogleLLMSettings(
             model="gemini-2.5-flash",
+            system_instruction=None,
             max_tokens=4096,
             temperature=None,
             top_k=None,
@@ -834,6 +838,9 @@ class GoogleLLMService(LLMService):
         if model is not None:
             _warn_deprecated_param("model", GoogleLLMSettings, "model")
             default_settings.model = model
+        if system_instruction is not None:
+            _warn_deprecated_param("system_instruction", GoogleLLMSettings, "system_instruction")
+            default_settings.system_instruction = system_instruction
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -854,7 +861,6 @@ class GoogleLLMService(LLMService):
         super().__init__(settings=default_settings, **kwargs)
 
         self._api_key = api_key
-        self._system_instruction = system_instruction
         self._http_options = update_google_client_http_options(http_options)
         self._tools = tools
         self._tool_config = tool_config
@@ -993,10 +999,10 @@ class GoogleLLMService(LLMService):
         messages = params_from_context["messages"]
         if (
             params_from_context["system_instruction"]
-            and self._system_instruction != params_from_context["system_instruction"]
+            and self._settings.system_instruction != params_from_context["system_instruction"]
         ):
             logger.debug(f"System instruction changed: {params_from_context['system_instruction']}")
-            self._system_instruction = params_from_context["system_instruction"]
+            self._settings.system_instruction = params_from_context["system_instruction"]
 
         tools = []
         if params_from_context["tools"]:
@@ -1009,7 +1015,9 @@ class GoogleLLMService(LLMService):
 
         # Build generation parameters
         generation_params = self._build_generation_params(
-            system_instruction=self._system_instruction, tools=tools, tool_config=tool_config
+            system_instruction=self._settings.system_instruction,
+            tools=tools,
+            tool_config=tool_config,
         )
 
         # possibly modify generation_params (in place) to set thinking to off by default

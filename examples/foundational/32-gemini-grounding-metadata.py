@@ -27,7 +27,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService, LLMSearchResponseFrame
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings, LLMSearchResponseFrame
 from pipecat.services.llm_service import LLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -107,7 +107,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize the Gemini Multimodal Live model
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_instruction,
+        settings=GoogleLLMSettings(
+            system_instruction=system_instruction,
+        ),
         tools=tools,
     )
 

@@ -223,7 +223,6 @@ class AnthropicLLMService(LLMService):
         client=None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
-        system_instruction: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the Anthropic LLM service.
@@ -246,12 +245,12 @@ class AnthropicLLMService(LLMService):
             client: Optional custom Anthropic client instance.
             retry_timeout_secs: Request timeout in seconds for retry logic.
             retry_on_timeout: Whether to retry the request once if it times out.
-            system_instruction: Optional system instruction to use as the system prompt.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = AnthropicLLMSettings(
             model="claude-sonnet-4-6",
+            system_instruction=None,
             max_tokens=4096,
             enable_prompt_caching=False,
             temperature=NOT_GIVEN,
@@ -309,9 +308,8 @@ class AnthropicLLMService(LLMService):
         )  # if the client is provided, use it and remove it, otherwise create a new one
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._system_instruction = system_instruction
-        if self._system_instruction:
-            logger.debug(f"{self}: Using system instruction: {self._system_instruction}")
+        if self._settings.system_instruction:
+            logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate usage metrics.
@@ -445,13 +443,13 @@ class AnthropicLLMService(LLMService):
             params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(
                 context, enable_prompt_caching=self._settings.enable_prompt_caching
             )
-            if self._system_instruction:
+            if self._settings.system_instruction:
                 if params["system"] is not NOT_GIVEN:
                     logger.warning(
                         f"{self}: Both system_instruction and a system message in context are"
                         " set. Using system_instruction."
                     )
-                params["system"] = self._system_instruction
+                params["system"] = self._settings.system_instruction
             return params
 
         # Anthropic-specific context

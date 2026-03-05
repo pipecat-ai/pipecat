@@ -24,7 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
 from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
 from pipecat.transports.heygen.transport import HeyGenParams, HeyGenTransport, ServiceType
 
@@ -63,7 +63,9 @@ async def main():
 
         llm = GoogleLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),
-            system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+            settings=GoogleLLMSettings(
+                system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+            ),
         )
 
         context = LLMContext()

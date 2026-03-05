@@ -121,7 +121,6 @@ class BaseOpenAILLMService(LLMService):
         settings: Optional[OpenAILLMSettings] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
-        system_instruction: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -147,12 +146,12 @@ class BaseOpenAILLMService(LLMService):
                 parameters, ``settings`` values take precedence.
             retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
             retry_on_timeout: Whether to retry the request once if it times out.
-            system_instruction: Optional system instruction to prepend to messages.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = OpenAILLMSettings(
             model="gpt-4o",
+            system_instruction=None,
             frequency_penalty=NOT_GIVEN,
             presence_penalty=NOT_GIVEN,
             seed=NOT_GIVEN,
@@ -193,7 +192,6 @@ class BaseOpenAILLMService(LLMService):
         self._service_tier = service_tier
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._system_instruction = system_instruction
         self._full_model_name: str = ""
         self._client = self.create_client(
             api_key=api_key,
@@ -204,8 +202,8 @@ class BaseOpenAILLMService(LLMService):
             **kwargs,
         )
 
-        if self._system_instruction:
-            logger.debug(f"{self}: Using system instruction: {self._system_instruction}")
+        if self._settings.system_instruction:
+            logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
     def create_client(
         self,
@@ -329,7 +327,7 @@ class BaseOpenAILLMService(LLMService):
         params.update(self._settings.extra)
 
         # Prepend system instruction from constructor, replacing any context system message
-        if self._system_instruction:
+        if self._settings.system_instruction:
             messages = params.get("messages", [])
             if messages and messages[0].get("role") == "system":
                 logger.warning(
@@ -337,7 +335,7 @@ class BaseOpenAILLMService(LLMService):
                     " Using system_instruction."
                 )
             params["messages"] = [
-                {"role": "system", "content": self._system_instruction}
+                {"role": "system", "content": self._settings.system_instruction}
             ] + messages
 
         return params

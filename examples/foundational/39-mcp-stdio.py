@@ -35,7 +35,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.anthropic.llm import AnthropicLLMService, AnthropicLLMSettings
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
@@ -155,7 +155,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         Just respond with short sentences when you are carrying out tool calls.
         """
 
-        llm = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"), system_instruction=system)
+        llm = AnthropicLLMService(
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            settings=AnthropicLLMSettings(
+                system_instruction=system,
+            ),
+        )
 
         try:
             mcp = MCPClient(

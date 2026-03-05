@@ -299,21 +299,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         name="Conversation",
         settings=GoogleLLMSettings(
             model="gemini-2.5-flash",
+            system_instruction=conversation_system_message,
         ),
         api_key=os.getenv("GOOGLE_API_KEY"),
         # we can give the GoogleLLMService a system instruction to use directly
         # in the GenerativeModel constructor. Let's do that rather than put
         # our system message in the messages list.
-        system_instruction=conversation_system_message,
     )
 
     input_transcription_llm = GoogleLLMService(
         name="Transcription",
         settings=GoogleLLMSettings(
             model="gemini-2.5-flash",
+            system_instruction=transcriber_system_message,
         ),
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=transcriber_system_message,
     )
 
     messages = [
