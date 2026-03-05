@@ -116,6 +116,7 @@ class LmntTTSService(InterruptibleTTSService):
         """
         super().__init__(
             push_stop_frames=True,
+            push_start_frame=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
             settings=LmntTTSSettings(
@@ -129,7 +130,6 @@ class LmntTTSService(InterruptibleTTSService):
 
         self._api_key = api_key
         self._receive_task = None
-        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -266,7 +266,6 @@ class LmntTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting from LMNT: {e}", exception=e)
         finally:
-            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -292,7 +291,7 @@ class LmntTTSService(InterruptibleTTSService):
                     audio=message,
                     sample_rate=self.sample_rate,
                     num_channels=1,
-                    context_id=self._context_id,
+                    context_id=self.get_active_audio_context_id(),
                 )
                 await self.push_frame(frame)
             else:
@@ -324,13 +323,6 @@ class LmntTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame(context_id=context_id)
-                # Store context_id for use in _receive_messages
-                self._context_id = context_id
-
                 # Send text to LMNT
                 await self._get_websocket().send(json.dumps({"text": text}))
                 # Force synthesis
