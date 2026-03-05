@@ -19,8 +19,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
@@ -99,6 +97,8 @@ class SpeechmaticsTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=SpeechmaticsTTSSettings(
                 model=None,
                 voice=voice_id,
@@ -154,9 +154,6 @@ class SpeechmaticsTTSService(TTSService):
         url = _get_endpoint_url(self._base_url, self._settings.voice, self.sample_rate)
 
         try:
-            # Start TTS TTFB metrics
-            await self.start_ttfb_metrics()
-
             # Track attempt
             attempt = 0
 
@@ -206,11 +203,6 @@ class SpeechmaticsTTSService(TTSService):
 
                     # Update Pipecat metrics
                     await self.start_tts_usage_metrics(text)
-
-                    # Emit the TTS started frame
-                    if not self.audio_context_available(context_id):
-                        await self.create_audio_context(context_id)
-                        yield TTSStartedFrame(context_id=context_id)
 
                     # Process the response in streaming chunks
                     first_chunk = True
