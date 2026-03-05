@@ -924,6 +924,7 @@ class ElevenLabsHttpTTSService(TTSService):
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
+            push_start_frame=True,
             sample_rate=sample_rate,
             settings=ElevenLabsHttpTTSSettings(
                 model=model,
@@ -1156,8 +1157,6 @@ class ElevenLabsHttpTTSService(TTSService):
             params["optimize_streaming_latency"] = self._settings.optimize_streaming_latency
 
         try:
-            await self.start_ttfb_metrics()
-
             async with self._session.post(
                 url, json=payload, headers=headers, params=params
             ) as response:
@@ -1167,12 +1166,6 @@ class ElevenLabsHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-
-                # Start TTS sequence
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    await self.start_word_timestamps()
-                    yield TTSStartedFrame(context_id=context_id)
 
                 # Track the duration of this utterance based on the last character's end time
                 utterance_duration = 0
@@ -1237,6 +1230,3 @@ class ElevenLabsHttpTTSService(TTSService):
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
-        finally:
-            await self.stop_ttfb_metrics()
-            # Let the parent class handle TTSStoppedFrame
