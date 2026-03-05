@@ -544,9 +544,12 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "error":
                 if not await self._maybe_handle_evt_retrieve_conversation_item_error(evt):
-                    await self._handle_evt_error(evt)
-                    # errors are fatal, so exit the receive loop
-                    return
+                    if evt.error.code == "response_cancel_not_active":
+                        logger.debug(f"{self} {evt.error.message}")
+                    else:
+                        await self._handle_evt_error(evt)
+                        # errors are fatal, so exit the receive loop
+                        return
 
     @traced_openai_realtime(operation="llm_setup")
     async def _handle_evt_session_created(self, evt):
@@ -706,7 +709,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.push_interruption_task_frame_and_wait()
+        await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
         await self.start_ttfb_metrics()

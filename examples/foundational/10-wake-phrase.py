@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -59,18 +59,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful assistant. Respond to what the user said in a creative and helpful way. Keep your responses brief.",
-        },
-    ]
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        system_instruction="You are a helpful assistant. Respond to what the user said in a creative and helpful way. Keep your responses brief.",
+    )
 
     hey_robot_filter = WakeCheckFilter(["hey robot", "hey, robot"])
 
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -102,7 +98,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frame(TTSSpeakFrame("Hi! If you want to talk to me, just say 'Hey Robot'"))
+        context.add_message(
+            {
+                "role": "system",
+                "content": "Please introduce yourself. Tell the user they should say 'Hey Robot' before talking to you.",
+            }
+        )
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

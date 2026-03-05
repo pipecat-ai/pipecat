@@ -60,16 +60,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.getenv("RIME_API_KEY"), voice_id="eva", aiohttp_session=session
         )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        )
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
-            },
-        ]
-
-        context = LLMContext(messages)
+        context = LLMContext()
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -99,7 +95,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info(f"Client connected")
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+            context.add_message(
+                {"role": "system", "content": "Please introduce yourself to the user."}
+            )
             await task.queue_frames([LLMRunFrame()])
 
             await asyncio.sleep(10)

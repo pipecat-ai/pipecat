@@ -11,7 +11,6 @@ including data frames, system frames, and control frames for audio, video, text,
 and LLM processing.
 """
 
-import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import (
@@ -43,6 +42,7 @@ if TYPE_CHECKING:
     from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
     from pipecat.services.settings import ServiceSettings
+    from pipecat.utils.context.llm_context_summarization import LLMContextSummaryConfig
     from pipecat.utils.tracing.tracing_context import TracingContext
 
 
@@ -1140,24 +1140,9 @@ class InterruptionFrame(SystemFrame):
     This frame is used to interrupt the pipeline. For example, when a user
     starts speaking to cancel any in-progress bot output. It can also be pushed
     by any processor.
-
-    Parameters:
-        event: Optional event set when the frame has fully traversed the
-            pipeline.
-
     """
 
-    event: Optional[asyncio.Event] = None
-
-    def complete(self):
-        """Signal that this interruption has been fully processed.
-
-        Called automatically when the frame reaches the pipeline sink, or
-        manually when the frame is consumed before reaching it (e.g. when
-        the user is muted).
-        """
-        if self.event:
-            self.event.set()
+    pass
 
 
 @dataclass
@@ -1824,16 +1809,11 @@ class InterruptionTaskFrame(TaskFrame):
     """Frame indicating the pipeline should be interrupted.
 
     This frame should be pushed upstream to indicate the pipeline should be
-    interrupted. The pipeline task converts this into an `InterruptionFrame` and
-    sends it downstream. The `event` is passed to the `InterruptionFrame` so it
-    can signal when the interruption has fully traversed the pipeline.
-
-    Parameters:
-        event: Optional event passed to the corresponding `InterruptionFrame`.
-
+    interrupted. The pipeline task converts this into an `InterruptionFrame`
+    and sends it downstream.
     """
 
-    event: Optional[asyncio.Event] = None
+    pass
 
 
 @dataclass
@@ -1904,6 +1884,29 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
     This frame is marked as UninterruptibleFrame to ensure it is not lost when
     an InterruptionFrame is processed. Terminal frames must survive interruption
     to guarantee proper pipeline control.
+    """
+
+    pass
+
+
+@dataclass
+class BotConnectedFrame(SystemFrame):
+    """Frame indicating the bot has connected to the transport service.
+
+    Pushed downstream by SFU transports (Daily, LiveKit, HeyGen, Tavus)
+    when the bot successfully joins the room. Non-SFU transports do not
+    emit this frame.
+    """
+
+    pass
+
+
+@dataclass
+class ClientConnectedFrame(SystemFrame):
+    """Frame indicating that a client has connected to the transport.
+
+    Pushed downstream by the input transport when a client (participant)
+    connects. Used by observers to measure transport readiness timing.
     """
 
     pass
@@ -1991,6 +1994,32 @@ class LLMFullResponseEndFrame(ControlFrame):
 
 
 @dataclass
+class LLMAssistantPushAggregationFrame(ControlFrame):
+    """Frame that forces the LLM assistant aggregator to push its current aggregation to context.
+
+    When received by ``LLMAssistantAggregator``, any text that has been accumulated
+    in the aggregation buffer is immediately committed to the conversation context as
+    an assistant message, without waiting for an ``LLMFullResponseEndFrame``.
+    """
+
+
+@dataclass
+class LLMSummarizeContextFrame(ControlFrame):
+    """Frame requesting on-demand context summarization.
+
+    Push this frame into the pipeline to trigger a manual context summarization.
+
+    Parameters:
+        config: Optional per-request override for summary generation settings
+            (prompt, token budget, messages to keep). If ``None``, the
+            summarizer's default :class:`~pipecat.utils.context.llm_context_summarization.LLMContextSummaryConfig`
+            is used.
+    """
+
+    config: Optional["LLMContextSummaryConfig"] = None
+
+
+@dataclass
 class LLMContextSummaryRequestFrame(ControlFrame):
     """Frame requesting context summarization from an LLM service.
 
@@ -2009,6 +2038,8 @@ class LLMContextSummaryRequestFrame(ControlFrame):
             the summary text.
         summarization_prompt: System prompt instructing the LLM how to generate
             the summary.
+        summarization_timeout: Maximum time in seconds for the LLM to generate a
+            summary. When None, a default timeout of 120s is applied.
     """
 
     request_id: str
@@ -2016,6 +2047,7 @@ class LLMContextSummaryRequestFrame(ControlFrame):
     min_messages_to_keep: int
     target_context_tokens: int
     summarization_prompt: str
+    summarization_timeout: Optional[float] = None
 
 
 @dataclass

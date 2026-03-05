@@ -292,6 +292,63 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         assert upstream_received
         assert downstream_received
 
+    async def test_task_queue_frame_upstream(self):
+        upstream_received = False
+
+        pipeline = Pipeline([IdentityFilter()])
+        task = PipelineTask(pipeline, cancel_on_idle_timeout=False)
+        task.set_reached_upstream_filter((TextFrame,))
+
+        @task.event_handler("on_frame_reached_upstream")
+        async def on_frame_reached_upstream(task, frame):
+            nonlocal upstream_received
+            if isinstance(frame, TextFrame) and frame.text == "Hello Upstream!":
+                upstream_received = True
+
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame):
+            await task.queue_frame(TextFrame(text="Hello Upstream!"), FrameDirection.UPSTREAM)
+
+        try:
+            await asyncio.wait_for(
+                task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
+                timeout=1.0,
+            )
+        except asyncio.TimeoutError:
+            pass
+
+        assert upstream_received
+
+    async def test_task_queue_frames_upstream(self):
+        upstream_texts = []
+
+        pipeline = Pipeline([IdentityFilter()])
+        task = PipelineTask(pipeline, cancel_on_idle_timeout=False)
+        task.set_reached_upstream_filter((TextFrame,))
+
+        @task.event_handler("on_frame_reached_upstream")
+        async def on_frame_reached_upstream(task, frame):
+            if isinstance(frame, TextFrame):
+                upstream_texts.append(frame.text)
+
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame):
+            await task.queue_frames(
+                [TextFrame(text="First"), TextFrame(text="Second")],
+                FrameDirection.UPSTREAM,
+            )
+
+        try:
+            await asyncio.wait_for(
+                task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
+                timeout=1.0,
+            )
+        except asyncio.TimeoutError:
+            pass
+
+        assert "First" in upstream_texts
+        assert "Second" in upstream_texts
+
     async def test_task_heartbeats(self):
         heartbeats_counter = 0
 

@@ -94,7 +94,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # Anthropic for vision analysis
-    llm = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    llm = AnthropicLLMService(
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
+    )
     llm.register_function("fetch_user_image", fetch_user_image)
 
     @llm.event_handler("on_function_calls_started")
@@ -118,14 +121,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     tools = ToolsSchema(standard_tools=[fetch_image_function])
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
-        },
-    ]
-
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -162,7 +158,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         client_id = get_transport_client_id(transport, client)
 
         # Kick off the conversation.
-        messages.append(
+        context.add_message(
             {
                 "role": "system",
                 "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",

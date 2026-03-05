@@ -39,6 +39,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     InterruptionFrame,
+    LLMAssistantPushAggregationFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     StartFrame,
@@ -67,10 +68,16 @@ class TTSContext:
     """Context information for a TTS request.
 
     Attributes:
-        append_to_context: Whether this TTS output should be appended to the conversation context.
+        append_to_context: Whether this TTS output should be appended to the
+            conversation context after it is spoken.
+        push_assistant_aggregation: Whether to push an
+            ``LLMAssistantPushAggregationFrame`` after the TTS has finished
+            speaking, forcing the assistant aggregator to commit its current
+            text buffer to the conversation context.
     """
 
     append_to_context: bool = True
+    push_assistant_aggregation: Optional[bool] = False
 
 
 class TextAggregationMode(str, Enum):
@@ -641,10 +648,13 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
+            # If we are not receiving text from the LLM, we can assume that the SpeakFrame should be automatically added to the context
+            push_assistant_aggregation = frame.append_to_context and not self._llm_response_started
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
             await self._push_tts_frames(
                 AggregatedTextFrame(frame.text, AggregationType.SENTENCE),
                 append_tts_text_to_context=frame.append_to_context,
+                push_assistant_aggregation=push_assistant_aggregation,
             )
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
@@ -809,6 +819,7 @@ class TTSService(AIService):
         src_frame: AggregatedTextFrame,
         includes_inter_frame_spaces: Optional[bool] = False,
         append_tts_text_to_context: Optional[bool] = True,
+        push_assistant_aggregation: Optional[bool] = False,
     ):
         type = src_frame.aggregated_by
         text = src_frame.text
@@ -876,7 +887,8 @@ class TTSService(AIService):
         self._tts_contexts[context_id] = TTSContext(
             append_to_context=append_tts_text_to_context
             if append_tts_text_to_context is not None
-            else True
+            else True,
+            push_assistant_aggregation=push_assistant_aggregation,
         )
 
         # Apply any final text preparation (e.g., trailing space)
@@ -905,6 +917,8 @@ class TTSService(AIService):
             if append_tts_text_to_context is not None:
                 frame.append_to_context = append_tts_text_to_context
             await self.push_frame(frame)
+            if push_assistant_aggregation:
+                await self.push_frame(LLMAssistantPushAggregationFrame())
 
     async def _stop_frame_handler(self):
         has_started = False
@@ -988,6 +1002,9 @@ class TTSService(AIService):
                 frame = TTSStoppedFrame()
                 frame.pts = last_pts
                 frame.context_id = context_id
+                if context_id in self._tts_contexts:
+                    if self._tts_contexts[context_id].push_assistant_aggregation:
+                        await self.push_frame(LLMAssistantPushAggregationFrame())
             else:
                 # Assumption: word-by-word text frames don't include spaces, so
                 # we can rely on the default includes_inter_frame_spaces=False

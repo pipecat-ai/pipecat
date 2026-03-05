@@ -613,7 +613,7 @@ class GladiaSTTService(WebsocketSTTService):
 
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
 
     async def _on_speech_ended(self):
         """Handle speech end event from Gladia.

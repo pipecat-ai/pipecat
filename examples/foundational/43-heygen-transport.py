@@ -59,16 +59,12 @@ async def main():
             voice_id="00967b2f-88a6-4a31-8153-110a92134b9f",
         )
 
-        llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = GoogleLLMService(
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+        )
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
-            },
-        ]
-
-        context = LLMContext(messages)
+        context = LLMContext()
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -98,7 +94,7 @@ async def main():
         async def on_client_connected(transport, client):
             logger.info(f"Client connected")
             # Kick off the conversation.
-            messages.append(
+            context.add_message(
                 {
                     "role": "system",
                     "content": "Start by saying 'Hello' and then a short greeting.",

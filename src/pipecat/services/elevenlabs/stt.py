@@ -861,6 +861,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         await self._handle_transcription(text, True, language)
 
+        finalized = self._settings.commit_strategy == CommitStrategy.MANUAL
+
         await self.push_frame(
             TranscriptionFrame(
                 text,
@@ -868,6 +870,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 time_now_iso8601(),
                 language,
                 result=data,
+                finalized=finalized,
             )
         )
 
@@ -902,6 +905,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         await self._handle_transcription(text, True, language)
 
+        finalized = self._settings.commit_strategy == CommitStrategy.MANUAL
+
         # This message is sent after committed_transcript when include_timestamps=true.
         # It contains the full transcript data including text and word-level timestamps.
         await self.push_frame(
@@ -911,5 +916,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 time_now_iso8601(),
                 language,
                 result=data,
+                finalized=finalized,
             )
         )
