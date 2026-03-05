@@ -10,10 +10,12 @@ This module provides integration with Fal's Wizper API for speech-to-text
 transcription using segmented audio processing.
 """
 
+import base64
 import os
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 
+import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
@@ -24,15 +26,6 @@ from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    import fal_client
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Fal, you need to `pip install pipecat-ai[fal]`. Also, set `FAL_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 
 def language_to_fal_language(language: Language) -> Optional[str]:
@@ -192,6 +185,7 @@ class FalSTTService(SegmentedSTTService):
         self,
         *,
         api_key: Optional[str] = None,
+        aiohttp_session: Optional[aiohttp.ClientSession] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         ttfs_p99_latency: Optional[float] = FAL_TTFS_P99,
@@ -201,6 +195,8 @@ class FalSTTService(SegmentedSTTService):
 
         Args:
             api_key: Fal API key. If not provided, will check FAL_KEY environment variable.
+            aiohttp_session: Optional aiohttp ClientSession for HTTP requests.
+                If not provided, a session will be created and managed internally.
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the Wizper API.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -224,14 +220,14 @@ class FalSTTService(SegmentedSTTService):
             **kwargs,
         )
 
-        if api_key:
-            os.environ["FAL_KEY"] = api_key
-        elif "FAL_KEY" not in os.environ:
+        self._api_key = api_key or os.getenv("FAL_KEY", "")
+        if not self._api_key:
             raise ValueError(
                 "FAL_KEY must be provided either through api_key parameter or environment variable"
             )
 
-        self._fal_client = fal_client.AsyncClient(key=api_key or os.getenv("FAL_KEY"))
+        self._session: aiohttp.ClientSession | None = aiohttp_session
+        self._owns_session = aiohttp_session is None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -275,12 +271,26 @@ class FalSTTService(SegmentedSTTService):
         try:
             await self.start_processing_metrics()
 
-            # Send to Fal directly (audio is already in WAV format from base class)
-            data_uri = fal_client.encode(audio, "audio/x-wav")
-            response = await self._fal_client.run(
-                "fal-ai/wizper",
-                arguments={"audio_url": data_uri, **self._settings.given_fields()},
-            )
+            if not self._session:
+                self._session = aiohttp.ClientSession()
+
+            data_uri = f"data:audio/x-wav;base64,{base64.b64encode(audio).decode()}"
+            payload = {"audio_url": data_uri, **self._settings.given_fields()}
+            headers = {
+                "Authorization": f"Key {self._api_key}",
+                "Content-Type": "application/json",
+            }
+
+            async with self._session.post(
+                "https://fal.run/fal-ai/wizper",
+                json=payload,
+                headers=headers,
+            ) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    yield ErrorFrame(error=f"Fal API error ({resp.status}): {error_text}")
+                    return
+                response = await resp.json()
 
             if response and "text" in response:
                 text = response["text"].strip()
