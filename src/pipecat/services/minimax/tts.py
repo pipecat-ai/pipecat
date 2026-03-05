@@ -23,8 +23,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
@@ -231,6 +229,8 @@ class MiniMaxHttpTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=MiniMaxTTSSettings(
                 model=model,
                 voice=voice_id,
@@ -384,8 +384,6 @@ class MiniMaxHttpTTSService(TTSService):
             payload["language_boost"] = self._settings.language_boost
 
         try:
-            await self.start_ttfb_metrics()
-
             async with self._session.post(
                 self._base_url, headers=headers, json=payload
             ) as response:
@@ -395,9 +393,6 @@ class MiniMaxHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    yield TTSStartedFrame(context_id=context_id)
 
                 # Process the streaming response
                 buffer = bytearray()
