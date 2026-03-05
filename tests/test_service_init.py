@@ -73,7 +73,7 @@ def _import_all_service_modules():
     """Import every module under pipecat.services (skipping missing deps)."""
     package = pipecat.services
     for _importer, modname, _ispkg in pkgutil.walk_packages(
-        package.__path__, prefix=package.__name__ + "."
+        package.__path__, prefix=package.__name__ + ".", onerror=lambda _name: None
     ):
         try:
             importlib.import_module(modname)
