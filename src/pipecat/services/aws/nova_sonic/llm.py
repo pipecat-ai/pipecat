@@ -261,6 +261,9 @@ class AWSNovaSonicLLMService(LLMService):
                 deprecated top-level parameters, the ``settings`` values take
                 precedence.
             system_instruction: System-level instruction for the model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSNovaSonicLLMSettings(system_instruction=...)`` instead.
             tools: Available tools/functions for the model to use.
             send_transcription_frames: Whether to emit transcription frames.
 
@@ -273,6 +276,7 @@ class AWSNovaSonicLLMService(LLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = AWSNovaSonicLLMSettings(
             model="amazon.nova-2-sonic-v1:0",
+            system_instruction=None,
             voice="matthew",
             temperature=0.7,
             max_tokens=1024,
@@ -293,6 +297,11 @@ class AWSNovaSonicLLMService(LLMService):
         if voice_id != "matthew":
             _warn_deprecated_param("voice_id", AWSNovaSonicLLMSettings, "voice")
             default_settings.voice = voice_id
+        if system_instruction is not None:
+            _warn_deprecated_param(
+                "system_instruction", AWSNovaSonicLLMSettings, "system_instruction"
+            )
+            default_settings.system_instruction = system_instruction
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -325,7 +334,6 @@ class AWSNovaSonicLLMService(LLMService):
         self._output_sample_rate = _audio_params.output_sample_rate
         self._output_sample_size = _audio_params.output_sample_size
         self._output_channel_count = _audio_params.output_channel_count
-        self._system_instruction = system_instruction
         self._tools = tools
 
         # Validate endpointing_sensitivity parameter
@@ -625,11 +633,11 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_prompt_start_event(tools)
 
         # Send system instruction.
-        # Instruction from context takes priority over self._system_instruction.
+        # Instruction from context takes priority over self._settings.system_instruction.
         system_instruction = (
             llm_connection_params["system_instruction"]
             if llm_connection_params["system_instruction"]
-            else self._system_instruction
+            else self._settings.system_instruction
         )
         logger.debug(f"Using system instruction: {system_instruction}")
         if system_instruction:

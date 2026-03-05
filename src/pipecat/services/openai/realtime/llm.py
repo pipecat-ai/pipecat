@@ -170,6 +170,7 @@ class OpenAIRealtimeLLMService(LLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = OpenAIRealtimeLLMSettings(
             model="gpt-realtime-1.5",
+            system_instruction=None,
             temperature=None,
             max_tokens=None,
             top_p=None,
