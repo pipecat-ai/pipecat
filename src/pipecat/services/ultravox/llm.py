@@ -189,6 +189,7 @@ class UltravoxRealtimeLLMService(LLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = UltravoxRealtimeLLMSettings(
             model=None,
+            system_instruction=None,
             temperature=None,
             max_tokens=None,
             top_p=None,

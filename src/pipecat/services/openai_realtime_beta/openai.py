@@ -158,6 +158,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = OpenAIRealtimeBetaLLMSettings(
             model="gpt-4o-realtime-preview-2025-06-03",
+            system_instruction=None,
             temperature=None,
             max_tokens=None,
             top_p=None,
