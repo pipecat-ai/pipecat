@@ -22,8 +22,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
@@ -113,6 +111,8 @@ class XTTSService(TTSService):
         """
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=XTTSTTSSettings(
                 model=None,
                 voice=voice_id,
@@ -195,8 +195,6 @@ class XTTSService(TTSService):
             "stream_chunk_size": 20,
         }
 
-        await self.start_ttfb_metrics()
-
         async with self._aiohttp_session.post(url, json=payload) as r:
             if r.status != 200:
                 text = await r.text()
@@ -204,10 +202,6 @@ class XTTSService(TTSService):
                 return
 
             await self.start_tts_usage_metrics(text)
-
-            if not self.audio_context_available(context_id):
-                await self.create_audio_context(context_id)
-                yield TTSStartedFrame(context_id=context_id)
 
             CHUNK_SIZE = self.chunk_size
 
