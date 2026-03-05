@@ -20,10 +20,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "aiofiles>=24.1.0,<25",
+    "aiofiles>=24.1.0,<27",
     "aiohttp>=3.11.12,<4",
     "audioop-lts~=0.2.1; python_version>='3.13'",
-    "docstring_parser~=0.16",
+    "docstring_parser>=0.16,<1",
     "loguru~=0.7.3",
     "Markdown>=3.7,<4",
     "nltk>=3.9.3,<4",
@@ -31,17 +31,17 @@ dependencies = [
     "Pillow>=11.1.0,<13",
     "protobuf~=5.29.6",
     "pydantic>=2.10.6,<3",
-    "pyloudnorm~=0.1.1",
+    "pyloudnorm~=0.2.0",
     "resampy~=0.4.3",
-    "soxr~=0.5.0",
+    "soxr~=1.0.0",
     "openai>=1.74.0,<3",
     # Pinning numba to resolve package dependencies
-    "numba>=0.61.2",
-    "wait_for2>=0.4.1; python_version<'3.12'",
+    "numba>=0.61.2,<1",
+    "wait_for2>=0.4.1,<1; python_version<'3.12'",
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
-    "transformers",
-    "onnxruntime~=1.23.2",
+    "transformers>=4.48.0,<6",
+    "onnxruntime>=1.23.2,<2",
 ]
 
 [project.urls]
@@ -86,12 +86,12 @@ lemonslice = [ "pipecat-ai[daily]" ]
 livekit = [ "livekit~=1.0.13", "livekit-api~=1.0.5", "tenacity>=8.2.3,<10.0.0", "pyjwt>=2.10.1" ]
 lmnt = [ "pipecat-ai[websockets-base]" ]
 local = [ "pyaudio~=0.2.14" ]
-local-smart-turn = [ "coremltools>=8.0", "transformers", "torch>=2.5.0,<3", "torchaudio>=2.5.0,<3" ]
+local-smart-turn = [ "coremltools>=8.0", "transformers>=4.48.0,<6", "torch>=2.5.0,<3", "torchaudio>=2.5.0,<3" ]
 mcp = [ "mcp[cli]>=1.11.0,<2" ]
 mem0 = [ "mem0ai~=0.1.94" ]
 mistral = []
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
-moondream = [ "accelerate~=1.10.0", "einops~=0.8.0", "pyvips[binary]~=3.0.0", "timm~=1.0.13", "transformers>=4.48.0" ]
+moondream = [ "accelerate~=1.10.0", "einops~=0.8.0", "pyvips[binary]~=3.0.0", "timm~=1.0.13", "transformers>=4.48.0,<6" ]
 neuphonic = [ "pipecat-ai[websockets-base]" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 nvidia = [ "nvidia-riva-client~=2.21.1" ]
@@ -111,7 +111,7 @@ sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
 sarvam = [ "sarvamai==0.1.26a2", "pipecat-ai[websockets-base]" ]
 sentry = [ "sentry-sdk>=2.28.0,<3" ]
-silero = [ "onnxruntime~=1.23.2" ]
+silero = []
 simli = [ "simli-ai~=2.0.1"]
 soniox = [ "pipecat-ai[websockets-base]" ]
 soundfile = [ "soundfile~=0.13.1" ]
