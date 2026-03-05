@@ -42,7 +42,6 @@ from pipecat.frames.frames import (
     FrameProcessorResumeFrame,
     FrameProcessorResumeUrgentFrame,
     InterruptionFrame,
-    InterruptionTaskFrame,
     StartFrame,
     SystemFrame,
     UninterruptibleFrame,
@@ -52,8 +51,6 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
-
-INTERRUPTION_COMPLETION_TIMEOUT = 2.0
 
 
 class FrameDirection(Enum):
@@ -243,10 +240,6 @@ class FrameProcessor(BaseObject):
         self.__process_frame_task: Optional[asyncio.Task] = None
         self.__process_current_frame: Optional[Frame] = None
 
-        # Set while awaiting push_interruption_task_frame_and_wait() so that
-        # _start_interruption() knows not to cancel the process task.
-        self._wait_for_interruption = False
-
         # Frame processor events.
         self._register_event_handler("on_before_process_frame", sync=True)
         self._register_event_handler("on_after_process_frame", sync=True)
@@ -332,7 +325,7 @@ class FrameProcessor(BaseObject):
             warnings.simplefilter("always")
             warnings.warn(
                 "`FrameProcessor.interruptions_allowed` is deprecated. "
-                "Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.",
+                "Use `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -420,27 +413,49 @@ class FrameProcessor(BaseObject):
         """
         self._metrics.set_core_metrics_data(data)
 
-    async def start_ttfb_metrics(self):
-        """Start time-to-first-byte metrics collection."""
-        if self.can_generate_metrics() and self.metrics_enabled:
-            await self._metrics.start_ttfb_metrics(self._report_only_initial_ttfb)
+    async def start_ttfb_metrics(self, *, start_time: Optional[float] = None):
+        """Start time-to-first-byte metrics collection.
 
-    async def stop_ttfb_metrics(self):
-        """Stop time-to-first-byte metrics collection and push results."""
+        Args:
+            start_time: Optional timestamp to use as the start time. If None,
+                uses the current time.
+        """
         if self.can_generate_metrics() and self.metrics_enabled:
-            frame = await self._metrics.stop_ttfb_metrics()
+            await self._metrics.start_ttfb_metrics(
+                start_time=start_time, report_only_initial_ttfb=self._report_only_initial_ttfb
+            )
+
+    async def stop_ttfb_metrics(self, *, end_time: Optional[float] = None):
+        """Stop time-to-first-byte metrics collection and push results.
+
+        Args:
+            end_time: Optional timestamp to use as the end time. If None, uses
+                the current time.
+        """
+        if self.can_generate_metrics() and self.metrics_enabled:
+            frame = await self._metrics.stop_ttfb_metrics(end_time=end_time)
             if frame:
                 await self.push_frame(frame)
 
-    async def start_processing_metrics(self):
-        """Start processing metrics collection."""
-        if self.can_generate_metrics() and self.metrics_enabled:
-            await self._metrics.start_processing_metrics()
+    async def start_processing_metrics(self, *, start_time: Optional[float] = None):
+        """Start processing metrics collection.
 
-    async def stop_processing_metrics(self):
-        """Stop processing metrics collection and push results."""
+        Args:
+            start_time: Optional timestamp to use as the start time. If None,
+                uses the current time.
+        """
         if self.can_generate_metrics() and self.metrics_enabled:
-            frame = await self._metrics.stop_processing_metrics()
+            await self._metrics.start_processing_metrics(start_time=start_time)
+
+    async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
+        """Stop processing metrics collection and push results.
+
+        Args:
+            end_time: Optional timestamp to use as the end time. If None, uses
+                the current time.
+        """
+        if self.can_generate_metrics() and self.metrics_enabled:
+            frame = await self._metrics.stop_processing_metrics(end_time=end_time)
             if frame:
                 await self.push_frame(frame)
 
@@ -466,10 +481,23 @@ class FrameProcessor(BaseObject):
             if frame:
                 await self.push_frame(frame)
 
+    async def start_text_aggregation_metrics(self):
+        """Start text aggregation time metrics collection."""
+        if self.can_generate_metrics() and self.metrics_enabled:
+            await self._metrics.start_text_aggregation_metrics()
+
+    async def stop_text_aggregation_metrics(self):
+        """Stop text aggregation time metrics collection and push results."""
+        if self.can_generate_metrics() and self.metrics_enabled:
+            frame = await self._metrics.stop_text_aggregation_metrics()
+            if frame:
+                await self.push_frame(frame)
+
     async def stop_all_metrics(self):
         """Stop all active metrics collection."""
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
+        await self.stop_text_aggregation_metrics()
 
     def create_task(self, coroutine: Coroutine, name: Optional[str] = None) -> asyncio.Task:
         """Create a new task managed by this processor.
@@ -597,15 +625,6 @@ class FrameProcessor(BaseObject):
         """
         # If we are cancelling we don't want to process any other frame.
         if self._cancelling:
-            return
-
-        # If we are waiting for an interruption, bypass all queued system frames
-        # and process the frame right away. This is because a previous system
-        # frame might be waiting for the interruption frame blocking the input
-        # task, so this InterruptionFrame would never be dequeued and we'd
-        # deadlock.
-        if self._wait_for_interruption and isinstance(frame, InterruptionFrame):
-            await self.__process_frame(frame, direction, callback)
             return
 
         if self._enable_direct_mode:
@@ -745,40 +764,32 @@ class FrameProcessor(BaseObject):
 
         await self._call_event_handler("on_after_push_frame", frame)
 
-    async def push_interruption_task_frame_and_wait(self):
+    async def broadcast_interruption(self):
+        """Broadcast an `InterruptionFrame` both upstream and downstream."""
+        logger.debug(f"{self}: broadcasting interruption")
+        self.__reset_process_task()
+        await self.stop_all_metrics()
+        await self.broadcast_frame(InterruptionFrame)
+
+    async def push_interruption_task_frame_and_wait(self, *, timeout: float = 5.0):
         """Push an interruption task frame upstream and wait for the interruption.
 
-        This function sends an `InterruptionTaskFrame` upstream to the
-        pipeline task. The task creates a corresponding `InterruptionFrame`
-        and sends it downstream through the pipeline. An `asyncio.Event` is
-        attached to both frames so the caller can wait until the interruption
-        has fully traversed the pipeline. The event is set when the
-        `InterruptionFrame` reaches the pipeline sink. If the frame does
-        not complete within `INTERRUPTION_COMPLETION_TIMEOUT` seconds, a
-        warning is logged periodically until it completes.
-
+        .. deprecated:: 0.0.104
+            Use :meth:`broadcast_interruption` instead. This method now
+            delegates to ``broadcast_interruption()`` and ignores *timeout*.
         """
-        self._wait_for_interruption = True
+        import warnings
 
-        event = asyncio.Event()
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`FrameProcessor.push_interruption_task_frame_and_wait()` is deprecated. "
+                "Use `FrameProcessor.broadcast_interruption()` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
-        await self.push_frame(InterruptionTaskFrame(event=event), FrameDirection.UPSTREAM)
-
-        # Wait for the `InterruptionFrame` to complete and log a warning
-        # periodically if it takes too long.
-        while not event.is_set():
-            try:
-                await asyncio.wait_for(event.wait(), timeout=INTERRUPTION_COMPLETION_TIMEOUT)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f"{self}: InterruptionFrame has not completed after"
-                    f" {INTERRUPTION_COMPLETION_TIMEOUT}s. Make sure"
-                    " InterruptionFrame.complete() is being called (e.g. if the"
-                    " frame is being blocked or consumed before reaching the"
-                    " pipeline sink)."
-                )
-
-        self._wait_for_interruption = False
+        await self.broadcast_interruption()
 
     async def broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
         """Broadcasts a frame of the specified class upstream and downstream.
@@ -791,8 +802,12 @@ class FrameProcessor(BaseObject):
             frame_cls: The class of the frame to be broadcasted.
             **kwargs: Keyword arguments to be passed to the frame's constructor.
         """
-        await self.push_frame(frame_cls(**kwargs))
-        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
+        downstream_frame = frame_cls(**kwargs)
+        upstream_frame = frame_cls(**kwargs)
+        downstream_frame.broadcast_sibling_id = upstream_frame.id
+        upstream_frame.broadcast_sibling_id = downstream_frame.id
+        await self.push_frame(downstream_frame)
+        await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
     async def broadcast_frame_instance(self, frame: Frame):
         """Broadcasts a frame instance upstream and downstream.
@@ -816,15 +831,18 @@ class FrameProcessor(BaseObject):
             if not f.init and f.name not in ("id", "name")
         }
 
-        new_frame = frame_cls(**init_fields)
+        downstream_frame = frame_cls(**init_fields)
         for k, v in extra_fields.items():
-            setattr(new_frame, k, v)
-        await self.push_frame(new_frame)
+            setattr(downstream_frame, k, v)
 
-        new_frame = frame_cls(**init_fields)
+        upstream_frame = frame_cls(**init_fields)
         for k, v in extra_fields.items():
-            setattr(new_frame, k, v)
-        await self.push_frame(new_frame, FrameDirection.UPSTREAM)
+            setattr(upstream_frame, k, v)
+
+        downstream_frame.broadcast_sibling_id = upstream_frame.id
+        upstream_frame.broadcast_sibling_id = downstream_frame.id
+        await self.push_frame(downstream_frame)
+        await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
     async def __start(self, frame: StartFrame):
         """Handle the start frame to initialize processor state.
@@ -878,15 +896,7 @@ class FrameProcessor(BaseObject):
     async def _start_interruption(self):
         """Start handling an interruption by cancelling current tasks."""
         try:
-            if self._wait_for_interruption:
-                # If we get here we know the process task was just waiting for
-                # an interruption (push_interruption_task_frame_and_wait()), so
-                # we can't cancel the task because it might still need to do
-                # more things (e.g. pushing a frame after the
-                # interruption). Instead we just drain the queue because this is
-                # an interruption.
-                self.__reset_process_task()
-            elif isinstance(self.__process_current_frame, UninterruptibleFrame):
+            if isinstance(self.__process_current_frame, UninterruptibleFrame):
                 # We don't want to cancel UninterruptibleFrame, so we simply
                 # cleanup the queue.
                 self.__reset_process_queue()
@@ -910,7 +920,7 @@ class FrameProcessor(BaseObject):
         try:
             timestamp = self._clock.get_time() if self._clock else 0
             if direction == FrameDirection.DOWNSTREAM and self._next:
-                logger.trace(f"Pushing {frame} from {self} to {self._next}")
+                logger.trace(f"Pushing {frame} downstream from {self} to {self._next}")
 
                 if self._observer:
                     data = FramePushed(

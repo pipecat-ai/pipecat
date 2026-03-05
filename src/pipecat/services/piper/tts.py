@@ -7,8 +7,9 @@
 """Piper TTS service implementation."""
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncGenerator, AsyncIterator, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Optional
 
 import aiohttp
 from loguru import logger
@@ -19,6 +20,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -31,6 +33,13 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class PiperTTSSettings(TTSSettings):
+    """Settings for Piper TTS service."""
+
+    pass
+
+
 class PiperTTSService(TTSService):
     """Piper TTS service implementation.
 
@@ -38,6 +47,8 @@ class PiperTTSService(TTSService):
     downloads voice models if not already present and resamples audio output to
     match the configured sample rate.
     """
+
+    _settings: PiperTTSSettings
 
     def __init__(
         self,
@@ -58,9 +69,10 @@ class PiperTTSService(TTSService):
             use_cuda: Use CUDA for GPU-accelerated inference.
             **kwargs: Additional arguments passed to the parent `TTSService`.
         """
-        super().__init__(**kwargs)
-
-        self._voice_id = voice_id
+        super().__init__(
+            settings=PiperTTSSettings(model=None, voice=voice_id, language=None),
+            **kwargs,
+        )
 
         download_dir = download_dir or Path.cwd()
 
@@ -84,6 +96,18 @@ class PiperTTSService(TTSService):
             True, as Piper service supports metrics generation.
         """
         return True
+
+    async def _update_settings(self, delta: PiperTTSSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(delta)
+        if not changed:
+            return changed
+        # TODO: voice changes would require re-downloading and loading the model.
+        self._warn_unhandled_updated_settings(changed)
+        return changed
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -143,6 +167,13 @@ class PiperTTSService(TTSService):
 #  $ uv pip install "piper-tts[http]"
 #  $ uv run python -m piper.http_server -m en_US-ryan-high
 #
+@dataclass
+class PiperHttpTTSSettings(TTSSettings):
+    """Settings for Piper HTTP TTS service."""
+
+    pass
+
+
 class PiperHttpTTSService(TTSService):
     """Piper HTTP TTS service implementation.
 
@@ -150,6 +181,8 @@ class PiperHttpTTSService(TTSService):
     synthesis. Supports streaming audio generation with configurable sample
     rates and automatic WAV header removal.
     """
+
+    _settings: PiperHttpTTSSettings
 
     def __init__(
         self,
@@ -167,7 +200,10 @@ class PiperHttpTTSService(TTSService):
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            settings=PiperHttpTTSSettings(model=None, voice=voice_id, language=None),
+            **kwargs,
+        )
 
         if base_url.endswith("/"):
             logger.warning("Base URL ends with a slash, this is not allowed.")
@@ -175,7 +211,6 @@ class PiperHttpTTSService(TTSService):
 
         self._base_url = base_url
         self._session = aiohttp_session
-        self._model_id = voice_id
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -205,7 +240,7 @@ class PiperHttpTTSService(TTSService):
 
             data = {
                 "text": text,
-                "voice": self._model_id,
+                "voice": self._settings.voice,
             }
 
             async with self._session.post(self._base_url, json=data, headers=headers) as response:

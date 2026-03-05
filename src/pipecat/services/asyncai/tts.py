@@ -9,7 +9,8 @@
 import asyncio
 import base64
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
 from loguru import logger
@@ -20,14 +21,14 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextTTSService, TTSService
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.tts_service import AudioContextTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -72,11 +73,39 @@ def language_to_async_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class AsyncAITTSSettings(TTSSettings):
+    """Settings for Async AI TTS services.
+
+    Parameters:
+        output_container: Audio container format (e.g. "raw").
+        output_encoding: Audio encoding format (e.g. "pcm_s16le").
+        output_sample_rate: Audio sample rate in Hz.
+    """
+
+    output_container: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "AsyncAITTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested ``output_format``."""
+        flat = dict(settings)
+        nested = flat.pop("output_format", None)
+        if isinstance(nested, dict):
+            flat.setdefault("output_container", nested.get("container"))
+            flat.setdefault("output_encoding", nested.get("encoding"))
+            flat.setdefault("output_sample_rate", nested.get("sample_rate"))
+        return super().from_mapping(flat)
+
+
 class AsyncAITTSService(AudioContextTTSService):
     """Async TTS service with WebSocket streaming.
 
     Provides text-to-speech using Async's streaming WebSocket API.
     """
+
+    _settings: AsyncAITTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Async TTS configuration.
@@ -99,7 +128,8 @@ class AsyncAITTSService(AudioContextTTSService):
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
-        aggregate_sentences: Optional[bool] = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
     ):
         """Initialize the Async TTS service.
@@ -115,39 +145,55 @@ class AsyncAITTSService(AudioContextTTSService):
             encoding: Audio encoding format.
             container: Audio container format.
             params: Additional input parameters for voice customization.
-            aggregate_sentences: Whether to aggregate sentences within the TTSService.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to the parent service.
         """
+        params = params or AsyncAITTSService.InputParams()
+
         super().__init__(
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             pause_frame_processing=True,
             push_stop_frames=True,
             sample_rate=sample_rate,
+            settings=AsyncAITTSSettings(
+                model=model,
+                voice=voice_id,
+                output_container=container,
+                output_encoding=encoding,
+                output_sample_rate=0,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else None,
+            ),
             **kwargs,
         )
-
-        params = params or AsyncAITTSService.InputParams()
 
         self._api_key = api_key
         self._api_version = version
         self._url = url
-        self._settings = {
-            "output_format": {
-                "container": container,
-                "encoding": encoding,
-                "sample_rate": 0,
-            },
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else None,
-        }
-
-        self.set_model_name(model)
-        self.set_voice(voice_id)
 
         self._receive_task = None
         self._keepalive_task = None
-        self._context_id = None
+
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(delta)
+
+        if not changed:
+            return changed
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -179,7 +225,7 @@ class AsyncAITTSService(AudioContextTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["output_format"]["sample_rate"] = self.sample_rate
+        self._settings.output_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -233,10 +279,14 @@ class AsyncAITTSService(AudioContextTTSService):
                 f"{self._url}?api_key={self._api_key}&version={self._api_version}"
             )
             init_msg = {
-                "model_id": self._model_name,
-                "voice": {"mode": "id", "id": self._voice_id},
-                "output_format": self._settings["output_format"],
-                "language": self._settings["language"],
+                "model_id": self._settings.model,
+                "voice": {"mode": "id", "id": self._settings.voice},
+                "output_format": {
+                    "container": self._settings.output_container,
+                    "encoding": self._settings.output_encoding,
+                    "sample_rate": self._settings.output_sample_rate,
+                },
+                "language": self._settings.language,
             }
 
             await self._get_websocket().send(json.dumps(init_msg))
@@ -254,7 +304,7 @@ class AsyncAITTSService(AudioContextTTSService):
             if self._websocket:
                 logger.debug("Disconnecting from Async")
                 # Close all contexts and the socket
-                if self._context_id:
+                if self.has_active_audio_context():
                     await self._websocket.send(json.dumps({"terminate": True}))
                 await self._websocket.close()
                 logger.debug("Disconnected from Async")
@@ -262,7 +312,7 @@ class AsyncAITTSService(AudioContextTTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._websocket = None
-            self._context_id = None
+            await self.remove_active_audio_context()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -272,10 +322,11 @@ class AsyncAITTSService(AudioContextTTSService):
 
     async def flush_audio(self):
         """Flush any pending audio."""
-        if not self._context_id or not self._websocket:
+        context_id = self.get_active_audio_context_id()
+        if not context_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = self._build_msg(text=" ", context_id=self._context_id, force=True)
+        msg = self._build_msg(text=" ", context_id=context_id, force=True)
         await self._websocket.send(msg)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -303,11 +354,11 @@ class AsyncAITTSService(AudioContextTTSService):
 
             # Check if this message belongs to the current context.
             if not self.audio_context_available(received_ctx_id):
-                if self._context_id == received_ctx_id:
+                if self.get_active_audio_context_id() == received_ctx_id:
                     logger.debug(
-                        f"Received a delayed message, recreating the context: {self._context_id}"
+                        f"Received a delayed message, recreating the context: {received_ctx_id}"
                     )
-                    await self.create_audio_context(self._context_id)
+                    await self.create_audio_context(received_ctx_id)
                 else:
                     # This can happen if a message is received _after_ we have closed a context
                     # due to user interruption but _before_ the `isFinal` message for the context
@@ -328,10 +379,11 @@ class AsyncAITTSService(AudioContextTTSService):
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    if self._context_id:
+                    context_id = self.get_active_audio_context_id()
+                    if context_id:
                         keepalive_message = {
                             "transcript": " ",
-                            "context_id": self._context_id,
+                            "context_id": context_id,
                         }
                         logger.trace("Sending keepalive message")
                     else:
@@ -345,21 +397,29 @@ class AsyncAITTSService(AudioContextTTSService):
                 logger.warning(f"{self} keepalive error: {e}")
                 break
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        """Handle interruption by closing the current context."""
-        await super()._handle_interruption(frame, direction)
-
-        # Close the current context when interrupted without closing the websocket
-        if self._context_id and self._websocket:
+    async def _close_context(self, context_id: str):
+        # Async AI requires explicit context closure to free server-side resources,
+        # both on interruption and on normal completion.
+        if context_id and self._websocket:
             try:
                 await self._websocket.send(
-                    json.dumps(
-                        {"context_id": self._context_id, "close_context": True, "transcript": ""}
-                    )
+                    json.dumps({"context_id": context_id, "close_context": True, "transcript": ""})
                 )
             except Exception as e:
-                logger.error(f"Error closing context on interruption: {e}")
-            self._context_id = None
+                logger.error(f"{self}: Error closing context {context_id}: {e}")
+
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Close the Async AI context when the bot is interrupted."""
+        await self._close_context(context_id)
+
+    async def on_audio_context_completed(self, context_id: str):
+        """Close the Async AI context after all audio has been played.
+
+        Async AI does not send a server-side signal when a context is
+        exhausted, so Pipecat must explicitly close it with
+        ``close_context: True`` to free server-side resources.
+        """
+        await self._close_context(context_id)
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -379,15 +439,13 @@ class AsyncAITTSService(AudioContextTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
+                if not self.has_active_audio_context():
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame(context_id=context_id)
+                    if not self.audio_context_available(context_id):
+                        await self.create_audio_context(context_id)
 
-                if not self._context_id:
-                    self._context_id = context_id
-                if not self.audio_context_available(self._context_id):
-                    await self.create_audio_context(self._context_id)
-
-                msg = self._build_msg(text=text, force=True, context_id=self._context_id)
+                msg = self._build_msg(text=text, force=True, context_id=context_id)
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
 
@@ -407,6 +465,8 @@ class AsyncAIHttpTTSService(TTSService):
     non-WebSocket integration. Suitable for use cases where streaming WebSocket
     connection is not required or desired.
     """
+
+    _settings: AsyncAITTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Async API.
@@ -447,25 +507,26 @@ class AsyncAIHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or AsyncAIHttpTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=AsyncAITTSSettings(
+                model=model,
+                voice=voice_id,
+                output_container=container,
+                output_encoding=encoding,
+                output_sample_rate=0,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else None,
+            ),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._base_url = url
         self._api_version = version
-        self._settings = {
-            "output_format": {
-                "container": container,
-                "encoding": encoding,
-                "sample_rate": 0,
-            },
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else None,
-        }
-        self.set_voice(voice_id)
-        self.set_model_name(model)
 
         self._session = aiohttp_session
 
@@ -495,7 +556,7 @@ class AsyncAIHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["output_format"]["sample_rate"] = self.sample_rate
+        self._settings.output_sample_rate = self.sample_rate
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -511,14 +572,18 @@ class AsyncAIHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            voice_config = {"mode": "id", "id": self._voice_id}
+            voice_config = {"mode": "id", "id": self._settings.voice}
             await self.start_ttfb_metrics()
             payload = {
-                "model_id": self._model_name,
+                "model_id": self._settings.model,
                 "transcript": text,
                 "voice": voice_config,
-                "output_format": self._settings["output_format"],
-                "language": self._settings["language"],
+                "output_format": {
+                    "container": self._settings.output_container,
+                    "encoding": self._settings.output_encoding,
+                    "sample_rate": self._settings.output_sample_rate,
+                },
+                "language": self._settings.language,
             }
             yield TTSStartedFrame(context_id=context_id)
             headers = {

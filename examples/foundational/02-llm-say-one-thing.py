@@ -42,14 +42,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
-    messages = [
-        {
-            "role": "system",
-            "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world.",
-        }
-    ]
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        system_instruction="You are an LLM in a WebRTC session, and this is a 'hello world' demo.",
+    )
 
     task = PipelineTask(
         Pipeline([llm, tts, transport.output()]),
@@ -59,7 +55,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Register an event handler so we can play the audio when the client joins
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        await task.queue_frames([LLMContextFrame(LLMContext(messages)), EndFrame()])
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "Say hello to the world."})
+        await task.queue_frames([LLMContextFrame(context), EndFrame()])
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

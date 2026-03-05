@@ -11,6 +11,7 @@ for image analysis and description generation.
 """
 
 import asyncio
+from dataclasses import dataclass
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     VisionFullResponseStartFrame,
     VisionTextFrame,
 )
+from pipecat.services.settings import VisionSettings
 from pipecat.services.vision_service import VisionService
 
 try:
@@ -60,6 +62,15 @@ def detect_device():
         return torch.device("cpu"), torch.float32
 
 
+@dataclass
+class MoondreamSettings(VisionSettings):
+    """Settings for the Moondream vision service.
+
+    Parameters:
+        model: Moondream model identifier.
+    """
+
+
 class MoondreamService(VisionService):
     """Moondream vision-language model service.
 
@@ -79,9 +90,7 @@ class MoondreamService(VisionService):
             use_cpu: Whether to force CPU usage instead of hardware acceleration.
             **kwargs: Additional arguments passed to the parent VisionService.
         """
-        super().__init__(**kwargs)
-
-        self.set_model_name(model)
+        super().__init__(settings=MoondreamSettings(model=model), **kwargs)
 
         if not use_cpu:
             device, dtype = detect_device()

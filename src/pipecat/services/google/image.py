@@ -16,6 +16,7 @@ import os
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -25,6 +26,7 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
+from pipecat.services.settings import ImageGenSettings
 
 try:
     from google import genai
@@ -33,6 +35,15 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class GoogleImageGenSettings(ImageGenSettings):
+    """Settings for the Google image generation service.
+
+    Parameters:
+        model: Google Imagen model identifier.
+    """
 
 
 class GoogleImageGenService(ImageGenService):
@@ -72,14 +83,14 @@ class GoogleImageGenService(ImageGenService):
             http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to the parent ImageGenService.
         """
-        super().__init__(**kwargs)
-        self._params = params or GoogleImageGenService.InputParams()
+        params = params or GoogleImageGenService.InputParams()
+        super().__init__(settings=GoogleImageGenSettings(model=params.model), **kwargs)
+        self._params = params
 
         # Add client header
         http_options = update_google_client_http_options(http_options)
 
         self._client = genai.Client(api_key=api_key, http_options=http_options)
-        self.set_model_name(self._params.model)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

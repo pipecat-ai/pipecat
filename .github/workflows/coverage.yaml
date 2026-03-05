@@ -29,6 +29,7 @@ jobs:
 
       - name: Install system packages
         run: |
+          sudo apt-get update
           sudo apt-get install -y portaudio19-dev
 
       - name: Install dependencies
@@ -36,11 +37,13 @@ jobs:
           uv sync --group dev \
             --extra anthropic \
             --extra aws \
+            --extra deepgram \
             --extra google \
             --extra langchain \
             --extra livekit \
-            --extra local-smart-turn-v3 \
             --extra piper \
+            --extra sagemaker \
+            --extra tracing \
             --extra websocket
 
       - name: Run tests with coverage

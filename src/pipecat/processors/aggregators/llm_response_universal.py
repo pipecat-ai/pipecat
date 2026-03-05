@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
+    LLMAssistantPushAggregationFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
     LLMContextSummaryRequestFrame,
@@ -78,7 +79,10 @@ from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedPar
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
-from pipecat.utils.context.llm_context_summarization import LLMContextSummarizationConfig
+from pipecat.utils.context.llm_context_summarization import (
+    LLMAutoContextSummarizationConfig,
+    LLMContextSummarizationConfig,
+)
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
@@ -92,9 +96,9 @@ class LLMUserAggregatorParams:
         user_mute_strategies: List of user mute strategies.
         user_turn_stop_timeout: Time in seconds to wait before considering the
             user's turn finished.
-        user_idle_timeout: Optional timeout in seconds for detecting user idle state.
-            If set, the aggregator will emit an `on_user_turn_idle` event when the user
-            has been idle (not speaking) for this duration. Set to None to disable
+        user_idle_timeout: Timeout in seconds for detecting user idle state.
+            The aggregator will emit an `on_user_turn_idle` event when the user
+            has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
         filter_incomplete_user_turns: Whether to filter out incomplete user turns.
@@ -109,7 +113,7 @@ class LLMUserAggregatorParams:
     user_turn_strategies: Optional[UserTurnStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
-    user_idle_timeout: Optional[float] = None
+    user_idle_timeout: float = 0
     vad_analyzer: Optional[VADAnalyzer] = None
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
@@ -124,20 +128,56 @@ class LLMAssistantAggregatorParams:
             in text frames by adding spaces between tokens. This parameter is
             ignored when used with the newer LLMAssistantAggregator, which
             handles word spacing automatically.
-        enable_context_summarization: Enable automatic context summarization when token
-            limits are reached (disabled by default). When enabled, older conversation
-            messages are automatically compressed into summaries to manage context size.
-        context_summarization_config: Configuration for context summarization behavior.
-            Controls thresholds, message preservation, and summarization prompts. If None
-            and summarization is enabled, uses default configuration values.
+        enable_auto_context_summarization: Enable automatic context summarization when token
+            or message-count limits are reached (disabled by default). When enabled,
+            older conversation messages are automatically compressed into summaries to
+            manage context size.
+        auto_context_summarization_config: Configuration for automatic context
+            summarization. Controls trigger thresholds, message preservation, and
+            summarization prompts. If None, uses default
+            ``LLMAutoContextSummarizationConfig`` values.
         correct_aggregation_callback: Optional callback to correct corrupted
             TTS text before it's added to the conversation context.
     """
 
     expect_stripped_words: bool = True
-    enable_context_summarization: bool = False
+    enable_auto_context_summarization: bool = False
+    auto_context_summarization_config: Optional[LLMAutoContextSummarizationConfig] = None
+
+    # ---------------------------------------------------------------------------
+    # Deprecated field names — kept for backward compatibility.
+    # Use enable_auto_context_summarization and auto_context_summarization_config instead.
+    # ---------------------------------------------------------------------------
+    enable_context_summarization: Optional[bool] = None
     context_summarization_config: Optional[LLMContextSummarizationConfig] = None
     correct_aggregation_callback: Optional[Callable[[str], str]] = None
+
+    def __post_init__(self):
+        if self.enable_context_summarization is not None:
+            warnings.warn(
+                "LLMAssistantAggregatorParams.enable_context_summarization is deprecated. "
+                "Use enable_auto_context_summarization instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.enable_auto_context_summarization = self.enable_context_summarization
+            self.enable_context_summarization = None
+
+        if self.context_summarization_config is not None:
+            warnings.warn(
+                "LLMAssistantAggregatorParams.context_summarization_config is deprecated. "
+                "Use auto_context_summarization_config (LLMAutoContextSummarizationConfig) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if isinstance(self.context_summarization_config, LLMContextSummarizationConfig):
+                self.auto_context_summarization_config = (
+                    self.context_summarization_config.to_auto_config()
+                )
+            else:
+                # Accept LLMAutoContextSummarizationConfig passed to the deprecated field
+                self.auto_context_summarization_config = self.context_summarization_config  # type: ignore[assignment]
+            self.context_summarization_config = None
 
 
 @dataclass
@@ -407,15 +447,10 @@ class LLMUserAggregator(LLMContextAggregator):
             "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
         )
 
-        # Optional user idle controller
-        self._user_idle_controller: Optional[UserIdleController] = None
-        if self._params.user_idle_timeout:
-            self._user_idle_controller = UserIdleController(
-                user_idle_timeout=self._params.user_idle_timeout
-            )
-            self._user_idle_controller.add_event_handler(
-                "on_user_turn_idle", self._on_user_turn_idle
-            )
+        self._user_idle_controller = UserIdleController(
+            user_idle_timeout=self._params.user_idle_timeout
+        )
+        self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
 
         # VAD controller
         self._vad_controller: Optional[VADController] = None
@@ -469,6 +504,10 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+        elif isinstance(frame, (InterimTranscriptionFrame, TranslationFrame)):
+            # Interim transcriptions and translations are consumed here
+            # and not pushed downstream, same as final TranscriptionFrame.
+            pass
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
@@ -492,8 +531,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         await self._user_turn_controller.process_frame(frame)
 
-        if self._user_idle_controller:
-            await self._user_idle_controller.process_frame(frame)
+        await self._user_idle_controller.process_frame(frame)
 
     async def push_aggregation(self) -> str:
         """Push the current aggregation."""
@@ -510,8 +548,7 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _start(self, frame: StartFrame):
         await self._user_turn_controller.setup(self.task_manager)
 
-        if self._user_idle_controller:
-            await self._user_idle_controller.setup(self.task_manager)
+        await self._user_idle_controller.setup(self.task_manager)
 
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
@@ -544,14 +581,19 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _cleanup(self):
         await self._user_turn_controller.cleanup()
-
-        if self._user_idle_controller:
-            await self._user_idle_controller.cleanup()
+        await self._user_idle_controller.cleanup()
 
         for s in self._params.user_mute_strategies:
             await s.cleanup()
 
     async def _maybe_mute_frame(self, frame: Frame):
+        # Lifecycle frames should never be muted and should not trigger mute
+        # state changes. Evaluating mute strategies on StartFrame would
+        # broadcast UserMuteStartedFrame before StartFrame reaches downstream
+        # processors.
+        if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
+            return False
+
         should_mute_frame = self._user_is_muted and isinstance(
             frame,
             (
@@ -567,12 +609,6 @@ class LLMUserAggregator(LLMContextAggregator):
 
         if should_mute_frame:
             logger.trace(f"{frame.name} suppressed - user currently muted")
-
-        # When muted, the InterruptionFrame won't propagate further and
-        # will never reach the pipeline sink. Complete it here so
-        # push_interruption_task_frame_and_wait() doesn't hang.
-        if should_mute_frame and isinstance(frame, InterruptionFrame):
-            frame.complete()
 
         should_mute_next_time = False
         for s in self._params.user_mute_strategies:
@@ -602,6 +638,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
+        if self._params.filter_incomplete_user_turns:
+            config = self._params.user_turn_completion_config or UserTurnCompletionConfig()
+            self._context.add_message({"role": "system", "content": config.completion_instructions})
         if frame.run_llm:
             await self.push_context_frame()
 
@@ -691,8 +730,10 @@ class LLMUserAggregator(LLMContextAggregator):
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
+        await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
+
         if params.enable_interruptions and self._allow_interruptions:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
 
         await self._call_event_handler("on_user_turn_started", strategy)
 
@@ -706,6 +747,8 @@ class LLMUserAggregator(LLMContextAggregator):
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStoppedSpeakingFrame)
+
+        await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._maybe_emit_user_turn_stopped(strategy)
 
@@ -820,16 +863,18 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._thought_aggregation: List[TextPartForConcatenation] = []
         self._thought_start_time: str = ""
 
-        # Context summarization
-        self._summarizer: Optional[LLMContextSummarizer] = None
-        if self._params.enable_context_summarization:
-            self._summarizer = LLMContextSummarizer(
-                context=self._context,
-                config=self._params.context_summarization_config,
-            )
-            self._summarizer.add_event_handler(
-                "on_request_summarization", self._on_request_summarization
-            )
+        # Context summarization — always create the summarizer so that manually
+        # pushed LLMSummarizeContextFrame frames are always handled.
+        # Auto-triggering based on thresholds is only enabled when
+        # enable_auto_context_summarization is True.
+        self._summarizer: Optional[LLMContextSummarizer] = LLMContextSummarizer(
+            context=self._context,
+            config=self._params.auto_context_summarization_config,
+            auto_trigger=self._params.enable_auto_context_summarization,
+        )
+        self._summarizer.add_event_handler(
+            "on_request_summarization", self._on_request_summarization
+        )
 
         self._register_event_handler("on_assistant_turn_started")
         self._register_event_handler("on_assistant_turn_stopped")
@@ -875,6 +920,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._handle_end_or_cancel(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMAssistantPushAggregationFrame):
+            await self.push_aggregation()
         elif isinstance(frame, LLMFullResponseStartFrame):
             await self._handle_llm_start(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -1263,8 +1310,8 @@ class LLMContextAggregatorPair:
         self,
         context: LLMContext,
         *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        user_params: Optional[LLMUserAggregatorParams] = None,
+        assistant_params: Optional[LLMAssistantAggregatorParams] = None,
     ):
         """Initialize the LLM context aggregator pair.
 
@@ -1273,6 +1320,8 @@ class LLMContextAggregatorPair:
             user_params: Parameters for the user context aggregator.
             assistant_params: Parameters for the assistant context aggregator.
         """
+        user_params = user_params or LLMUserAggregatorParams()
+        assistant_params = assistant_params or LLMAssistantAggregatorParams()
         self._user = LLMUserAggregator(context, params=user_params)
         self._assistant = LLMAssistantAggregator(context, params=assistant_params)
 

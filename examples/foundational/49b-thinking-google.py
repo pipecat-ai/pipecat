@@ -69,16 +69,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 include_thoughts=True,
             )
         ),
+        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
     )
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
-
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -109,16 +103,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append(
-            {
-                "role": "user",
-                "content": "Say hello briefly.",
-            }
-        )
+        context.add_message({"role": "user", "content": "Say hello briefly."})
         # Replace the above with one of these example prompts to demonstrate
         # thinking.
         # These examples come from Gemini and Anthropic docs.
-        # messages.append(
+        # context.add_message(
         #     {
         #         "role": "user",
         #         "content": "Analogize photosynthesis and growing up. Keep your answer concise.",

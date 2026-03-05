@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     FunctionCallResultProperties,
     InterimTranscriptionFrame,
     InterruptionFrame,
-    InterruptionTaskFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -567,7 +566,7 @@ class BaseTestUserContextAggregator:
             SleepFrame(),
             UserStoppedSpeakingFrame(),
         ]
-        expected_up_frames = [InterruptionTaskFrame]
+        expected_up_frames = [InterruptionFrame]
         expected_down_frames = [
             BotStartedSpeakingFrame,
             UserStartedSpeakingFrame,

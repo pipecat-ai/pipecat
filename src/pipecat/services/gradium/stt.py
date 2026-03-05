@@ -12,7 +12,8 @@ WebSocket API for streaming audio transcription.
 
 import base64
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -27,6 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -64,6 +66,18 @@ def language_to_gradium_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class GradiumSTTSettings(STTSettings):
+    """Settings for the Gradium STT service.
+
+    Parameters:
+        delay_in_frames: Delay in audio frames (80ms each) before text is
+            generated. Higher delays allow more context but increase latency.
+    """
+
+    delay_in_frames: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class GradiumSTTService(WebsocketSTTService):
     """Gradium real-time speech-to-text service.
 
@@ -71,6 +85,8 @@ class GradiumSTTService(WebsocketSTTService):
     Supports both interim and final transcriptions with configurable parameters
     for audio processing and connection management.
     """
+
+    _settings: GradiumSTTSettings
 
     class InputParams(BaseModel):
         """Configuration parameters for Gradium STT API.
@@ -113,8 +129,6 @@ class GradiumSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(sample_rate=SAMPLE_RATE, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
         if json_config is not None:
             import warnings
 
@@ -124,10 +138,22 @@ class GradiumSTTService(WebsocketSTTService):
                 stacklevel=2,
             )
 
+        params = params or GradiumSTTService.InputParams()
+
+        super().__init__(
+            sample_rate=SAMPLE_RATE,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=GradiumSTTSettings(
+                model=None,
+                language=params.language,
+                delay_in_frames=params.delay_in_frames or None,
+            ),
+            **kwargs,
+        )
+
         self._api_key = api_key
         self._api_endpoint_base_url = api_endpoint_base_url
         self._websocket = None
-        self._params = params or GradiumSTTService.InputParams()
         self._json_config = json_config
 
         self._receive_task = None
@@ -149,16 +175,22 @@ class GradiumSTTService(WebsocketSTTService):
         """
         return True
 
-    async def set_language(self, language: Language):
-        """Set the recognition language and reconnect.
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta, sync params, and reconnect.
 
         Args:
-            language: The language to use for speech recognition.
+            delta: A :class:`STTSettings` (or ``GradiumSTTSettings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
         """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._params.language = language
+        changed = await super()._update_settings(delta)
+        if not changed:
+            return changed
+
         await self._disconnect()
         await self._connect()
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the speech-to-text service.
@@ -298,12 +330,12 @@ class GradiumSTTService(WebsocketSTTService):
             json_config = {}
             if self._json_config:
                 json_config = json.loads(self._json_config)
-            if self._params.language:
-                gradium_language = language_to_gradium_language(self._params.language)
+            if self._settings.language:
+                gradium_language = language_to_gradium_language(self._settings.language)
                 if gradium_language:
                     json_config["language"] = gradium_language
-            if self._params.delay_in_frames:
-                json_config["delay_in_frames"] = self._params.delay_in_frames
+            if self._settings.delay_in_frames:
+                json_config["delay_in_frames"] = self._settings.delay_in_frames
             if json_config:
                 setup_msg["json_config"] = json_config
             await self._websocket.send(json.dumps(setup_msg))

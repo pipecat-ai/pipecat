@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 if TYPE_CHECKING:
     from opentelemetry.trace import Span
 
+    from pipecat.services.settings import ServiceSettings
+
 from pipecat.utils.tracing.setup import is_tracing_available
 
 if is_tracing_available():
@@ -69,7 +71,7 @@ def add_tts_span_attributes(
     model: str,
     voice_id: str,
     text: Optional[str] = None,
-    settings: Optional[Dict[str, Any]] = None,
+    settings: Optional["ServiceSettings"] = None,
     character_count: Optional[int] = None,
     operation_name: str = "tts",
     ttfb: Optional[float] = None,
@@ -108,7 +110,7 @@ def add_tts_span_attributes(
 
     # Add settings if provided
     if settings:
-        for key, value in settings.items():
+        for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
                 span.set_attribute(f"settings.{key}", value)
 
@@ -127,7 +129,7 @@ def add_stt_span_attributes(
     is_final: Optional[bool] = None,
     language: Optional[str] = None,
     user_id: Optional[str] = None,
-    settings: Optional[Dict[str, Any]] = None,
+    settings: Optional["ServiceSettings"] = None,
     vad_enabled: bool = False,
     ttfb: Optional[float] = None,
     **kwargs,
@@ -172,7 +174,7 @@ def add_stt_span_attributes(
 
     # Add settings if provided
     if settings:
-        for key, value in settings.items():
+        for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
                 span.set_attribute(f"settings.{key}", value)
 
@@ -278,7 +280,7 @@ def add_gemini_live_span_attributes(
     voice_id: Optional[str] = None,
     language: Optional[str] = None,
     modalities: Optional[str] = None,
-    settings: Optional[Dict[str, Any]] = None,
+    settings: Optional["ServiceSettings"] = None,
     tools: Optional[List[Dict]] = None,
     tools_serialized: Optional[str] = None,
     transcript: Optional[str] = None,
@@ -355,7 +357,7 @@ def add_gemini_live_span_attributes(
 
     # Add settings if provided
     if settings:
-        for key, value in settings.items():
+        for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
                 span.set_attribute(f"settings.{key}", value)
             elif key == "vad" and value:

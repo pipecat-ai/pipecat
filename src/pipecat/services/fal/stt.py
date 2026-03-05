@@ -11,12 +11,14 @@ transcription using segmented audio processing.
 """
 
 import os
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import FAL_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -146,12 +148,30 @@ def language_to_fal_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class FalSTTSettings(STTSettings):
+    """Settings for the Fal Wizper STT service.
+
+    Parameters:
+        task: Task to perform ('transcribe' or 'translate'). Defaults to
+            'transcribe'.
+        chunk_level: Level of chunking ('segment'). Defaults to 'segment'.
+        version: Version of Wizper model to use. Defaults to '3'.
+    """
+
+    task: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    chunk_level: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    version: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class FalSTTService(SegmentedSTTService):
     """Speech-to-text service using Fal's Wizper API.
 
     This service uses Fal's Wizper API to perform speech-to-text transcription on audio
     segments. It inherits from SegmentedSTTService to handle audio buffering and speech detection.
     """
+
+    _settings: FalSTTSettings
 
     class InputParams(BaseModel):
         """Configuration parameters for Fal's Wizper API.
@@ -187,13 +207,22 @@ class FalSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
+        params = params or FalSTTService.InputParams()
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
+            settings=FalSTTSettings(
+                model=None,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en",
+                task=params.task,
+                chunk_level=params.chunk_level,
+                version=params.version,
+            ),
             **kwargs,
         )
-
-        params = params or FalSTTService.InputParams()
 
         if api_key:
             os.environ["FAL_KEY"] = api_key
@@ -203,14 +232,6 @@ class FalSTTService(SegmentedSTTService):
             )
 
         self._fal_client = fal_client.AsyncClient(key=api_key or os.getenv("FAL_KEY"))
-        self._settings = {
-            "task": params.task,
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en",
-            "chunk_level": params.chunk_level,
-            "version": params.version,
-        }
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -230,24 +251,6 @@ class FalSTTService(SegmentedSTTService):
             The Fal-specific language code, or None if not supported.
         """
         return language_to_fal_language(language)
-
-    async def set_language(self, language: Language):
-        """Set the transcription language.
-
-        Args:
-            language: The language to use for speech-to-text transcription.
-        """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._settings["language"] = self.language_to_service_language(language)
-
-    async def set_model(self, model: str):
-        """Set the STT model.
-
-        Args:
-            model: The model name to use for transcription.
-        """
-        await super().set_model(model)
-        logger.info(f"Switching STT model to: [{model}]")
 
     @traced_stt
     async def _handle_transcription(
@@ -276,19 +279,19 @@ class FalSTTService(SegmentedSTTService):
             data_uri = fal_client.encode(audio, "audio/x-wav")
             response = await self._fal_client.run(
                 "fal-ai/wizper",
-                arguments={"audio_url": data_uri, **self._settings},
+                arguments={"audio_url": data_uri, **self._settings.given_fields()},
             )
 
             if response and "text" in response:
                 text = response["text"].strip()
                 if text:  # Only yield non-empty text
-                    await self._handle_transcription(text, True, self._settings["language"])
+                    await self._handle_transcription(text, True, self._settings.language)
                     logger.debug(f"Transcription: [{text}]")
                     yield TranscriptionFrame(
                         text,
                         self._user_id,
                         time_now_iso8601(),
-                        Language(self._settings["language"]),
+                        Language(self._settings.language),
                         result=response,
                     )
 

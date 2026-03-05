@@ -123,6 +123,7 @@ TESTS_07 = [
     ("07n-interruptible-google.py", EVAL_SIMPLE_MATH),
     ("07n-interruptible-google-http.py", EVAL_SIMPLE_MATH),
     ("07o-interruptible-assemblyai.py", EVAL_SIMPLE_MATH),
+    ("07p-interruptible-krisp-viva.py", EVAL_SIMPLE_MATH),
     ("07q-interruptible-rime.py", EVAL_SIMPLE_MATH),
     ("07q-interruptible-rime-http.py", EVAL_SIMPLE_MATH),
     ("07r-interruptible-nvidia.py", EVAL_SIMPLE_MATH),
@@ -143,13 +144,10 @@ TESTS_07 = [
     ("07ze-interruptible-hume.py", EVAL_SIMPLE_MATH),
     ("07zf-interruptible-gradium.py", EVAL_SIMPLE_MATH),
     ("07zg-interruptible-camb.py", EVAL_SIMPLE_MATH),
-    ("07zh-interruptible-hathora.py", EVAL_SIMPLE_MATH),
     ("07zi-interruptible-piper.py", EVAL_SIMPLE_MATH),
     ("07zj-interruptible-kokoro.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
-    # Needs a Krisp license.
-    # ("07p-interruptible-krisp.py", EVAL_SIMPLE_MATH),
 ]
 
 TESTS_12 = [

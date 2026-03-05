@@ -14,7 +14,8 @@ import json
 import os
 import random
 import string
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -28,6 +29,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -43,6 +45,25 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class AWSTranscribeSTTSettings(STTSettings):
+    """Settings for the AWS Transcribe STT service.
+
+    Parameters:
+        sample_rate: Audio sample rate in Hz (8000 or 16000).
+        media_encoding: Audio encoding format (e.g. "linear16").
+        number_of_channels: Number of audio channels.
+        show_speaker_label: Whether to show speaker labels.
+        enable_channel_identification: Whether to enable channel identification.
+    """
+
+    sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    media_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    number_of_channels: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    show_speaker_label: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_channel_identification: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class AWSTranscribeSTTService(WebsocketSTTService):
     """AWS Transcribe Speech-to-Text service using WebSocket streaming.
 
@@ -50,6 +71,8 @@ class AWSTranscribeSTTService(WebsocketSTTService):
     Supports multiple languages, configurable sample rates, and both interim and
     final transcription results.
     """
+
+    _settings: AWSTranscribeSTTSettings
 
     def __init__(
         self,
@@ -76,23 +99,25 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
-        self._settings = {
-            "sample_rate": sample_rate,
-            "language": language,
-            "media_encoding": "linear16",  # AWS expects raw PCM
-            "number_of_channels": 1,
-            "show_speaker_label": False,
-            "enable_channel_identification": False,
-        }
+        super().__init__(
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=AWSTranscribeSTTSettings(
+                language=self.language_to_service_language(language) or "en-US",
+                sample_rate=sample_rate,
+                media_encoding="linear16",
+                number_of_channels=1,
+                show_speaker_label=False,
+                enable_channel_identification=False,
+            ),
+            **kwargs,
+        )
 
         # Validate sample rate - AWS Transcribe only supports 8000 Hz or 16000 Hz
         if sample_rate not in [8000, 16000]:
             logger.warning(
                 f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. Converting from {sample_rate} Hz to 16000 Hz."
             )
-            self._settings["sample_rate"] = 16000
+            self._settings.sample_rate = 16000
 
         self._credentials = {
             "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
@@ -102,6 +127,14 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         }
 
         self._receive_task = None
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as AWS Transcribe STT supports metrics generation.
+        """
+        return True
 
     def get_service_encoding(self, encoding: str) -> str:
         """Convert internal encoding format to AWS Transcribe format.
@@ -116,6 +149,26 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             "linear16": "pcm",  # AWS expects "pcm" for 16-bit linear PCM
         }
         return encoding_map.get(encoding, encoding)
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(delta)
+
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # if changed and self._websocket:
+        #     await self._disconnect()
+        #     await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     async def start(self, frame: StartFrame):
         """Initialize the connection when the service starts.
@@ -208,9 +261,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
             logger.debug("Connecting to AWS Transcribe WebSocket")
 
-            language_code = self.language_to_service_language(Language(self._settings["language"]))
+            language_code = self._settings.language
             if not language_code:
-                raise ValueError(f"Unsupported language: {self._settings['language']}")
+                raise ValueError(f"Unsupported language: {language_code}")
 
             # Generate random websocket key
             websocket_key = "".join(
@@ -237,14 +290,14 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 },
                 language_code=language_code,
                 media_encoding=self.get_service_encoding(
-                    self._settings["media_encoding"]
+                    self._settings.media_encoding
                 ),  # Convert to AWS format
-                sample_rate=self._settings["sample_rate"],
-                number_of_channels=self._settings["number_of_channels"],
+                sample_rate=self._settings.sample_rate,
+                number_of_channels=self._settings.number_of_channels,
                 enable_partial_results_stabilization=True,
                 partial_results_stability="high",
-                show_speaker_label=self._settings["show_speaker_label"],
-                enable_channel_identification=self._settings["enable_channel_identification"],
+                show_speaker_label=self._settings.show_speaker_label,
+                enable_channel_identification=self._settings.enable_channel_identification,
             )
 
             logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
@@ -479,14 +532,14 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                                             transcript,
                                             self._user_id,
                                             time_now_iso8601(),
-                                            self._settings["language"],
+                                            self._settings.language,
                                             result=result,
                                         )
                                     )
                                     await self._handle_transcription(
                                         transcript,
                                         is_final,
-                                        self._settings["language"],
+                                        self._settings.language,
                                     )
                                     await self.stop_processing_metrics()
                                 else:
@@ -495,7 +548,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                                             transcript,
                                             self._user_id,
                                             time_now_iso8601(),
-                                            self._settings["language"],
+                                            self._settings.language,
                                             result=result,
                                         )
                                     )

@@ -53,6 +53,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, F
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIObserverParams, RTVIProcessor
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
+from pipecat.utils.tracing.tracing_context import TracingContext
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
 HEARTBEAT_SECS = 1.0
@@ -290,10 +291,14 @@ class PipelineTask(BasePipelineTask):
         self._turn_tracking_observer: Optional[TurnTrackingObserver] = None
         self._user_bot_latency_observer: Optional[UserBotLatencyObserver] = None
         self._turn_trace_observer: Optional[TurnTraceObserver] = None
+        self._tracing_context: Optional[TracingContext] = None
         if self._enable_turn_tracking:
             self._turn_tracking_observer = TurnTrackingObserver()
             observers.append(self._turn_tracking_observer)
-            # Create latency observer (useful for both tracing and external consumers)
+        if self._enable_tracing and self._turn_tracking_observer:
+            # Create pipeline-scoped tracing context
+            self._tracing_context = TracingContext()
+            # Create latency observer for tracing
             self._user_bot_latency_observer = UserBotLatencyObserver()
             observers.append(self._user_bot_latency_observer)
         if self._enable_tracing and self._turn_tracking_observer:
@@ -303,6 +308,7 @@ class PipelineTask(BasePipelineTask):
                 latency_tracker=self._user_bot_latency_observer,
                 conversation_id=self._conversation_id,
                 additional_span_attributes=self._additional_span_attributes,
+                tracing_context=self._tracing_context,
             )
             observers.append(self._turn_trace_observer)
 
@@ -325,6 +331,7 @@ class PipelineTask(BasePipelineTask):
 
         # RTVI support
         self._rtvi = None
+        prepend_rtvi = False
         external_rtvi = self._find_processor(pipeline, RTVIProcessor)
         external_observer_found = any(isinstance(o, RTVIObserver) for o in observers)
 
@@ -347,6 +354,7 @@ class PipelineTask(BasePipelineTask):
         elif enable_rtvi:
             self._rtvi = rtvi_processor or RTVIProcessor()
             observers.append(self._rtvi.create_rtvi_observer(params=rtvi_observer_params))
+            prepend_rtvi = True
 
         if self._rtvi:
             # Automatically call RTVIProcessor.set_bot_ready()
@@ -382,9 +390,12 @@ class PipelineTask(BasePipelineTask):
         # source allows us to receive and react to upstream frames, and the sink
         # allows us to receive and react to downstream frames.
         source = PipelineSource(self._source_push_frame, name=f"{self}::Source")
-        sink = PipelineSink(self._sink_push_frame, name=f"{self}::Sink")
-        processors = [self._rtvi, pipeline] if self._rtvi else [pipeline]
-        self._pipeline = Pipeline(processors, source=source, sink=sink)
+        self._sink = PipelineSink(self._sink_push_frame, name=f"{self}::Sink")
+        # Only prepend the RTVIProcessor if we created it ourselves. When the
+        # user already placed it inside their pipeline we must not insert it
+        # again or it will appear twice in the frame chain.
+        processors = [self._rtvi, pipeline] if prepend_rtvi else [pipeline]
+        self._pipeline = Pipeline(processors, source=source, sink=self._sink)
 
         # The task observer acts as a proxy to the provided observers. This way,
         # we only need to pass a single observer (using the StartFrame) which
@@ -624,26 +635,43 @@ class PipelineTask(BasePipelineTask):
             self._finished = True
             logger.debug(f"Pipeline task {self} has finished")
 
-    async def queue_frame(self, frame: Frame):
-        """Queue a single frame to be pushed down the pipeline.
+    async def queue_frame(
+        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+    ):
+        """Queue a single frame to be pushed through the pipeline.
+
+        Downstream frames are pushed from the beginning of the pipeline.
+        Upstream frames are pushed from the end of the pipeline.
 
         Args:
             frame: The frame to be processed.
+            direction: The direction to push the frame. Defaults to downstream.
         """
-        await self._push_queue.put(frame)
+        if direction == FrameDirection.DOWNSTREAM:
+            await self._push_queue.put(frame)
+        else:
+            await self._sink.queue_frame(frame, direction)
 
-    async def queue_frames(self, frames: Iterable[Frame] | AsyncIterable[Frame]):
-        """Queues multiple frames to be pushed down the pipeline.
+    async def queue_frames(
+        self,
+        frames: Iterable[Frame] | AsyncIterable[Frame],
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+    ):
+        """Queue multiple frames to be pushed through the pipeline.
+
+        Downstream frames are pushed from the beginning of the pipeline.
+        Upstream frames are pushed from the end of the pipeline.
 
         Args:
             frames: An iterable or async iterable of frames to be processed.
+            direction: The direction to push the frames. Defaults to downstream.
         """
         if isinstance(frames, AsyncIterable):
             async for frame in frames:
-                await self.queue_frame(frame)
+                await self.queue_frame(frame, direction)
         elif isinstance(frames, Iterable):
             for frame in frames:
-                await self.queue_frame(frame)
+                await self.queue_frame(frame, direction)
 
     async def _cancel(self, *, reason: Optional[str] = None):
         """Internal cancellation logic for the pipeline task.
@@ -822,6 +850,7 @@ class PipelineTask(BasePipelineTask):
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             interruption_strategies=self._params.interruption_strategies,
+            tracing_context=self._tracing_context,
         )
         start_frame.metadata = self._create_start_metadata()
         await self._pipeline.queue_frame(start_frame)
@@ -873,7 +902,7 @@ class PipelineTask(BasePipelineTask):
             # pipeline. This is in case the push task is blocked waiting for a
             # pipeline-ending frame to finish traversing the pipeline.
             logger.debug(f"{self}: received interruption task frame {frame}")
-            await self._pipeline.queue_frame(InterruptionFrame(event=frame.event))
+            await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
             await self._call_event_handler("on_pipeline_error", frame)
             if frame.fatal:
@@ -896,6 +925,7 @@ class PipelineTask(BasePipelineTask):
 
         if isinstance(frame, StartFrame):
             await self._call_event_handler("on_pipeline_started", frame)
+            await self._observer.on_pipeline_started()
 
             # Start heartbeat tasks now that StartFrame has been processed
             # by all processors in the pipeline
@@ -912,8 +942,6 @@ class PipelineTask(BasePipelineTask):
             self._pipeline_end_event.set()
         elif isinstance(frame, CancelFrame):
             self._pipeline_end_event.set()
-        elif isinstance(frame, InterruptionFrame):
-            frame.complete()
         elif isinstance(frame, HeartbeatFrame):
             await self._heartbeat_queue.put(frame)
 

@@ -71,6 +71,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
         endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
         model=os.getenv("AZURE_CHATGPT_MODEL"),
+        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
     )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
@@ -97,14 +98,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         required=["location", "format"],
     )
     tools = ToolsSchema(standard_tools=[weather_function])
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
-
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

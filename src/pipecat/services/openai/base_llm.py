@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional
 
 import httpx
@@ -34,7 +35,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
-    LLMUpdateSettingsFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -44,7 +44,22 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
+from pipecat.services.settings import LLMSettings, _NotGiven
 from pipecat.utils.tracing.service_decorators import traced_llm
+
+
+@dataclass
+class OpenAILLMSettings(LLMSettings):
+    """Settings for OpenAI-compatible LLM services.
+
+    Parameters:
+        max_completion_tokens: Maximum completion tokens to generate.
+        service_tier: Service tier to use (e.g., "auto", "flex", "priority").
+    """
+
+    max_completion_tokens: int | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    service_tier: str | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
 
 
 class BaseOpenAILLMService(LLMService):
@@ -56,6 +71,8 @@ class BaseOpenAILLMService(LLMService):
     assistant, and system messages, as well as tool choices and function call
     configurations.
     """
+
+    _settings: OpenAILLMSettings
 
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
@@ -102,6 +119,7 @@ class BaseOpenAILLMService(LLMService):
         params: Optional[InputParams] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
+        system_instruction: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -116,26 +134,32 @@ class BaseOpenAILLMService(LLMService):
             params: Input parameters for model configuration and behavior.
             retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
             retry_on_timeout: Whether to retry the request once if it times out.
+            system_instruction: Optional system instruction to prepend to messages.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
-        super().__init__(**kwargs)
-
         params = params or BaseOpenAILLMService.InputParams()
 
-        self._settings = {
-            "frequency_penalty": params.frequency_penalty,
-            "presence_penalty": params.presence_penalty,
-            "seed": params.seed,
-            "temperature": params.temperature,
-            "top_p": params.top_p,
-            "max_tokens": params.max_tokens,
-            "max_completion_tokens": params.max_completion_tokens,
-            "service_tier": params.service_tier,
-            "extra": params.extra if isinstance(params.extra, dict) else {},
-        }
+        super().__init__(
+            settings=OpenAILLMSettings(
+                model=model,
+                frequency_penalty=params.frequency_penalty,
+                presence_penalty=params.presence_penalty,
+                seed=params.seed,
+                temperature=params.temperature,
+                top_p=params.top_p,
+                top_k=None,
+                max_tokens=params.max_tokens,
+                max_completion_tokens=params.max_completion_tokens,
+                service_tier=params.service_tier,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                extra=params.extra if isinstance(params.extra, dict) else {},
+            ),
+            **kwargs,
+        )
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self.set_model_name(model)
+        self._system_instruction = system_instruction
         self._full_model_name: str = ""
         self._client = self.create_client(
             api_key=api_key,
@@ -147,6 +171,9 @@ class BaseOpenAILLMService(LLMService):
         )
         # Store pending function calls that need to be executed after TTS
         self._pending_function_calls = []
+
+        if self._system_instruction:
+            logger.debug(f"{self}: Using system instruction: {self._system_instruction}")
 
     def create_client(
         self,
@@ -251,23 +278,31 @@ class BaseOpenAILLMService(LLMService):
             Dictionary of parameters for the chat completion request.
         """
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "frequency_penalty": self._settings["frequency_penalty"],
-            "presence_penalty": self._settings["presence_penalty"],
-            "seed": self._settings["seed"],
-            "temperature": self._settings["temperature"],
-            "top_p": self._settings["top_p"],
-            "max_tokens": self._settings["max_tokens"],
-            "max_completion_tokens": self._settings["max_completion_tokens"],
-            "service_tier": self._settings["service_tier"],
+            "frequency_penalty": self._settings.frequency_penalty,
+            "presence_penalty": self._settings.presence_penalty,
+            "seed": self._settings.seed,
+            "temperature": self._settings.temperature,
+            "top_p": self._settings.top_p,
+            "max_tokens": self._settings.max_tokens,
+            "max_completion_tokens": self._settings.max_completion_tokens,
+            "service_tier": self._settings.service_tier,
         }
 
         # Messages, tools, tool_choice
         params.update(params_from_context)
 
-        params.update(self._settings["extra"])
+        params.update(self._settings.extra)
+
+        # Prepend system instruction if set
+        if self._system_instruction:
+            messages = params.get("messages", [])
+            params["messages"] = [
+                {"role": "system", "content": self._system_instruction}
+            ] + messages
+
         return params
 
     async def run_inference(
@@ -398,20 +433,29 @@ class BaseOpenAILLMService(LLMService):
             else self._stream_chat_completions_universal_context(context)
         )
 
-        # Ensure stream is closed on cancellation/exception to prevent socket
-        # leaks. OpenAI's AsyncStream uses close(), async generators use aclose().
+        # Ensure stream and its async iterator are closed on cancellation/exception
+        # to prevent socket leaks and uvloop crashes. Closing the iterator first
+        # cascades cleanup through nested async generators (httpx/httpcore internals),
+        # preventing uvloop's broken asyncgen finalizer from firing on Python 3.12+
+        # (MagicStack/uvloop#699).
         @asynccontextmanager
         async def _closing(stream):
+            chunk_iter = stream.__aiter__()
             try:
-                yield stream
+                yield chunk_iter
             finally:
-                if hasattr(stream, "aclose"):
-                    await stream.aclose()
-                elif hasattr(stream, "close"):
+                # Close the iterator first to cascade cleanup through
+                # nested async generators (httpx/httpcore internals).
+                if hasattr(chunk_iter, "aclose"):
+                    await chunk_iter.aclose()
+                # Then close the stream to release HTTP resources.
+                if hasattr(stream, "close"):
                     await stream.close()
+                elif hasattr(stream, "aclose"):
+                    await stream.aclose()
 
-        async with _closing(chunk_stream):
-            async for chunk in chunk_stream:
+        async with _closing(chunk_stream) as chunk_iter:
+            async for chunk in chunk_iter:
                 if chunk.usage:
                     cached_tokens = (
                         chunk.usage.prompt_tokens_details.cached_tokens
@@ -560,8 +604,6 @@ class BaseOpenAILLMService(LLMService):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
             context = OpenAILLMContext.from_messages(frame.messages)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 

@@ -115,10 +115,14 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Handle input audio to check if the turn is completed."""
         state = self._turn_analyzer.append_audio(frame.audio, self._vad_user_speaking)
 
-        # If at this point the model says the turn is complete it will be due to
-        # a timeout, so we mark turn as complete and we trigger the user end of
-        # turn.
+        # Streaming analyzers (e.g. KrispVivaTurn) detect turn completion
+        # frame-by-frame inside append_audio, so COMPLETE is returned here
+        # rather than in analyze_end_of_turn. Batch analyzers (BaseSmartTurn)
+        # return COMPLETE here only on a silence timeout. In either case we
+        # consume and push metrics immediately while they're fresh.
         if state == EndOfTurnState.COMPLETE:
+            _, prediction = await self._turn_analyzer.analyze_end_of_turn()
+            await self._handle_prediction_result(prediction)
             self._turn_complete = True
             await self._maybe_trigger_user_turn_stopped()
 

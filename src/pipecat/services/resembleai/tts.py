@@ -8,7 +8,8 @@
 
 import base64
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, ClassVar, Dict, Optional
 
 from loguru import logger
 
@@ -17,16 +18,13 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService
-from pipecat.transcriptions.language import Language
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.tts_service import AudioContextTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -38,13 +36,35 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class ResembleAITTSService(AudioContextWordTTSService):
+@dataclass
+class ResembleAITTSSettings(TTSSettings):
+    """Settings for Resemble AI TTS service.
+
+    Parameters:
+        precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).
+        output_format: Audio format (wav or mp3).
+        resemble_sample_rate: Audio sample rate sent to the API.
+    """
+
+    precision: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    resemble_sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {
+        "voice_id": "voice",
+        "sample_rate": "resemble_sample_rate",
+    }
+
+
+class ResembleAITTSService(AudioContextTTSService):
     """Resemble AI TTS service with WebSocket streaming and word timestamps.
 
     Provides text-to-speech using Resemble AI's streaming WebSocket API.
     Supports word-level timestamps and audio context management for handling
     multiple simultaneous synthesis requests with proper interruption support.
     """
+
+    _settings: ResembleAITTSSettings
 
     def __init__(
         self,
@@ -70,17 +90,21 @@ class ResembleAITTSService(AudioContextWordTTSService):
         """
         super().__init__(
             sample_rate=sample_rate,
+            reuse_context_id_within_turn=False,
+            supports_word_timestamps=True,
+            settings=ResembleAITTSSettings(
+                model=None,
+                voice=voice_id,
+                language=None,
+                precision=precision,
+                output_format=output_format,
+                resemble_sample_rate=sample_rate,
+            ),
             **kwargs,
         )
 
         self._api_key = api_key
-        self._voice_id = voice_id
         self._url = url
-        self._settings = {
-            "precision": precision,
-            "output_format": output_format,
-            "sample_rate": sample_rate,
-        }
 
         self._websocket = None
         self._request_id_counter = 0
@@ -101,8 +125,6 @@ class ResembleAITTSService(AudioContextWordTTSService):
         self._jitter_buffer_bytes = 44100  # ~1000ms at 22050Hz to handle 400ms+ network gaps
         self._playback_started: dict[str, bool] = {}  # Track if we've started playback per request
 
-        self.set_voice(voice_id)
-
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -121,13 +143,13 @@ class ResembleAITTSService(AudioContextWordTTSService):
             JSON string containing the request payload.
         """
         msg = {
-            "voice_uuid": self._voice_id,
+            "voice_uuid": self._settings.voice,
             "data": text,
             "binary_response": False,  # Use JSON frames to get timestamps
             "request_id": self._request_id_counter,  # ResembleAI only accepts number
-            "output_format": self._settings["output_format"],
-            "sample_rate": self._settings["sample_rate"],
-            "precision": self._settings["precision"],
+            "output_format": self._settings.output_format,
+            "sample_rate": self._settings.resemble_sample_rate,
+            "precision": self._settings.precision,
             "no_audio_header": True,
         }
 
@@ -141,7 +163,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["sample_rate"] = self.sample_rate
+        self._settings.resemble_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -223,15 +245,18 @@ class ResembleAITTSService(AudioContextWordTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        """Handle interruption by stopping current synthesis.
-
-        Args:
-            frame: The interruption frame.
-            direction: The direction of frame processing.
-        """
-        await super()._handle_interruption(frame, direction)
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Stop metrics when the bot is interrupted."""
         await self.stop_all_metrics()
+
+    async def on_audio_context_completed(self, context_id: str):
+        """Stop metrics after the Resemble AI context finishes playing.
+
+        No close message is needed: Resemble AI signals completion with an
+        ``audio_end`` message (handled in ``_process_messages``), after which
+        the server-side context is already closed.
+        """
+        pass
 
     async def flush_audio(self):
         """Flush any pending audio and finalize the current context."""

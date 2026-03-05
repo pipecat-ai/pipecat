@@ -3,21 +3,20 @@ name: docstring
 description: Document a Python module and its classes using Google style
 ---
 
-Document a Python module and its classes using Google-style docstrings following project conventions. The class name is provided as an argument.
+Document a Python module or class using Google-style docstrings following project conventions. The argument can be a class name or a module path.
 
 ## Instructions
 
-1. First, find the class in the codebase:
-   ```
-   Search for "class ClassName" in src/pipecat/
-   ```
+1. Determine what to document based on the argument:
 
-2. If multiple files contain that class name:
-   - List all matches with their file paths
-   - Ask the user which one they want to document
-   - Wait for confirmation before proceeding
+   **If a module path is provided** (e.g. `src/pipecat/audio/vad/vad_analyzer.py`):
+   - Use that file directly
 
-3. Once the file is identified, read the module to understand its structure:
+   **If a class name is provided** (e.g. `VADAnalyzer`):
+   - Search for `class ClassName` in `src/pipecat/`
+   - If multiple files contain that class name, list all matches with their file paths, ask the user which one they want to document, and wait for confirmation
+
+2. Once the file is identified, read the module to understand its structure:
    - Identify all classes, functions, and important type aliases
    - Understand the purpose of each component
 

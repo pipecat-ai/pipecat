@@ -425,6 +425,11 @@ class BaseInputTransport(FrameProcessor):
                 if self._params.audio_in_filter:
                     frame.audio = await self._params.audio_in_filter.filter(frame.audio)
 
+                # Skip frames with no audio data (e.g. filter is buffering).
+                if not frame.audio:
+                    self._audio_in_queue.task_done()
+                    continue
+
                 ###################################################################
                 # DEPRECATED.
                 #
@@ -554,7 +559,7 @@ class BaseInputTransport(FrameProcessor):
 
             # Make sure we notify about interruptions quickly out-of-band.
             if should_push_immediate_interruption and self._allow_interruptions:
-                await self.push_interruption_task_frame_and_wait()
+                await self.broadcast_interruption()
             elif self.interruption_strategies and self._bot_speaking:
                 logger.debug(
                     "User started speaking while bot is speaking with interruption config - "

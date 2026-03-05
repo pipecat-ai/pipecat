@@ -7,6 +7,7 @@
 """Kokoro TTS service implementation using kokoro-onnx."""
 
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
@@ -22,6 +23,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -87,12 +89,25 @@ def language_to_kokoro_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class KokoroTTSSettings(TTSSettings):
+    """Settings for the Kokoro TTS service.
+
+    Parameters:
+        lang_code: Kokoro language code for synthesis.
+    """
+
+    lang_code: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class KokoroTTSService(TTSService):
     """Kokoro TTS service implementation.
 
     Provides local text-to-speech synthesis using kokoro-onnx.
     Automatically downloads model files on first use.
     """
+
+    _settings: KokoroTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Kokoro TTS configuration.
@@ -122,11 +137,18 @@ class KokoroTTSService(TTSService):
             **kwargs: Additional arguments passed to parent `TTSService`.
 
         """
-        super().__init__(**kwargs)
-
         params = params or KokoroTTSService.InputParams()
 
-        self._voice_id = voice_id
+        super().__init__(
+            settings=KokoroTTSSettings(
+                model=None,
+                voice=voice_id,
+                language=language_to_kokoro_language(params.language),
+                lang_code=language_to_kokoro_language(params.language),
+            ),
+            **kwargs,
+        )
+
         self._lang_code = language_to_kokoro_language(params.language)
 
         model = Path(model_path) if model_path else KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
@@ -161,7 +183,7 @@ class KokoroTTSService(TTSService):
             yield TTSStartedFrame(context_id=context_id)
 
             stream = self._kokoro.create_stream(
-                text, voice=self._voice_id, lang=self._lang_code, speed=1.0
+                text, voice=self._settings.voice, lang=self._lang_code, speed=1.0
             )
 
             async for samples, sample_rate in stream:
