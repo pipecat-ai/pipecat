@@ -76,6 +76,7 @@ class OpenAILLMService(BaseOpenAILLMService):
         self,
         *,
         model: Optional[str] = None,
+        service_tier: Optional[str] = None,
         params: Optional[BaseOpenAILLMService.InputParams] = None,
         settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
@@ -88,6 +89,7 @@ class OpenAILLMService(BaseOpenAILLMService):
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAILLMSettings(model=...)`` instead.
 
+            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             params: Input parameters for model configuration.
 
                 .. deprecated:: 0.0.105
@@ -108,7 +110,6 @@ class OpenAILLMService(BaseOpenAILLMService):
             top_k=None,
             max_tokens=NOT_GIVEN,
             max_completion_tokens=NOT_GIVEN,
-            service_tier=NOT_GIVEN,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             extra={},
@@ -118,6 +119,10 @@ class OpenAILLMService(BaseOpenAILLMService):
         if model is not None:
             _warn_deprecated_param("model", OpenAILLMSettings, "model")
             default_settings.model = model
+
+        # Handle service_tier from deprecated params
+        if params is not None and not settings and params.service_tier is not NOT_GIVEN:
+            service_tier = service_tier or params.service_tier
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -130,7 +135,6 @@ class OpenAILLMService(BaseOpenAILLMService):
                 default_settings.top_p = params.top_p
                 default_settings.max_tokens = params.max_tokens
                 default_settings.max_completion_tokens = params.max_completion_tokens
-                default_settings.service_tier = params.service_tier
                 if isinstance(params.extra, dict):
                     default_settings.extra = params.extra
 
@@ -138,7 +142,7 @@ class OpenAILLMService(BaseOpenAILLMService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        super().__init__(settings=default_settings, **kwargs)
+        super().__init__(service_tier=service_tier, settings=default_settings, **kwargs)
 
     def create_context_aggregator(
         self,

@@ -53,11 +53,9 @@ class OpenAILLMSettings(LLMSettings):
 
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
-        service_tier: Service tier to use (e.g., "auto", "flex", "priority").
     """
 
     max_completion_tokens: int | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    service_tier: str | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
 
 
 class BaseOpenAILLMService(LLMService):
@@ -118,6 +116,7 @@ class BaseOpenAILLMService(LLMService):
         organization=None,
         project=None,
         default_headers: Optional[Mapping[str, str]] = None,
+        service_tier: Optional[str] = None,
         params: Optional[InputParams] = None,
         settings: Optional[OpenAILLMSettings] = None,
         retry_timeout_secs: Optional[float] = 5.0,
@@ -138,6 +137,7 @@ class BaseOpenAILLMService(LLMService):
             organization: OpenAI organization ID.
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
+            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             params: Input parameters for model configuration and behavior.
 
                 .. deprecated:: 0.0.105
@@ -161,7 +161,6 @@ class BaseOpenAILLMService(LLMService):
             top_k=None,
             max_tokens=NOT_GIVEN,
             max_completion_tokens=NOT_GIVEN,
-            service_tier=NOT_GIVEN,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             extra={},
@@ -180,7 +179,6 @@ class BaseOpenAILLMService(LLMService):
             default_settings.top_p = params.top_p
             default_settings.max_tokens = params.max_tokens
             default_settings.max_completion_tokens = params.max_completion_tokens
-            default_settings.service_tier = params.service_tier
             if isinstance(params.extra, dict):
                 default_settings.extra = params.extra
 
@@ -192,6 +190,7 @@ class BaseOpenAILLMService(LLMService):
             settings=default_settings,
             **kwargs,
         )
+        self._service_tier = service_tier
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
         self._system_instruction = system_instruction
@@ -321,7 +320,7 @@ class BaseOpenAILLMService(LLMService):
             "top_p": self._settings.top_p,
             "max_tokens": self._settings.max_tokens,
             "max_completion_tokens": self._settings.max_completion_tokens,
-            "service_tier": self._settings.service_tier,
+            "service_tier": self._service_tier,
         }
 
         # Messages, tools, tool_choice

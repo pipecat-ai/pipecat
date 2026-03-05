@@ -31,6 +31,8 @@ class FireworksLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    _settings: FireworksLLMSettings
+
     def __init__(
         self,
         *,

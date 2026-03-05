@@ -191,12 +191,12 @@ class AWSNovaSonicLLMSettings(LLMSettings):
     """Settings for AWS Nova Sonic LLM service.
 
     Parameters:
-        voice_id: Voice for speech synthesis.
+        voice: Voice identifier for speech synthesis.
         endpointing_sensitivity: Controls how quickly Nova Sonic decides the
             user has stopped speaking. Can be "LOW", "MEDIUM", or "HIGH".
     """
 
-    voice_id: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     endpointing_sensitivity: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -250,7 +250,7 @@ class AWSNovaSonicLLMService(LLMService):
                 - Nova Sonic (the older model): see https://docs.aws.amazon.com/nova/latest/userguide/available-voices.html.
 
                 .. deprecated::
-                    Use ``settings=AWSNovaSonicLLMSettings(voice_id=...)`` instead.
+                    Use ``settings=AWSNovaSonicLLMSettings(voice=...)`` instead.
 
             params: Model parameters for audio configuration and inference.
 
@@ -273,7 +273,7 @@ class AWSNovaSonicLLMService(LLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = AWSNovaSonicLLMSettings(
             model="amazon.nova-2-sonic-v1:0",
-            voice_id="matthew",
+            voice="matthew",
             temperature=0.7,
             max_tokens=1024,
             top_p=0.9,
@@ -291,8 +291,8 @@ class AWSNovaSonicLLMService(LLMService):
             _warn_deprecated_param("model", AWSNovaSonicLLMSettings, "model")
             default_settings.model = model
         if voice_id != "matthew":
-            _warn_deprecated_param("voice_id", AWSNovaSonicLLMSettings, "voice_id")
-            default_settings.voice_id = voice_id
+            _warn_deprecated_param("voice_id", AWSNovaSonicLLMSettings, "voice")
+            default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -811,7 +811,7 @@ class AWSNovaSonicLLMService(LLMService):
                 "sampleRateHertz": {self._output_sample_rate},
                 "sampleSizeBits": {self._output_sample_size},
                 "channelCount": {self._output_channel_count},
-                "voiceId": "{self._settings.voice_id}",
+                "voiceId": "{self._settings.voice}",
                 "encoding": "base64",
                 "audioType": "SPEECH"
               }}{tools_config}

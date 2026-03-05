@@ -75,10 +75,12 @@ class AWSBedrockLLMSettings(LLMSettings):
     """Settings for AWS Bedrock LLM services.
 
     Parameters:
+        stop_sequences: List of strings that stop generation.
         latency: Performance mode - "standard" or "optimized".
         additional_model_request_fields: Additional model-specific parameters.
     """
 
+    stop_sequences: List[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latency: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     additional_model_request_fields: Dict[str, Any] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
@@ -810,6 +812,10 @@ class AWSBedrockLLMService(LLMService):
                 deprecated parameters and *settings* are provided, *settings*
                 values take precedence.
             stop_sequences: List of strings that stop generation.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSBedrockLLMSettings(stop_sequences=...)`` instead.
+
             client_config: Custom boto3 client configuration.
             retry_timeout_secs: Request timeout in seconds for retry logic.
             retry_on_timeout: Whether to retry the request once if it times out.
@@ -828,6 +834,7 @@ class AWSBedrockLLMService(LLMService):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
+            stop_sequences=None,
             latency=None,
             additional_model_request_fields={},
         )
@@ -836,6 +843,9 @@ class AWSBedrockLLMService(LLMService):
         if model is not None:
             _warn_deprecated_param("model", AWSBedrockLLMSettings, "model")
             default_settings.model = model
+        if stop_sequences is not None:
+            _warn_deprecated_param("stop_sequences", AWSBedrockLLMSettings, "stop_sequences")
+            default_settings.stop_sequences = stop_sequences
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -844,6 +854,8 @@ class AWSBedrockLLMService(LLMService):
                 default_settings.max_tokens = params.max_tokens
                 default_settings.temperature = params.temperature
                 default_settings.top_p = params.top_p
+                if params.stop_sequences:
+                    default_settings.stop_sequences = params.stop_sequences
                 default_settings.latency = params.latency
                 if isinstance(params.additional_model_request_fields, dict):
                     default_settings.additional_model_request_fields = (
@@ -855,14 +867,6 @@ class AWSBedrockLLMService(LLMService):
             default_settings.apply_update(settings)
 
         super().__init__(settings=default_settings, **kwargs)
-
-        # Handle stop_sequences (not a settings field)
-        if stop_sequences is not None:
-            self._stop_sequences = stop_sequences
-        elif params is not None:
-            self._stop_sequences = params.stop_sequences or []
-        else:
-            self._stop_sequences = []
 
         # Initialize the AWS Bedrock client
         if not client_config:
@@ -915,6 +919,8 @@ class AWSBedrockLLMService(LLMService):
             inference_config["temperature"] = self._settings.temperature
         if self._settings.top_p is not None:
             inference_config["topP"] = self._settings.top_p
+        if self._settings.stop_sequences:
+            inference_config["stopSequences"] = self._settings.stop_sequences
         return inference_config
 
     async def run_inference(

@@ -57,6 +57,8 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
     responses, and tool usage.
     """
 
+    _settings: GeminiLiveVertexLLMSettings
+
     def __init__(
         self,
         *,
@@ -90,6 +92,9 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
                     Use ``settings=GeminiLiveLLMSettings(model=...)`` instead.
 
             voice_id: TTS voice identifier. Defaults to "Charon".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GeminiLiveVertexLLMSettings(voice=...)`` instead.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             system_instruction: System prompt for the model. Defaults to None.
@@ -132,6 +137,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = GeminiLiveVertexLLMSettings(
             model="google/gemini-live-2.5-flash-native-audio",
+            voice="Charon",
             frequency_penalty=None,
             max_tokens=4096,
             presence_penalty=None,
@@ -156,6 +162,9 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         if model is not None:
             _warn_deprecated_param("model", GeminiLiveVertexLLMSettings, "model")
             default_settings.model = model
+        if voice_id != "Charon":
+            _warn_deprecated_param("voice_id", GeminiLiveVertexLLMSettings, "voice")
+            default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -193,7 +202,6 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
             # api_key is required by parent class, but actually not used with
             # Vertex
             api_key="dummy",
-            voice_id=voice_id,
             start_audio_paused=start_audio_paused,
             start_video_paused=start_video_paused,
             system_instruction=system_instruction,

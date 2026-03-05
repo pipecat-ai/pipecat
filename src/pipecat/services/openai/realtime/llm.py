@@ -10,7 +10,7 @@ import base64
 import io
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from loguru import logger
@@ -59,7 +59,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import LLMSettings, _warn_deprecated_param
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -93,15 +93,9 @@ class CurrentAudioResponse:
 
 @dataclass
 class OpenAIRealtimeLLMSettings(LLMSettings):
-    """Settings for OpenAI Realtime LLM services.
+    """Settings for OpenAI Realtime LLM services."""
 
-    Parameters:
-        session_properties: OpenAI Realtime session configuration.
-    """
-
-    session_properties: events.SessionProperties | _NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
+    pass
 
 
 class OpenAIRealtimeLLMService(LLMService):
@@ -145,15 +139,8 @@ class OpenAIRealtimeLLMService(LLMService):
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.openai.com/v1/realtime".
             session_properties: Configuration properties for the realtime session.
-
-                .. deprecated::
-                    Use ``settings=OpenAIRealtimeLLMSettings(session_properties=...)``
-                    instead.
-
-                These are session-level settings that can be updated during the session
-                (except for voice and model). If None, uses default SessionProperties.
-            settings: Realtime LLM settings. If provided together with deprecated
-                top-level parameters, the ``settings`` values take precedence.
+                If None, uses default SessionProperties.
+            settings: Runtime-updatable settings for this service.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             video_frame_detail: Detail level for video processing. Can be "auto", "low", or "high".
@@ -192,20 +179,14 @@ class OpenAIRealtimeLLMService(LLMService):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            session_properties=events.SessionProperties(),
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
             _warn_deprecated_param("model", OpenAIRealtimeLLMSettings, "model")
             default_settings.model = model
-        if session_properties is not None:
-            _warn_deprecated_param(
-                "session_properties", OpenAIRealtimeLLMSettings, "session_properties"
-            )
-            default_settings.session_properties = session_properties
 
-        # 4. Apply settings delta (canonical API, always wins)
+        # 3. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -220,6 +201,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
         self.api_key = api_key
         self.base_url = full_url
+        self._session_properties = session_properties or events.SessionProperties()
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
         self._video_frame_detail = video_frame_detail
@@ -282,12 +264,12 @@ class OpenAIRealtimeLLMService(LLMService):
 
     def _is_modality_enabled(self, modality: str) -> bool:
         """Check if a specific modality is enabled, "text" or "audio"."""
-        modalities = self._settings.session_properties.output_modalities or ["audio", "text"]
+        modalities = self._session_properties.output_modalities or ["audio", "text"]
         return modality in modalities
 
     def _get_enabled_modalities(self) -> list[str]:
         """Get the list of enabled modalities."""
-        modalities = self._settings.session_properties.output_modalities or ["audio", "text"]
+        modalities = self._session_properties.output_modalities or ["audio", "text"]
         # API only supports single modality responses: either ["text"] or ["audio"]
         if "audio" in modalities:
             return ["audio"]
@@ -360,9 +342,9 @@ class OpenAIRealtimeLLMService(LLMService):
         # None and False are different. Check for False. None means we're using OpenAI's
         # built-in turn detection defaults.
         turn_detection_disabled = (
-            self._settings.session_properties.audio
-            and self._settings.session_properties.audio.input
-            and self._settings.session_properties.audio.input.turn_detection is False
+            self._session_properties.audio
+            and self._session_properties.audio.input
+            and self._session_properties.audio.input.turn_detection is False
         )
         if turn_detection_disabled:
             await self.send_client_event(events.InputAudioBufferClearEvent())
@@ -382,9 +364,9 @@ class OpenAIRealtimeLLMService(LLMService):
         # None and False are different. Check for False. None means we're using OpenAI's
         # built-in turn detection defaults.
         turn_detection_disabled = (
-            self._settings.session_properties.audio
-            and self._settings.session_properties.audio.input
-            and self._settings.session_properties.audio.input.turn_detection is False
+            self._session_properties.audio
+            and self._session_properties.audio.input
+            and self._session_properties.audio.input.turn_detection is False
         )
         if turn_detection_disabled:
             await self.send_client_event(events.InputAudioBufferCommitEvent())
@@ -457,7 +439,7 @@ class OpenAIRealtimeLLMService(LLMService):
         # directly. The frame.delta path falls through to super, which calls
         # _update_settings → our override handles the rest.
         if isinstance(frame, LLMUpdateSettingsFrame) and frame.delta is None:
-            self._settings.session_properties = events.SessionProperties(**frame.settings)
+            self._session_properties = events.SessionProperties(**frame.settings)
             await self._send_session_update()
             await self.push_frame(frame, direction)
             return
@@ -576,15 +558,13 @@ class OpenAIRealtimeLLMService(LLMService):
             await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
     async def _update_settings(self, delta):
-        """Apply a settings delta, sending a session update if needed."""
+        """Apply a settings delta."""
         changed = await super()._update_settings(delta)
-        if "session_properties" in changed:
-            await self._send_session_update()
-        self._warn_unhandled_updated_settings(changed.keys() - {"session_properties"})
+        self._warn_unhandled_updated_settings(changed.keys())
         return changed
 
     async def _send_session_update(self):
-        settings = self._settings.session_properties
+        settings = self._session_properties
         adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:
