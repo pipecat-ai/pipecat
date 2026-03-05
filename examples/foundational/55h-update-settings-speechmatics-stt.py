@@ -53,7 +53,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
-        params=SpeechmaticsSTTService.InputParams(
+        settings=SpeechmaticsSTTSettings(
             enable_diarization=True,
             speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
             speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",

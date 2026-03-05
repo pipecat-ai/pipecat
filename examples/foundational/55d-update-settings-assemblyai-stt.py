@@ -22,7 +22,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.assemblyai.models import AssemblyAIConnectionParams
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, AssemblyAISTTSettings
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
@@ -53,8 +52,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = AssemblyAISTTService(
         api_key=os.getenv("ASSEMBLYAI_API_KEY"),
-        connection_params=AssemblyAIConnectionParams(
-            speech_model="u3-rt-pro",
+        settings=AssemblyAISTTSettings(
+            model="u3-rt-pro",
         ),
     )
 
@@ -111,9 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frame(
             STTUpdateSettingsFrame(
                 delta=AssemblyAISTTSettings(
-                    connection_params=AssemblyAIConnectionParams(
-                        keyterms_prompt=["Xiomara", "Saoirse", "Krzystof", "Nguyen", "Pipecat"]
-                    )
+                    keyterms_prompt=["Xiomara", "Saoirse", "Krzystof", "Nguyen", "Pipecat"]
                 )
             )
         )

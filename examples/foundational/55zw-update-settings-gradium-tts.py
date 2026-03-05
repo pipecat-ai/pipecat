@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = GradiumTTSService(
         api_key=os.getenv("GRADIUM_API_KEY"),
-        voice_id="YTpq7expH9539ERJ",
+        settings=GradiumTTSSettings(voice="YTpq7expH9539ERJ"),
         url="wss://us.api.gradium.ai/api/speech/tts",
     )
 

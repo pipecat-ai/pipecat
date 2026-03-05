@@ -58,7 +58,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = ElevenLabsHttpTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+            settings=ElevenLabsHttpTTSSettings(voice=os.getenv("ELEVENLABS_VOICE_ID")),
             aiohttp_session=session,
         )
 

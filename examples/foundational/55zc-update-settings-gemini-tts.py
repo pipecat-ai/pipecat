@@ -55,9 +55,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = GeminiTTSService(
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
-        model="gemini-2.5-flash-tts",
-        voice_id="Charon",
-        params=GeminiTTSService.InputParams(
+        settings=GeminiTTSSettings(
+            model="gemini-2.5-flash-tts",
+            voice="Charon",
             language=Language.EN_US,
             prompt="You are a helpful AI assistant. Speak in a natural, conversational tone.",
         ),

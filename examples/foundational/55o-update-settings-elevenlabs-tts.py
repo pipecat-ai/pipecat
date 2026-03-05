@@ -55,7 +55,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY"),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        settings=ElevenLabsTTSSettings(voice=os.getenv("ELEVENLABS_VOICE_ID")),
     )
 
     llm = OpenAILLMService(

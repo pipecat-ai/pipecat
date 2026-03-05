@@ -77,7 +77,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # (see https://docs.rime.ai/api-reference/spell)
     # tts = RimeHttpTTSService(
     #     api_key=os.getenv("RIME_API_KEY", ""),
-    #     voice_id="eva",
+    #     settings=RimeTTSSettings(
+    #         voice="eva",
+    #     ),
     #     aiohttp_session=session,
     # )
 

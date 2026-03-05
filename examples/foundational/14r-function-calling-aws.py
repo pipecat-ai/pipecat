@@ -67,7 +67,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = AWSPollyTTSService(
         region="us-west-2",  # only specific regions support generative TTS
         settings=AWSPollyTTSSettings(
-            voice_id="Joanna",
+            voice="Joanna",
             engine="generative",
             rate="1.1",
         ),
