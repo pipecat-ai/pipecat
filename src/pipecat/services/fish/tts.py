@@ -164,6 +164,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         super().__init__(
             push_stop_frames=True,
+            push_start_frame=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
             settings=FishAudioTTSSettings(
@@ -184,7 +185,6 @@ class FishAudioTTSService(InterruptibleTTSService):
         self._base_url = "wss://api.fish.audio/v1/tts/live"
         self._websocket = None
         self._receive_task = None
-        self._request_id = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -302,7 +302,6 @@ class FishAudioTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._request_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -322,7 +321,6 @@ class FishAudioTTSService(InterruptibleTTSService):
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        self._request_id = None
 
     async def _receive_messages(self):
         async for message in self._get_websocket():
@@ -358,12 +356,6 @@ class FishAudioTTSService(InterruptibleTTSService):
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
-
-            if not self.audio_context_available(context_id):
-                await self.create_audio_context(context_id)
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
-                self._request_id = str(uuid.uuid4())
 
             # Send the text
             text_message = {
