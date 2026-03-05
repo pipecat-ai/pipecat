@@ -17,8 +17,6 @@ from loguru import logger
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
@@ -70,6 +68,8 @@ class PiperTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent `TTSService`.
         """
         super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=PiperTTSSettings(model=None, voice=voice_id, language=None),
             **kwargs,
         )
@@ -137,13 +137,7 @@ class PiperTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             await self.start_tts_usage_metrics(text)
-
-            if not self.audio_context_available(context_id):
-                await self.create_audio_context(context_id)
-                yield TTSStartedFrame(context_id=context_id)
 
             async for frame in self._stream_audio_frames_from_iterator(
                 async_iterator(self._voice.synthesize(text)),
@@ -202,6 +196,8 @@ class PiperHttpTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=PiperHttpTTSSettings(model=None, voice=voice_id, language=None),
             **kwargs,
         )
@@ -237,12 +233,6 @@ class PiperHttpTTSService(TTSService):
             "Content-Type": "application/json",
         }
         try:
-            await self.start_ttfb_metrics()
-
-            # Create audio context upfront so the finally path can always append frames.
-            if not self.audio_context_available(context_id):
-                await self.create_audio_context(context_id)
-
             data = {
                 "text": text,
                 "voice": self._settings.voice,
@@ -257,8 +247,6 @@ class PiperHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-
-                yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
