@@ -35,6 +35,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from azure.cognitiveservices.speech import (
+        CancellationReason,
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
@@ -80,6 +81,7 @@ class AzureSTTService(STTService):
         region: str,
         language: Language = Language.EN_US,
         sample_rate: Optional[int] = None,
+        private_endpoint: Optional[str] = None,
         endpoint_id: Optional[str] = None,
         ttfs_p99_latency: Optional[float] = AZURE_TTFS_P99,
         **kwargs,
@@ -91,6 +93,8 @@ class AzureSTTService(STTService):
             region: Azure region for the Speech service (e.g., 'eastus').
             language: Language for speech recognition. Defaults to English (US).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
+            private_endpoint: Private endpoint for STT behind firewall.
+                See https://docs.azure.cn/en-us/ai-services/speech-service/speech-services-private-link?tabs=portal
             endpoint_id: Custom model endpoint id.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
@@ -112,6 +116,7 @@ class AzureSTTService(STTService):
             subscription=api_key,
             region=region,
             speech_recognition_language=language_to_azure_language(language),
+            endpoint=private_endpoint,
         )
 
         if endpoint_id:
@@ -205,6 +210,7 @@ class AzureSTTService(STTService):
             )
             self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
             self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+            self._speech_recognizer.canceled.connect(self._on_handle_canceled)
             self._speech_recognizer.start_continuous_recognition_async()
         except Exception as e:
             await self.push_error(
@@ -276,3 +282,13 @@ class AzureSTTService(STTService):
                 result=event,
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+
+    def _on_handle_canceled(self, event):
+        details = event.result.cancellation_details
+        if details.reason == CancellationReason.Error:
+            error_msg = f"Azure STT recognition canceled: {details.reason}"
+            if details.error_details:
+                error_msg += f" - {details.error_details}"
+            asyncio.run_coroutine_threadsafe(
+                self.push_error(error_msg=error_msg), self.get_event_loop()
+            )

@@ -128,6 +128,7 @@ class HeyGenVideoService(AIService):
             session_request=self._session_request,
             service_type=self._service_type,
             callbacks=HeyGenCallbacks(
+                on_connected=self._on_connected,
                 on_participant_connected=self._on_participant_connected,
                 on_participant_disconnected=self._on_participant_disconnected,
             ),
@@ -143,6 +144,10 @@ class HeyGenVideoService(AIService):
         await super().cleanup()
         await self._client.cleanup()
         self._client = None
+
+    async def _on_connected(self):
+        """Handle bot connected to LiveKit room."""
+        logger.info("HeyGen bot connected to LiveKit room")
 
     async def _on_participant_connected(self, participant_id: str):
         """Handle participant connected events."""

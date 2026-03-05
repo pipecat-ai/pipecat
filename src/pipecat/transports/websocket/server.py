@@ -22,11 +22,11 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
-    InputTransportMessageUrgentFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -504,6 +504,8 @@ class WebsocketServerTransport(BaseTransport):
         if self._output:
             await self._output.set_client_connection(websocket)
             await self._call_event_handler("on_client_connected", websocket)
+            if self._input:
+                await self._input.push_frame(ClientConnectedFrame())
         else:
             logger.error("A WebsocketServerTransport output is missing in the pipeline")
 

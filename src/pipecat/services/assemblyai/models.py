@@ -12,7 +12,8 @@ transcription WebSocket messages and connection configuration.
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from loguru import logger
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Word(BaseModel):
@@ -68,7 +69,15 @@ class TurnMessage(BaseMessage):
         transcript: The transcribed text for this turn.
         end_of_turn_confidence: Confidence score for end-of-turn detection.
         words: List of individual words with timing and confidence data.
+        language_code: Detected language code (e.g., "es", "fr"). Only present with
+            complete utterances or when end_of_turn is True.
+        language_confidence: Confidence score (0-1) for language detection. Only present
+            with complete utterances or when end_of_turn is True.
+        speaker: Speaker label (e.g., "A", "B"). Only present when speaker_labels is
+            enabled and end_of_turn is True. Maps to 'speaker_label' in JSON response.
     """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     type: Literal["Turn"] = "Turn"
     turn_order: int
@@ -77,6 +86,21 @@ class TurnMessage(BaseMessage):
     transcript: str
     end_of_turn_confidence: float
     words: List[Word]
+    language_code: Optional[str] = None
+    language_confidence: Optional[float] = None
+    speaker: Optional[str] = Field(default=None, alias="speaker_label")
+
+
+class SpeechStartedMessage(BaseMessage):
+    """Message sent when speech is first detected in the audio stream.
+
+    Parameters:
+        type: Always "SpeechStarted" for this message type.
+        timestamp: Audio timestamp in milliseconds when speech was detected.
+    """
+
+    type: Literal["SpeechStarted"] = "SpeechStarted"
+    timestamp: int
 
 
 class TerminationMessage(BaseMessage):
@@ -94,7 +118,7 @@ class TerminationMessage(BaseMessage):
 
 
 # Union type for all possible message types
-AnyMessage = BeginMessage | TurnMessage | TerminationMessage
+AnyMessage = BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage
 
 
 class AssemblyAIConnectionParams(BaseModel):
@@ -106,10 +130,19 @@ class AssemblyAIConnectionParams(BaseModel):
         formatted_finals: Whether to enable transcript formatting. Defaults to True.
         word_finalization_max_wait_time: Maximum time to wait for word finalization in milliseconds.
         end_of_turn_confidence_threshold: Confidence threshold for end-of-turn detection.
-        min_end_of_turn_silence_when_confident: Minimum silence duration when confident about end-of-turn.
+        min_turn_silence: Minimum silence duration when confident about end-of-turn.
+        min_end_of_turn_silence_when_confident: DEPRECATED. Use min_turn_silence instead.
         max_turn_silence: Maximum silence duration before forcing end-of-turn.
         keyterms_prompt: List of key terms to guide transcription. Will be JSON serialized before sending.
-        speech_model: Select between English and multilingual models. Defaults to "universal-streaming-english".
+        prompt: Optional text prompt to guide the transcription. Only used when speech_model is "u3-rt-pro".
+        speech_model: Select between English, multilingual, and u3-rt-pro models. Defaults to "u3-rt-pro".
+        language_detection: Enable automatic language detection. Only applicable to
+            universal-streaming-multilingual. When enabled, Turn messages include
+            language_code and language_confidence fields. Defaults to None (not sent).
+        format_turns: Whether to format transcript turns. Defaults to True.
+        speaker_labels: Enable speaker diarization. When enabled, final transcripts
+            (end_of_turn=True) include a speaker field identifying the speaker
+            (e.g., "Speaker A", "Speaker B"). Defaults to None (not sent).
     """
 
     sample_rate: int = 16000
@@ -117,9 +150,27 @@ class AssemblyAIConnectionParams(BaseModel):
     formatted_finals: bool = True
     word_finalization_max_wait_time: Optional[int] = None
     end_of_turn_confidence_threshold: Optional[float] = None
-    min_end_of_turn_silence_when_confident: Optional[int] = None
+    min_turn_silence: Optional[int] = None
+    min_end_of_turn_silence_when_confident: Optional[int] = None  # Deprecated
     max_turn_silence: Optional[int] = None
     keyterms_prompt: Optional[List[str]] = None
-    speech_model: Literal["universal-streaming-english", "universal-streaming-multilingual"] = (
-        "universal-streaming-english"
-    )
+    prompt: Optional[str] = None
+    speech_model: Literal[
+        "universal-streaming-english", "universal-streaming-multilingual", "u3-rt-pro"
+    ] = "u3-rt-pro"
+    language_detection: Optional[bool] = None
+    format_turns: bool = True
+    speaker_labels: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def handle_deprecated_param(self):
+        """Handle deprecated min_end_of_turn_silence_when_confident parameter."""
+        if self.min_end_of_turn_silence_when_confident is not None:
+            logger.warning(
+                "The 'min_end_of_turn_silence_when_confident' parameter is deprecated and will be "
+                "removed in a future version. Please use 'min_turn_silence' instead."
+            )
+            # If min_turn_silence is not set, use the deprecated value
+            if self.min_turn_silence is None:
+                self.min_turn_silence = self.min_end_of_turn_silence_when_confident
+        return self

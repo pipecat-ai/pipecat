@@ -24,7 +24,9 @@ from pydantic import BaseModel
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
+    BotConnectedFrame,
     CancelFrame,
+    ClientConnectedFrame,
     DataFrame,
     EndFrame,
     Frame,
@@ -1465,7 +1467,6 @@ class DailyTransportClient(EventHandler):
         Args:
             message: Error message.
         """
-        logger.error(f"Transcription error: {message}")
         self._call_event_callback(self._callbacks.on_transcription_error, message)
 
     def on_transcription_message(self, message):
@@ -2070,6 +2071,8 @@ class DailyTransport(BaseTransport):
     Event handlers available:
 
     - on_joined: Called when the bot joins the room. Args: (data: dict)
+    - on_connected: Called when the bot connects to the room (alias for
+      on_joined). Args: (data: dict)
     - on_left: Called when the bot leaves the room.
     - on_before_leave: [sync] Called just before the bot leaves the room.
     - on_error: Called when a transport error occurs. Args: (error: str)
@@ -2187,6 +2190,7 @@ class DailyTransport(BaseTransport):
         # Register supported handlers. The user will only be able to register
         # these handlers.
         self._register_event_handler("on_active_speaker_changed")
+        self._register_event_handler("on_connected")
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
         self._register_event_handler("on_error")
@@ -2578,6 +2582,10 @@ class DailyTransport(BaseTransport):
             if error:
                 await self._on_error(f"Unable to start transcription: {error}")
         await self._call_event_handler("on_joined", data)
+        # Also call on_connected for compatibility with other transports
+        await self._call_event_handler("on_connected", data)
+        if self._input:
+            await self._input.push_frame(BotConnectedFrame())
 
     async def _on_left(self):
         """Handle room left events."""
@@ -2659,44 +2667,54 @@ class DailyTransport(BaseTransport):
 
     async def _on_dialin_connected(self, data):
         """Handle dial-in connected events."""
+        logger.debug(f"{self} dial-in connected: {data}")
         await self._call_event_handler("on_dialin_connected", data)
 
     async def _on_dialin_ready(self, sip_endpoint):
         """Handle dial-in ready events."""
+        logger.debug(f"{self} dial-in ready: {sip_endpoint}")
         if self._params.dialin_settings:
             await self._handle_dialin_ready(sip_endpoint)
         await self._call_event_handler("on_dialin_ready", sip_endpoint)
 
     async def _on_dialin_stopped(self, data):
         """Handle dial-in stopped events."""
+        logger.debug(f"{self} dial-in stopped: {data}")
         await self._call_event_handler("on_dialin_stopped", data)
 
     async def _on_dialin_error(self, data):
         """Handle dial-in error events."""
+        logger.error(f"{self} dial-in error: {data}")
         await self._call_event_handler("on_dialin_error", data)
 
     async def _on_dialin_warning(self, data):
         """Handle dial-in warning events."""
+        logger.warning(f"{self} dial-in warning: {data}")
         await self._call_event_handler("on_dialin_warning", data)
 
     async def _on_dialout_answered(self, data):
         """Handle dial-out answered events."""
+        logger.debug(f"{self} dial-out answered: {data}")
         await self._call_event_handler("on_dialout_answered", data)
 
     async def _on_dialout_connected(self, data):
         """Handle dial-out connected events."""
+        logger.debug(f"{self} dial-out connected: {data}")
         await self._call_event_handler("on_dialout_connected", data)
 
     async def _on_dialout_stopped(self, data):
         """Handle dial-out stopped events."""
+        logger.debug(f"{self} dial-out stopped: {data}")
         await self._call_event_handler("on_dialout_stopped", data)
 
     async def _on_dialout_error(self, data):
         """Handle dial-out error events."""
+        logger.error(f"{self} dial-out error: {data}")
         await self._call_event_handler("on_dialout_error", data)
 
     async def _on_dialout_warning(self, data):
         """Handle dial-out warning events."""
+        logger.warning(f"{self} dial-out warning: {data}")
         await self._call_event_handler("on_dialout_warning", data)
 
     async def _on_participant_joined(self, participant):
@@ -2716,6 +2734,8 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_participant_joined", participant)
         # Also call on_client_connected for compatibility with other transports
         await self._call_event_handler("on_client_connected", participant)
+        if self._input:
+            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_participant_left(self, participant, reason):
         """Handle participant left events."""
@@ -2727,6 +2747,7 @@ class DailyTransport(BaseTransport):
 
     async def _on_participant_updated(self, participant):
         """Handle participant updated events."""
+        logger.debug(f"{self} participant updated: {participant}")
         await self._call_event_handler("on_participant_updated", participant)
 
     async def _on_transcription_message(self, message: Mapping[str, Any]) -> None:
@@ -2767,20 +2788,25 @@ class DailyTransport(BaseTransport):
 
     async def _on_transcription_stopped(self, stopped_by, stopped_by_error):
         """Handle transcription stopped events."""
+        logger.debug(f"{self} transcription stopped by: {stopped_by} (error: {stopped_by_error})")
         await self._call_event_handler("on_transcription_stopped", stopped_by, stopped_by_error)
 
     async def _on_transcription_error(self, message):
         """Handle transcription error events."""
+        logger.error(f"{self} transcription error: {message}")
         await self._call_event_handler("on_transcription_error", message)
 
     async def _on_recording_started(self, status):
         """Handle recording started events."""
+        logger.debug(f"{self} recording started: {status}")
         await self._call_event_handler("on_recording_started", status)
 
     async def _on_recording_stopped(self, stream_id):
         """Handle recording stopped events."""
+        logger.debug(f"{self} recording stopped (id: {stream_id})")
         await self._call_event_handler("on_recording_stopped", stream_id)
 
     async def _on_recording_error(self, stream_id, message):
         """Handle recording error events."""
+        logger.error(f"{self} recording error (id: {stream_id}): {message}")
         await self._call_event_handler("on_recording_error", stream_id, message)

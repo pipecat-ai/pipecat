@@ -11,7 +11,7 @@ import base64
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import httpx
 from loguru import logger
@@ -117,6 +117,7 @@ class BaseOpenAILLMService(LLMService):
         params: Optional[InputParams] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
+        system_instruction: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -131,6 +132,7 @@ class BaseOpenAILLMService(LLMService):
             params: Input parameters for model configuration and behavior.
             retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
             retry_on_timeout: Whether to retry the request once if it times out.
+            system_instruction: Optional system instruction to prepend to messages.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         params = params or BaseOpenAILLMService.InputParams()
@@ -155,6 +157,7 @@ class BaseOpenAILLMService(LLMService):
         )
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
+        self._system_instruction = system_instruction
         self._full_model_name: str = ""
         self._client = self.create_client(
             api_key=api_key,
@@ -164,6 +167,9 @@ class BaseOpenAILLMService(LLMService):
             default_headers=default_headers,
             **kwargs,
         )
+
+        if self._system_instruction:
+            logger.debug(f"{self}: Using system instruction: {self._system_instruction}")
 
     def create_client(
         self,
@@ -285,6 +291,14 @@ class BaseOpenAILLMService(LLMService):
         params.update(params_from_context)
 
         params.update(self._settings.extra)
+
+        # Prepend system instruction if set
+        if self._system_instruction:
+            messages = params.get("messages", [])
+            params["messages"] = [
+                {"role": "system", "content": self._system_instruction}
+            ] + messages
+
         return params
 
     async def run_inference(

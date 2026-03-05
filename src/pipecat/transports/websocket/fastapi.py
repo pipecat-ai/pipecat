@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -260,6 +261,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         if not self._monitor_websocket_task and self._params.session_timeout:
             self._monitor_websocket_task = self.create_task(self._monitor_websocket())
         await self._client.trigger_client_connected()
+        await self.push_frame(ClientConnectedFrame())
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_messages())
         await self.set_transport_ready(frame)

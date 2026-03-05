@@ -71,13 +71,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         model="gemini-2.5-flash",
-    )
-
-    # System message that instructs the AI on how to speak
-    messages = [
-        {
-            "role": "system",
-            "content": """You are a helpful AI assistant in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
+        system_instruction="""You are a helpful AI assistant in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
 
             IMPORTANT: You're using Gemini TTS which supports expressive markup tags. You can use these tags in your responses:
             - [sigh] - Insert a sigh sound
@@ -95,10 +89,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             - "The answer is... [long pause] ...42!"
 
             Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.""",
-        },
-    ]
+    )
 
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -129,7 +122,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation
-        messages.append(
+        context.add_message(
             {
                 "role": "system",
                 "content": "You are an AI assistant. You can help with a variety of tasks. Introduce yourself and ask the user what they would like to know.",
