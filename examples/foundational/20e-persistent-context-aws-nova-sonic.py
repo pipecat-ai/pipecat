@@ -24,7 +24,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
+from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService, AWSNovaSonicLLMSettings
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -222,9 +222,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),  # as of 2025-05-06, us-east-1 is the only supported region
-        voice_id="tiffany",  # matthew, tiffany, amy
-        # you could choose to pass instruction here rather than via context
-        # system_instruction=system_instruction,
+        settings=AWSNovaSonicLLMSettings(
+            voice="tiffany",  # matthew, tiffany, amy
+            system_instruction=system_instruction,
+        ),
         # you could choose to pass tools here rather than via context
         # tools=tools
     )
@@ -236,7 +237,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     context = LLMContext(
         messages=[
-            {"role": "system", "content": f"{system_instruction}"},
             {"role": "user", "content": "Hello!"},
         ],
         tools=tools,
