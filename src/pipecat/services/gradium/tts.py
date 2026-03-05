@@ -19,7 +19,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
@@ -89,6 +88,7 @@ class GradiumTTSService(WebsocketTTSService):
 
         super().__init__(
             push_stop_frames=True,
+            push_start_frame=True,
             push_text_frames=False,
             pause_frame_processing=True,
             sample_rate=SAMPLE_RATE,
@@ -331,11 +331,6 @@ class GradiumTTSService(WebsocketTTSService):
                 await self._connect()
 
             try:
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame(context_id=context_id)
-
                 msg = self._build_msg(text=text, context_id=context_id)
                 await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
