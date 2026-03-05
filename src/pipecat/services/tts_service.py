@@ -152,6 +152,8 @@ class TTSService(AIService):
         push_text_frames: bool = True,
         # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
         push_stop_frames: bool = False,
+        # if True, TTSService will push TTSStartedFrames and create audio contexts automatically
+        push_start_frame: bool = False,
         # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
         stop_frame_timeout_s: float = 2.0,
         # if True, TTSService will push silence audio frames after TTSStoppedFrame
@@ -202,6 +204,9 @@ class TTSService(AIService):
 
             push_text_frames: Whether to push TextFrames and LLMFullResponseEndFrames.
             push_stop_frames: Whether to automatically push TTSStoppedFrames.
+            push_start_frame: Whether to automatically create audio contexts and push TTSStartedFrames.
+                When True, the base class handles ``create_audio_context`` and yields ``TTSStartedFrame``
+                before each synthesis call, so ``run_tts`` implementations do not need to.
             stop_frame_timeout_s: Idle time before pushing TTSStoppedFrame when push_stop_frames is True.
             push_silence_after_stop: Whether to push silence audio after TTSStoppedFrame.
             silence_time_s: Duration of silence to push when push_silence_after_stop is True.
@@ -266,6 +271,7 @@ class TTSService(AIService):
         self._text_aggregation_mode: TextAggregationMode = text_aggregation_mode
         self._push_text_frames: bool = push_text_frames
         self._push_stop_frames: bool = push_stop_frames
+        self._push_start_frame: bool = push_start_frame
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
         self._push_silence_after_stop: bool = push_silence_after_stop
         self._silence_time_s: float = silence_time_s
@@ -634,9 +640,10 @@ class TTSService(AIService):
         if self._is_yielding_frames_synchronously and self.audio_context_available(
             self._turn_context_id
         ):
-            await self.append_to_audio_context(
-                self._turn_context_id, TTSStoppedFrame(context_id=self._turn_context_id)
-            )
+            if self._push_stop_frames:
+                await self.append_to_audio_context(
+                    self._turn_context_id, TTSStoppedFrame(context_id=self._turn_context_id)
+                )
             await self.remove_audio_context(self._turn_context_id)
 
         # Flush any pending audio so the TTS service closes the current context.
@@ -974,6 +981,11 @@ class TTSService(AIService):
 
         # Trigger event before starting TTS
         await self._call_event_handler("on_tts_request", context_id, prepared_text)
+
+        if self._push_start_frame and not self.audio_context_available(context_id):
+            await self.create_audio_context(context_id)
+            await self.start_ttfb_metrics()
+            await self.append_to_audio_context(context_id, TTSStartedFrame(context_id=context_id))
 
         await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
 

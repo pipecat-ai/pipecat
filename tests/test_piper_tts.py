@@ -136,7 +136,7 @@ async def test_run_piper_tts_error(aiohttp_client):
             TTSSpeakFrame(text="Error case.", append_to_context=False),
         ]
 
-        expected_down_frames = [AggregatedTextFrame, TTSTextFrame, TTSStoppedFrame]
+        expected_down_frames = [AggregatedTextFrame, TTSStartedFrame, TTSTextFrame, TTSStoppedFrame]
 
         expected_up_frames = [ErrorFrame]
 
