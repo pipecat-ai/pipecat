@@ -146,6 +146,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             aggregate_sentences=aggregate_sentences,
             text_aggregation_mode=text_aggregation_mode,
             push_stop_frames=True,
+            push_start_frame=True,
             stop_frame_timeout_s=2.0,
             sample_rate=sample_rate,
             settings=NeuphonicTTSSettings(
@@ -161,12 +162,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
         self._api_key = api_key
         self._url = url
-
-        self._cumulative_time = 0
-
         self._receive_task = None
         self._keepalive_task = None
-        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -329,7 +326,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -343,7 +339,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
                     audio = base64.b64decode(msg["data"]["audio"])
                     frame = TTSAudioRawFrame(
-                        audio, self.sample_rate, 1, context_id=self._context_id
+                        audio, self.sample_rate, 1, context_id=self.get_active_audio_context_id()
                     )
                     await self.push_frame(frame)
 
@@ -386,14 +382,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame(context_id=context_id)
-                    self._cumulative_time = 0
-                # Store context_id for use in _receive_messages
-                self._context_id = context_id
-
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
@@ -456,6 +444,8 @@ class NeuphonicHttpTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_stop_frames=True,
+            push_start_frame=True,
             settings=NeuphonicTTSSettings(
                 model=None,
                 voice=voice_id,
@@ -572,8 +562,6 @@ class NeuphonicHttpTTSService(TTSService):
             payload["voice_id"] = self._settings.voice
 
         try:
-            await self.start_ttfb_metrics()
-
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
@@ -582,9 +570,6 @@ class NeuphonicHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-                if not self.audio_context_available(context_id):
-                    await self.create_audio_context(context_id)
-                    yield TTSStartedFrame(context_id=context_id)
 
                 # Process SSE stream line by line
                 async for line in response.content:
