@@ -20,8 +20,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
@@ -140,6 +138,8 @@ class KokoroTTSService(TTSService):
         params = params or KokoroTTSService.InputParams()
 
         super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=KokoroTTSSettings(
                 model=None,
                 voice=voice_id,
@@ -178,11 +178,7 @@ class KokoroTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
             await self.start_tts_usage_metrics(text)
-            if not self.audio_context_available(context_id):
-                await self.create_audio_context(context_id)
-                yield TTSStartedFrame(context_id=context_id)
 
             stream = self._kokoro.create_stream(
                 text, voice=self._settings.voice, lang=self._lang_code, speed=1.0

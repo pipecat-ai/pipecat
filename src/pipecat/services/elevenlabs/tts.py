@@ -1230,3 +1230,5 @@ class ElevenLabsHttpTTSService(TTSService):
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
+        finally:
+            await self.stop_ttfb_metrics()

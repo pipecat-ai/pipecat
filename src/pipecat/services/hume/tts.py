@@ -349,3 +349,6 @@ class HumeTTSService(TTSService):
 
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+        finally:
+            # Ensure TTFB timer is stopped even on early failures
+            await self.stop_ttfb_metrics()
