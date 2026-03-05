@@ -204,9 +204,7 @@ class OpenAIWebSocketLLMAdapter(BaseLLMAdapter[OpenAIWebSocketLLMInvocationParam
                     continue
                 item_type = item.get("type")
                 if item_type == "text":
-                    converted_content.append(
-                        {"type": "input_text", "text": item.get("text", "")}
-                    )
+                    converted_content.append({"type": "input_text", "text": item.get("text", "")})
                 elif item_type == "image_url":
                     converted_content.append(
                         {

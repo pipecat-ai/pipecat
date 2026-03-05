@@ -85,7 +85,10 @@ class TestSimpleUserMessage:
         item = params["input"][0]
         assert len(item["content"]) == 2
         assert item["content"][0] == {"type": "input_text", "text": "Describe this"}
-        assert item["content"][1] == {"type": "input_image", "image_url": "data:image/png;base64,abc"}
+        assert item["content"][1] == {
+            "type": "input_image",
+            "image_url": "data:image/png;base64,abc",
+        }
 
 
 class TestSystemMessageExtraction:

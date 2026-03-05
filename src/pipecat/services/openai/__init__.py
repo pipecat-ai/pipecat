@@ -13,5 +13,8 @@ from .llm import *
 from .realtime import *
 from .stt import *
 from .tts import *
+from .websocket_llm import *
 
-sys.modules[__name__] = DeprecatedModuleProxy(globals(), "openai", "openai.[image,llm,stt,tts]")
+sys.modules[__name__] = DeprecatedModuleProxy(
+    globals(), "openai", "openai.[image,llm,stt,tts,websocket_llm]"
+)
