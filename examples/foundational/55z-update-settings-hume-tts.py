@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = HumeTTSService(
         api_key=os.getenv("HUME_API_KEY"),
-        voice_id="f898a92e-685f-43fa-985b-a46920f0650b",
+        settings=HumeTTSSettings(voice="f898a92e-685f-43fa-985b-a46920f0650b"),
     )
 
     llm = OpenAILLMService(

@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = LmntTTSService(
         api_key=os.getenv("LMNT_API_KEY"),
-        voice_id="lily",
+        settings=LmntTTSSettings(voice="lily"),
     )
 
     llm = OpenAILLMService(

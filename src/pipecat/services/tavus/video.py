@@ -11,6 +11,7 @@ avatar functionality through Tavus's streaming API.
 """
 
 import asyncio
+from dataclasses import dataclass
 from typing import Optional
 
 import aiohttp
@@ -38,6 +39,13 @@ from pipecat.services.settings import ServiceSettings
 from pipecat.transports.tavus.transport import TavusCallbacks, TavusParams, TavusTransportClient
 
 
+@dataclass
+class TavusVideoSettings(ServiceSettings):
+    """Settings for the Tavus video service."""
+
+    pass
+
+
 class TavusVideoService(AIService):
     """Service that proxies audio to Tavus and receives audio and video in return.
 
@@ -58,7 +66,7 @@ class TavusVideoService(AIService):
         replica_id: str,
         persona_id: str = "pipecat-stream",
         session: aiohttp.ClientSession,
-        settings: Optional[ServiceSettings] = None,
+        settings: Optional[TavusVideoSettings] = None,
         **kwargs,
     ) -> None:
         """Initialize the Tavus video service.

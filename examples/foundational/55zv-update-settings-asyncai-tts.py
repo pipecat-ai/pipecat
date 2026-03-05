@@ -55,7 +55,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = AsyncAITTSService(
         api_key=os.getenv("ASYNCAI_API_KEY", ""),
-        voice_id=os.getenv("ASYNCAI_VOICE_ID", "e0f39dc4-f691-4e78-bba5-5c636692cc04"),
+        settings=AsyncAITTSSettings(
+            voice=os.getenv("ASYNCAI_VOICE_ID", "e0f39dc4-f691-4e78-bba5-5c636692cc04")
+        ),
     )
 
     llm = OpenAILLMService(

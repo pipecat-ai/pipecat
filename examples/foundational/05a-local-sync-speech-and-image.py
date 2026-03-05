@@ -29,7 +29,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService, CartesiaTTSSettings
-from pipecat.services.fal.image import FalImageGenService
+from pipecat.services.fal.image import FalImageGenService, FalImageGenSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
@@ -104,7 +104,9 @@ async def main():
             )
 
             imagegen = FalImageGenService(
-                params=FalImageGenService.InputParams(image_size="square_hd"),
+                settings=FalImageGenSettings(
+                    image_size="square_hd",
+                ),
                 aiohttp_session=session,
                 key=os.getenv("FAL_KEY"),
             )

@@ -12,6 +12,7 @@ audio/video streaming capabilities through the HeyGen API.
 """
 
 import asyncio
+from dataclasses import dataclass
 from typing import Optional, Union
 
 import aiohttp
@@ -52,6 +53,13 @@ from pipecat.transports.base_transport import TransportParams
 AVATAR_VAD_STOP_SECS = 0.35
 
 
+@dataclass
+class HeyGenVideoSettings(ServiceSettings):
+    """Settings for the HeyGen video service."""
+
+    pass
+
+
 class HeyGenVideoService(AIService):
     """A service that integrates HeyGen's interactive avatar capabilities into the pipeline.
 
@@ -81,7 +89,7 @@ class HeyGenVideoService(AIService):
         session: aiohttp.ClientSession,
         session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
         service_type: Optional[ServiceType] = None,
-        settings: Optional[ServiceSettings] = None,
+        settings: Optional[HeyGenVideoSettings] = None,
         **kwargs,
     ) -> None:
         """Initialize the HeyGen video service.

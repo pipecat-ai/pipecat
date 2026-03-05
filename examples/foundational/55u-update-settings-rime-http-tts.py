@@ -57,7 +57,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = RimeHttpTTSService(
-            api_key=os.getenv("RIME_API_KEY"), voice_id="eva", aiohttp_session=session
+            api_key=os.getenv("RIME_API_KEY"),
+            settings=RimeTTSSettings(voice="eva"),
+            aiohttp_session=session,
         )
 
         llm = OpenAILLMService(

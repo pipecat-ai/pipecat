@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = RimeTTSService(
         api_key=os.getenv("RIME_API_KEY"),
-        voice_id="luna",
+        settings=RimeTTSSettings(voice="luna"),
     )
 
     llm = OpenAILLMService(

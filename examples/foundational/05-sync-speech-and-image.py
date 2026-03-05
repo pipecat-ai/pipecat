@@ -28,7 +28,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService, CartesiaTTSSettings
-from pipecat.services.fal.image import FalImageGenService
+from pipecat.services.fal.image import FalImageGenService, FalImageGenSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -104,7 +104,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         imagegen = FalImageGenService(
-            params=FalImageGenService.InputParams(image_size="square_hd"),
+            settings=FalImageGenSettings(
+                image_size="square_hd",
+            ),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )

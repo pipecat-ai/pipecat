@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = ResembleAITTSService(
         api_key=os.getenv("RESEMBLE_API_KEY"),
-        voice_id=os.getenv("RESEMBLE_VOICE_UUID"),
+        settings=ResembleAITTSSettings(voice=os.getenv("RESEMBLE_VOICE_UUID")),
     )
 
     llm = OpenAILLMService(
