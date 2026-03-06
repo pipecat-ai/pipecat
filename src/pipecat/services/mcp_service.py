@@ -298,7 +298,7 @@ class MCPClient(BaseObject):
 
         try:
             logger.debug(f"Found {len(available_tools)} available tools")
-        except:
+        except Exception:
             pass
 
         for tool in available_tools.tools:

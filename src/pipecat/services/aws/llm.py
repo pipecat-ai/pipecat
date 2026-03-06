@@ -369,7 +369,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                     tool_result_content = [{"json": content_json}]
                 else:
                     tool_result_content = [{"text": message["content"]}]
-            except:
+            except (json.JSONDecodeError, ValueError):
                 tool_result_content = [{"text": message["content"]}]
 
             return {
