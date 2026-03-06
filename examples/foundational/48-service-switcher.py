@@ -116,15 +116,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         services=[tts_cartesia, tts_deepgram], strategy_type=ServiceSwitcherStrategyManual
     )
 
-    system = "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
+    system_prompt = "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
 
     llm_openai = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAILLMSettings(system_instruction=system),
+        settings=OpenAILLMSettings(system_instruction=system_prompt),
     )
     llm_google = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        settings=GoogleLLMSettings(system_instruction=system),
+        settings=GoogleLLMSettings(system_instruction=system_prompt),
     )
     llm_switcher = LLMSwitcher(
         llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual

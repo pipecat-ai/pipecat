@@ -49,7 +49,7 @@ async def main():
         async def get_month_data(month):
             messages = [
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
                 }
             ]

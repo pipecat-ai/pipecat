@@ -235,12 +235,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = LLMContext(
-        messages=[
-            {"role": "user", "content": "Hello!"},
-        ],
-        tools=tools,
-    )
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
@@ -266,6 +261,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
         # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
         # triggering the first assistant response. Note that this trigger requires a special

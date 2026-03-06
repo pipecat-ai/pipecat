@@ -197,11 +197,11 @@ Your response will be turned into speech so use only simple words and punctuatio
 """
 
     llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GoogleLLMSettings(
             model=VOICE_MODEL,
             system_instruction=system_prompt,
         ),
-        api_key=os.getenv("GOOGLE_API_KEY"),
     )
     llm.register_function("query_knowledge_base", query_knowledge_base)
 
@@ -218,11 +218,7 @@ Your response will be turned into speech so use only simple words and punctuatio
     )
     tools = ToolsSchema(standard_tools=[query_function])
 
-    messages = [
-        {"role": "user", "content": "Greet the user."},
-    ]
-
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -252,6 +248,7 @@ Your response will be turned into speech so use only simple words and punctuatio
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Start conversation - empty prompt to let LLM follow system instructions
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

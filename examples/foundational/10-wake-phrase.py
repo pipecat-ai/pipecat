@@ -104,7 +104,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message(
             {
-                "role": "system",
+                "role": "user",
                 "content": "Please introduce yourself. Tell the user they should say 'Hey Robot' before talking to you.",
             }
         )
