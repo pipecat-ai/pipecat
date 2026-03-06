@@ -136,6 +136,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         include_prob_metrics: bool = False,
+        push_empty_transcripts: bool = False,
         ttfs_p99_latency: Optional[float] = WHISPER_TTFS_P99,
         **kwargs,
     ):
@@ -150,6 +151,12 @@ class BaseWhisperSTTService(SegmentedSTTService):
             temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
             include_prob_metrics: If True, enables probability metrics in API response.
                 Each service implements this differently (see child classes).
+                Defaults to False.
+            push_empty_transcripts: - If true, allow empty `TranscriptionFrame` frames to be
+                pushed downstream instead of discarding them. This is intended for situations
+                where VAD fires even though the user did not speak. In these cases, it is
+                useful to know that nothing was transcribed so that the agent can resume
+                speaking, instead of waiting longer for a transcription.
                 Defaults to False.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
@@ -171,6 +178,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         self._prompt = prompt
         self._temperature = temperature
         self._include_prob_metrics = include_prob_metrics
+        self._push_empty_transcripts = push_empty_transcripts
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
@@ -237,7 +245,10 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
             text = response.text.strip()
 
-            if text:
+            if not text:
+                logger.warning("Received empty transcription from API")
+
+            if text or self._push_empty_transcripts:
                 await self._handle_transcription(text, True, self._language)
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(
@@ -246,8 +257,6 @@ class BaseWhisperSTTService(SegmentedSTTService):
                     time_now_iso8601(),
                     result=response,
                 )
-            else:
-                logger.warning("Received empty transcription from API")
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
