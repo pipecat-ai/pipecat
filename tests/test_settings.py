@@ -12,6 +12,8 @@ import pytest
 
 from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTSettings
+from pipecat.services.openai.realtime import events
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMSettings
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -615,3 +617,201 @@ class TestDeepgramSTTSettingsExtraSync:
         kwargs = svc._build_connect_kwargs()
         assert kwargs["numerals"] == "true"
         assert kwargs["custom_param"] == "test"
+
+
+# ---------------------------------------------------------------------------
+# OpenAIRealtimeLLMSettings: apply_update with bidirectional sync
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAIRealtimeSettingsApplyUpdate:
+    def _make_store(self, **kwargs) -> OpenAIRealtimeLLMSettings:
+        """Helper to build a store-mode OpenAIRealtimeLLMSettings."""
+        defaults = dict(
+            model="gpt-realtime-1.5",
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=events.SessionProperties(),
+        )
+        defaults.update(kwargs)
+        return OpenAIRealtimeLLMSettings(**defaults)
+
+    def test_top_level_model_syncs_to_sp(self):
+        """Updating top-level model should propagate to session_properties.model."""
+        store = self._make_store()
+        delta = OpenAIRealtimeLLMSettings(model="gpt-realtime-2.0")
+        changed = store.apply_update(delta)
+
+        assert "model" in changed
+        assert store.model == "gpt-realtime-2.0"
+        assert store.session_properties.model == "gpt-realtime-2.0"
+
+    def test_top_level_system_instruction_syncs_to_sp(self):
+        """Updating top-level system_instruction should propagate to session_properties.instructions."""
+        store = self._make_store()
+        delta = OpenAIRealtimeLLMSettings(system_instruction="Be helpful.")
+        changed = store.apply_update(delta)
+
+        assert "system_instruction" in changed
+        assert store.system_instruction == "Be helpful."
+        assert store.session_properties.instructions == "Be helpful."
+
+    def test_sp_replaces_wholesale(self):
+        """session_properties in delta replaces the entire stored SP."""
+        store = self._make_store(
+            session_properties=events.SessionProperties(
+                output_modalities=["audio", "text"],
+                instructions="Old instructions.",
+            ),
+            system_instruction="Old instructions.",
+        )
+
+        new_sp = events.SessionProperties(output_modalities=["text"])
+        delta = OpenAIRealtimeLLMSettings(session_properties=new_sp)
+        changed = store.apply_update(delta)
+
+        assert "session_properties" in changed
+        assert store.session_properties.output_modalities == ["text"]
+        # Fields not in the new SP become None (wholesale replacement)
+        # But model is synced from top-level
+        assert store.session_properties.model == "gpt-realtime-1.5"
+
+    def test_sp_model_syncs_to_top_level(self):
+        """session_properties.model should sync to top-level model."""
+        store = self._make_store()
+        new_sp = events.SessionProperties(model="gpt-realtime-2.0")
+        delta = OpenAIRealtimeLLMSettings(session_properties=new_sp)
+        changed = store.apply_update(delta)
+
+        assert "model" in changed
+        assert store.model == "gpt-realtime-2.0"
+        assert store.session_properties.model == "gpt-realtime-2.0"
+
+    def test_sp_instructions_syncs_to_top_level(self):
+        """session_properties.instructions should sync to top-level system_instruction."""
+        store = self._make_store()
+        new_sp = events.SessionProperties(instructions="New instructions.")
+        delta = OpenAIRealtimeLLMSettings(session_properties=new_sp)
+        changed = store.apply_update(delta)
+
+        assert "system_instruction" in changed
+        assert store.system_instruction == "New instructions."
+        assert store.session_properties.instructions == "New instructions."
+
+    def test_top_level_model_takes_precedence_over_sp_model(self):
+        """When both model and session_properties.model are in the delta, top-level wins."""
+        store = self._make_store()
+        new_sp = events.SessionProperties(model="sp-model")
+        delta = OpenAIRealtimeLLMSettings(model="top-model", session_properties=new_sp)
+        store.apply_update(delta)
+
+        assert store.model == "top-model"
+        assert store.session_properties.model == "top-model"
+
+    def test_top_level_si_takes_precedence_over_sp_instructions(self):
+        """When both system_instruction and SP.instructions are in delta, top-level wins."""
+        store = self._make_store()
+        new_sp = events.SessionProperties(instructions="sp instructions")
+        delta = OpenAIRealtimeLLMSettings(
+            system_instruction="top instructions",
+            session_properties=new_sp,
+        )
+        store.apply_update(delta)
+
+        assert store.system_instruction == "top instructions"
+        assert store.session_properties.instructions == "top instructions"
+
+    def test_non_synced_field_update_does_not_affect_sp(self):
+        """Updating a non-synced field like temperature shouldn't touch session_properties."""
+        store = self._make_store(
+            session_properties=events.SessionProperties(instructions="Keep me."),
+            system_instruction="Keep me.",
+        )
+        original_sp = store.session_properties
+
+        delta = OpenAIRealtimeLLMSettings(temperature=0.5)
+        changed = store.apply_update(delta)
+
+        assert "temperature" in changed
+        assert store.temperature == 0.5
+        # SP should be untouched (same object)
+        assert store.session_properties is original_sp
+        assert store.session_properties.instructions == "Keep me."
+
+
+# ---------------------------------------------------------------------------
+# OpenAIRealtimeLLMSettings: from_mapping
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAIRealtimeSettingsFromMapping:
+    def test_sp_keys_route_to_session_properties(self):
+        """SessionProperties fields (instructions, audio, etc.) route into nested SP."""
+        delta = OpenAIRealtimeLLMSettings.from_mapping(
+            {"instructions": "Be concise.", "output_modalities": ["text"]}
+        )
+        assert is_given(delta.session_properties)
+        assert delta.session_properties.instructions == "Be concise."
+        assert delta.session_properties.output_modalities == ["text"]
+
+    def test_model_routes_to_top_level(self):
+        """model should go to the top-level field, not session_properties."""
+        delta = OpenAIRealtimeLLMSettings.from_mapping({"model": "gpt-realtime-2.0"})
+        assert delta.model == "gpt-realtime-2.0"
+        # No session_properties should be created since no SP keys were present
+        assert not is_given(delta.session_properties)
+
+    def test_unknown_keys_go_to_extra(self):
+        """Unrecognized keys should land in extra."""
+        delta = OpenAIRealtimeLLMSettings.from_mapping({"unknown_param": 42})
+        assert not is_given(delta.model)
+        assert not is_given(delta.session_properties)
+        assert delta.extra == {"unknown_param": 42}
+
+    def test_mixed_keys(self):
+        """model + SP keys + unknown keys are routed correctly."""
+        delta = OpenAIRealtimeLLMSettings.from_mapping(
+            {
+                "model": "gpt-realtime-2.0",
+                "instructions": "Be helpful.",
+                "unknown": "val",
+            }
+        )
+        assert delta.model == "gpt-realtime-2.0"
+        assert is_given(delta.session_properties)
+        assert delta.session_properties.instructions == "Be helpful."
+        assert delta.extra == {"unknown": "val"}
+
+    def test_roundtrip_from_mapping_apply_update(self):
+        """Simulate dict-style update: from_mapping -> apply_update."""
+        store = OpenAIRealtimeLLMSettings(
+            model="gpt-realtime-1.5",
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=events.SessionProperties(),
+        )
+
+        raw = {"instructions": "Be concise.", "output_modalities": ["text"]}
+        delta = OpenAIRealtimeLLMSettings.from_mapping(raw)
+        changed = store.apply_update(delta)
+
+        assert "session_properties" in changed
+        assert store.session_properties.instructions == "Be concise."
+        assert store.session_properties.output_modalities == ["text"]
+        assert store.system_instruction == "Be concise."
