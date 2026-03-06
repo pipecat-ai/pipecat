@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.settings import TTSSettings, _warn_deprecated_param
-from pipecat.services.tts_service import AudioContextTTSService
+from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -43,7 +43,7 @@ class ResembleAITTSSettings(TTSSettings):
     pass
 
 
-class ResembleAITTSService(AudioContextTTSService):
+class ResembleAITTSService(WebsocketTTSService):
     """Resemble AI TTS service with WebSocket streaming and word timestamps.
 
     Provides text-to-speech using Resemble AI's streaming WebSocket API.
@@ -103,7 +103,6 @@ class ResembleAITTSService(AudioContextTTSService):
         super().__init__(
             sample_rate=sample_rate,
             reuse_context_id_within_turn=False,
-            supports_word_timestamps=True,
             settings=default_settings,
             **kwargs,
         )
@@ -268,7 +267,7 @@ class ResembleAITTSService(AudioContextTTSService):
         """
         pass
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio and finalize the current context."""
         logger.trace(f"{self}: flushing audio")
         # For Resemble AI, we just wait for the audio_end message
@@ -297,9 +296,6 @@ class ResembleAITTSService(AudioContextTTSService):
                 continue
 
             if msg_type == "audio":
-                await self.stop_ttfb_metrics()
-                await self.start_word_timestamps()
-
                 # Decode base64 audio content
                 audio_content = msg.get("audio_content", "")
                 if not audio_content:
@@ -447,13 +443,13 @@ class ResembleAITTSService(AudioContextTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                await self.start_ttfb_metrics()
+                yield TTSStartedFrame(context_id=context_id)
 
             # Map request_id to context_id for tracking
             self._request_id_to_context[self._request_id_counter] = context_id
-
-            await self.create_audio_context(context_id)
 
             msg = self._build_msg(text=text)
 

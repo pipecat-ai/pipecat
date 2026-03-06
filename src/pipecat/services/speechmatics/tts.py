@@ -19,8 +19,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
@@ -135,6 +133,8 @@ class SpeechmaticsTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -185,9 +185,6 @@ class SpeechmaticsTTSService(TTSService):
         url = _get_endpoint_url(self._base_url, self._settings.voice, self.sample_rate)
 
         try:
-            # Start TTS TTFB metrics
-            await self.start_ttfb_metrics()
-
             # Track attempt
             attempt = 0
 
@@ -238,9 +235,6 @@ class SpeechmaticsTTSService(TTSService):
                     # Update Pipecat metrics
                     await self.start_tts_usage_metrics(text)
 
-                    # Emit the TTS started frame
-                    yield TTSStartedFrame(context_id=context_id)
-
                     # Process the response in streaming chunks
                     first_chunk = True
                     buffer = b""
@@ -277,8 +271,7 @@ class SpeechmaticsTTSService(TTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Error generating TTS: {e}")
         finally:
-            # Emit the TTS stopped frame
-            yield TTSStoppedFrame(context_id=context_id)
+            await self.stop_ttfb_metrics()
 
 
 def _get_endpoint_url(base_url: str, voice: str, sample_rate: int) -> str:

@@ -23,12 +23,11 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import TTSSettings, _warn_deprecated_param
-from pipecat.services.tts_service import AudioContextTTSService, TextAggregationMode, TTSService
+from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -80,7 +79,7 @@ class AsyncAITTSSettings(TTSSettings):
     pass
 
 
-class AsyncAITTSService(AudioContextTTSService):
+class AsyncAITTSService(WebsocketTTSService):
     """Async TTS service with WebSocket streaming.
 
     Provides text-to-speech using Async's streaming WebSocket API.
@@ -183,8 +182,9 @@ class AsyncAITTSService(AudioContextTTSService):
             aggregate_sentences=aggregate_sentences,
             text_aggregation_mode=text_aggregation_mode,
             pause_frame_processing=True,
-            push_stop_frames=True,
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -340,13 +340,18 @@ class AsyncAITTSService(AudioContextTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self):
-        """Flush any pending audio."""
-        context_id = self.get_active_audio_context_id()
-        if not context_id or not self._websocket:
+    async def flush_audio(self, context_id: Optional[str] = None):
+        """Flush any pending audio.
+
+        Args:
+            context_id: The specific context to flush. If None, falls back to the
+                currently active context.
+        """
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = self._build_msg(text=" ", context_id=context_id, force=True)
+        msg = self._build_msg(text=" ", context_id=flush_id, force=True)
         await self._websocket.send(msg)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -459,12 +464,6 @@ class AsyncAITTSService(AudioContextTTSService):
                 await self._connect()
 
             try:
-                if not self.has_active_audio_context():
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame(context_id=context_id)
-                    if not self.audio_context_available(context_id):
-                        await self.create_audio_context(context_id)
-
                 msg = self._build_msg(text=text, force=True, context_id=context_id)
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
@@ -574,6 +573,8 @@ class AsyncAIHttpTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -632,7 +633,7 @@ class AsyncAIHttpTTSService(TTSService):
 
         try:
             voice_config = {"mode": "id", "id": self._settings.voice}
-            await self.start_ttfb_metrics()
+
             payload = {
                 "model_id": self._settings.model,
                 "transcript": text,
@@ -644,7 +645,7 @@ class AsyncAIHttpTTSService(TTSService):
                 },
                 "language": self._settings.language,
             }
-            yield TTSStartedFrame(context_id=context_id)
+
             headers = {
                 "version": self._api_version,
                 "x-api-key": self._api_key,
@@ -682,4 +683,3 @@ class AsyncAIHttpTTSService(TTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)

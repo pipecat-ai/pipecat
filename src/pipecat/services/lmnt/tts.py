@@ -143,6 +143,7 @@ class LmntTTSService(InterruptibleTTSService):
 
         super().__init__(
             push_stop_frames=True,
+            push_start_frame=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
             settings=default_settings,
@@ -152,7 +153,6 @@ class LmntTTSService(InterruptibleTTSService):
         self._api_key = api_key
         self._output_format = "raw"
         self._receive_task = None
-        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -289,7 +289,6 @@ class LmntTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting from LMNT: {e}", exception=e)
         finally:
-            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -299,7 +298,7 @@ class LmntTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis."""
         if not self._websocket or self._websocket.state is State.CLOSED:
             return
@@ -315,7 +314,7 @@ class LmntTTSService(InterruptibleTTSService):
                     audio=message,
                     sample_rate=self.sample_rate,
                     num_channels=1,
-                    context_id=self._context_id,
+                    context_id=self.get_active_audio_context_id(),
                 )
                 await self.push_frame(frame)
             else:
@@ -347,11 +346,6 @@ class LmntTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
-                # Store context_id for use in _receive_messages
-                self._context_id = context_id
-                yield TTSStartedFrame(context_id=context_id)
-
                 # Send text to LMNT
                 await self._get_websocket().send(json.dumps({"text": text}))
                 # Force synthesis

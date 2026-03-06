@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -166,7 +165,7 @@ class HumeTTSService(TTSService):
             sample_rate=sample_rate,
             push_text_frames=False,
             push_stop_frames=True,
-            supports_word_timestamps=True,
+            push_start_frame=True,
             settings=default_settings,
             **kwargs,
         )
@@ -181,7 +180,6 @@ class HumeTTSService(TTSService):
 
         # Track cumulative time for word timestamps across utterances
         self._cumulative_time = 0.0
-        self._started = False
 
     def can_generate_metrics(self) -> bool:
         """Can generate metrics.
@@ -203,7 +201,6 @@ class HumeTTSService(TTSService):
     def _reset_state(self):
         """Reset internal state variables."""
         self._cumulative_time = 0.0
-        self._started = False
 
     async def stop(self, frame: EndFrame) -> None:
         """Stop the service and cleanup resources.
@@ -310,14 +307,7 @@ class HumeTTSService(TTSService):
         # Request raw PCM chunks in the streaming JSON
         pcm_fmt = FormatPcm(type="pcm")
 
-        await self.start_ttfb_metrics()
         await self.start_tts_usage_metrics(text)
-
-        # Start TTS sequence if not already started
-        if not self._started:
-            await self.start_word_timestamps()
-            yield TTSStartedFrame(context_id=context_id)
-            self._started = True
 
         try:
             # Instant mode is always enabled here (not user-configurable)
@@ -395,4 +385,3 @@ class HumeTTSService(TTSService):
         finally:
             # Ensure TTFB timer is stopped even on early failures
             await self.stop_ttfb_metrics()
-            # Let the parent class handle TTSStoppedFrame via push_stop_frames
