@@ -255,7 +255,7 @@ class LLMContext:
         this method, which is part of the public API of OpenAILLMContext but
         doesn't need to be for LLMContext.
 
-        .. deprecated::
+        .. deprecated:: 0.0.92
             Use `get_messages()` instead.
 
         Returns:

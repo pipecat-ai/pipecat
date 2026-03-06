@@ -552,7 +552,7 @@ class ContextWindowCompressionParams(BaseModel):
 class InputParams(BaseModel):
     """Input parameters for Gemini Live generation.
 
-    .. deprecated::
+    .. deprecated:: 0.0.105
         Use ``GeminiLiveLLMSettings`` instead.
 
     Parameters:
@@ -678,7 +678,7 @@ class GeminiLiveLLMService(LLMService):
 
             model: Model identifier to use.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveLLMSettings(model=...)`` instead.
 
             voice_id: TTS voice identifier. Defaults to "Charon".
@@ -691,7 +691,7 @@ class GeminiLiveLLMService(LLMService):
             tools: Tools/functions available to the model. Defaults to None.
             params: Configuration parameters for the model.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveLLMSettings(...)`` instead.
 
             settings: Gemini Live LLM settings. If provided together with deprecated

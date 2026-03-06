@@ -94,7 +94,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("ASSEMBLYAI_API_KEY"),
         vad_force_turn_endpoint=False,  # Use AssemblyAI's built-in turn detection
         settings=AssemblyAISTTSettings(
-            speech_model="u3-rt-pro",
+            model="u3-rt-pro",
             # Optional: Tune turn detection timing (defaults shown below)
             # min_turn_silence=100,  # Default
             # max_turn_silence=1000,  # Default

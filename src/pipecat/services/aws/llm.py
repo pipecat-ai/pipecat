@@ -754,7 +754,7 @@ class AWSBedrockLLMService(LLMService):
     class InputParams(BaseModel):
         """Input parameters for AWS Bedrock LLM service.
 
-        .. deprecated::
+        .. deprecated:: 0.0.105
             Use ``AWSBedrockLLMSettings`` instead. Pass settings directly via the
             ``settings`` parameter of :class:`AWSBedrockLLMService`.
 
@@ -795,7 +795,7 @@ class AWSBedrockLLMService(LLMService):
         Args:
             model: The AWS Bedrock model identifier to use.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=AWSBedrockLLMSettings(model=...)`` instead.
 
             aws_access_key: AWS access key ID. If None, uses default credentials.
@@ -804,7 +804,7 @@ class AWSBedrockLLMService(LLMService):
             aws_region: AWS region for the Bedrock service.
             params: Model parameters and configuration.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=AWSBedrockLLMSettings(...)`` instead.
 
             settings: Runtime-updatable settings for this service.  When both

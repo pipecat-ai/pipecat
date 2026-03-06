@@ -657,7 +657,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
         self._user_speaking = True
 
     async def _handle_termination(self, message: TerminationMessage):

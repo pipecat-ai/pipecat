@@ -88,7 +88,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
             project_id: Google Cloud project ID.
             model: Model identifier to use.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveLLMSettings(model=...)`` instead.
 
             voice_id: TTS voice identifier. Defaults to "Charon".
@@ -102,7 +102,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
             params: Configuration parameters for the model along with Vertex AI
                 location and project ID.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=GeminiLiveLLMSettings(...)`` instead.
 
             settings: Gemini Live LLM settings. If provided together with deprecated

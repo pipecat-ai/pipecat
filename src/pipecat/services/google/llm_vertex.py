@@ -128,14 +128,14 @@ class GoogleVertexLLMService(GoogleLLMService):
             credentials_path: Path to the service account JSON file.
             model: Model identifier (e.g., "gemini-2.5-flash").
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMSettings(model=...)`` instead.
 
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
             project_id: Google Cloud project ID.
             params: Input parameters for the model.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMSettings(...)`` instead.
 
             settings: Runtime-updatable settings for this service.  When both

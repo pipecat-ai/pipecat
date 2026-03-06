@@ -653,7 +653,7 @@ class GoogleSTTService(STTService):
     async def set_languages(self, languages: List[Language]):
         """Update the service's recognition languages.
 
-        .. deprecated::
+        .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame`` with ``GoogleSTTSettings(languages=...)``
             instead.
 

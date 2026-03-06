@@ -754,7 +754,7 @@ class GoogleLLMService(LLMService):
     class InputParams(BaseModel):
         """Input parameters for Google AI models.
 
-        .. deprecated::
+        .. deprecated:: 0.0.105
             Use ``settings=GoogleLLMSettings(...)`` instead.
 
         Parameters:
@@ -797,12 +797,12 @@ class GoogleLLMService(LLMService):
             api_key: Google AI API key for authentication.
             model: Model name to use.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMSettings(model=...)`` instead.
 
             params: Optional model parameters for inference.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=GoogleLLMSettings(...)`` instead.
 
             settings: Runtime-updatable settings for this service.  When both

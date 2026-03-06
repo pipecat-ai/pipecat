@@ -414,7 +414,7 @@ class SarvamSTTService(STTService):
     async def set_prompt(self, prompt: Optional[str]):
         """Set the transcription/translation prompt and reconnect.
 
-        .. deprecated::
+        .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame(SarvamSTTSettings(prompt=...))`` instead.
 
         Args:

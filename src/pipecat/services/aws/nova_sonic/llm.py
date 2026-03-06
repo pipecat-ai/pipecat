@@ -280,7 +280,7 @@ class AWSNovaSonicLLMService(LLMService):
                 - Nova Sonic (the older model): "us-east-1", "ap-northeast-1"
             model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMSettings(model=...)`` instead.
 
             voice_id: Voice ID for speech synthesis.
@@ -289,7 +289,7 @@ class AWSNovaSonicLLMService(LLMService):
                 - Nova 2 Sonic (the default model): see https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html
                 - Nova Sonic (the older model): see https://docs.aws.amazon.com/nova/latest/userguide/available-voices.html.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMSettings(voice=...)`` instead.
 
             params: Model parameters for audio configuration and inference.

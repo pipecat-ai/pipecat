@@ -170,7 +170,7 @@ class AnthropicLLMService(LLMService):
     class InputParams(BaseModel):
         """Input parameters for Anthropic model inference.
 
-        .. deprecated::
+        .. deprecated:: 0.0.105
             Use ``AnthropicLLMSettings`` instead. Pass settings directly via the
             ``settings`` parameter of :class:`AnthropicLLMService`.
 
@@ -231,12 +231,12 @@ class AnthropicLLMService(LLMService):
             api_key: Anthropic API key for authentication.
             model: Model name to use.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=AnthropicLLMSettings(model=...)`` instead.
 
             params: Optional model parameters for inference.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=AnthropicLLMSettings(...)`` instead.
 
             settings: Runtime-updatable settings for this service.  When both

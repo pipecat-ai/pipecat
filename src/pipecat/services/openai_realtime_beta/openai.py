@@ -134,7 +134,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             api_key: OpenAI API key for authentication.
             model: OpenAI model name.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeBetaLLMSettings(model=...)`` instead.
 
             base_url: WebSocket base URL for the realtime API.
