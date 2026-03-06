@@ -27,7 +27,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 class UserIdleProcessor(FrameProcessor):
     """Monitors user inactivity and triggers callbacks after timeout periods.
 
-    .. deprecated::
+    .. deprecated:: 0.0.100
         UserIdleProcessor is deprecated in 0.0.100 and will be removed in a future version.
         Use LLMUserAggregator with user_idle_timeout parameter instead.
 

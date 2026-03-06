@@ -85,12 +85,11 @@ class TurnDetectionMode(str, Enum):
 
 @dataclass
 class SpeechmaticsSTTSettings(STTSettings):
-    """Settings for Speechmatics STT service.
+    """Settings for SpeechmaticsSTTService.
 
     See ``SpeechmaticsSTTService.InputParams`` for detailed descriptions of each field.
 
     Parameters:
-        model: The operating point / model name.
         domain: Domain for Speechmatics API.
         turn_detection_mode: Endpoint handling mode.
         speaker_active_format: Formatter for active speaker ID.
@@ -490,15 +489,15 @@ class SpeechmaticsSTTService(STTService):
                 default_settings.prefer_current_speaker = _params.prefer_current_speaker
                 default_settings.extra_params = _params.extra_params
 
-        # Build SDK config from settings, then resolve model from operating_point
+        # --- 4. Settings delta (canonical API, always wins) ---
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        # Build SDK config from settings, set model name before calling super
         self._client: VoiceAgentClient | None = None
         self._audio_encoding = encoding
         self._config: VoiceAgentConfig = self._build_config(default_settings)
         default_settings.model = self._config.operating_point.value
-
-        # --- 4. Settings delta (canonical API, always wins) ---
-        if settings is not None:
-            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,

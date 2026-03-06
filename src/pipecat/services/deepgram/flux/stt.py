@@ -71,7 +71,7 @@ class FluxEventType(str, Enum):
 
 @dataclass
 class DeepgramFluxSTTSettings(STTSettings):
-    """Settings for the Deepgram Flux STT service.
+    """Settings for DeepgramFluxSTTService.
 
     Parameters:
         eager_eot_threshold: EagerEndOfTurn/TurnResumed threshold. Off by default.
@@ -81,7 +81,6 @@ class DeepgramFluxSTTSettings(STTSettings):
         eot_timeout_ms: Time in ms after speech to finish a turn regardless of EOT
             confidence (default 5000).
         keyterm: Keyterms to boost recognition accuracy for specialized terminology.
-        tag: Tags to label requests for identification during usage reporting.
         min_confidence: Minimum confidence required to create a TranscriptionFrame.
     """
 
@@ -89,7 +88,6 @@ class DeepgramFluxSTTSettings(STTSettings):
     eot_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     eot_timeout_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     keyterm: list | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    tag: list | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_confidence: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -157,6 +155,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         mip_opt_out: Optional[bool] = None,
         model: Optional[str] = None,
         flux_encoding: str = "linear16",
+        tag: Optional[list] = None,
         params: Optional[InputParams] = None,
         should_interrupt: bool = True,
         settings: Optional[DeepgramFluxSTTSettings] = None,
@@ -177,6 +176,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
             flux_encoding: Audio encoding format required by Flux API. Must be "linear16".
                 Raw signed little-endian 16-bit PCM encoding.
+            tag: Tags to label requests for identification during usage reporting.
             params: InputParams instance containing detailed API configuration options.
 
                 .. deprecated:: 0.0.105
@@ -224,7 +224,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             eot_threshold=None,
             eot_timeout_ms=None,
             keyterm=[],
-            tag=[],
             min_confidence=None,
         )
 
@@ -241,7 +240,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 default_settings.eot_threshold = params.eot_threshold
                 default_settings.eot_timeout_ms = params.eot_timeout_ms
                 default_settings.keyterm = params.keyterm or []
-                default_settings.tag = params.tag or []
+                if params.tag and tag is None:
+                    tag = params.tag
                 default_settings.min_confidence = params.min_confidence
                 if params.mip_opt_out is not None:
                     mip_opt_out = params.mip_opt_out
@@ -261,6 +261,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         self._should_interrupt = should_interrupt
         self._encoding = flux_encoding
         self._mip_opt_out = mip_opt_out
+        self._tag = tag or []
         self._websocket_url = None
         self._receive_task = None
 
@@ -469,7 +470,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             url_params.append(urlencode({"keyterm": keyterm}))
 
         # Add tag parameters (can have multiple)
-        for tag_value in self._settings.tag:
+        for tag_value in self._tag:
             url_params.append(urlencode({"tag": tag_value}))
 
         self._websocket_url = f"{self._url}?{'&'.join(url_params)}"

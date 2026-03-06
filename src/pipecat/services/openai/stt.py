@@ -182,7 +182,7 @@ _OPENAI_SAMPLE_RATE = 24000
 
 @dataclass
 class OpenAIRealtimeSTTSettings(STTSettings):
-    """Settings for the OpenAI Realtime STT service.
+    """Settings for OpenAIRealtimeSTTService.
 
     Parameters:
         prompt: Optional prompt text to guide transcription style.

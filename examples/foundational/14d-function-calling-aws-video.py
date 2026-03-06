@@ -99,7 +99,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AWSBedrockLLMService(
         aws_region="us-west-2",
         settings=AWSBedrockLLMSettings(
-            model="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            model="us.anthropic.claude-sonnet-4-6",
             # Note: usually, prefer providing latency="optimized" param.
             # Here we can't because AWS Bedrock doesn't support it for Claude 3.7,
             # which we need for image input.
@@ -170,7 +170,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message(
             {
                 "role": "user",
-                "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
+                "content": f"Please introduce yourself to the user briefly; don't mention the camera. Use '{client_id}' as the user ID during function calls.",
             }
         )
         await task.queue_frames([LLMRunFrame()])

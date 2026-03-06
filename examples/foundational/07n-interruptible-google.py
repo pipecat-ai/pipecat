@@ -55,8 +55,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = GoogleSTTService(
         settings=GoogleSTTSettings(
-            languages=Language.EN_US,
-            model="chirp_3",
+            languages=[Language.EN_US],
+            # Add model to use a specific model
+            # model="chirp_3",
         ),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
         location="us",

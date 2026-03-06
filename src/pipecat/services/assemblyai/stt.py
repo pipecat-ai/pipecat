@@ -81,7 +81,7 @@ def map_language_from_assemblyai(language_code: str) -> Language:
 
 @dataclass
 class AssemblyAISTTSettings(STTSettings):
-    """Settings for the AssemblyAI STT service.
+    """Settings for AssemblyAISTTService.
 
     Parameters:
         formatted_finals: Whether to enable transcript formatting.
@@ -99,6 +99,8 @@ class AssemblyAISTTSettings(STTSettings):
         language_detection: Enable automatic language detection.
         format_turns: Whether to format transcript turns.
         speaker_labels: Enable speaker diarization.
+        vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
+            audio frames as silence. Only applicable to u3-rt-pro.
     """
 
     formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -115,6 +117,7 @@ class AssemblyAISTTSettings(STTSettings):
     language_detection: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_labels: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AssemblyAISTTService(WebsocketSTTService):
@@ -199,6 +202,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             language_detection=None,
             format_turns=True,
             speaker_labels=None,
+            vad_threshold=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -227,6 +231,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 default_settings.language_detection = connection_params.language_detection
                 default_settings.format_turns = connection_params.format_turns
                 default_settings.speaker_labels = connection_params.speaker_labels
+                default_settings.vad_threshold = connection_params.vad_threshold
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -463,6 +468,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             "language_detection": s.language_detection,
             "format_turns": s.format_turns,
             "speaker_labels": s.speaker_labels,
+            "vad_threshold": s.vad_threshold,
         }
 
         for k, v in optional_fields.items():
@@ -651,7 +657,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
         self._user_speaking = True
 
     async def _handle_termination(self, message: TerminationMessage):

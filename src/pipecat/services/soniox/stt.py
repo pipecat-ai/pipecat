@@ -141,7 +141,7 @@ def _prepare_language_hints(
 
 @dataclass
 class SonioxSTTSettings(STTSettings):
-    """Settings for Soniox STT service.
+    """Settings for SonioxSTTService.
 
     Parameters:
         language_hints: List of language hints to use for transcription.

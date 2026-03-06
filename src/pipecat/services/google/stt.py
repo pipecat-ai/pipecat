@@ -360,7 +360,7 @@ def language_to_google_stt_language(language: Language) -> Optional[str]:
 
 @dataclass
 class GoogleSTTSettings(STTSettings):
-    """Settings for Google Cloud Speech-to-Text V2.
+    """Settings for GoogleSTTService.
 
     Parameters:
         languages: List of ``Language`` enums for recognition
@@ -653,7 +653,7 @@ class GoogleSTTService(STTService):
     async def set_languages(self, languages: List[Language]):
         """Update the service's recognition languages.
 
-        .. deprecated::
+        .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame`` with ``GoogleSTTSettings(languages=...)``
             instead.
 

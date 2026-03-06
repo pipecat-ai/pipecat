@@ -233,14 +233,14 @@ def can_generate_metrics(self) -> bool:
 
 ### Service Settings
 
-Every STT, LLM, TTS, and image-generation service exposes a **Settings dataclass** that serves two roles:
+Every AI service (STT, LLM, TTS, image generation, etc.) exposes a **Settings dataclass** that serves two roles:
 
 1. **Store mode** — the service's `self._settings` holds the current value of every runtime-updatable field.
-2. **Delta mode** — an update frame carries only the fields that changed; unset fields remain `NOT_GIVEN`.
+2. **Delta mode** — an update frame (e.g. `TTSUpdateSettingsFrame`) specifies only the fields that should change; unspecified fields remain `NOT_GIVEN`.
 
 #### Defining your Settings class
 
-Extend `STTSettings`, `TTSSettings`, `LLMSettings`, or `ImageGenSettings`. The base classes already provide common fields (e.g. `model`, `voice`, `language`). You only need to add **service-specific knobs that should be runtime-updatable**:
+Extend `STTSettings`, `TTSSettings`, `LLMSettings`, or `ImageGenSettings` (or, if your service directly subclasses `AIService`, `ServiceSettings`). The base classes already provide common fields (e.g. `model`, `voice`, `language`). You only need to add **service-specific knobs that should be runtime-updatable**:
 
 ```python
 from dataclasses import dataclass, field
@@ -320,7 +320,7 @@ svc = MyTTSService(
 
 #### Reacting to runtime changes
 
-STT, LLM, and TTS services support runtime configuration changes via `*UpdateSettingsFrame`s (e.g. `STTUpdateSettingsFrame`, `TTSUpdateSettingsFrame`, `LLMUpdateSettingsFrame`).
+AI services support runtime configuration changes via `*UpdateSettingsFrame`s (e.g. `STTUpdateSettingsFrame`, `TTSUpdateSettingsFrame`, `LLMUpdateSettingsFrame`).
 
 To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns a `dict` mapping each changed field name to its **pre-update** value. Your override should call `super()` first, then act on the changed fields. A common implementation might look like:
 

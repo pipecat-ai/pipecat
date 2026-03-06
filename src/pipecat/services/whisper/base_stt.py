@@ -28,7 +28,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 @dataclass
 class BaseWhisperSTTSettings(STTSettings):
-    """Settings for Whisper API-based STT services.
+    """Settings for BaseWhisperSTTService.
 
     Parameters:
         prompt: Optional text to guide the model's style or continue
