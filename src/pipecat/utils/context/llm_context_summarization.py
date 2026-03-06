@@ -382,25 +382,33 @@ class LLMContextSummarizationUtil:
         return total
 
     @staticmethod
-    def _get_function_calls_in_progress_index(messages: List[dict], start_idx: int) -> int:
+    def _get_function_calls_in_progress_index(
+        messages: List[dict], start_idx: int, summary_end: int
+    ) -> int:
         """Find the earliest message index with incomplete function calls.
 
-        Scans messages to identify function/tool calls that haven't received
-        their results yet. This prevents summarizing incomplete tool interactions
-        which would break the request-response pairing.
+        Scans messages from ``start_idx`` up to (but not including)
+        ``summary_end`` to identify tool calls whose responses either don't
+        exist yet or fall in the kept portion of the context (>= summary_end).
+        This prevents summarizing tool call requests when their responses would
+        remain in the kept context as orphans, which the OpenAI API rejects.
 
         Args:
             messages: List of messages to check.
             start_idx: Index to start checking from.
+            summary_end: Exclusive upper bound for the scan (the first kept
+                message index). Only tool responses within this range count as
+                completing a call; responses beyond it are treated as absent,
+                leaving the call "in progress".
 
         Returns:
             Index of first message with function call in progress, or -1 if all
-            function calls are complete.
+            function calls are complete within the scanned range.
         """
         # Track tool call IDs mapped to their message index
         pending_tool_calls: dict[str, int] = {}
 
-        for i in range(start_idx, len(messages)):
+        for i in range(start_idx, summary_end):
             msg = messages[i]
             # LLMSpecificMessage instances (e.g. thinking blocks) never carry tool_call or
             # tool_call_id fields, so they cannot affect the pending-call tracking. Skipping
@@ -484,7 +492,7 @@ class LLMContextSummarizationUtil:
 
         # Check for function calls in progress in the range we want to summarize
         function_call_start = LLMContextSummarizationUtil._get_function_calls_in_progress_index(
-            messages, summary_start
+            messages, summary_start, summary_end
         )
         if function_call_start >= 0 and function_call_start < summary_end:
             # Stop summarization before the function call
