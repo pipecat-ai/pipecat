@@ -90,7 +90,6 @@ class SpeechmaticsSTTSettings(STTSettings):
     See ``SpeechmaticsSTTService.InputParams`` for detailed descriptions of each field.
 
     Parameters:
-        model: The operating point / model name.
         domain: Domain for Speechmatics API.
         turn_detection_mode: Endpoint handling mode.
         speaker_active_format: Formatter for active speaker ID.
@@ -490,12 +489,6 @@ class SpeechmaticsSTTService(STTService):
                 default_settings.prefer_current_speaker = _params.prefer_current_speaker
                 default_settings.extra_params = _params.extra_params
 
-        # Build SDK config from settings, then resolve model from operating_point
-        self._client: VoiceAgentClient | None = None
-        self._audio_encoding = encoding
-        self._config: VoiceAgentConfig = self._build_config(default_settings)
-        default_settings.model = self._config.operating_point.value
-
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
             default_settings.apply_update(settings)
@@ -506,6 +499,13 @@ class SpeechmaticsSTTService(STTService):
             settings=default_settings,
             **kwargs,
         )
+
+        # Build SDK config from settings, then resolve model from operating_point
+        self._client: VoiceAgentClient | None = None
+        self._audio_encoding = encoding
+        self._config: VoiceAgentConfig = self._build_config(self._settings)
+        self._settings.model = self._config.operating_point.value
+        self._sync_model_name_to_metrics()
 
         # Outbound frame queue
         self._outbound_frames: asyncio.Queue[Frame] = asyncio.Queue()

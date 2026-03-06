@@ -186,7 +186,7 @@ class ElevenLabsSTTSettings(STTSettings):
             (coughing) in the transcription.
     """
 
-    tag_audio_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    tag_audio_events: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -277,8 +277,8 @@ class ElevenLabsSTTService(SegmentedSTTService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = ElevenLabsSTTSettings(
             model="scribe_v2",
-            language="eng",
-            tag_audio_events=True,
+            language=language_to_elevenlabs_language(Language.EN),
+            tag_audio_events=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -291,9 +291,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             _warn_deprecated_param("params", ElevenLabsSTTSettings)
             if not settings:
                 if params.language is not None:
-                    default_settings.language = (
-                        self.language_to_service_language(params.language) or "eng"
-                    )
+                    default_settings.language = language_to_elevenlabs_language(params.language)
                 default_settings.tag_audio_events = params.tag_audio_events
 
         # 4. Apply settings delta (canonical API, always wins)
@@ -354,10 +352,11 @@ class ElevenLabsSTTService(SegmentedSTTService):
             content_type="audio/x-wav",
         )
 
-        # Add required model_id, language_code, and tag_audio_events
+        # Add required model_id and language_code
         data.add_field("model_id", self._settings.model)
         data.add_field("language_code", self._settings.language)
-        data.add_field("tag_audio_events", str(self._settings.tag_audio_events).lower())
+        if self._settings.tag_audio_events is not None:
+            data.add_field("tag_audio_events", str(self._settings.tag_audio_events).lower())
 
         async with self._session.post(url, data=data, headers=headers) as response:
             if response.status != 200:
