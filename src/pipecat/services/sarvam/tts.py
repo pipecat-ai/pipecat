@@ -247,7 +247,7 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
 
 @dataclass
 class SarvamHttpTTSSettings(TTSSettings):
-    """Settings for Sarvam HTTP TTS service.
+    """Settings for SarvamHttpTTSService.
 
     Parameters:
         enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
@@ -273,7 +273,7 @@ class SarvamHttpTTSSettings(TTSSettings):
 
 @dataclass
 class SarvamTTSSettings(SarvamHttpTTSSettings):
-    """Settings for Sarvam WebSocket TTS service.
+    """Settings for SarvamTTSService.
 
     Extends :class:`SarvamHttpTTSSettings` with WebSocket-specific buffering parameters.
 

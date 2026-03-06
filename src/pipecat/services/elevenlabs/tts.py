@@ -187,7 +187,7 @@ class PronunciationDictionaryLocator(BaseModel):
 
 @dataclass
 class ElevenLabsTTSSettings(TTSSettings):
-    """Settings for the ElevenLabs WebSocket TTS service.
+    """Settings for ElevenLabsTTSService.
 
     Fields that appear in the WebSocket URL (``voice``, ``model``,
     ``language``) require a full reconnect when changed.  Fields that
@@ -225,7 +225,7 @@ class ElevenLabsTTSSettings(TTSSettings):
 
 @dataclass
 class ElevenLabsHttpTTSSettings(TTSSettings):
-    """Settings for the ElevenLabs HTTP TTS service.
+    """Settings for ElevenLabsHttpTTSService.
 
     Parameters:
         optimize_streaming_latency: Latency optimization level (0-4).

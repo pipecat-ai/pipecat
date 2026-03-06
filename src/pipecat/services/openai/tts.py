@@ -62,7 +62,7 @@ VALID_VOICES: Dict[str, ValidVoice] = {
 
 @dataclass
 class OpenAITTSSettings(TTSSettings):
-    """Settings for OpenAI TTS service.
+    """Settings for OpenAITTSService.
 
     Parameters:
         instructions: Instructions to guide voice synthesis behavior.

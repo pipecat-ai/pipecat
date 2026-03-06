@@ -74,7 +74,7 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
 
 @dataclass
 class LmntTTSSettings(TTSSettings):
-    """Settings for LMNT TTS service."""
+    """Settings for LmntTTSService."""
 
     pass
 

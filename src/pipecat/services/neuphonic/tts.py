@@ -76,7 +76,7 @@ def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
 
 @dataclass
 class NeuphonicTTSSettings(TTSSettings):
-    """Settings for Neuphonic TTS service.
+    """Settings for NeuphonicTTSService and NeuphonicHttpTTSService.
 
     Parameters:
         speed: Speech speed multiplier. Defaults to 1.0.

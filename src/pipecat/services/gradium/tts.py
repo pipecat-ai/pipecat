@@ -39,7 +39,7 @@ SAMPLE_RATE = 48000
 
 @dataclass
 class GradiumTTSSettings(TTSSettings):
-    """Settings for the Gradium TTS service."""
+    """Settings for GradiumTTSService."""
 
     pass
 

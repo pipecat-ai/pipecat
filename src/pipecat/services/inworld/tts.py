@@ -68,7 +68,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 @dataclass
 class InworldTTSSettings(TTSSettings):
-    """Settings for Inworld TTS services.
+    """Settings for InworldTTSService and InworldHttpTTSService.
 
     Parameters:
         speaking_rate: Speaking rate for speech synthesis.

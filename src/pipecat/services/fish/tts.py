@@ -49,7 +49,7 @@ FishAudioOutputFormat = Literal["opus", "mp3", "pcm", "wav"]
 
 @dataclass
 class FishAudioTTSSettings(TTSSettings):
-    """Settings for Fish Audio TTS service.
+    """Settings for FishAudioTTSService.
 
     Parameters:
         latency: Latency mode ("normal" or "balanced"). Defaults to "normal".

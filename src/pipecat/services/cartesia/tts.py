@@ -188,7 +188,7 @@ class CartesiaEmotion(str, Enum):
 
 @dataclass
 class CartesiaTTSSettings(TTSSettings):
-    """Settings for Cartesia TTS services.
+    """Settings for CartesiaTTSService and CartesiaHttpTTSService.
 
     Parameters:
         generation_config: Generation configuration for Sonic-3 models. Includes volume,

@@ -38,7 +38,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class ResembleAITTSSettings(TTSSettings):
-    """Settings for Resemble AI TTS service."""
+    """Settings for ResembleAITTSService."""
 
     pass
 

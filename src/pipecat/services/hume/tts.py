@@ -50,7 +50,7 @@ DEFAULT_HEADERS = {
 
 @dataclass
 class HumeTTSSettings(TTSSettings):
-    """Settings for Hume TTS service.
+    """Settings for HumeTTSService.
 
     Parameters:
         description: Natural-language acting directions (up to 100 characters).

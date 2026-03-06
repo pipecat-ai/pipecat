@@ -33,7 +33,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class PiperTTSSettings(TTSSettings):
-    """Settings for Piper TTS service."""
+    """Settings for PiperTTSService."""
 
     pass
 
@@ -186,7 +186,7 @@ class PiperTTSService(TTSService):
 #
 @dataclass
 class PiperHttpTTSSettings(TTSSettings):
-    """Settings for Piper HTTP TTS service."""
+    """Settings for PiperHttpTTSService."""
 
     pass
 

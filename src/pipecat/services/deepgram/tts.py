@@ -45,7 +45,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class DeepgramTTSSettings(TTSSettings):
-    """Settings for Deepgram TTS service."""
+    """Settings for DeepgramTTSService and DeepgramHttpTTSService."""
 
     pass
 
