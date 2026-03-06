@@ -922,19 +922,25 @@ class TTSService(AIService):
 
     async def _stop_frame_handler(self):
         has_started = False
+        context_id = None
         while True:
             try:
                 frame = await asyncio.wait_for(
                     self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
                 )
+                context_id = frame.context_id
                 if isinstance(frame, TTSStartedFrame):
                     has_started = True
                 elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
                     has_started = False
             except asyncio.TimeoutError:
                 if has_started:
-                    await self.push_frame(TTSStoppedFrame())
+                    await self.push_frame(TTSStoppedFrame(context_id=context_id))
                     has_started = False
+                    if context_id in self._tts_contexts:
+                        if self._tts_contexts[context_id].push_assistant_aggregation:
+                            await self.push_frame(LLMAssistantPushAggregationFrame())
+
 
     #
     # Word timestamp methods (active when supports_word_timestamps=True)
