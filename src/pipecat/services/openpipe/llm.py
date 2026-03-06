@@ -82,6 +82,8 @@ class OpenPipeLLMService(OpenAILLMService):
             _warn_deprecated_param("model", OpenPipeLLMSettings, "model")
             default_settings.model = model
 
+        # 3. (No step 3, as there's no params object to apply)
+
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
