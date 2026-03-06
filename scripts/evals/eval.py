@@ -49,7 +49,7 @@ from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
-from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
+from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
@@ -243,7 +243,7 @@ async def run_eval_pipeline(
     # 5" (in audio) this can be converted to "32 is 5".
     stt = DeepgramSTTService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        live_options=LiveOptions(
+        settings=DeepgramSTTSettings(
             language="multi",
             smart_format=False,
         ),
@@ -251,10 +251,32 @@ async def run_eval_pipeline(
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
+        settings=CartesiaTTSSettings(
+            voice="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
+        ),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    # Load example prompt depending on image.
+    example_prompt = ""
+    example_image: Optional[ImageFile] = None
+    if isinstance(eval_config.prompt, str):
+        example_prompt = eval_config.prompt
+    elif isinstance(eval_config.prompt, tuple):
+        example_prompt, example_image = eval_config.prompt
+
+    common_system_prompt = (
+        "You should only call the eval function if:\n"
+        "- The user explicitly attempts to answer the question, AND\n"
+        f"- Their answer can be cleanly evaluated using: {eval_config.eval}\n"
+        "Ignore greetings, comments, non-answers, or requests for clarification.\n"
+        "Numerical word answers are allowed (e.g., 'five' is the same as '5').\n"
+    )
+    if eval_config.eval_speaks_first:
+        system_prompt = f"You are an evaluation agent, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
+    else:
+        system_prompt = f"You are an evaluation agent, be extremly brief. First, ask one question: {example_prompt}. {common_system_prompt}"
+
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), system_instruction=system_prompt)
 
     llm.register_function("eval_function", eval_runner.function_assert_eval)
 
@@ -281,34 +303,7 @@ async def run_eval_pipeline(
     )
     tools = ToolsSchema(standard_tools=[eval_function])
 
-    # Load example prompt depending on image.
-    example_prompt = ""
-    example_image: Optional[ImageFile] = None
-    if isinstance(eval_config.prompt, str):
-        example_prompt = eval_config.prompt
-    elif isinstance(eval_config.prompt, tuple):
-        example_prompt, example_image = eval_config.prompt
-
-    common_system_prompt = (
-        "You should only call the eval function if:\n"
-        "- The user explicitly attempts to answer the question, AND\n"
-        f"- Their answer can be cleanly evaluated using: {eval_config.eval}\n"
-        "Ignore greetings, comments, non-answers, or requests for clarification.\n"
-        "Numerical word answers are allowed (e.g., 'five' is the same as '5').\n"
-    )
-    if eval_config.eval_speaks_first:
-        system_prompt = f"You are an evaluation agent, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
-    else:
-        system_prompt = f"You are an evaluation agent, be extremly brief. First, ask one question: {example_prompt}. {common_system_prompt}"
-
-    messages = [
-        {
-            "role": "system",
-            "content": system_prompt,
-        },
-    ]
-
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
