@@ -17,7 +17,7 @@ from pipecat.frames.frames import LLMRunFrame, ManuallySwitchServiceFrame
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.service_switcher import ServiceSwitcher, ServiceSwitcherStrategyManual
+from pipecat.pipeline.service_switcher import ServiceSwitcher
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -96,24 +96,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt_cartesia = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
     stt_deepgram = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-    stt_switcher = ServiceSwitcher(
-        services=[stt_cartesia, stt_deepgram], strategy_type=ServiceSwitcherStrategyManual
-    )
+    stt_switcher = ServiceSwitcher(services=[stt_cartesia, stt_deepgram])
 
     tts_cartesia = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",
     )
     tts_deepgram = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-    tts_switcher = ServiceSwitcher(
-        services=[tts_cartesia, tts_deepgram], strategy_type=ServiceSwitcherStrategyManual
-    )
+    tts_switcher = ServiceSwitcher(services=[tts_cartesia, tts_deepgram])
 
     llm_openai = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
-    llm_switcher = LLMSwitcher(
-        llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
-    )
+    llm_switcher = LLMSwitcher(llms=[llm_openai, llm_google])
     # Register a "classic" function
     llm_switcher.register_function("get_current_weather", fetch_weather_from_api)
     # Register a "direct" function

@@ -6,10 +6,12 @@
 
 """Service switcher for switching between different services at runtime, with different switching strategies."""
 
-from abc import abstractmethod
 from typing import Any, Generic, List, Optional, Type, TypeVar
 
+from loguru import logger
+
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     ManuallySwitchServiceFrame,
     ServiceMetadataFrame,
@@ -69,42 +71,14 @@ class ServiceSwitcherStrategy(BaseObject):
         """Return the currently active service."""
         return self._active_service
 
-    @abstractmethod
     async def handle_frame(
         self, frame: ServiceSwitcherFrame, direction: FrameDirection
     ) -> Optional[FrameProcessor]:
         """Handle a frame that controls service switching.
 
-        Subclasses implement this to decide whether a switch should occur.
-
-        Args:
-            frame: The frame to handle.
-            direction: The direction of the frame (upstream or downstream).
-
-        Returns:
-            The newly active service if a switch occurred, or None otherwise.
-        """
-        pass
-
-
-class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
-    """A strategy for switching between services manually.
-
-    This strategy allows the user to manually select which service is active.
-    The initial active service is the first one in the list.
-
-    Example::
-
-        stt_switcher = ServiceSwitcher(
-            services=[stt_1, stt_2],
-            strategy_type=ServiceSwitcherStrategyManual
-        )
-    """
-
-    async def handle_frame(
-        self, frame: ServiceSwitcherFrame, direction: FrameDirection
-    ) -> Optional[FrameProcessor]:
-        """Handle a frame that controls service switching.
+        By default, handles ``ManuallySwitchServiceFrame`` to allow manual
+        switching in all strategies. Subclasses can override this to handle
+        additional frame types.
 
         Args:
             frame: The frame to handle.
@@ -115,7 +89,21 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
         """
         if isinstance(frame, ManuallySwitchServiceFrame):
             return await self._set_active_if_available(frame.service)
+        return None
 
+    async def handle_error(self, error: ErrorFrame) -> Optional[FrameProcessor]:
+        """Handle an error from the active service.
+
+        Called by ``ServiceSwitcher`` when a non-fatal ``ErrorFrame`` is pushed
+        upstream by the currently active service. Subclasses can override this
+        to implement automatic failover.
+
+        Args:
+            error: The error frame pushed by the active service.
+
+        Returns:
+            The newly active service if a switch occurred, or None otherwise.
+        """
         return None
 
     async def _set_active_if_available(self, service: FrameProcessor) -> Optional[FrameProcessor]:
@@ -137,6 +125,76 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
         return None
 
 
+class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
+    """A strategy for switching between services manually.
+
+    .. deprecated:: 0.0.104
+        Manual switching is now the default behavior of ``ServiceSwitcher``.
+        Omit ``strategy_type`` when initializing.
+    """
+
+    def __init__(self, services: List[FrameProcessor]):
+        """Initialize the service switcher strategy for manual switching.
+
+        Args:
+            services: List of frame processors to switch between.
+        """
+        super().__init__(services)
+        logger.warning(
+            "ServiceSwitcherStrategyManual is deprecated. "
+            "Manual switching is now the default behavior of ServiceSwitcher."
+        )
+
+
+class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategy):
+    """A strategy that automatically switches to a backup service on failure.
+
+    When the active service produces a non-fatal error, this strategy switches
+    to the next available service in the list. Recovery and fallback policies
+    are left to application code via the ``on_service_switched`` event.
+
+    Event handlers available:
+
+    - on_service_switched: Called when the active service changes.
+
+    Example::
+
+        switcher = ServiceSwitcher(
+            services=[primary_stt, backup_stt],
+            strategy_type=ServiceSwitcherStrategyFailover,
+        )
+
+        @switcher.strategy.event_handler("on_service_switched")
+        async def on_switched(strategy, service):
+            # App decides when/how to recover the failed service
+            ...
+    """
+
+    async def handle_error(self, error: ErrorFrame) -> Optional[FrameProcessor]:
+        """Handle an error from the active service by failing over.
+
+        Switches to the next service in the list. The failed service remains
+        in the list and can be switched back to manually or via application
+        logic in the ``on_service_switched`` event handler.
+
+        Args:
+            error: The error frame pushed by the active service.
+
+        Returns:
+            The newly active service if a switch occurred, or None if no
+            other service is available.
+        """
+        logger.warning(f"Service {self._active_service.name} reported an error: {error.error}")
+
+        if len(self._services) <= 1:
+            logger.error("No other service available to switch to")
+            return None
+
+        current_idx = self._services.index(self._active_service)
+        next_idx = (current_idx + 1) % len(self._services)
+        return await self._set_active_if_available(self._services[next_idx])
+
+
 StrategyType = TypeVar("StrategyType", bound=ServiceSwitcherStrategy)
 
 
@@ -150,18 +208,20 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
     Example::
 
-        switcher = ServiceSwitcher(
-            services=[stt_1, stt_2],
-            strategy_type=ServiceSwitcherStrategyManual,
-        )
+        switcher = ServiceSwitcher(services=[stt_1, stt_2])
     """
 
-    def __init__(self, services: List[FrameProcessor], strategy_type: Type[StrategyType]):
+    def __init__(
+        self,
+        services: List[FrameProcessor],
+        strategy_type: Type[StrategyType] = ServiceSwitcherStrategy,
+    ):
         """Initialize the service switcher with a list of services and a switching strategy.
 
         Args:
             services: List of frame processors to switch between.
             strategy_type: The strategy class to use for switching between services.
+                Defaults to ``ServiceSwitcherStrategy`` (the base strategy; manual switching only).
         """
         _strategy = strategy_type(services)
         super().__init__(*self._make_pipeline_definitions(services, _strategy))
@@ -227,6 +287,10 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         all the filters let it pass, and `StartFrame` causes the service to
         generate `ServiceMetadataFrame`.
 
+        Non-fatal ``ErrorFrame`` instances are forwarded to the strategy via
+        ``handle_error`` so strategies like ``ServiceSwitcherStrategyFailover``
+        can perform failover. The error frame is still propagated upstream so
+        that application-level error handlers can observe it.
         """
         # Consume ServiceSwitcherRequestMetadataFrame once the targeted service
         # has handled it (i.e. the active service).
@@ -238,6 +302,12 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         if isinstance(frame, ServiceMetadataFrame):
             if frame.service_name != self.strategy.active_service.name:
                 return
+
+        # Let the strategy react to non-fatal errors from the active service.
+        if isinstance(frame, ErrorFrame) and not frame.fatal:
+            service = await self.strategy.handle_error(frame)
+            if service:
+                await service.queue_frame(ServiceSwitcherRequestMetadataFrame(service=service))
 
         await super().push_frame(frame, direction)
 
