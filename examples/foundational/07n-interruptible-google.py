@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.google.stt import GoogleSTTService
-from pipecat.services.google.tts import GoogleTTSService
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
+from pipecat.services.google.stt import GoogleSTTService, GoogleSTTSettings
+from pipecat.services.google.tts import GoogleTTSService, GoogleTTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -54,25 +54,30 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = GoogleSTTService(
-        params=GoogleSTTService.InputParams(languages=Language.EN_US, model="chirp_3"),
+        settings=GoogleSTTSettings(
+            languages=Language.EN_US,
+            model="chirp_3",
+        ),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
         location="us",
     )
 
     tts = GoogleTTSService(
-        voice_id="en-US-Chirp3-HD-Charon",
-        params=GoogleTTSService.InputParams(language=Language.EN_US),
+        settings=GoogleTTSSettings(
+            voice="en-US-Chirp3-HD-Charon",
+            language=Language.EN_US,
+        ),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        model="gemini-2.5-flash",
-        # force a certain amount of thinking if you want it
-        # params=GoogleLLMService.InputParams(
-        #     thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
-        # ),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=GoogleLLMSettings(
+            model="gemini-2.5-flash",
+            # force a certain amount of thinking if you want it
+            # thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096),
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     context = LLMContext()

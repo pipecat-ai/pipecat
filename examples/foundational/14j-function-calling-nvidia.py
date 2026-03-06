@@ -24,10 +24,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.nvidia.llm import NvidiaLLMService
+from pipecat.services.nvidia.llm import NvidiaLLMService, NvidiaLLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -64,15 +64,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-        # text_filters=[MarkdownTextFilter()],
+        settings=CartesiaTTSSettings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     llm = NvidiaLLMService(
         api_key=os.getenv("NVIDIA_API_KEY"),
-        model="nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        # Recommended when turning thinking off
-        params=NvidiaLLMService.InputParams(temperature=0.0),
+        settings=NvidiaLLMSettings(
+            model="nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            # Recommended when turning thinking off
+            temperature=0.0,
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
@@ -99,17 +103,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         required=["location", "format"],
     )
     tools = ToolsSchema(standard_tools=[weather_function])
-    messages = [
-        # Disable thinking by sending this message first
-        # Check the model for the corresponding "no thinking" message
-        {"role": "system", "content": "/no_think"},
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
 
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

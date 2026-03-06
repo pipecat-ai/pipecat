@@ -12,6 +12,7 @@ audio/video streaming capabilities through the HeyGen API.
 """
 
 import asyncio
+from dataclasses import dataclass
 from typing import Optional, Union
 
 import aiohttp
@@ -45,10 +46,18 @@ from pipecat.services.heygen.client import (
     HeyGenClient,
     ServiceType,
 )
+from pipecat.services.settings import ServiceSettings
 from pipecat.transports.base_transport import TransportParams
 
 # Using the same values that we do in the BaseOutputTransport
 AVATAR_VAD_STOP_SECS = 0.35
+
+
+@dataclass
+class HeyGenVideoSettings(ServiceSettings):
+    """Settings for the HeyGen video service."""
+
+    pass
 
 
 class HeyGenVideoService(AIService):
@@ -80,6 +89,7 @@ class HeyGenVideoService(AIService):
         session: aiohttp.ClientSession,
         session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
         service_type: Optional[ServiceType] = None,
+        settings: Optional[HeyGenVideoSettings] = None,
         **kwargs,
     ) -> None:
         """Initialize the HeyGen video service.
@@ -89,9 +99,15 @@ class HeyGenVideoService(AIService):
             session: HTTP client session for API requests
             session_request: Configuration for the HeyGen session
             service_type: Service type for the avatar session
+            settings: Runtime-updatable settings. HeyGen has no model concept, so this
+                is primarily used for the ``extra`` dict.
             **kwargs: Additional arguments passed to parent AIService
         """
-        super().__init__(**kwargs)
+        default_settings = ServiceSettings(model=None)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
         self._api_key = api_key
         self._session = session
         self._client: Optional[HeyGenClient] = None

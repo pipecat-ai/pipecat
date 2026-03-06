@@ -24,7 +24,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.gradium.tts import GradiumTTSService, GradiumTTSSettings
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -54,13 +54,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = GradiumTTSService(
         api_key=os.getenv("GRADIUM_API_KEY"),
-        voice_id="YTpq7expH9539ERJ",
+        settings=GradiumTTSSettings(voice="YTpq7expH9539ERJ"),
         url="wss://us.api.gradium.ai/api/speech/tts",
     )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenAILLMSettings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     context = LLMContext()

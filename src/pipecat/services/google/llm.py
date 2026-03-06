@@ -58,7 +58,13 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, is_given
+from pipecat.services.settings import (
+    NOT_GIVEN,
+    LLMSettings,
+    _NotGiven,
+    _warn_deprecated_param,
+    is_given,
+)
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -748,6 +754,9 @@ class GoogleLLMService(LLMService):
     class InputParams(BaseModel):
         """Input parameters for Google AI models.
 
+        .. deprecated::
+            Use ``settings=GoogleLLMSettings(...)`` instead.
+
         Parameters:
             max_tokens: Maximum number of tokens to generate.
             temperature: Sampling temperature between 0.0 and 2.0.
@@ -773,8 +782,9 @@ class GoogleLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gemini-2.5-flash",
+        model: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[GoogleLLMSettings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_config: Optional[Dict[str, Any]] = None,
@@ -785,36 +795,72 @@ class GoogleLLMService(LLMService):
 
         Args:
             api_key: Google AI API key for authentication.
-            model: Model name to use. Defaults to "gemini-2.0-flash".
-            params: Input parameters for the model.
+            model: Model name to use.
+
+                .. deprecated::
+                    Use ``settings=GoogleLLMSettings(model=...)`` instead.
+
+            params: Optional model parameters for inference.
+
+                .. deprecated::
+                    Use ``settings=GoogleLLMSettings(...)`` instead.
+
+            settings: Runtime-updatable settings for this service.  When both
+                deprecated parameters and *settings* are provided, *settings*
+                values take precedence.
             system_instruction: System instruction/prompt for the model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleLLMSettings(system_instruction=...)`` instead.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent class.
         """
-        params = params or GoogleLLMService.InputParams()
-
-        super().__init__(
-            settings=GoogleLLMSettings(
-                model=model,
-                max_tokens=params.max_tokens,
-                temperature=params.temperature,
-                top_k=params.top_k,
-                top_p=params.top_p,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                thinking=params.thinking,
-                extra=params.extra if isinstance(params.extra, dict) else {},
-            ),
-            **kwargs,
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = GoogleLLMSettings(
+            model="gemini-2.5-flash",
+            system_instruction=None,
+            max_tokens=4096,
+            temperature=None,
+            top_k=None,
+            top_p=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            thinking=None,
+            extra={},
         )
 
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GoogleLLMSettings, "model")
+            default_settings.model = model
+        if system_instruction is not None:
+            _warn_deprecated_param("system_instruction", GoogleLLMSettings, "system_instruction")
+            default_settings.system_instruction = system_instruction
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GoogleLLMSettings)
+            if not settings:
+                default_settings.max_tokens = params.max_tokens
+                default_settings.temperature = params.temperature
+                default_settings.top_k = params.top_k
+                default_settings.top_p = params.top_p
+                default_settings.thinking = params.thinking
+                if isinstance(params.extra, dict):
+                    default_settings.extra = params.extra
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
+
         self._api_key = api_key
-        self._system_instruction = system_instruction
         self._http_options = update_google_client_http_options(http_options)
         self._tools = tools
         self._tool_config = tool_config
@@ -953,10 +999,10 @@ class GoogleLLMService(LLMService):
         messages = params_from_context["messages"]
         if (
             params_from_context["system_instruction"]
-            and self._system_instruction != params_from_context["system_instruction"]
+            and self._settings.system_instruction != params_from_context["system_instruction"]
         ):
             logger.debug(f"System instruction changed: {params_from_context['system_instruction']}")
-            self._system_instruction = params_from_context["system_instruction"]
+            self._settings.system_instruction = params_from_context["system_instruction"]
 
         tools = []
         if params_from_context["tools"]:
@@ -969,7 +1015,9 @@ class GoogleLLMService(LLMService):
 
         # Build generation parameters
         generation_params = self._build_generation_params(
-            system_instruction=self._system_instruction, tools=tools, tool_config=tool_config
+            system_instruction=self._settings.system_instruction,
+            tools=tools,
+            tool_config=tool_config,
         )
 
         # possibly modify generation_params (in place) to set thinking to off by default

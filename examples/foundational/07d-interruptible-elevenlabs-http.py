@@ -24,8 +24,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.elevenlabs.stt import ElevenLabsSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService, ElevenLabsHttpTTSSettings
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -63,13 +63,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = ElevenLabsHttpTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
             aiohttp_session=session,
+            settings=ElevenLabsHttpTTSSettings(
+                voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
+            ),
         )
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            settings=OpenAILLMSettings(
+                system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            ),
         )
 
         context = LLMContext()

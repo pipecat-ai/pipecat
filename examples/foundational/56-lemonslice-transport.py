@@ -23,8 +23,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.groq.llm import GroqLLMService
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService, ElevenLabsTTSSettings
+from pipecat.services.groq.llm import GroqLLMService, GroqLLMSettings
 from pipecat.transports.lemonslice.transport import (
     LemonSliceNewSessionRequest,
     LemonSliceParams,
@@ -57,12 +57,16 @@ async def main():
 
         llm = GroqLLMService(
             api_key=os.getenv("GROQ_API_KEY"),
-            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            settings=GroqLLMSettings(
+                system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            ),
         )
 
         tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
+            settings=ElevenLabsTTSSettings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
         )
 
         context = LLMContext()

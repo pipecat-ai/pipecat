@@ -60,7 +60,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -191,12 +191,12 @@ class AWSNovaSonicLLMSettings(LLMSettings):
     """Settings for AWS Nova Sonic LLM service.
 
     Parameters:
-        voice_id: Voice for speech synthesis.
+        voice: Voice identifier for speech synthesis.
         endpointing_sensitivity: Controls how quickly Nova Sonic decides the
             user has stopped speaking. Can be "LOW", "MEDIUM", or "HIGH".
     """
 
-    voice_id: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     endpointing_sensitivity: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -222,6 +222,7 @@ class AWSNovaSonicLLMService(LLMService):
         model: str = "amazon.nova-2-sonic-v1:0",
         voice_id: str = "matthew",
         params: Optional[Params] = None,
+        settings: Optional[AWSNovaSonicLLMSettings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
         send_transcription_frames: bool = True,
@@ -238,13 +239,31 @@ class AWSNovaSonicLLMService(LLMService):
                 - Nova 2 Sonic (the default model): "us-east-1", "us-west-2", "ap-northeast-1"
                 - Nova Sonic (the older model): "us-east-1", "ap-northeast-1"
             model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
+
+                .. deprecated::
+                    Use ``settings=AWSNovaSonicLLMSettings(model=...)`` instead.
+
             voice_id: Voice ID for speech synthesis.
                 Note that some voices are designed for use with a specific language.
                 Options:
                 - Nova 2 Sonic (the default model): see https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html
                 - Nova Sonic (the older model): see https://docs.aws.amazon.com/nova/latest/userguide/available-voices.html.
+
+                .. deprecated::
+                    Use ``settings=AWSNovaSonicLLMSettings(voice=...)`` instead.
+
             params: Model parameters for audio configuration and inference.
+
+                .. deprecated::
+                    Use ``settings=AWSNovaSonicLLMSettings(...)`` instead.
+
+            settings: AWS Nova Sonic LLM settings. If provided together with
+                deprecated top-level parameters, the ``settings`` values take
+                precedence.
             system_instruction: System-level instruction for the model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSNovaSonicLLMSettings(system_instruction=...)`` instead.
             tools: Available tools/functions for the model to use.
             send_transcription_frames: Whether to emit transcription frames.
 
@@ -254,23 +273,51 @@ class AWSNovaSonicLLMService(LLMService):
 
             **kwargs: Additional arguments passed to the parent LLMService.
         """
-        params = params or Params()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = AWSNovaSonicLLMSettings(
+            model="amazon.nova-2-sonic-v1:0",
+            system_instruction=None,
+            voice="matthew",
+            temperature=0.7,
+            max_tokens=1024,
+            top_p=0.9,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            endpointing_sensitivity=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model != "amazon.nova-2-sonic-v1:0":
+            _warn_deprecated_param("model", AWSNovaSonicLLMSettings, "model")
+            default_settings.model = model
+        if voice_id != "matthew":
+            _warn_deprecated_param("voice_id", AWSNovaSonicLLMSettings, "voice")
+            default_settings.voice = voice_id
+        if system_instruction is not None:
+            _warn_deprecated_param(
+                "system_instruction", AWSNovaSonicLLMSettings, "system_instruction"
+            )
+            default_settings.system_instruction = system_instruction
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AWSNovaSonicLLMSettings)
+            if not settings:
+                default_settings.temperature = params.temperature
+                default_settings.max_tokens = params.max_tokens
+                default_settings.top_p = params.top_p
+                default_settings.endpointing_sensitivity = params.endpointing_sensitivity
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
-            settings=AWSNovaSonicLLMSettings(
-                model=model,
-                voice_id=voice_id,
-                temperature=params.temperature,
-                max_tokens=params.max_tokens,
-                top_p=params.top_p,
-                top_k=None,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                endpointing_sensitivity=params.endpointing_sensitivity,
-            ),
+            settings=default_settings,
             **kwargs,
         )
         self._secret_access_key = secret_access_key
@@ -280,13 +327,13 @@ class AWSNovaSonicLLMService(LLMService):
         self._client: Optional[BedrockRuntimeClient] = None
 
         # Audio I/O config (hardware settings, not runtime-tunable)
-        self._input_sample_rate = params.input_sample_rate
-        self._input_sample_size = params.input_sample_size
-        self._input_channel_count = params.input_channel_count
-        self._output_sample_rate = params.output_sample_rate
-        self._output_sample_size = params.output_sample_size
-        self._output_channel_count = params.output_channel_count
-        self._system_instruction = system_instruction
+        _audio_params = params or Params()
+        self._input_sample_rate = _audio_params.input_sample_rate
+        self._input_sample_size = _audio_params.input_sample_size
+        self._input_channel_count = _audio_params.input_channel_count
+        self._output_sample_rate = _audio_params.output_sample_rate
+        self._output_sample_size = _audio_params.output_sample_size
+        self._output_channel_count = _audio_params.output_channel_count
         self._tools = tools
 
         # Validate endpointing_sensitivity parameter
@@ -295,7 +342,7 @@ class AWSNovaSonicLLMService(LLMService):
             and not self._is_endpointing_sensitivity_supported()
         ):
             logger.warning(
-                f"endpointing_sensitivity is not supported for model '{model}' and will be ignored. "
+                f"endpointing_sensitivity is not supported for model '{self._settings.model}' and will be ignored. "
                 "This parameter is only supported starting with Nova 2 Sonic (amazon.nova-2-sonic-v1:0)."
             )
             self._settings.endpointing_sensitivity = None
@@ -586,11 +633,11 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_prompt_start_event(tools)
 
         # Send system instruction.
-        # Instruction from context takes priority over self._system_instruction.
+        # Instruction from context takes priority over self._settings.system_instruction.
         system_instruction = (
             llm_connection_params["system_instruction"]
             if llm_connection_params["system_instruction"]
-            else self._system_instruction
+            else self._settings.system_instruction
         )
         logger.debug(f"Using system instruction: {system_instruction}")
         if system_instruction:
@@ -772,7 +819,7 @@ class AWSNovaSonicLLMService(LLMService):
                 "sampleRateHertz": {self._output_sample_rate},
                 "sampleSizeBits": {self._output_sample_size},
                 "channelCount": {self._output_channel_count},
-                "voiceId": "{self._settings.voice_id}",
+                "voiceId": "{self._settings.voice}",
                 "encoding": "base64",
                 "audioType": "SPEECH"
               }}{tools_config}

@@ -12,7 +12,7 @@ for streaming text-to-speech synthesis with customizable voice parameters.
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, ClassVar, Dict, Literal, Mapping, Optional
+from typing import Any, AsyncGenerator, ClassVar, Dict, Literal, Mapping, Optional, Self
 
 from loguru import logger
 from pydantic import BaseModel
@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -52,27 +52,21 @@ class FishAudioTTSSettings(TTSSettings):
     """Settings for Fish Audio TTS service.
 
     Parameters:
-        fish_sample_rate: Audio sample rate sent to the API.
         latency: Latency mode ("normal" or "balanced"). Defaults to "normal".
-        format: Audio output format.
         normalize: Whether to normalize audio output. Defaults to True.
         prosody_speed: Speech speed multiplier (0.5-2.0). Defaults to 1.0.
         prosody_volume: Volume adjustment in dB. Defaults to 0.
         reference_id: Reference ID of the voice model.
     """
 
-    fish_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latency: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     normalize: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prosody_speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prosody_volume: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
-    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "fish_sample_rate"}
-
     @classmethod
-    def from_mapping(cls, settings: Mapping[str, Any]) -> "FishAudioTTSSettings":
+    def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
         """Construct settings from a plain dict, destructuring legacy nested ``prosody``."""
         flat = dict(settings)
         nested = flat.pop("prosody", None)
@@ -95,6 +89,9 @@ class FishAudioTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         """Input parameters for Fish Audio TTS configuration.
 
+        .. deprecated:: 0.0.105
+            Use ``settings=FishAudioTTSSettings(...)`` instead.
+
         Parameters:
             language: Language for synthesis. Defaults to English.
             latency: Latency mode ("normal" or "balanced"). Defaults to "normal".
@@ -115,10 +112,11 @@ class FishAudioTTSService(InterruptibleTTSService):
         api_key: str,
         reference_id: Optional[str] = None,  # This is the voice ID
         model: Optional[str] = None,  # Deprecated
-        model_id: str = "s1",
+        model_id: Optional[str] = None,
         output_format: FishAudioOutputFormat = "pcm",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[FishAudioTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Fish Audio TTS service.
@@ -126,28 +124,37 @@ class FishAudioTTSService(InterruptibleTTSService):
         Args:
             api_key: Fish Audio API key for authentication.
             reference_id: Reference ID of the voice model to use for synthesis.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=FishAudioTTSSettings(voice=...)`` instead.
+
             model: Deprecated. Reference ID of the voice model to use for synthesis.
 
-              .. deprecated:: 0.0.74
-                The `model` parameter is deprecated and will be removed in version 0.1.0.
-                Use `reference_id` instead to specify the voice model.
+                .. deprecated:: 0.0.74
+                    The ``model`` parameter is deprecated and will be removed in version 0.1.0.
+                    Use ``reference_id`` instead to specify the voice model.
 
-            model_id: Specify which Fish Audio TTS model to use (e.g. "s1")
+            model_id: Specify which Fish Audio TTS model to use (e.g. "s1").
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=FishAudioTTSSettings(model=...)`` instead.
+
             output_format: Audio output format. Defaults to "pcm".
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=FishAudioTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent service.
         """
-        params = params or FishAudioTTSService.InputParams()
-
         # Validation for model and reference_id parameters
         if model and reference_id:
             raise ValueError(
                 "Cannot specify both 'model' and 'reference_id'. Use 'reference_id' only."
             )
-
-        if model is None and reference_id is None:
-            raise ValueError("Must specify 'reference_id' (or deprecated 'model') parameter.")
 
         if model:
             import warnings
@@ -162,21 +169,49 @@ class FishAudioTTSService(InterruptibleTTSService):
                 )
             reference_id = model
 
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = FishAudioTTSSettings(
+            model="s1",
+            voice=None,
+            language=None,
+            latency="normal",
+            normalize=True,
+            prosody_speed=1.0,
+            prosody_volume=0,
+            reference_id=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if reference_id is not None:
+            _warn_deprecated_param("reference_id", FishAudioTTSSettings, "voice")
+            default_settings.voice = reference_id
+            default_settings.reference_id = reference_id
+        if model_id is not None:
+            _warn_deprecated_param("model_id", FishAudioTTSSettings, "model")
+            default_settings.model = model_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", FishAudioTTSSettings)
+            if not settings:
+                if params.latency is not None:
+                    default_settings.latency = params.latency
+                if params.normalize is not None:
+                    default_settings.normalize = params.normalize
+                if params.prosody_speed is not None:
+                    default_settings.prosody_speed = params.prosody_speed
+                if params.prosody_volume is not None:
+                    default_settings.prosody_volume = params.prosody_volume
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            settings=FishAudioTTSSettings(
-                model=model_id,
-                voice=reference_id,
-                fish_sample_rate=0,
-                latency=params.latency,
-                format=output_format,
-                normalize=params.normalize,
-                prosody_speed=params.prosody_speed,
-                prosody_volume=params.prosody_volume,
-                reference_id=reference_id,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -185,6 +220,10 @@ class FishAudioTTSService(InterruptibleTTSService):
         self._websocket = None
         self._receive_task = None
         self._request_id = None
+
+        # Init-only audio format config (not runtime-updatable).
+        self._fish_sample_rate = 0  # Set in start()
+        self._output_format = output_format
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -220,7 +259,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.fish_sample_rate = self.sample_rate
+        self._fish_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -270,9 +309,9 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             # Send initial start message with ormsgpack
             request_settings = {
-                "sample_rate": self._settings.fish_sample_rate,
+                "sample_rate": self._fish_sample_rate,
                 "latency": self._settings.latency,
-                "format": self._settings.format,
+                "format": self._output_format,
                 "normalize": self._settings.normalize,
                 "prosody": {
                     "speed": self._settings.prosody_speed,

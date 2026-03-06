@@ -25,8 +25,8 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.google.llm_openai import GoogleLLMOpenAIBetaService
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService, ElevenLabsTTSSettings
+from pipecat.services.google.llm_openai import GoogleLLMOpenAIBetaService, OpenAILLMSettings
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -64,10 +64,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
+        settings=ElevenLabsTTSSettings(
+            voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
+        ),
     )
 
-    llm = GoogleLLMOpenAIBetaService(api_key=os.getenv("GOOGLE_API_KEY"))
+    llm = GoogleLLMOpenAIBetaService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        settings=OpenAILLMSettings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
+    )
     # You can aslo register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)

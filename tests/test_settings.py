@@ -328,8 +328,6 @@ class TestDeepgramSTTSettingsApplyUpdate:
         defaults = dict(
             model="nova-3-general",
             language="en",
-            encoding="linear16",
-            channels=1,
             interim_results=True,
             smart_format=False,
             punctuate=True,
@@ -350,8 +348,8 @@ class TestDeepgramSTTSettingsApplyUpdate:
         assert current.punctuate is False
         assert "punctuate" in changed
         # Other fields are untouched
-        assert current.encoding == "linear16"
-        assert current.channels == 1
+        assert current.model == "nova-3-general"
+        assert current.language == "en"
 
     def test_apply_update_model(self):
         """model field is updated directly."""
@@ -427,8 +425,6 @@ class TestDeepgramSTTSettingsFromMapping:
         current = DeepgramSTTSettings(
             model="nova-3-general",
             language="en",
-            encoding="linear16",
-            channels=1,
             interim_results=True,
             punctuate=True,
             profanity_filter=True,
@@ -442,7 +438,6 @@ class TestDeepgramSTTSettingsFromMapping:
         assert current.punctuate is False
         assert current.diarize is True
         # Unchanged fields stay put
-        assert current.encoding == "linear16"
         assert current.model == "nova-3-general"
         assert "punctuate" in changed
 
@@ -451,8 +446,6 @@ class TestDeepgramSTTSettingsFromMapping:
         current = DeepgramSTTSettings(
             model="nova-3-general",
             language="en",
-            encoding="linear16",
-            channels=1,
         )
 
         raw = {"model": "nova-2"}
@@ -474,16 +467,13 @@ class TestDeepgramSageMakerSTTSettings:
         store = DeepgramSageMakerSTTSettings(
             model="nova-3",
             language="en",
-            encoding="linear16",
-            channels=1,
-            punctuate=True,
         )
-        delta = DeepgramSageMakerSTTSettings(punctuate=False)
+        delta = DeepgramSageMakerSTTSettings(model="nova-2")
         changed = store.apply_update(delta)
 
-        assert store.punctuate is False
-        assert store.encoding == "linear16"
-        assert "punctuate" in changed
+        assert store.model == "nova-2"
+        assert store.language == "en"
+        assert "model" in changed
 
 
 # ---------------------------------------------------------------------------
@@ -499,17 +489,17 @@ class TestDeepgramSTTSettingsExtraSync:
             return DeepgramSTTService(api_key="test-key", sample_rate=16000, **kwargs)
 
     def test_extra_synced_to_declared_field_at_init(self):
-        """If LiveOptions has unknown params in _extra, they can be synced if they match fields."""
+        """LiveOptions params that match declared fields are synced at init."""
         from pipecat.services.deepgram.stt import LiveOptions
 
-        # Use **kwargs to pass undeclared params
-        live_options = LiveOptions(numerals=True)  # 'numerals' goes into _extra
+        live_options = LiveOptions(numerals=True)
 
         svc = self._make_service(live_options=live_options)
 
-        # 'numerals' doesn't match a declared DeepgramSTTSettings field,
-        # so it should stay in extra
-        assert svc._settings.extra["numerals"] is True
+        # 'numerals' is a declared DeepgramSTTSettings field,
+        # so it should be promoted from extra to the declared field
+        assert svc._settings.numerals is True
+        assert "numerals" not in svc._settings.extra
 
     def test_declared_field_from_live_options(self):
         """LiveOptions fields that match DeepgramSTTSettings fields are applied."""
@@ -532,7 +522,7 @@ class TestDeepgramSTTSettingsExtraSync:
         raw_dict = {
             "diarize": True,  # matches declared field
             "punctuate": False,  # matches declared field
-            "numerals": True,  # doesn't match - stays in extra
+            "custom_param": "value",  # doesn't match - stays in extra
         }
 
         delta = DeepgramSTTSettings.from_mapping(raw_dict)
@@ -541,7 +531,7 @@ class TestDeepgramSTTSettingsExtraSync:
         assert delta.diarize is True
         assert delta.punctuate is False
         # Unknown stays in extra
-        assert delta.extra["numerals"] is True
+        assert delta.extra["custom_param"] == "value"
 
         # Now simulate syncing (though from_mapping already routes correctly)
         delta._sync_extra_to_fields()
@@ -549,7 +539,7 @@ class TestDeepgramSTTSettingsExtraSync:
         # Still the same - from_mapping already put them in the right place
         assert delta.diarize is True
         assert delta.punctuate is False
-        assert delta.extra["numerals"] is True
+        assert delta.extra["custom_param"] == "value"
 
     def test_sync_promotes_extra_to_field_when_not_given(self):
         """_sync_extra_to_fields promotes extra dict entries to declared fields."""
@@ -611,16 +601,17 @@ class TestDeepgramSTTSettingsExtraSync:
         """Unknown params (not matching fields) stay in extra and get forwarded."""
         from pipecat.services.deepgram.stt import LiveOptions
 
-        # numerals isn't a declared field in DeepgramSTTSettings
+        # 'numerals' is now a declared field; 'custom_param' is not
         live_options = LiveOptions(numerals=True, custom_param="test")
 
         svc = self._make_service(live_options=live_options)
 
-        # Should be in extra
-        assert svc._settings.extra["numerals"] is True
+        # 'numerals' is a declared field, so it should be promoted
+        assert svc._settings.numerals is True
+        # 'custom_param' is unknown, so it stays in extra
         assert svc._settings.extra["custom_param"] == "test"
 
-        # And forwarded to kwargs
+        # Both forwarded to kwargs
         kwargs = svc._build_connect_kwargs()
         assert kwargs["numerals"] == "true"
         assert kwargs["custom_param"] == "test"

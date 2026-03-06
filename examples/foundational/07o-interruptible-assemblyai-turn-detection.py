@@ -22,10 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.assemblyai.models import AssemblyAIConnectionParams
-from pipecat.services.assemblyai.stt import AssemblyAISTTService
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.assemblyai.stt import AssemblyAISTTService, AssemblyAISTTSettings
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -94,7 +93,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = AssemblyAISTTService(
         api_key=os.getenv("ASSEMBLYAI_API_KEY"),
         vad_force_turn_endpoint=False,  # Use AssemblyAI's built-in turn detection
-        connection_params=AssemblyAIConnectionParams(
+        settings=AssemblyAISTTSettings(
             speech_model="u3-rt-pro",
             # Optional: Tune turn detection timing (defaults shown below)
             # min_turn_silence=100,  # Default
@@ -108,12 +107,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSSettings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenAILLMSettings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     context = LLMContext()

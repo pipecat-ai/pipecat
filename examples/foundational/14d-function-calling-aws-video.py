@@ -28,8 +28,8 @@ from pipecat.runner.utils import (
     get_transport_client_id,
     maybe_capture_participant_camera,
 )
-from pipecat.services.aws.llm import AWSBedrockLLMService
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.aws.llm import AWSBedrockLLMService, AWSBedrockLLMSettings
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -90,18 +90,22 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSSettings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     # AWS for vision analysis
     llm = AWSBedrockLLMService(
         aws_region="us-west-2",
-        model="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-        # Note: usually, prefer providing latency="optimized" param.
-        # Here we can't because AWS Bedrock doesn't support it for Claude 3.7,
-        # which we need for image input.
-        params=AWSBedrockLLMService.InputParams(temperature=0.8),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
+        settings=AWSBedrockLLMSettings(
+            model="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            # Note: usually, prefer providing latency="optimized" param.
+            # Here we can't because AWS Bedrock doesn't support it for Claude 3.7,
+            # which we need for image input.
+            temperature=0.8,
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
+        ),
     )
     llm.register_function("fetch_user_image", fetch_user_image)
 

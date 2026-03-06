@@ -35,8 +35,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.anthropic.llm import AnthropicLLMService
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.anthropic.llm import AnthropicLLMService, AnthropicLLMSettings
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -137,11 +137,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            settings=CartesiaTTSSettings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
         )
 
+        system = f"""
+        You are a helpful LLM in a WebRTC call.
+        Your goal is to demonstrate your capabilities in a succinct way.
+        You have access to tools to search the Rijksmuseum collection.
+        Offer, for example, to show a floral still life, use the `search_artwork` tool.
+        The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
+        Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
+        Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
+        Respond to what the user said in a creative and helpful way.
+        Don't overexplain what you are doing.
+        Just respond with short sentences when you are carrying out tool calls.
+        """
+
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            settings=AnthropicLLMSettings(
+                system_instruction=system,
+            ),
         )
 
         try:
@@ -169,22 +187,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             logger.error(f"error registering tools")
             logger.exception("error trace:")
 
-        system = f"""
-        You are a helpful LLM in a WebRTC call.
-        Your goal is to demonstrate your capabilities in a succinct way.
-        You have access to tools to search the Rijksmuseum collection.
-        Offer, for example, to show a floral still life, use the `search_artwork` tool.
-        The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
-        Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
-        Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
-        Respond to what the user said in a creative and helpful way.
-        Don't overexplain what you are doing.
-        Just respond with short sentences when you are carrying out tool calls.
-        """
-
-        messages = [{"role": "system", "content": system}]
-
-        context = LLMContext(messages, tools)
+        context = LLMContext(tools=tools)
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

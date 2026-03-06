@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -155,6 +155,9 @@ class AWSPollyTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for AWS Polly TTS configuration.
 
+        .. deprecated:: 0.0.105
+            Use ``AWSPollyTTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             engine: TTS engine to use ('standard', 'neural', etc.).
             language: Language for synthesis. Defaults to English.
@@ -178,9 +181,10 @@ class AWSPollyTTSService(TTSService):
         aws_access_key_id: Optional[str] = None,
         aws_session_token: Optional[str] = None,
         region: Optional[str] = None,
-        voice_id: str = "Joanna",
+        voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[AWSPollyTTSSettings] = None,
         **kwargs,
     ):
         """Initializes the AWS Polly TTS service.
@@ -191,26 +195,59 @@ class AWSPollyTTSService(TTSService):
             aws_session_token: AWS session token for temporary credentials.
             region: AWS region for Polly service. Defaults to 'us-east-1'.
             voice_id: Voice ID to use for synthesis. Defaults to 'Joanna'.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSPollyTTSSettings(voice=...)`` instead.
+
             sample_rate: Audio sample rate. If None, uses service default.
             params: Additional input parameters for voice customization.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSPollyTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        params = params or AWSPollyTTSService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = AWSPollyTTSSettings(
+            model=None,
+            voice="Joanna",
+            language="en-US",
+            engine=None,
+            pitch=None,
+            rate=None,
+            volume=None,
+            lexicon_names=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", AWSPollyTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", AWSPollyTTSSettings)
+            if not settings:
+                default_settings.engine = params.engine
+                default_settings.language = (
+                    self.language_to_service_language(params.language)
+                    if params.language
+                    else "en-US"
+                )
+                default_settings.pitch = params.pitch
+                default_settings.rate = params.rate
+                default_settings.volume = params.volume
+                default_settings.lexicon_names = params.lexicon_names
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=AWSPollyTTSSettings(
-                model=None,
-                voice=voice_id,
-                engine=params.engine,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "en-US",
-                pitch=params.pitch,
-                rate=params.rate,
-                volume=params.volume,
-                lexicon_names=params.lexicon_names,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

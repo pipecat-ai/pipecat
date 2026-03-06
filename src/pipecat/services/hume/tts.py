@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -84,6 +84,9 @@ class HumeTTSService(TTSService):
     class InputParams(BaseModel):
         """Optional synthesis parameters for Hume TTS.
 
+        .. deprecated:: 0.0.105
+            Use ``settings=HumeTTSSettings(...)`` instead.
+
         Parameters:
             description: Natural-language acting directions (up to 100 characters).
             speed: Speaking-rate multiplier (0.5-2.0).
@@ -98,9 +101,10 @@ class HumeTTSService(TTSService):
         self,
         *,
         api_key: Optional[str] = None,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         params: Optional[InputParams] = None,
         sample_rate: Optional[int] = HUME_SAMPLE_RATE,
+        settings: Optional[HumeTTSSettings] = None,
         **kwargs,
     ) -> None:
         """Initialize the HumeTTSService.
@@ -108,8 +112,18 @@ class HumeTTSService(TTSService):
         Args:
             api_key: Hume API key. If omitted, reads the ``HUME_API_KEY`` environment variable.
             voice_id: ID of the voice to use. Only voice IDs are supported; voice names are not.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=HumeTTSSettings(voice=...)`` instead.
+
             params: Optional synthesis controls (acting instructions, speed, trailing silence).
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=HumeTTSSettings(...)`` instead.
+
             sample_rate: Output sample rate for emitted PCM frames. Defaults to 48_000 (Hume).
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent class.
         """
         api_key = api_key or os.getenv("HUME_API_KEY")
@@ -121,21 +135,39 @@ class HumeTTSService(TTSService):
                 f"Hume TTS streams at {HUME_SAMPLE_RATE} Hz; configured sample_rate={sample_rate}"
             )
 
-        params = params or HumeTTSService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = HumeTTSSettings(
+            model=None,
+            voice=None,
+            language=None,  # Not applicable here
+            description=None,
+            speed=None,
+            trailing_silence=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", HumeTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", HumeTTSSettings)
+            if not settings:
+                default_settings.description = params.description
+                default_settings.speed = params.speed
+                default_settings.trailing_silence = params.trailing_silence
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             push_text_frames=False,
             push_stop_frames=True,
             supports_word_timestamps=True,
-            settings=HumeTTSSettings(
-                model=None,
-                voice=voice_id,
-                language=None,  # Not applicable here
-                description=params.description,
-                speed=params.speed,
-                trailing_silence=params.trailing_silence,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

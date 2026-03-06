@@ -27,12 +27,12 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.stt import CartesiaSTTService
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.deepgram.tts import DeepgramTTSService
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.deepgram.tts import DeepgramTTSService, DeepgramTTSSettings
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -102,15 +102,30 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts_cartesia = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",
+        settings=CartesiaTTSSettings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
-    tts_deepgram = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    tts_deepgram = DeepgramTTSService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        settings=DeepgramTTSSettings(
+            voice="aura-2-helena-en",
+        ),
+    )
     tts_switcher = ServiceSwitcher(
         services=[tts_cartesia, tts_deepgram], strategy_type=ServiceSwitcherStrategyManual
     )
 
-    llm_openai = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-    llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+    system = "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
+
+    llm_openai = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMSettings(system_instruction=system),
+    )
+    llm_google = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        settings=GoogleLLMSettings(system_instruction=system),
+    )
     llm_switcher = LLMSwitcher(
         llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
     )
@@ -119,15 +134,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Register a "direct" function
     llm_switcher.register_direct_function(get_restaurant_recommendation)
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
     tools = ToolsSchema(standard_tools=[weather_function, get_restaurant_recommendation])
 
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -158,7 +167,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
         await asyncio.sleep(15)
         print(f"Switching to {stt_deepgram}")

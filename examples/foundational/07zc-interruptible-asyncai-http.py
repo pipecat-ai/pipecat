@@ -23,9 +23,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.asyncai.tts import AsyncAIHttpTTSService
+from pipecat.services.asyncai.tts import AsyncAIHttpTTSService, AsyncAITTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -60,13 +60,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = AsyncAIHttpTTSService(
             api_key=os.getenv("ASYNCAI_API_KEY", ""),
-            voice_id=os.getenv("ASYNCAI_VOICE_ID", "e0f39dc4-f691-4e78-bba5-5c636692cc04"),
+            settings=AsyncAITTSSettings(
+                voice="e0f39dc4-f691-4e78-bba5-5c636692cc04",
+            ),
             aiohttp_session=session,
         )
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            settings=OpenAILLMSettings(
+                system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            ),
         )
 
         context = LLMContext()

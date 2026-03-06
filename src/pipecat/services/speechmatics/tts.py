@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -62,6 +62,9 @@ class SpeechmaticsTTSService(TTSService):
     class InputParams(BaseModel):
         """Optional input parameters for Speechmatics TTS configuration.
 
+        .. deprecated:: 0.0.105
+            Use ``settings=SpeechmaticsTTSSettings(...)`` instead.
+
         Parameters:
             max_retries: Maximum number of retries for TTS requests. Defaults to 5.
         """
@@ -73,10 +76,11 @@ class SpeechmaticsTTSService(TTSService):
         *,
         api_key: str,
         base_url: str = "https://preview.tts.speechmatics.com",
-        voice_id: str = "sarah",
+        voice_id: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
         sample_rate: Optional[int] = SPEECHMATICS_SAMPLE_RATE,
         params: Optional[InputParams] = None,
+        settings: Optional[SpeechmaticsTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Speechmatics TTS service.
@@ -85,9 +89,19 @@ class SpeechmaticsTTSService(TTSService):
             api_key: Speechmatics API key for authentication.
             base_url: Base URL for Speechmatics TTS API.
             voice_id: Voice model to use for synthesis.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SpeechmaticsTTSSettings(voice=...)`` instead.
+
             aiohttp_session: Shared aiohttp session for HTTP requests.
             sample_rate: Audio sample rate in Hz.
-            params: Optional[InputParams]: Input parameters for the service.
+            params: Input parameters for the service.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SpeechmaticsTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to TTSService.
         """
         if sample_rate and sample_rate != self.SPEECHMATICS_SAMPLE_RATE:
@@ -95,16 +109,33 @@ class SpeechmaticsTTSService(TTSService):
                 f"Speechmatics TTS only supports {self.SPEECHMATICS_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        params = params or SpeechmaticsTTSService.InputParams()
+
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = SpeechmaticsTTSSettings(
+            model=None,
+            voice="sarah",
+            language=None,
+            max_retries=5,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", SpeechmaticsTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", SpeechmaticsTTSSettings)
+            if not settings:
+                default_settings.max_retries = params.max_retries
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=SpeechmaticsTTSSettings(
-                model=None,
-                voice=voice_id,
-                language=None,
-                max_retries=params.max_retries,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

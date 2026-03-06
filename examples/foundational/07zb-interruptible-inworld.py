@@ -23,8 +23,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.inworld.tts import InworldTTSService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.inworld.tts import InworldTTSService, InworldTTSSettings
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -56,14 +56,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = InworldTTSService(
         api_key=os.getenv("INWORLD_API_KEY", ""),
-        voice_id="Ashley",
-        model="inworld-tts-1",
-        temperature=1.1,
+        settings=InworldTTSSettings(
+            voice="Ashley",
+            model="inworld-tts-1",
+            temperature=1.1,
+        ),
     )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful AI demonstrating Inworld AI's TTS. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
+        settings=OpenAILLMSettings(
+            system_instruction="You are a helpful AI demonstrating Inworld AI's TTS. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
+        ),
     )
 
     context = LLMContext()

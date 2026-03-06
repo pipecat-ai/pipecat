@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -182,7 +182,8 @@ class ElevenLabsSTTSettings(STTSettings):
     """Settings for the ElevenLabs file-based STT service.
 
     Parameters:
-        tag_audio_events: Whether to include audio event tags in transcription.
+        tag_audio_events: Whether to include audio events like (laughter),
+            (coughing) in the transcription.
     """
 
     tag_audio_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -195,7 +196,6 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
     See ``ElevenLabsRealtimeSTTService.InputParams`` for detailed descriptions.
 
     Parameters:
-        commit_strategy: How to segment speech - manual (Pipecat VAD) or vad (ElevenLabs VAD).
         vad_silence_threshold_secs: Seconds of silence before VAD commits (0.3-3.0).
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
@@ -205,7 +205,6 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         include_language_detection: Whether to include language detection in transcripts.
     """
 
-    commit_strategy: CommitStrategy | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_silence_threshold_secs: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -228,6 +227,9 @@ class ElevenLabsSTTService(SegmentedSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs STT API.
 
+        .. deprecated:: 0.0.105
+            Use ``settings=ElevenLabsSTTSettings(...)`` instead.
+
         Parameters:
             language: Target language for transcription.
             tag_audio_events: Whether to include audio events like (laughter), (coughing), in the transcription.
@@ -242,9 +244,10 @@ class ElevenLabsSTTService(SegmentedSTTService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         base_url: str = "https://api.elevenlabs.io",
-        model: str = "scribe_v2",
+        model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[ElevenLabsSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = ELEVENLABS_TTFS_P99,
         **kwargs,
     ):
@@ -254,25 +257,53 @@ class ElevenLabsSTTService(SegmentedSTTService):
             api_key: ElevenLabs API key for authentication.
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             base_url: Base URL for ElevenLabs API.
-            model: Model ID for transcription. Defaults to "scribe_v2".
+            model: Model ID for transcription.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=ElevenLabsSTTSettings(model=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=ElevenLabsSTTSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        params = params or ElevenLabsSTTService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = ElevenLabsSTTSettings(
+            model="scribe_v2",
+            language="eng",
+            tag_audio_events=True,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", ElevenLabsSTTSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", ElevenLabsSTTSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = (
+                        self.language_to_service_language(params.language) or "eng"
+                    )
+                default_settings.tag_audio_events = params.tag_audio_events
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=ElevenLabsSTTSettings(
-                model=model,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "eng",
-                tag_audio_events=params.tag_audio_events,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -429,6 +460,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs Realtime STT API.
 
+        .. deprecated:: 0.0.105
+            Use ``settings=ElevenLabsRealtimeSTTSettings(...)`` instead.
+
         Parameters:
             language_code: ISO-639-1 or ISO-639-3 language code. Leave None for auto-detection.
             commit_strategy: How to segment speech - manual (Pipecat VAD) or vad (ElevenLabs VAD).
@@ -460,9 +494,11 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         *,
         api_key: str,
         base_url: str = "api.elevenlabs.io",
-        model: str = "scribe_v2_realtime",
+        commit_strategy: CommitStrategy = CommitStrategy.MANUAL,
+        model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[ElevenLabsRealtimeSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = ELEVENLABS_REALTIME_TTFS_P99,
         **kwargs,
     ):
@@ -471,32 +507,69 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Args:
             api_key: ElevenLabs API key for authentication.
             base_url: Base URL for ElevenLabs WebSocket API.
-            model: Model ID for transcription. Defaults to "scribe_v2_realtime".
+            commit_strategy: How to segment speech — ``CommitStrategy.MANUAL``
+                (Pipecat VAD) or ``CommitStrategy.VAD`` (ElevenLabs VAD).
+                Defaults to ``CommitStrategy.MANUAL``.
+            model: Model ID for transcription.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=ElevenLabsRealtimeSTTSettings(model=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=ElevenLabsRealtimeSTTSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
-        params = params or ElevenLabsRealtimeSTTService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = ElevenLabsRealtimeSTTSettings(
+            model="scribe_v2_realtime",
+            language=None,
+            vad_silence_threshold_secs=None,
+            vad_threshold=None,
+            min_speech_duration_ms=None,
+            min_silence_duration_ms=None,
+            include_timestamps=False,
+            enable_logging=False,
+            include_language_detection=False,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", ElevenLabsRealtimeSTTSettings, "model")
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", ElevenLabsRealtimeSTTSettings)
+            if not settings:
+                default_settings.language = params.language_code
+                if params.commit_strategy != CommitStrategy.MANUAL:
+                    commit_strategy = params.commit_strategy
+                default_settings.vad_silence_threshold_secs = params.vad_silence_threshold_secs
+                default_settings.vad_threshold = params.vad_threshold
+                default_settings.min_speech_duration_ms = params.min_speech_duration_ms
+                default_settings.min_silence_duration_ms = params.min_silence_duration_ms
+                default_settings.include_timestamps = params.include_timestamps
+                default_settings.enable_logging = params.enable_logging
+                default_settings.include_language_detection = params.include_language_detection
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=10,
             keepalive_interval=5,
-            settings=ElevenLabsRealtimeSTTSettings(
-                model=model,
-                language=params.language_code,
-                commit_strategy=params.commit_strategy,
-                vad_silence_threshold_secs=params.vad_silence_threshold_secs,
-                vad_threshold=params.vad_threshold,
-                min_speech_duration_ms=params.min_speech_duration_ms,
-                min_silence_duration_ms=params.min_silence_duration_ms,
-                include_timestamps=params.include_timestamps,
-                enable_logging=params.enable_logging,
-                include_language_detection=params.include_language_detection,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -504,6 +577,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._base_url = base_url
         self._audio_format = ""  # initialized in start()
         self._receive_task = None
+
+        # Init-only config (not runtime-updatable).
+        self._commit_strategy = commit_strategy
 
         self._connected_event = asyncio.Event()
         self._connected_event.set()
@@ -581,7 +657,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send commit when user stops speaking (manual commit mode)
-            if self._settings.commit_strategy == CommitStrategy.MANUAL:
+            if self._commit_strategy == CommitStrategy.MANUAL:
                 if self._websocket and self._websocket.state is State.OPEN:
                     try:
                         commit_message = {
@@ -684,7 +760,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 params.append(f"language_code={self._settings.language}")
 
             params.append(f"audio_format={self._audio_format}")
-            params.append(f"commit_strategy={self._settings.commit_strategy.value}")
+            params.append(f"commit_strategy={self._commit_strategy.value}")
 
             # Add optional parameters
             if self._settings.include_timestamps:
@@ -701,7 +777,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 )
 
             # Add VAD parameters if using VAD commit strategy and values are specified
-            if self._settings.commit_strategy == CommitStrategy.VAD:
+            if self._commit_strategy == CommitStrategy.VAD:
                 if self._settings.vad_silence_threshold_secs is not None:
                     params.append(
                         f"vad_silence_threshold_secs={self._settings.vad_silence_threshold_secs}"
@@ -861,7 +937,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         await self._handle_transcription(text, True, language)
 
-        finalized = self._settings.commit_strategy == CommitStrategy.MANUAL
+        finalized = self._commit_strategy == CommitStrategy.MANUAL
 
         await self.push_frame(
             TranscriptionFrame(
@@ -905,7 +981,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         await self._handle_transcription(text, True, language)
 
-        finalized = self._settings.commit_strategy == CommitStrategy.MANUAL
+        finalized = self._commit_strategy == CommitStrategy.MANUAL
 
         # This message is sent after committed_transcript when include_timestamps=true.
         # It contains the full transcript data including text and word-level timestamps.

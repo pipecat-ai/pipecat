@@ -6,9 +6,21 @@
 
 """OLLama LLM service implementation for Pipecat AI framework."""
 
+from dataclasses import dataclass
+from typing import Optional
+
 from loguru import logger
 
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class OllamaLLMSettings(OpenAILLMSettings):
+    """Settings for Ollama LLM service."""
+
+    pass
 
 
 class OLLamaLLMService(OpenAILLMService):
@@ -18,18 +30,43 @@ class OLLamaLLMService(OpenAILLMService):
     providing a compatible interface for running large language models locally.
     """
 
+    _settings: OllamaLLMSettings
+
     def __init__(
-        self, *, model: str = "llama2", base_url: str = "http://localhost:11434/v1", **kwargs
+        self,
+        *,
+        model: Optional[str] = None,
+        base_url: str = "http://localhost:11434/v1",
+        settings: Optional[OllamaLLMSettings] = None,
+        **kwargs,
     ):
         """Initialize OLLama LLM service.
 
         Args:
             model: The OLLama model to use. Defaults to "llama2".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
             base_url: The base URL for the OLLama API endpoint.
                     Defaults to "http://localhost:11434/v1".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(model=model, base_url=base_url, api_key="ollama", **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = OllamaLLMSettings(model="llama2")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", OllamaLLMSettings, "model")
+            default_settings.model = model
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(base_url=base_url, api_key="ollama", settings=default_settings, **kwargs)
 
     def create_client(self, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Ollama.

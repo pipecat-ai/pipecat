@@ -6,7 +6,7 @@
 
 import base64
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import AudioContextTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -40,13 +40,9 @@ SAMPLE_RATE = 48000
 
 @dataclass
 class GradiumTTSSettings(TTSSettings):
-    """Settings for the Gradium TTS service.
+    """Settings for the Gradium TTS service."""
 
-    Parameters:
-        output_format: Audio output format.
-    """
-
-    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class GradiumTTSService(AudioContextTTSService):
@@ -56,6 +52,9 @@ class GradiumTTSService(AudioContextTTSService):
 
     class InputParams(BaseModel):
         """Configuration parameters for Gradium TTS service.
+
+        .. deprecated:: 0.0.105
+            Use ``GradiumTTSSettings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             temp: Temperature to be used for generation, defaults to 0.6.
@@ -67,11 +66,12 @@ class GradiumTTSService(AudioContextTTSService):
         self,
         *,
         api_key: str,
-        voice_id: str = "YTpq7expH9539ERJ",
+        voice_id: Optional[str] = None,
         url: str = "wss://eu.api.gradium.ai/api/speech/tts",
-        model: str = "default",
+        model: Optional[str] = None,
         json_config: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[GradiumTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Gradium TTS service.
@@ -79,13 +79,49 @@ class GradiumTTSService(AudioContextTTSService):
         Args:
             api_key: Gradium API key for authentication.
             voice_id: the voice identifier.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GradiumTTSSettings(voice=...)`` instead.
+
             url: Gradium websocket API endpoint.
             model: Model ID to use for synthesis.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GradiumTTSSettings(model=...)`` instead.
+
             json_config: Optional JSON configuration string for additional model settings.
             params: Additional configuration parameters.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GradiumTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent class.
         """
-        params = params or GradiumTTSService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = GradiumTTSSettings(
+            model="default",
+            voice="YTpq7expH9539ERJ",
+            language=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GradiumTTSSettings, "model")
+            default_settings.model = model
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", GradiumTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GradiumTTSSettings)
+            # Note: params.temp has no corresponding settings field
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             push_stop_frames=True,
@@ -93,12 +129,7 @@ class GradiumTTSService(AudioContextTTSService):
             pause_frame_processing=True,
             supports_word_timestamps=True,
             sample_rate=SAMPLE_RATE,
-            settings=GradiumTTSSettings(
-                model=model,
-                voice=voice_id,
-                language=None,
-                output_format="pcm",
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

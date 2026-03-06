@@ -12,7 +12,7 @@ transcription using segmented audio processing.
 
 import base64
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -20,7 +20,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import STTSettings, _warn_deprecated_param
 from pipecat.services.stt_latency import FAL_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -143,18 +143,9 @@ def language_to_fal_language(language: Language) -> Optional[str]:
 
 @dataclass
 class FalSTTSettings(STTSettings):
-    """Settings for the Fal Wizper STT service.
+    """Settings for the Fal Wizper STT service."""
 
-    Parameters:
-        task: Task to perform ('transcribe' or 'translate'). Defaults to
-            'transcribe'.
-        chunk_level: Level of chunking ('segment'). Defaults to 'segment'.
-        version: Version of Wizper model to use. Defaults to '3'.
-    """
-
-    task: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    chunk_level: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    version: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class FalSTTService(SegmentedSTTService):
@@ -168,6 +159,9 @@ class FalSTTService(SegmentedSTTService):
 
     class InputParams(BaseModel):
         """Configuration parameters for Fal's Wizper API.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=FalSTTSettings(...)`` instead.
 
         Parameters:
             language: Language of the audio input. Defaults to English.
@@ -186,8 +180,12 @@ class FalSTTService(SegmentedSTTService):
         *,
         api_key: Optional[str] = None,
         aiohttp_session: Optional[aiohttp.ClientSession] = None,
+        task: str = "transcribe",
+        chunk_level: str = "segment",
+        version: str = "3",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[FalSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = FAL_TTFS_P99,
         **kwargs,
     ):
@@ -197,28 +195,59 @@ class FalSTTService(SegmentedSTTService):
             api_key: Fal API key. If not provided, will check FAL_KEY environment variable.
             aiohttp_session: Optional aiohttp ClientSession for HTTP requests.
                 If not provided, a session will be created and managed internally.
+            task: Task to perform (``"transcribe"`` or ``"translate"``).
+                Defaults to ``"transcribe"``.
+            chunk_level: Level of chunking (``"segment"``). Defaults to ``"segment"``.
+            version: Version of Wizper model to use. Defaults to ``"3"``.
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the Wizper API.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=FalSTTSettings(...)`` for model/language and
+                    direct init parameters for task/chunk_level/version instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        params = params or FalSTTService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = FalSTTSettings(
+            model=None,
+            language=language_to_fal_language(Language.EN) or "en",
+        )
+
+        # 2. (no deprecated direct args for this service)
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", FalSTTSettings)
+            if not settings:
+                default_settings.language = (
+                    language_to_fal_language(params.language) if params.language else "en"
+                )
+                if params.task != "transcribe":
+                    task = params.task
+                if params.chunk_level != "segment":
+                    chunk_level = params.chunk_level
+                if params.version != "3":
+                    version = params.version
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=FalSTTSettings(
-                model=None,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "en",
-                task=params.task,
-                chunk_level=params.chunk_level,
-                version=params.version,
-            ),
+            settings=default_settings,
             **kwargs,
         )
+
+        self._task = task
+        self._chunk_level = chunk_level
+        self._version = version
 
         self._api_key = api_key or os.getenv("FAL_KEY", "")
         if not self._api_key:
@@ -275,7 +304,15 @@ class FalSTTService(SegmentedSTTService):
                 self._session = aiohttp.ClientSession()
 
             data_uri = f"data:audio/x-wav;base64,{base64.b64encode(audio).decode()}"
-            payload = {"audio_url": data_uri, **self._settings.given_fields()}
+            payload: dict = {"audio_url": data_uri}
+            if self._settings.language is not None:
+                payload["language"] = self._settings.language
+            if self._task is not None:
+                payload["task"] = self._task
+            if self._chunk_level is not None:
+                payload["chunk_level"] = self._chunk_level
+            if self._version is not None:
+                payload["version"] = self._version
             headers = {
                 "Authorization": f"Key {self._api_key}",
                 "Content-Type": "application/json",

@@ -18,7 +18,7 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+from pipecat.services.openai.stt import OpenAIRealtimeSTTService, OpenAIRealtimeSTTSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -53,8 +53,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = OpenAIRealtimeSTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-transcribe",
-        prompt="Expect words related to dogs, such as breed names.",
+        settings=OpenAIRealtimeSTTSettings(
+            model="gpt-4o-transcribe",
+            prompt="Expect words related to dogs, such as breed names.",
+        ),
     )
 
     tl = TranscriptionLogger()

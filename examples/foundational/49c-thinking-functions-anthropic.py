@@ -23,8 +23,12 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.anthropic.llm import AnthropicLLMService
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.anthropic.llm import (
+    AnthropicLLMService,
+    AnthropicLLMSettings,
+    AnthropicThinkingConfig,
+)
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -77,15 +81,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSSettings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     llm = AnthropicLLMService(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        params=AnthropicLLMService.InputParams(
-            thinking=AnthropicLLMService.ThinkingConfig(type="enabled", budget_tokens=2048)
+        settings=AnthropicLLMSettings(
+            thinking=AnthropicThinkingConfig(
+                type="enabled",
+                budget_tokens=2048,
+            ),
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
     )
 
     llm.register_direct_function(check_flight_status)

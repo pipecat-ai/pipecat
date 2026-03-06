@@ -13,8 +13,8 @@ for creating images from text prompts using various AI models.
 import asyncio
 import io
 import os
-from dataclasses import dataclass
-from typing import AsyncGenerator, Dict, Optional, Union
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Dict, Optional, Union
 
 import aiohttp
 from loguru import logger
@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import ImageGenSettings
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, _warn_deprecated_param
 
 
 @dataclass
@@ -32,7 +32,35 @@ class FalImageGenSettings(ImageGenSettings):
 
     Parameters:
         model: Fal.ai model identifier.
+        seed: Random seed for reproducible generation. ``None`` uses a random seed.
+        num_inference_steps: Number of inference steps for generation.
+        num_images: Number of images to generate.
+        image_size: Image dimensions as a string preset or dict with width/height.
+        expand_prompt: Whether to automatically expand/enhance the prompt.
+        enable_safety_checker: Whether to enable content safety filtering.
+        format: Output image format.
     """
+
+    seed: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    num_inference_steps: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    num_images: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    image_size: str | Dict[str, int] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    expand_prompt: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_safety_checker: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    def to_api_arguments(self) -> Dict[str, Any]:
+        """Build the Fal API arguments dict from settings, excluding None values."""
+        args: Dict[str, Any] = {}
+        if self.seed is not None:
+            args["seed"] = self.seed
+        args["num_inference_steps"] = self.num_inference_steps
+        args["num_images"] = self.num_images
+        args["image_size"] = self.image_size
+        args["expand_prompt"] = self.expand_prompt
+        args["enable_safety_checker"] = self.enable_safety_checker
+        args["format"] = self.format
+        return args
 
 
 class FalImageGenService(ImageGenService):
@@ -44,6 +72,9 @@ class FalImageGenService(ImageGenService):
 
     class InputParams(BaseModel):
         """Input parameters for Fal.ai image generation.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=FalImageGenSettings(...)`` instead.
 
         Parameters:
             seed: Random seed for reproducible generation. If None, uses random seed.
@@ -63,26 +94,70 @@ class FalImageGenService(ImageGenService):
         enable_safety_checker: bool = True
         format: str = "png"
 
+    _settings: FalImageGenSettings
+
     def __init__(
         self,
         *,
-        params: InputParams,
+        params: Optional[InputParams] = None,
         aiohttp_session: aiohttp.ClientSession,
-        model: str = "fal-ai/fast-sdxl",
+        model: Optional[str] = None,
         key: Optional[str] = None,
+        settings: Optional[FalImageGenSettings] = None,
         **kwargs,
     ):
         """Initialize the FalImageGenService.
 
         Args:
             params: Input parameters for image generation configuration.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=FalImageGenSettings(...)`` instead.
+
             aiohttp_session: HTTP client session for downloading generated images.
             model: The Fal.ai model to use for generation. Defaults to "fal-ai/fast-sdxl".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=FalImageGenSettings(model=...)`` instead.
+
             key: Optional API key for Fal.ai. If provided, sets FAL_KEY environment variable.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent ImageGenService.
         """
-        super().__init__(settings=FalImageGenSettings(model=model), **kwargs)
-        self._params = params
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = FalImageGenSettings(
+            model="fal-ai/fast-sdxl",
+            seed=None,
+            num_inference_steps=8,
+            num_images=1,
+            image_size="square_hd",
+            expand_prompt=False,
+            enable_safety_checker=True,
+            format="png",
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", FalImageGenSettings, "model")
+            default_settings.model = model
+
+        if params is not None:
+            _warn_deprecated_param("params", FalImageGenSettings)
+            if not settings:
+                default_settings.seed = params.seed
+                default_settings.num_inference_steps = params.num_inference_steps
+                default_settings.num_images = params.num_images
+                default_settings.image_size = params.image_size
+                default_settings.expand_prompt = params.expand_prompt
+                default_settings.enable_safety_checker = params.enable_safety_checker
+                default_settings.format = params.format
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
         self._aiohttp_session = aiohttp_session
         self._api_key = key or os.getenv("FAL_KEY", "")
         if key:
@@ -110,7 +185,7 @@ class FalImageGenService(ImageGenService):
             "Authorization": f"Key {self._api_key}",
             "Content-Type": "application/json",
         }
-        payload = {"prompt": prompt, **self._params.model_dump(exclude_none=True)}
+        payload = {"prompt": prompt, **self._settings.to_api_arguments()}
 
         async with self._aiohttp_session.post(
             f"https://fal.run/{self._settings.model}",
