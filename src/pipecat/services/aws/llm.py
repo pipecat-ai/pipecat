@@ -1025,6 +1025,11 @@ class AWSBedrockLLMService(LLMService):
             adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
             params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
             if self._system_instruction:
+                if params["system"]:
+                    logger.warning(
+                        f"{self}: Both system_instruction and a system message in context are"
+                        " set. Using system_instruction."
+                    )
                 params["system"] = [{"text": self._system_instruction}]
             return params
 

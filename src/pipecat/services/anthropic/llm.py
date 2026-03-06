@@ -403,6 +403,11 @@ class AnthropicLLMService(LLMService):
                 context, enable_prompt_caching=self._settings.enable_prompt_caching
             )
             if self._system_instruction:
+                if params["system"] is not NOT_GIVEN:
+                    logger.warning(
+                        f"{self}: Both system_instruction and a system message in context are"
+                        " set. Using system_instruction."
+                    )
                 params["system"] = self._system_instruction
             return params
 
