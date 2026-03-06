@@ -149,6 +149,10 @@ class CurrentContent:
 class Params(BaseModel):
     """Configuration parameters for AWS Nova Sonic.
 
+    .. deprecated:: 0.0.105
+        Use ``settings=AWSNovaSonicLLMSettings(...)`` for inference settings
+        and ``audio_config=AudioConfig(...)`` for audio configuration.
+
     Parameters:
         input_sample_rate: Audio input sample rate in Hz.
         input_sample_size: Audio input sample size in bits.
@@ -184,6 +188,41 @@ class Params(BaseModel):
 
     # Turn-taking
     endpointing_sensitivity: Optional[str] = Field(default=None)
+
+    @property
+    def audio_config(self) -> "AudioConfig":
+        """Return an ``AudioConfig`` populated from this instance's audio fields."""
+        return AudioConfig(
+            input_sample_rate=self.input_sample_rate,
+            input_sample_size=self.input_sample_size,
+            input_channel_count=self.input_channel_count,
+            output_sample_rate=self.output_sample_rate,
+            output_sample_size=self.output_sample_size,
+            output_channel_count=self.output_channel_count,
+        )
+
+
+class AudioConfig(BaseModel):
+    """Audio configuration for AWS Nova Sonic.
+
+    Parameters:
+        input_sample_rate: Audio input sample rate in Hz.
+        input_sample_size: Audio input sample size in bits.
+        input_channel_count: Number of input audio channels.
+        output_sample_rate: Audio output sample rate in Hz.
+        output_sample_size: Audio output sample size in bits.
+        output_channel_count: Number of output audio channels.
+    """
+
+    # Input
+    input_sample_rate: Optional[int] = Field(default=16000)
+    input_sample_size: Optional[int] = Field(default=16)
+    input_channel_count: Optional[int] = Field(default=1)
+
+    # Output
+    output_sample_rate: Optional[int] = Field(default=24000)
+    output_sample_size: Optional[int] = Field(default=16)
+    output_channel_count: Optional[int] = Field(default=1)
 
 
 @dataclass
@@ -222,6 +261,7 @@ class AWSNovaSonicLLMService(LLMService):
         model: str = "amazon.nova-2-sonic-v1:0",
         voice_id: str = "matthew",
         params: Optional[Params] = None,
+        audio_config: Optional[AudioConfig] = None,
         settings: Optional[AWSNovaSonicLLMSettings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
@@ -254,9 +294,13 @@ class AWSNovaSonicLLMService(LLMService):
 
             params: Model parameters for audio configuration and inference.
 
-                .. deprecated::
-                    Use ``settings=AWSNovaSonicLLMSettings(...)`` instead.
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSNovaSonicLLMSettings(...)`` for inference
+                    settings and ``audio_config=AudioConfig(...)`` for audio
+                    configuration.
 
+            audio_config: Audio configuration (sample rates, sample sizes,
+                channel counts). If not provided, defaults are used.
             settings: AWS Nova Sonic LLM settings. If provided together with
                 deprecated top-level parameters, the ``settings`` values take
                 precedence.
@@ -305,7 +349,19 @@ class AWSNovaSonicLLMService(LLMService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", AWSNovaSonicLLMSettings)
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The `params` parameter is deprecated. "
+                    "Use `settings=AWSNovaSonicLLMSettings(...)` for inference settings "
+                    "(temperature, max_tokens, top_p, endpointing_sensitivity) "
+                    "and `audio_config=AudioConfig(...)` for audio configuration "
+                    "(sample rates, sample sizes, channel counts).",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             if not settings:
                 default_settings.temperature = params.temperature
                 default_settings.max_tokens = params.max_tokens
@@ -327,13 +383,10 @@ class AWSNovaSonicLLMService(LLMService):
         self._client: Optional[BedrockRuntimeClient] = None
 
         # Audio I/O config (hardware settings, not runtime-tunable)
-        _audio_params = params or Params()
-        self._input_sample_rate = _audio_params.input_sample_rate
-        self._input_sample_size = _audio_params.input_sample_size
-        self._input_channel_count = _audio_params.input_channel_count
-        self._output_sample_rate = _audio_params.output_sample_rate
-        self._output_sample_size = _audio_params.output_sample_size
-        self._output_channel_count = _audio_params.output_channel_count
+        # Priority: audio_config > params (deprecated) > defaults
+        self._audio_config = audio_config or (
+            params.audio_config if params is not None else AudioConfig()
+        )
         self._tools = tools
 
         # Validate endpointing_sensitivity parameter
@@ -816,9 +869,9 @@ class AWSNovaSonicLLMService(LLMService):
               }},
               "audioOutputConfiguration": {{
                 "mediaType": "audio/lpcm",
-                "sampleRateHertz": {self._output_sample_rate},
-                "sampleSizeBits": {self._output_sample_size},
-                "channelCount": {self._output_channel_count},
+                "sampleRateHertz": {self._audio_config.output_sample_rate},
+                "sampleSizeBits": {self._audio_config.output_sample_size},
+                "channelCount": {self._audio_config.output_channel_count},
                 "voiceId": "{self._settings.voice}",
                 "encoding": "base64",
                 "audioType": "SPEECH"
@@ -844,9 +897,9 @@ class AWSNovaSonicLLMService(LLMService):
                     "role": "USER",
                     "audioInputConfiguration": {{
                         "mediaType": "audio/lpcm",
-                        "sampleRateHertz": {self._input_sample_rate},
-                        "sampleSizeBits": {self._input_sample_size},
-                        "channelCount": {self._input_channel_count},
+                        "sampleRateHertz": {self._audio_config.input_sample_rate},
+                        "sampleSizeBits": {self._audio_config.input_sample_size},
+                        "channelCount": {self._audio_config.input_channel_count},
                         "audioType": "SPEECH",
                         "encoding": "base64"
                     }}
@@ -1129,8 +1182,8 @@ class AWSNovaSonicLLMService(LLMService):
         audio = base64.b64decode(audio_content)
         frame = TTSAudioRawFrame(
             audio=audio,
-            sample_rate=self._output_sample_rate,
-            num_channels=self._output_channel_count,
+            sample_rate=self._audio_config.output_sample_rate,
+            num_channels=self._audio_config.output_channel_count,
         )
         await self.push_frame(frame)
 
@@ -1442,9 +1495,9 @@ class AWSNovaSonicLLMService(LLMService):
             chunk_duration = 0.02  # what we might get from InputAudioRawFrame
             chunk_size = int(
                 chunk_duration
-                * self._input_sample_rate
-                * self._input_channel_count
-                * (self._input_sample_size / 8)
+                * self._audio_config.input_sample_rate
+                * self._audio_config.input_channel_count
+                * (self._audio_config.input_sample_size / 8)
             )  # e.g. 0.02 seconds of 16-bit (2-byte) PCM mono audio at 16kHz is 640 bytes
 
             # Lead with a bit of blank audio, if needed.
