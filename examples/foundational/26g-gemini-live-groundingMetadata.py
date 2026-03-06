@@ -19,7 +19,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.frames import LLMSearchResponseFrame
-from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, GeminiLiveLLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -107,9 +107,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=SYSTEM_INSTRUCTION,
-        voice_id="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
-        transcribe_user_audio=True,
+        settings=GeminiLiveLLMSettings(
+            system_instruction=SYSTEM_INSTRUCTION,
+            voice="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
+        ),
         tools=tools,
     )
 

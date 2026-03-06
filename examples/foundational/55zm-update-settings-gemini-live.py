@@ -19,10 +19,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.gemini_live.llm import (
-    GeminiLiveLLMService,
-    GeminiLiveLLMSettings,
-)
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, GeminiLiveLLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -53,7 +50,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=GeminiLiveLLMSettings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     context = LLMContext()
@@ -81,6 +80,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)

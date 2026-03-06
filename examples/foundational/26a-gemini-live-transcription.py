@@ -67,16 +67,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "role": "user",
                 "content": "Say hello. Then ask if I want to hear a joke.",
             },
-            #     {"role": "assistant", "content": "Hello! Why don't scientists trust atoms?"},
-            #     {
-            #         "role": "user",
-            #         "content": [
-            #             {
-            #                 "type": "text",
-            #                 "text": "Oh, I know this one: because they make up everything.",
-            #             }
-            #         ],
-            #     },
         ],
     )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
