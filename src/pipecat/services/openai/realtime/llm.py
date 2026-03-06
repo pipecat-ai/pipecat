@@ -236,7 +236,7 @@ class OpenAIRealtimeLLMService(LLMService):
             api_key: OpenAI API key for authentication.
             model: OpenAI model name.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeLLMSettings(model=...)`` instead.
 
                 This is a connection-level parameter set via the WebSocket URL query
@@ -246,7 +246,7 @@ class OpenAIRealtimeLLMService(LLMService):
             session_properties: Configuration properties for the realtime session.
                 If None, uses default SessionProperties.
 
-                .. deprecated::
+                .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeLLMSettings(session_properties=...)``
                     instead.
             settings: Runtime-updatable settings for this service.
