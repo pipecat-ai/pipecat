@@ -85,7 +85,10 @@ class IdleFrameProcessor(FrameProcessor):
         while True:
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
-            except asyncio.TimeoutError:
-                await self._callback(self)
-            finally:
+                # Event was set (activity detected) — clear immediately
                 self._idle_event.clear()
+            except asyncio.TimeoutError:
+                # No activity within timeout — trigger callback.
+                # Don't clear the event: if set() was called between the
+                # timeout and now, the next iteration should see it.
+                await self._callback(self)
