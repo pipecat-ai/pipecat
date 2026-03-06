@@ -128,7 +128,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         await audiobuffer.start_recording()
         # Kick off the conversation.
-        context.add_message({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @audiobuffer.event_handler("on_audio_data")

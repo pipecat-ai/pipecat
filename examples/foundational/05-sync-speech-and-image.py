@@ -152,7 +152,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]:
             messages = [
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
                 }
             ]

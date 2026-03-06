@@ -128,7 +128,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation
         context.add_message(
             {
-                "role": "system",
+                "role": "user",
                 "content": "You are an AI assistant. You can help with a variety of tasks. Introduce yourself and ask the user what they would like to know.",
             }
         )

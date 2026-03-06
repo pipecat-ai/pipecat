@@ -125,7 +125,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         )
 
-        system = f"""
+        system_prompt = f"""
         You are a helpful LLM in a WebRTC call.
         Your goal is to demonstrate your capabilities in a succinct way.
         You have access to tools to search the Rijksmuseum collection and the user's GitHub repositories and account.
@@ -142,7 +142,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY"),
             settings=AnthropicLLMSettings(
-                system_instruction=system,
+                system_instruction=system_prompt,
             ),
         )
 
