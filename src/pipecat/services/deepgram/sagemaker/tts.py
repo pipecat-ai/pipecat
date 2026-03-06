@@ -328,7 +328,7 @@ class DeepgramSageMakerTTSService(TTSService):
             except Exception as e:
                 logger.error(f"{self} error sending Clear message: {e}")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending Flush command.
 
         This should be called when the LLM finishes a complete response to force
@@ -355,12 +355,12 @@ class DeepgramSageMakerTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._ttfb_started:
-                await self.start_ttfb_metrics()
-                self._ttfb_started = True
-            await self.start_tts_usage_metrics(text)
-
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                if not self._ttfb_started:
+                    await self.start_ttfb_metrics()
+                    self._ttfb_started = True
+                yield TTSStartedFrame(context_id=context_id)
             self._context_id = context_id
 
             await self._client.send_json({"type": "Speak", "text": text})

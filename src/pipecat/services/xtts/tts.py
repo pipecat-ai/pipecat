@@ -11,7 +11,7 @@ text-to-speech synthesis using local Docker deployment.
 """
 
 from dataclasses import dataclass
-from typing import AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 import aiohttp
 from loguru import logger
@@ -22,8 +22,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
@@ -132,6 +130,8 @@ class XTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -213,8 +213,6 @@ class XTTSService(TTSService):
             "stream_chunk_size": 20,
         }
 
-        await self.start_ttfb_metrics()
-
         async with self._aiohttp_session.post(url, json=payload) as r:
             if r.status != 200:
                 text = await r.text()
@@ -222,8 +220,6 @@ class XTTSService(TTSService):
                 return
 
             await self.start_tts_usage_metrics(text)
-
-            yield TTSStartedFrame(context_id=context_id)
 
             CHUNK_SIZE = self.chunk_size
 
@@ -262,5 +258,3 @@ class XTTSService(TTSService):
                     resampled_audio, self.sample_rate, 1, context_id=context_id
                 )
                 yield frame
-
-            yield TTSStoppedFrame(context_id=context_id)

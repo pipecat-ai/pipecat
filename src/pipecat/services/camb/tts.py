@@ -29,8 +29,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
@@ -271,6 +269,8 @@ class CambTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -332,8 +332,6 @@ class CambTTSService(TTSService):
             text = text[:3000]
 
         try:
-            await self.start_ttfb_metrics()
-
             # Build SDK parameters
             tts_kwargs: Dict[str, Any] = {
                 "text": text,
@@ -348,7 +346,6 @@ class CambTTSService(TTSService):
                 tts_kwargs["user_instructions"] = self._settings.user_instructions
 
             await self.start_tts_usage_metrics(text)
-            yield TTSStartedFrame(context_id=context_id)
 
             assert self._client is not None, "Camb.ai TTS service not initialized"
 
@@ -384,5 +381,3 @@ class CambTTSService(TTSService):
 
         except Exception as e:
             yield ErrorFrame(error=f"Camb.ai TTS error: {e}")
-        finally:
-            yield TTSStoppedFrame(context_id=context_id)

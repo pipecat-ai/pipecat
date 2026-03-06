@@ -34,8 +34,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import (
     NOT_GIVEN,
@@ -655,6 +653,8 @@ class GoogleHttpTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -803,8 +803,6 @@ class GoogleHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             # Check if the voice is a Chirp voice (including Chirp 3) or Journey voice
             is_chirp_voice = "chirp" in self._settings.voice.lower()
             is_journey_voice = "journey" in self._settings.voice.lower()
@@ -840,8 +838,6 @@ class GoogleHttpTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame(context_id=context_id)
-
             # Skip the first 44 bytes to remove the WAV header
             audio_content = response.audio_content[44:]
 
@@ -854,8 +850,6 @@ class GoogleHttpTTSService(TTSService):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                 yield frame
-
-            yield TTSStoppedFrame(context_id=context_id)
 
         except Exception as e:
             error_message = f"TTS generation error: {str(e)}"
@@ -967,8 +961,6 @@ class GoogleBaseTTSService(TTSService):
         streaming_responses = await self._client.streaming_synthesize(request_generator())
         await self.start_tts_usage_metrics(text)
 
-        yield TTSStartedFrame(context_id=context_id)
-
         audio_buffer = b""
         first_chunk_for_ttfb = False
 
@@ -991,8 +983,6 @@ class GoogleBaseTTSService(TTSService):
 
         if audio_buffer:
             yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1, context_id=context_id)
-
-        yield TTSStoppedFrame(context_id=context_id)
 
 
 class GoogleTTSService(GoogleBaseTTSService):
@@ -1096,6 +1086,8 @@ class GoogleTTSService(GoogleBaseTTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -1135,8 +1127,6 @@ class GoogleTTSService(GoogleBaseTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             # Build voice selection params
             if self._voice_cloning_key:
                 voice_clone_params = texttospeech_v1.VoiceCloneParams(
@@ -1352,6 +1342,8 @@ class GeminiTTSService(GoogleBaseTTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -1414,8 +1406,6 @@ class GeminiTTSService(GoogleBaseTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             # Build voice selection params
             if self._settings.multi_speaker and self._settings.speaker_configs:
                 # Multi-speaker mode

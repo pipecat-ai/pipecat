@@ -20,8 +20,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
@@ -170,6 +168,8 @@ class KokoroTTSService(TTSService):
             default_settings.apply_update(settings)
 
         super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -212,9 +212,7 @@ class KokoroTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
             await self.start_tts_usage_metrics(text)
-            yield TTSStartedFrame(context_id=context_id)
 
             stream = self._kokoro.create_stream(
                 text, voice=self._settings.voice, lang=self._settings.language, speed=1.0
@@ -238,4 +236,3 @@ class KokoroTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)

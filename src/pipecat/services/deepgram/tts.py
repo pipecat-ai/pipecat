@@ -26,8 +26,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import TTSSettings, _warn_deprecated_param
@@ -120,6 +118,7 @@ class DeepgramTTSService(WebsocketTTSService):
             sample_rate=sample_rate,
             pause_frame_processing=True,
             push_stop_frames=True,
+            push_start_frame=True,
             append_trailing_space=True,
             settings=default_settings,
             **kwargs,
@@ -130,7 +129,6 @@ class DeepgramTTSService(WebsocketTTSService):
         self._encoding = encoding
 
         self._receive_task = None
-        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -267,7 +265,6 @@ class DeepgramTTSService(WebsocketTTSService):
             logger.error(f"{self} exception: {e}")
             await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
-            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -299,7 +296,9 @@ class DeepgramTTSService(WebsocketTTSService):
             if isinstance(message, bytes):
                 # Binary message contains audio data
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(message, self.sample_rate, 1, context_id=self._context_id)
+                frame = TTSAudioRawFrame(
+                    message, self.sample_rate, 1, context_id=self.get_active_audio_context_id()
+                )
                 await self.push_frame(frame)
             elif isinstance(message, str):
                 # Text message contains metadata or control messages
@@ -326,7 +325,7 @@ class DeepgramTTSService(WebsocketTTSService):
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending Flush command.
 
         This should be called when the LLM finishes a complete response to force
@@ -357,12 +356,7 @@ class DeepgramTTSService(WebsocketTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            await self.start_ttfb_metrics()
             await self.start_tts_usage_metrics(text)
-
-            yield TTSStartedFrame(context_id=context_id)
-            # Store context_id for use in _receive_messages
-            self._context_id = context_id
 
             # Send text message to Deepgram
             # Note: We don't send Flush here - that should only be sent when the
@@ -435,6 +429,8 @@ class DeepgramHttpTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -492,7 +488,6 @@ class DeepgramHttpTTSService(TTSService):
                     raise Exception(f"HTTP {response.status}: {error_text}")
 
                 await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
@@ -509,8 +504,6 @@ class DeepgramHttpTTSService(TTSService):
                             num_channels=1,
                             context_id=context_id,
                         )
-
-            yield TTSStoppedFrame(context_id=context_id)
 
         except Exception as e:
             yield ErrorFrame(f"Error getting audio: {str(e)}")

@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -331,8 +330,8 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             text_aggregation_mode=text_aggregation_mode,
             push_text_frames=False,  # We'll push text frames based on word timestamps
             push_stop_frames=True,
+            push_start_frame=True,
             pause_frame_processing=True,
-            supports_word_timestamps=True,
             sample_rate=sample_rate,
             settings=default_settings,
             **kwargs,
@@ -346,7 +345,6 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         self._audio_queue = asyncio.Queue()
         self._word_boundary_queue = asyncio.Queue()
         self._word_processor_task = None
-        self._first_chunk = True
         self._cumulative_audio_offset: float = 0.0  # Cumulative audio duration in seconds
         self._current_sentence_base_offset: float = 0.0  # Base offset for current sentence
         self._current_sentence_duration: float = 0.0  # Duration from Azure callback
@@ -619,7 +617,6 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
     def _reset_state(self):
         """Reset TTS state between turns."""
-        self._first_chunk = True
         self._cumulative_audio_offset = 0.0
         self._current_sentence_base_offset = 0.0
         self._current_sentence_duration = 0.0
@@ -628,7 +625,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         self._last_timestamp = None
         self._current_context_id = None
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio data."""
         logger.trace(f"{self}: flushing audio")
 
@@ -694,9 +691,6 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
                 return
 
             try:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
-                self._first_chunk = True
                 self._current_context_id = context_id
 
                 # Capture base offset BEFORE starting synthesis to avoid race conditions
@@ -718,11 +712,6 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
                     if isinstance(chunk, Exception):  # Error from _handle_canceled
                         yield ErrorFrame(error=str(chunk))
                         break
-
-                    if self._first_chunk:
-                        await self.stop_ttfb_metrics()
-                        await self.start_word_timestamps()
-                        self._first_chunk = False
 
                     frame = TTSAudioRawFrame(
                         audio=chunk,
@@ -833,6 +822,8 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
             settings=default_settings,
             **kwargs,
         )
@@ -887,8 +878,6 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
-        await self.start_ttfb_metrics()
-
         ssml = self._construct_ssml(text)
 
         result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, ssml)
@@ -896,7 +885,6 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         if result.reason == ResultReason.SynthesizingAudioCompleted:
             await self.start_tts_usage_metrics(text)
             await self.stop_ttfb_metrics()
-            yield TTSStartedFrame(context_id=context_id)
             # Azure always sends a 44-byte header. Strip it off.
             yield TTSAudioRawFrame(
                 audio=result.audio_data[44:],
@@ -904,7 +892,6 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
                 num_channels=1,
                 context_id=context_id,
             )
-            yield TTSStoppedFrame(context_id=context_id)
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
             logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")

@@ -524,6 +524,8 @@ class SarvamHttpTTSService(TTSService):
 
         super().__init__(
             sample_rate=sample_rate,
+            push_stop_frames=True,
+            push_start_frame=True,
             settings=default_settings,
             **kwargs,
         )
@@ -573,8 +575,6 @@ class SarvamHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             # Build payload with common parameters
             payload = {
                 "text": text,
@@ -605,8 +605,6 @@ class SarvamHttpTTSService(TTSService):
             }
 
             url = f"{self._base_url}/text-to-speech"
-
-            yield TTSStartedFrame(context_id=context_id)
 
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
@@ -645,7 +643,6 @@ class SarvamHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Error generating TTS: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)
 
 
 class SarvamTTSService(InterruptibleTTSService):
@@ -951,6 +948,7 @@ class SarvamTTSService(InterruptibleTTSService):
             push_text_frames=True,
             pause_frame_processing=True,
             push_stop_frames=True,
+            push_start_frame=True,
             sample_rate=sample_rate,
             settings=default_settings,
             **kwargs,
@@ -967,7 +965,6 @@ class SarvamTTSService(InterruptibleTTSService):
 
         self._receive_task = None
         self._keepalive_task = None
-        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -1018,7 +1015,7 @@ class SarvamTTSService(InterruptibleTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending flush command."""
         try:
             if self._websocket:
@@ -1151,7 +1148,6 @@ class SarvamTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
-            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -1170,7 +1166,7 @@ class SarvamTTSService(InterruptibleTTSService):
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
                     frame = TTSAudioRawFrame(
-                        audio, self.sample_rate, 1, context_id=self._context_id
+                        audio, self.sample_rate, 1, context_id=self.get_active_audio_context_id()
                     )
                     await self.push_frame(frame)
                 elif msg.get("type") == "error":
@@ -1224,10 +1220,6 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
-                # Store context_id for use in _receive_messages
-                self._context_id = context_id
-                yield TTSStartedFrame(context_id=context_id)
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
