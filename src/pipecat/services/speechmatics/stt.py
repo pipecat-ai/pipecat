@@ -85,7 +85,7 @@ class TurnDetectionMode(str, Enum):
 
 @dataclass
 class SpeechmaticsSTTSettings(STTSettings):
-    """Settings for Speechmatics STT service.
+    """Settings for SpeechmaticsSTTService.
 
     See ``SpeechmaticsSTTService.InputParams`` for detailed descriptions of each field.
 
@@ -493,19 +493,18 @@ class SpeechmaticsSTTService(STTService):
         if settings is not None:
             default_settings.apply_update(settings)
 
+        # Build SDK config from settings, set model name before calling super
+        self._client: VoiceAgentClient | None = None
+        self._audio_encoding = encoding
+        self._config: VoiceAgentConfig = self._build_config(default_settings)
+        default_settings.model = self._config.operating_point.value
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             settings=default_settings,
             **kwargs,
         )
-
-        # Build SDK config from settings, then resolve model from operating_point
-        self._client: VoiceAgentClient | None = None
-        self._audio_encoding = encoding
-        self._config: VoiceAgentConfig = self._build_config(self._settings)
-        self._settings.model = self._config.operating_point.value
-        self._sync_model_name_to_metrics()
 
         # Outbound frame queue
         self._outbound_frames: asyncio.Queue[Frame] = asyncio.Queue()

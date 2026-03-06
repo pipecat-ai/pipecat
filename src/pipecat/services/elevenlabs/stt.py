@@ -179,7 +179,7 @@ class CommitStrategy(str, Enum):
 
 @dataclass
 class ElevenLabsSTTSettings(STTSettings):
-    """Settings for the ElevenLabs file-based STT service.
+    """Settings for ElevenLabsSTTService.
 
     Parameters:
         tag_audio_events: Whether to include audio events like (laughter),
@@ -191,7 +191,7 @@ class ElevenLabsSTTSettings(STTSettings):
 
 @dataclass
 class ElevenLabsRealtimeSTTSettings(STTSettings):
-    """Settings for the ElevenLabs Realtime STT service.
+    """Settings for ElevenLabsRealtimeSTTService.
 
     See ``ElevenLabsRealtimeSTTService.InputParams`` for detailed descriptions.
 

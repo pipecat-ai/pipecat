@@ -46,7 +46,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class CartesiaSTTSettings(STTSettings):
-    """Settings for the Cartesia STT service."""
+    """Settings for CartesiaSTTService."""
 
     pass
 

@@ -177,7 +177,7 @@ class LiveOptions:
 
 @dataclass
 class DeepgramSTTSettings(STTSettings):
-    """Settings for Deepgram STT services.
+    """Settings for DeepgramSTTService.
 
     ``model`` and ``language`` are inherited from ``STTSettings`` /
     ``ServiceSettings``.  Additional Deepgram connection params may

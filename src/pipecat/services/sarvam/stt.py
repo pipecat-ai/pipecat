@@ -139,7 +139,7 @@ MODEL_CONFIGS: Dict[str, ModelConfig] = {
 
 @dataclass
 class SarvamSTTSettings(STTSettings):
-    """Settings for the Sarvam STT service.
+    """Settings for SarvamSTTService.
 
     Parameters:
         prompt: Optional prompt to guide transcription/translation style/context.

@@ -188,7 +188,7 @@ class _InputParamsDescriptor:
 
 @dataclass
 class GladiaSTTSettings(STTSettings):
-    """Settings for Gladia STT service.
+    """Settings for GladiaSTTService.
 
     Parameters:
         language_config: Language detection and handling configuration.

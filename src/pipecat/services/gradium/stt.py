@@ -68,7 +68,7 @@ def language_to_gradium_language(language: Language) -> Optional[str]:
 
 @dataclass
 class GradiumSTTSettings(STTSettings):
-    """Settings for the Gradium STT service."""
+    """Settings for GradiumSTTService."""
 
     pass
 

@@ -47,7 +47,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AWSTranscribeSTTSettings(STTSettings):
-    """Settings for the AWS Transcribe STT service."""
+    """Settings for AWSTranscribeSTTService."""
 
     pass
 

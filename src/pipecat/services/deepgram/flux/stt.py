@@ -71,7 +71,7 @@ class FluxEventType(str, Enum):
 
 @dataclass
 class DeepgramFluxSTTSettings(STTSettings):
-    """Settings for the Deepgram Flux STT service.
+    """Settings for DeepgramFluxSTTService.
 
     Parameters:
         eager_eot_threshold: EagerEndOfTurn/TurnResumed threshold. Off by default.

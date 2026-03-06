@@ -53,7 +53,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AzureSTTSettings(STTSettings):
-    """Settings for the Azure STT service."""
+    """Settings for AzureSTTService."""
 
     pass
 

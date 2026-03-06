@@ -81,7 +81,7 @@ def map_language_from_assemblyai(language_code: str) -> Language:
 
 @dataclass
 class AssemblyAISTTSettings(STTSettings):
-    """Settings for the AssemblyAI STT service.
+    """Settings for AssemblyAISTTService.
 
     Parameters:
         formatted_finals: Whether to enable transcript formatting.

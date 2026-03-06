@@ -93,14 +93,14 @@ def language_to_nvidia_riva_language(language: Language) -> Optional[str]:
 
 @dataclass
 class NvidiaSTTSettings(STTSettings):
-    """Settings for the NVIDIA Riva streaming STT service."""
+    """Settings for NvidiaSTTService."""
 
     pass
 
 
 @dataclass
 class NvidiaSegmentedSTTSettings(STTSettings):
-    """Settings for the NVIDIA Riva segmented STT service.
+    """Settings for NvidiaSegmentedSTTService.
 
     Parameters:
         profanity_filter: Whether to filter profanity from results.

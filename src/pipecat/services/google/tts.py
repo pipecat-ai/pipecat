@@ -482,7 +482,7 @@ def language_to_gemini_tts_language(language: Language) -> Optional[str]:
 
 @dataclass
 class GoogleHttpTTSSettings(TTSSettings):
-    """Settings for Google HTTP TTS service.
+    """Settings for GoogleHttpTTSService.
 
     Parameters:
         pitch: Voice pitch adjustment (e.g., "+2st", "-50%").
@@ -513,7 +513,7 @@ class GoogleHttpTTSSettings(TTSSettings):
 
 @dataclass
 class GoogleTTSSettings(TTSSettings):
-    """Settings for Google streaming TTS service.
+    """Settings for GoogleTTSService.
 
     Parameters:
         speaking_rate: The speaking rate, in the range [0.25, 2.0].
@@ -522,9 +522,14 @@ class GoogleTTSSettings(TTSSettings):
     speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+#: .. deprecated:: 0.0.105
+#:     Use ``GoogleTTSSettings`` instead.
+GoogleStreamTTSSettings = GoogleTTSSettings
+
+
 @dataclass
 class GeminiTTSSettings(TTSSettings):
-    """Settings for Gemini TTS service.
+    """Settings for GeminiTTSService.
 
     Parameters:
         prompt: Optional style instructions for how to synthesize the content.

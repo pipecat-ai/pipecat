@@ -143,7 +143,7 @@ def language_to_fal_language(language: Language) -> Optional[str]:
 
 @dataclass
 class FalSTTSettings(STTSettings):
-    """Settings for the Fal Wizper STT service."""
+    """Settings for FalSTTService."""
 
     pass
 
