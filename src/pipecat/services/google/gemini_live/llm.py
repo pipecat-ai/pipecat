@@ -607,7 +607,7 @@ class InputParams(BaseModel):
 
 @dataclass
 class GeminiLiveLLMSettings(LLMSettings):
-    """Settings for Gemini Live LLM services.
+    """Settings for GeminiLiveLLMService and GeminiLiveVertexLLMService.
 
     Parameters:
         voice: TTS voice identifier (e.g. ``"Charon"``).
@@ -717,6 +717,7 @@ class GeminiLiveLLMService(LLMService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = GeminiLiveLLMSettings(
             model="models/gemini-2.5-flash-native-audio-preview-12-2025",
+            system_instruction=system_instruction,
             voice="Charon",
             frequency_penalty=None,
             max_tokens=4096,
@@ -785,7 +786,6 @@ class GeminiLiveLLMService(LLMService):
 
         self._last_sent_time = 0
         self._base_url = base_url
-        self._language_code = params.language if params is not None else Language.EN_US
 
         self._system_instruction_from_init = system_instruction
         self._tools_from_init = tools
@@ -815,11 +815,13 @@ class GeminiLiveLLMService(LLMService):
 
         self._sample_rate = 24000
 
-        self._language = _params.language
+        self._language = self._settings.language
         self._language_code = (
-            language_to_gemini_language(_params.language) if _params.language else "en-US"
+            language_to_gemini_language(self._settings.language)
+            if self._settings.language
+            else "en-US"
         )
-        self._vad_params = _params.vad
+        self._vad_params = self._settings.vad
 
         # Reconnection tracking
         self._consecutive_failures = 0
