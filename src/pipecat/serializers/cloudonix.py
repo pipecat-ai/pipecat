@@ -1,10 +1,13 @@
 """Cloudonix Media Streams WebSocket protocol serializer for Pipecat."""
 
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from loguru import logger
 
 from pipecat.serializers.twilio import TwilioFrameSerializer
+
+if TYPE_CHECKING:
+    from pipecat.serializers.call_strategies import HangupStrategy
 
 
 class CloudonixFrameSerializer(TwilioFrameSerializer):
@@ -23,6 +26,7 @@ class CloudonixFrameSerializer(TwilioFrameSerializer):
         bearer_token: Optional[str] = None,
         region: Optional[str] = None,
         edge: Optional[str] = None,
+        hangup_strategy: Optional["HangupStrategy"] = None,
         params: Optional[TwilioFrameSerializer.InputParams] = None,
     ):
         """Initialize the CloudonixFrameSerializer.
@@ -34,6 +38,9 @@ class CloudonixFrameSerializer(TwilioFrameSerializer):
             bearer_token: Cloudonix bearer token (required for auto hang-up).
             region: Optional region parameter (legacy compatibility).
             edge: Optional edge parameter (legacy compatibility).
+            hangup_strategy: Strategy for handling call hangups. The strategy receives
+                context with Twilio-compatible keys (call_sid, account_sid, auth_token)
+                mapped from Cloudonix values (call_id, domain_id, bearer_token).
             params: Configuration parameters.
         """
         self._call_id = call_id
@@ -47,64 +54,8 @@ class CloudonixFrameSerializer(TwilioFrameSerializer):
             auth_token=bearer_token,
             region=region,
             edge=edge,
+            hangup_strategy=hangup_strategy,
             params=params,
         )
 
         logger.info(f"Cloudonix serializer initialized with call_id: {self._call_id}")
-
-    async def _hang_up_call(self):
-        """Terminate the Cloudonix call by issuing a DELETE request to the session endpoint."""
-        logger.debug(f"Attempting hangup for call {self._call_id}")
-
-        # If call_id is not available, fall back to WebSocket close behavior
-        if not self._call_id:
-            logger.warning(f"No call_id available for call. Relying on WebSocket close for hangup.")
-            return
-
-        # Validate required parameters for API call
-        if not self._domain_id or not self._bearer_token:
-            logger.warning(
-                f"Missing domain_id or bearer_token for call {self._call_id}. "
-                f"Cannot perform explicit hangup via API."
-            )
-            return
-
-        try:
-            import aiohttp
-
-            # Construct the DELETE session endpoint
-            # Using "self" as customer-id as per Cloudonix documentation
-            base_url = "https://api.cloudonix.io"
-            endpoint = (
-                f"{base_url}/customers/self/domains/{self._domain_id}/sessions/{self._call_id}"
-            )
-
-            # Prepare headers with Bearer token authentication
-            headers = {
-                "Authorization": f"Bearer {self._bearer_token}",
-                "Content-Type": "application/json",
-            }
-
-            logger.info(f"Terminating Cloudonix call {self._call_id} via DELETE {endpoint}")
-
-            # Make the DELETE request to terminate the session
-            async with aiohttp.ClientSession() as session:
-                async with session.delete(endpoint, headers=headers) as response:
-                    status = response.status
-                    response_text = await response.text()
-
-                    if status in (200, 204, 404):
-                        # 200/204: Success
-                        # 404: Session already terminated (acceptable)
-                        logger.info(
-                            f"Successfully terminated Cloudonix session {self._call_id} "
-                            f"(HTTP {status}), Response: {response_text}"
-                        )
-                    else:
-                        logger.warning(
-                            f"Unexpected response terminating Cloudonix session {self._call_id}: "
-                            f"HTTP {status}, Response: {response_text}"
-                        )
-
-        except Exception as e:
-            logger.error(f"Error terminating Cloudonix call {self._call_id}: {e}", exc_info=True)
