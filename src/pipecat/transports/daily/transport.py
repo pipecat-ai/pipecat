@@ -2747,7 +2747,7 @@ class DailyTransport(BaseTransport):
 
     async def _on_participant_updated(self, participant):
         """Handle participant updated events."""
-        logger.debug(f"{self} participant updated: {participant}")
+        logger.trace(f"{self} participant updated: {participant}")
         await self._call_event_handler("on_participant_updated", participant)
 
     async def _on_transcription_message(self, message: Mapping[str, Any]) -> None:
