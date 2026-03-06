@@ -941,7 +941,6 @@ class TTSService(AIService):
                         if self._tts_contexts[context_id].push_assistant_aggregation:
                             await self.push_frame(LLMAssistantPushAggregationFrame())
 
-
     #
     # Word timestamp methods (active when supports_word_timestamps=True)
     #
