@@ -23,7 +23,7 @@ from typing import (
 from loguru import logger
 from pydantic import BaseModel
 
-import pipecat.processors.frameworks.rtvi.models_v1 as RTVI
+import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.utils import calculate_audio_volume
 from pipecat.frames.frames import (
     AggregatedTextFrame,

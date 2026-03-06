@@ -12,7 +12,7 @@ from pipecat.processors.frameworks.rtvi.frames import (
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
 )
-from pipecat.processors.frameworks.rtvi.models_v0 import (
+from pipecat.processors.frameworks.rtvi.models_deprecated import (
     ActionResult,
     RTVIAction,
     RTVIActionArgument,

@@ -11,7 +11,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-import pipecat.processors.frameworks.rtvi.models_v1 as RTVI
+import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     Frame,
     OutputTransportMessageFrame,

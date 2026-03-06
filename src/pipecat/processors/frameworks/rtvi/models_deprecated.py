@@ -24,7 +24,7 @@ from typing import (
 
 from pydantic import BaseModel, Field, PrivateAttr
 
-import pipecat.processors.frameworks.rtvi.models_v1 as RTVI
+import pipecat.processors.frameworks.rtvi.models as RTVI
 
 ActionResult = Union[bool, int, float, str, list, dict]
 
