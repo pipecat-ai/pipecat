@@ -9,7 +9,7 @@
 Contains all RTVI protocol v1 message definitions and data structures.
 Import this module under the ``RTVI`` alias to use as a namespace::
 
-    import pipecat.processors.frameworks.rtvi.models_v1 as RTVI
+    import pipecat.processors.frameworks.rtvi.models as RTVI
 
     msg = RTVI.BotReady(id="1", data=RTVI.BotReadyData(version=RTVI.PROTOCOL_VERSION))
 """

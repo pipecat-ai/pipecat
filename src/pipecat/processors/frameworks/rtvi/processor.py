@@ -13,7 +13,7 @@ from typing import Any, Dict, Mapping, Optional
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
-import pipecat.processors.frameworks.rtvi.models_v1 as RTVI
+import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import RTVIActionFrame, RTVIClientMessageFrame
-from pipecat.processors.frameworks.rtvi.models_v0 import (
+from pipecat.processors.frameworks.rtvi.models_deprecated import (
     RTVIAction,
     RTVIActionResponse,
     RTVIActionResponseData,
