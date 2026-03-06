@@ -361,7 +361,7 @@ async def run_eval_pipeline(
         # Default behavior is for the bot to speak first
         # If the eval bot speaks first, we append the prompt to the messages
         if eval_config.eval_speaks_first:
-            messages.append(
+            context.add_message(
                 {"role": "user", "content": f"Start by saying this exactly: '{eval_config.prompt}'"}
             )
             await task.queue_frames([LLMRunFrame()])
