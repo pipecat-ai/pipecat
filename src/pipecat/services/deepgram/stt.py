@@ -594,6 +594,7 @@ class DeepgramSTTService(STTService):
                     from_finalize = getattr(message, "from_finalize", False) or False
                     if from_finalize:
                         self.confirm_finalize()
+                    logger.debug(f"Final transcription: {transcript}")
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
@@ -601,6 +602,7 @@ class DeepgramSTTService(STTService):
                             time_now_iso8601(),
                             language,
                             result=message,
+                            finalized=True
                         )
                     )
                     await self._handle_transcription(transcript, is_final, language)

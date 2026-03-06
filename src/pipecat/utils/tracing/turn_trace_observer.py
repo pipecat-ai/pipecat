@@ -78,19 +78,6 @@ class TurnTraceObserver(BaseObserver):
         self._conversation_id = conversation_id
         self._additional_span_attributes = additional_span_attributes or {}
 
-        # Get workflow run ID and providers from registry
-        workflow_run_id = conversation_id or get_current_run_id()
-        if workflow_run_id:
-            # Ensure workflow_run_id is a string for consistency
-            workflow_run_id_str = str(workflow_run_id)
-            self._conversation_provider, self._turn_provider = (
-                ContextProviderRegistry.get_or_create_providers(workflow_run_id_str)
-            )
-        else:
-            # Fallback to singleton instances for backward compatibility
-            self._conversation_provider = ConversationContextProvider.get_instance()
-            self._turn_provider = TurnContextProvider.get_instance()
-
         @turn_tracker.event_handler("on_turn_started")
         async def on_turn_started(tracker, turn_number):
             await self._handle_turn_started(turn_number)

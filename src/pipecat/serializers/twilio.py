@@ -8,7 +8,7 @@
 
 import base64
 import json
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import aiohttp
 from loguru import logger
@@ -30,9 +30,8 @@ from pipecat.frames.frames import (
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.utils.enums import EndTaskReason
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from pipecat.serializers.call_strategies import TransferStrategy, HangupStrategy
+    from pipecat.serializers.call_strategies import HangupStrategy, TransferStrategy
 
 
 class TwilioFrameSerializer(FrameSerializer):
@@ -216,8 +215,6 @@ class TwilioFrameSerializer(FrameSerializer):
 
         # Return None for unhandled frames
         return None
-
-
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Twilio WebSocket data to Pipecat frames.

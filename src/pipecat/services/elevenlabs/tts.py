@@ -467,13 +467,6 @@ class ElevenLabsTTSService(AudioContextTTSService):
         """
         return language_to_elevenlabs_language(language)
 
-    def _reset_state(self):
-        """Reset internal state variables."""
-        self._cumulative_time = 0
-        self._partial_word = ""
-        self._partial_word_start_time = 0.0
-        logger.debug(f"{self}: Reset internal state")
-
     def _set_voice_settings(self):
         ts = self._settings
         voice_setting_keys = [
@@ -552,7 +545,6 @@ class ElevenLabsTTSService(AudioContextTTSService):
         """
         await super().start(frame)
         self._output_format = output_format_from_sample_rate(self.sample_rate)
-        self._reset_state()
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -591,8 +583,6 @@ class ElevenLabsTTSService(AudioContextTTSService):
         """
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            # Reset timing on interruption or stop
-            self._reset_state()
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)], self.get_active_audio_context_id())
 

@@ -365,7 +365,6 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
-            logger.debug(f"Received EndFrame, stopping {self}")
             await self.push_frame(frame, direction)
             await self.stop(frame)
         elif isinstance(frame, StopFrame):

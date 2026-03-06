@@ -157,6 +157,8 @@ def _get_standard_tools_for_logging(tools: Any) -> Optional[List[Dict[str, Any]]
         return tools
 
     return None
+
+
 def _get_turn_context(self):
     """Get the current turn's tracing context if available.
 
@@ -505,16 +507,15 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 if name is not None:
                     span_name += f"-{name}"
                 else:
-                    node_name = None
+                    otel_span_name = None
                     try:
-                        node_name = context.get_node_name()
+                        otel_span_name = context.get_otel_span_name()
                     except AttributeError:
-                        node_name = None
+                        otel_span_name = None
 
-                    if node_name:
+                    if otel_span_name:
                         # Replace whitespace with hyphens for cleaner span names.
-                        node_slug = str(node_name).replace(" ", "-").lower()[:20]
-                        span_name += f"-{node_slug}"
+                        span_name = str(otel_span_name).replace(" ", "-").lower()[:20]
 
                 # Get the parent context - turn context if available, otherwise service context
                 parent_context = _get_turn_context(self) or _get_parent_service_context(self)

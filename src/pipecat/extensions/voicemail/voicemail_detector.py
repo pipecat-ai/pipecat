@@ -687,6 +687,9 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
 
         # Create the LLM context and aggregators for conversation management
         self._context = LLMContext(self._messages)
+
+        # Set OTel span name for tracing
+        self._context.set_otel_span_name("llm-voicemail-detector")
         self._context_aggregator = LLMContextAggregatorPair(
             self._context,
             user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),

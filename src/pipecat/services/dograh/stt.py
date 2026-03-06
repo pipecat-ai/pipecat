@@ -9,7 +9,7 @@
 import asyncio
 import json
 import time
-from typing import AsyncGenerator, Awaitable, Callable, Dict, Optional
+from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
 
@@ -19,13 +19,14 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    MetricsFrame,
     StartFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import DOGRAH_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
@@ -61,6 +62,7 @@ class DograhSTTService(STTService, WebsocketService):
         interim_results: bool = True,
         vad_events: bool = False,
         keyterms: Optional[list[str]] = None,
+        ttfs_p99_latency: Optional[float] = DOGRAH_TTFS_P99,
         **kwargs,
     ):
         """Initialize Dograh STT service.
@@ -76,21 +78,25 @@ class DograhSTTService(STTService, WebsocketService):
             interim_results: Whether to receive interim transcription results.
             vad_events: Whether to receive voice activity detection events.
             keyterms: Optional list of keyterms for speech recognition boosting.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent services.
         """
-        STTService.__init__(self, sample_rate=sample_rate, **kwargs)
+        STTService.__init__(
+            self,
+            sample_rate=sample_rate,
+            settings=STTSettings(model=model, language=language),
+            ttfs_p99_latency=ttfs_p99_latency,
+            **kwargs,
+        )
         WebsocketService.__init__(self, reconnect_on_error=True, **kwargs)
 
         self._api_key = api_key
         self._base_url = base_url
         self._ws_path = ws_path
-        self._model = model
-        self._language = language
         self._interim_results = interim_results
         self._vad_events = vad_events
         self._keyterms = keyterms or []
-
-        self.set_model_name(model)
 
         self._receive_task = None
         self._keepalive_task = None
@@ -113,26 +119,20 @@ class DograhSTTService(STTService, WebsocketService):
         """
         return self._vad_events
 
-    async def set_model(self, model: str):
-        """Set the speech recognition model.
-
-        Args:
-            model: The model identifier to use.
-        """
-        self._model = model
-        self.set_model_name(model)
-
     async def set_language(self, language: Language):
         """Set the language for speech recognition.
 
         Args:
             language: The language to use for recognition.
         """
-        self._language = language
+        await self._update_settings(STTSettings(language=language))
 
     async def _connect_websocket(self):
         """Connect to the WebSocket endpoint."""
         try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+
             url = f"{self._base_url}{self._ws_path}"
             headers = {
                 "Authorization": f"Bearer {self._api_key}",
@@ -145,8 +145,8 @@ class DograhSTTService(STTService, WebsocketService):
             # Send initial configuration
             config_msg = {
                 "type": "config",
-                "model": self._model,
-                "language": self._language,
+                "model": self._settings.model,
+                "language": self._settings.language,
                 "sample_rate": self.sample_rate,
                 "interim_results": self._interim_results,
                 "vad_events": self._vad_events,
@@ -165,6 +165,7 @@ class DograhSTTService(STTService, WebsocketService):
             logger.info("Connected to Dograh STT service")
 
         except Exception as e:
+            self._websocket = None
             logger.error(f"Failed to connect to Dograh STT service: {e}")
             raise
 
@@ -172,58 +173,37 @@ class DograhSTTService(STTService, WebsocketService):
         """Disconnect from the WebSocket endpoint."""
         try:
             if self._websocket:
+                logger.debug("Disconnecting from Dograh STT service")
                 # Send end of stream signal
                 end_msg = {"type": "end_of_stream"}
                 await self._websocket.send(json.dumps(end_msg))
-
                 await self._websocket.close()
-                self._websocket = None
-
-            logger.info("Disconnected from Dograh STT service")
-
+                logger.debug("Disconnected from Dograh STT service")
         except Exception as e:
             logger.error(f"Error disconnecting from Dograh STT service: {e}")
-
-    async def _reconnect_websocket(self, retry_count: int) -> bool:
-        """Reconnect to the WebSocket.
-
-        Args:
-            retry_count: Current retry attempt number.
-
-        Returns:
-            True if reconnection successful, False otherwise.
-        """
-        logger.debug(f"Reconnecting to Dograh STT (attempt {retry_count})")
-        await self._disconnect_websocket()
-        try:
-            await self._connect_websocket()
-            return True
-        except Exception as e:
-            logger.error(f"Reconnection failed: {e}")
-            return False
+        finally:
+            self._websocket = None
 
     async def _connect(self):
         """Connect to the service."""
+        await super()._connect()
+
         await self._connect_websocket()
 
-        # Start receive task handler from WebsocketService base class
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        # Start keepalive task
         if self._websocket and not self._keepalive_task:
             self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
         """Disconnect from the service."""
-        logger.debug(f"{self}: disconnecting")
+        await super()._disconnect()
 
-        # Cancel receive task
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        # Cancel keepalive task
         if self._keepalive_task:
             await self.cancel_task(self._keepalive_task)
             self._keepalive_task = None
@@ -299,6 +279,8 @@ class DograhSTTService(STTService, WebsocketService):
                 elif msg_type == "ready":
                     logger.debug("Dograh STT service is ready")
 
+            except asyncio.CancelledError:
+                raise
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to decode message from Dograh: {e}")
                 raise
@@ -342,7 +324,7 @@ class DograhSTTService(STTService, WebsocketService):
             try:
                 language = Language(language_code)
             except ValueError:
-                language = self._language
+                language = self._settings.language
 
         if transcript:
             await self.stop_ttfb_metrics()
@@ -356,6 +338,7 @@ class DograhSTTService(STTService, WebsocketService):
                         timestamp=time_now_iso8601(),
                         language=language,
                         result={"confidence": confidence} if confidence else None,
+                        finalized=True,
                     )
                 )
                 await self._handle_transcription_traced(transcript, is_final, language)
@@ -393,6 +376,7 @@ class DograhSTTService(STTService, WebsocketService):
             frame: The start frame containing initialization data.
         """
         await super().start(frame)
+        self._start_metadata = frame.metadata
         self._session_start_time = time.time()
         await self._connect()
 
@@ -429,21 +413,3 @@ class DograhSTTService(STTService, WebsocketService):
             # Send audio as binary frame
             await self._websocket.send(audio)
         yield None
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with Dograh-specific handling.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame processing.
-        """
-        # Capture StartFrame metadata for workflow_run_id
-        if isinstance(frame, StartFrame):
-            self._start_metadata = frame.metadata
-
-        await super().process_frame(frame, direction)
-
-        # Handle specific frame types if needed
-        if isinstance(frame, StartFrame):
-            # Reinitialize on new start if needed
-            pass

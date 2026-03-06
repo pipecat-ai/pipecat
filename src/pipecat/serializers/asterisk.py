@@ -5,7 +5,7 @@ chan_websocket / externalMedia over binary WebSocket frames.
 """
 
 import json
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from loguru import logger
 
@@ -22,9 +22,8 @@ from pipecat.frames.frames import (
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.utils.enums import EndTaskReason
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from pipecat.serializers.call_strategies import TransferStrategy, HangupStrategy
+    from pipecat.serializers.call_strategies import HangupStrategy, TransferStrategy
 
 
 class AsteriskFrameSerializer(FrameSerializer):
@@ -125,7 +124,9 @@ class AsteriskFrameSerializer(FrameSerializer):
                     if not success:
                         logger.error(f"Transfer strategy failed for channel {self._channel_id}")
                 else:
-                    logger.warning(f"No transfer strategy configured for channel {self._channel_id}")
+                    logger.warning(
+                        f"No transfer strategy configured for channel {self._channel_id}"
+                    )
                 return None
             elif (
                 self._params.auto_hang_up
@@ -204,4 +205,3 @@ class AsteriskFrameSerializer(FrameSerializer):
             except json.JSONDecodeError:
                 logger.warning(f"Failed to parse JSON message from Asterisk: {data}")
                 return None
-

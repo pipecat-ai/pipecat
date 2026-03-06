@@ -87,7 +87,6 @@ class TTSUsageMetricsData(MetricsData):
     value: int
 
 
-    
 class TextAggregationMetricsData(MetricsData):
     """Text aggregation time metrics data.
 

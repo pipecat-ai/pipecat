@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 
 
@@ -43,7 +44,11 @@ class MockTTSService(TTSService):
                 real TTS behavior where overlapping audio should be avoided.
             **kwargs: Additional args passed to TTSService
         """
-        super().__init__(pause_frame_processing=pause_frame_processing, **kwargs)
+        super().__init__(
+            pause_frame_processing=pause_frame_processing,
+            settings=TTSSettings(model=None, voice=None, language=None),
+            **kwargs,
+        )
 
         self._mock_audio_data = mock_audio_data or self.create_mock_audio(mock_audio_duration_ms)
         self._chunk_size = chunk_size

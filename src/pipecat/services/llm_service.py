@@ -865,8 +865,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             except asyncio.CancelledError:
                 raise
 
-        if not runner_item.registry_item.disable_timeout:
-            timeout_task = self.create_task(timeout_handler())
+        timeout_task = self.create_task(timeout_handler())
 
         try:
             # Yield to the event loop so the timeout task coroutine gets entered

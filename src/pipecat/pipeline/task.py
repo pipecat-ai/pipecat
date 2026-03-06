@@ -301,7 +301,6 @@ class PipelineTask(BasePipelineTask):
             # Create latency observer for tracing
             self._user_bot_latency_observer = UserBotLatencyObserver()
             observers.append(self._user_bot_latency_observer)
-        if self._enable_tracing and self._turn_tracking_observer:
             # Create turn trace observer with latency tracking
             self._turn_trace_observer = TurnTraceObserver(
                 self._turn_tracking_observer,

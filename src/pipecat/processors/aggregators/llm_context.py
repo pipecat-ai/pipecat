@@ -132,6 +132,10 @@ class LLMContext:
         self._tools: ToolsSchema | NotGiven = LLMContext._normalize_and_validate_tools(tools)
         self._tool_choice: LLMContextToolChoice | NotGiven = tool_choice
 
+        # Name of the current OTel span. This is useful for downstream tracing
+        # where we want to include the span name in the span.
+        self._otel_span_name = ""
+
     @staticmethod
     def create_image_url_message(
         *,
@@ -232,9 +236,6 @@ class LLMContext:
         )
 
         return {"role": role, "content": content}
-        # Name of the current workflow node (set by the Pipecat engine). This is useful
-        # for downstream tracing where we want to include the node name in the span.
-        self._node_name = ""
 
     @property
     def messages(self) -> List[LLMContextMessage]:
@@ -414,14 +415,14 @@ class LLMContext:
                 f"In LLMContext, tools must be a ToolsSchema object or NOT_GIVEN. Got type: {type(tools)}",
             )
 
-    def set_node_name(self, node_name: Optional[str]):
-        """Attach the current workflow node name to the context.
+    def set_otel_span_name(self, span_name: Optional[str]):
+        """Attach the current OTel span name to the context.
 
         This value is later accessed by the tracing decorators so that span names can
-        include the node name (e.g. ``llm-check-user-intent``).
+        include the OTel span name (e.g. `llm-check-user-intent`).
         """
-        self._node_name = node_name
+        self._otel_span_name = span_name
 
-    def get_node_name(self) -> Optional[str]:
-        """Return the node name previously set with ``set_node_name`` (if any)."""
-        return self._node_name
+    def get_otel_span_name(self) -> Optional[str]:
+        """Return the OTel span name previously set with `set_otel_span_name` (if any)."""
+        return self._otel_span_name
