@@ -18,7 +18,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class OllamaLLMSettings(OpenAILLMSettings):
-    """Settings for Ollama LLM service."""
+    """Settings for OLLamaLLMService."""
 
     pass
 

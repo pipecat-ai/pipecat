@@ -22,7 +22,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class OpenRouterLLMSettings(OpenAILLMSettings):
-    """Settings for OpenRouter LLM service."""
+    """Settings for OpenRouterLLMService."""
 
     pass
 

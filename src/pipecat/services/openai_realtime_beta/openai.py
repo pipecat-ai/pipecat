@@ -94,7 +94,7 @@ class CurrentAudioResponse:
 
 @dataclass
 class OpenAIRealtimeBetaLLMSettings(LLMSettings):
-    """Settings for OpenAI Realtime Beta LLM services."""
+    """Settings for OpenAIRealtimeBetaLLMService."""
 
     pass
 

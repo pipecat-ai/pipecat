@@ -19,7 +19,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class CerebrasLLMSettings(OpenAILLMSettings):
-    """Settings for Cerebras LLM service."""
+    """Settings for CerebrasLLMService."""
 
     pass
 

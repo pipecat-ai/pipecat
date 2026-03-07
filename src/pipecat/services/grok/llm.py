@@ -72,7 +72,7 @@ class GrokContextAggregatorPair:
 
 @dataclass
 class GrokLLMSettings(OpenAILLMSettings):
-    """Settings for Grok LLM service."""
+    """Settings for GrokLLMService."""
 
     pass
 

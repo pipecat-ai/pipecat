@@ -18,7 +18,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class QwenLLMSettings(OpenAILLMSettings):
-    """Settings for Qwen LLM service."""
+    """Settings for QwenLLMService."""
 
     pass
 

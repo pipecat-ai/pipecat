@@ -22,7 +22,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AzureRealtimeLLMSettings(OpenAIRealtimeLLMSettings):
-    """Settings for Azure Realtime LLM service."""
+    """Settings for AzureRealtimeLLMService."""
 
     pass
 

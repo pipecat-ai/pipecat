@@ -23,7 +23,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class NvidiaLLMSettings(OpenAILLMSettings):
-    """Settings for NVIDIA LLM service."""
+    """Settings for NvidiaLLMService."""
 
     pass
 

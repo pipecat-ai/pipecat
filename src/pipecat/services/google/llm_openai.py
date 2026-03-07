@@ -35,7 +35,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class GoogleOpenAILLMSettings(OpenAILLMSettings):
-    """Settings for Google OpenAI-compatible LLM service."""
+    """Settings for GoogleLLMOpenAIBetaService."""
 
     pass
 

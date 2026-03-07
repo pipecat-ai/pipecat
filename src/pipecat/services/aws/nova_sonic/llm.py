@@ -227,7 +227,7 @@ class AudioConfig(BaseModel):
 
 @dataclass
 class AWSNovaSonicLLMSettings(LLMSettings):
-    """Settings for AWS Nova Sonic LLM service.
+    """Settings for AWSNovaSonicLLMService.
 
     Parameters:
         voice: Voice identifier for speech synthesis.

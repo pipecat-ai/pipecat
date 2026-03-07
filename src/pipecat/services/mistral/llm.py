@@ -21,7 +21,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class MistralLLMSettings(OpenAILLMSettings):
-    """Settings for Mistral LLM service."""
+    """Settings for MistralLLMService."""
 
     pass
 

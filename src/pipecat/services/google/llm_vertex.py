@@ -42,7 +42,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class GoogleVertexLLMSettings(GoogleLLMSettings):
-    """Settings for Google Vertex LLM service."""
+    """Settings for GoogleVertexLLMService."""
 
     pass
 

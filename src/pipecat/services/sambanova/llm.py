@@ -30,7 +30,7 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 
 @dataclass
 class SambaNovaLLMSettings(OpenAILLMSettings):
-    """Settings for SambaNova LLM service."""
+    """Settings for SambaNovaLLMService."""
 
     pass
 

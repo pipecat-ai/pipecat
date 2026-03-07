@@ -19,7 +19,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class DeepSeekLLMSettings(OpenAILLMSettings):
-    """Settings for DeepSeek LLM service."""
+    """Settings for DeepSeekLLMService."""
 
     pass
 

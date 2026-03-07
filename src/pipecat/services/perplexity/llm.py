@@ -25,7 +25,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class PerplexityLLMSettings(OpenAILLMSettings):
-    """Settings for Perplexity LLM service."""
+    """Settings for PerplexityLLMService."""
 
     pass
 

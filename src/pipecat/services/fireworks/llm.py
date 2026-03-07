@@ -19,7 +19,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class FireworksLLMSettings(OpenAILLMSettings):
-    """Settings for Fireworks LLM service."""
+    """Settings for FireworksLLMService."""
 
     pass
 

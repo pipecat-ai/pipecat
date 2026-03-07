@@ -19,7 +19,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class AzureLLMSettings(OpenAILLMSettings):
-    """Settings for Azure OpenAI LLM service."""
+    """Settings for AzureLLMService."""
 
     pass
 

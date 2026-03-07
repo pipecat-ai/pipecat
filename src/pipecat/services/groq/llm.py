@@ -18,7 +18,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class GroqLLMSettings(OpenAILLMSettings):
-    """Settings for Groq LLM service."""
+    """Settings for GroqLLMService."""
 
     pass
 

@@ -30,7 +30,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class OpenPipeLLMSettings(OpenAILLMSettings):
-    """Settings for OpenPipe LLM service."""
+    """Settings for OpenPipeLLMService."""
 
     pass
 

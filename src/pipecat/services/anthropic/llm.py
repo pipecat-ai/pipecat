@@ -90,7 +90,7 @@ class AnthropicThinkingConfig(BaseModel):
 
 @dataclass
 class AnthropicLLMSettings(LLMSettings):
-    """Settings for Anthropic LLM services.
+    """Settings for AnthropicLLMService.
 
     Parameters:
         enable_prompt_caching: Whether to enable prompt caching.

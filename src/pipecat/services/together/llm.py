@@ -18,7 +18,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class TogetherLLMSettings(OpenAILLMSettings):
-    """Settings for Together LLM service."""
+    """Settings for TogetherLLMService."""
 
     pass
 

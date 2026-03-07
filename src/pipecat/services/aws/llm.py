@@ -72,7 +72,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AWSBedrockLLMSettings(LLMSettings):
-    """Settings for AWS Bedrock LLM services.
+    """Settings for AWSBedrockLLMService.
 
     Parameters:
         stop_sequences: List of strings that stop generation.
