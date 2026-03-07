@@ -594,13 +594,16 @@ class DeepgramSTTService(STTService):
             return
 
         logger.debug("Disconnecting from Deepgram")
-        # Ask Deepgram to close the stream gracefully before cancelling the task.
-        if self._connection:
-            await self._connection.send_close_stream()
+        # Clear self._connection first to prevent run_stt from sending audio
+        # during the close handshake, then close gracefully on the saved ref.
+        connection = self._connection
+        self._connection = None
+
+        if connection:
+            await connection.send_close_stream()
 
         await self.cancel_task(self._connection_task)
         self._connection_task = None
-        self._connection = None
 
     async def _connection_handler(self):
         """Manages the full WebSocket lifecycle inside a single async with block.
