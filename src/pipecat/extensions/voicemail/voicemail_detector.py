@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    StartFrame,
     StopFrame,
     SystemFrame,
     TranscriptionFrame,
@@ -841,7 +842,6 @@ class FirstTurnSpeechMonitor(FrameProcessor):
         self._context = context
         self._gate_notifier = gate_notifier
         self._is_first_turn = True
-        self._is_user_speaking = False
         self._final_transcripts: list[str] = []
         self._latest_interim = ""
         self._timer = None
@@ -856,13 +856,13 @@ class FirstTurnSpeechMonitor(FrameProcessor):
         """Process frames, tracking first-turn speech and interim transcripts."""
         await super().process_frame(frame, direction)
 
-        if not self._triggered and self._is_first_turn:
-            if isinstance(frame, UserStartedSpeakingFrame):
-                self._is_user_speaking = True
-                self._schedule_timer()
-
-            elif isinstance(frame, UserStoppedSpeakingFrame):
-                self._is_user_speaking = False
+        if isinstance(frame, StartFrame):
+            # Start timer now since Voicemail Detector relies on
+            # External Turn Stop strategies, and the main pipeline
+            # might be muted till first Bot Stopped Speaking
+            self._schedule_timer()
+        elif not self._triggered and self._is_first_turn:
+            if isinstance(frame, UserStoppedSpeakingFrame):
                 self._cancel_timer()
                 self._is_first_turn = False
 
@@ -896,7 +896,7 @@ class FirstTurnSpeechMonitor(FrameProcessor):
             self._timer = None
 
     async def _on_timeout(self):
-        if self._is_first_turn and self._is_user_speaking and not self._triggered:
+        if self._is_first_turn and not self._triggered:
             self._triggered = True
             self._timer = None
             transcript = self._get_best_transcript()
