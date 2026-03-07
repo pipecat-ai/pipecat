@@ -53,6 +53,8 @@ class FluxMessageType(str, Enum):
     RECEIVE_CONNECTED = "Connected"
     RECEIVE_FATAL_ERROR = "Error"
     TURN_INFO = "TurnInfo"
+    CONFIGURE_SUCCESS = "ConfigureSuccess"
+    CONFIGURE_FAILURE = "ConfigureFailure"
 
 
 class FluxEventType(str, Enum):
@@ -114,6 +116,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
     """
 
     _settings: DeepgramFluxSTTSettings
+    _CONFIGURE_FIELDS = {"keyterm", "eot_threshold", "eager_eot_threshold", "eot_timeout_ms"}
 
     class InputParams(BaseModel):
         """Configuration parameters for Deepgram Flux API.
@@ -409,6 +412,33 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         except Exception as e:
             await self.push_error(error_msg=f"Error sending closeStream: {e}", exception=e)
 
+    async def _send_configure(self, fields: set[str]):
+        """Send a Configure control message to update settings mid-stream.
+
+        Builds a Configure JSON message containing only the fields that changed
+        and sends it over the existing WebSocket connection.
+
+        Args:
+            fields: Set of changed field names to include in the message.
+        """
+        message: dict[str, Any] = {"type": "Configure"}
+
+        if "keyterm" in fields:
+            message["keyterms"] = self._settings.keyterm
+
+        thresholds: dict[str, Any] = {}
+        if "eot_threshold" in fields:
+            thresholds["eot_threshold"] = self._settings.eot_threshold
+        if "eager_eot_threshold" in fields:
+            thresholds["eager_eot_threshold"] = self._settings.eager_eot_threshold
+        if "eot_timeout_ms" in fields:
+            thresholds["eot_timeout_ms"] = self._settings.eot_timeout_ms
+        if thresholds:
+            message["thresholds"] = thresholds
+
+        logger.debug(f"{self}: sending Configure message: {message}")
+        await self._websocket.send(json.dumps(message))
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -420,19 +450,20 @@ class DeepgramFluxSTTService(WebsocketSTTService):
     async def _update_settings(self, delta: DeepgramFluxSTTSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Settings are stored but not applied to the active connection.
+        Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
+        eot_timeout_ms) are sent to Deepgram via a Configure WebSocket message.
+        Other fields are stored but cannot be applied to the active connection.
         """
         changed = await super()._update_settings(delta)
 
         if not changed:
             return changed
 
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # await self._disconnect()
-        # await self._connect()
+        configure_fields = changed.keys() & self._CONFIGURE_FIELDS
+        if configure_fields and self._websocket and self._websocket.state is State.OPEN:
+            await self._send_configure(configure_fields)
 
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.keys() - self._CONFIGURE_FIELDS)
 
         return changed
 
@@ -629,6 +660,14 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 await self._handle_fatal_error(data)
             case FluxMessageType.TURN_INFO:
                 await self._handle_turn_info(data)
+            case FluxMessageType.CONFIGURE_SUCCESS:
+                logger.info(f"{self}: Configure accepted: {data}")
+            case FluxMessageType.CONFIGURE_FAILURE:
+                error_code = data.get("error_code", "unknown")
+                description = data.get("description", "no description")
+                error_msg = f"Configure rejected: [{error_code}] {description}"
+                logger.warning(f"{self}: {error_msg}")
+                await self.push_error(error_msg=error_msg)
 
     async def _handle_connection_established(self):
         """Handle successful connection establishment to Deepgram Flux.

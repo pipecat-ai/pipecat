@@ -100,6 +100,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
+        # Update configure-able fields mid-stream (sent via Configure message,
+        # no reconnect needed).
+        await asyncio.sleep(10)
+        logger.info("Updating Deepgram Flux STT settings: eot_threshold, keyterm")
+        await task.queue_frame(
+            STTUpdateSettingsFrame(
+                delta=DeepgramFluxSTTSettings(
+                    eot_threshold=0.8,
+                    keyterm=["Pipecat", "Deepgram"],
+                )
+            )
+        )
+
         await asyncio.sleep(10)
         logger.info("Updating Deepgram Flux STT settings: language=es")
         await task.queue_frame(
