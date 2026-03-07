@@ -70,7 +70,10 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
-from pipecat.processors.aggregators.llm_context_summarizer import LLMContextSummarizer
+from pipecat.processors.aggregators.llm_context_summarizer import (
+    LLMContextSummarizer,
+    SummaryAppliedEvent,
+)
 from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -873,10 +876,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._summarizer.add_event_handler(
             "on_request_summarization", self._on_request_summarization
         )
+        self._summarizer.add_event_handler("on_summary_applied", self._on_summary_applied)
 
         self._register_event_handler("on_assistant_turn_started")
         self._register_event_handler("on_assistant_turn_stopped")
         self._register_event_handler("on_assistant_thought")
+        self._register_event_handler("on_summary_applied")
 
     @property
     def has_function_calls_in_progress(self) -> bool:
@@ -1293,6 +1298,19 @@ class LLMAssistantAggregator(LLMContextAggregator):
             frame: The summarization request frame to broadcast.
         """
         await self.push_frame(frame, FrameDirection.UPSTREAM)
+
+    async def _on_summary_applied(
+        self, summarizer: LLMContextSummarizer, event: SummaryAppliedEvent
+    ):
+        """Handle summary applied event from the summarizer.
+
+        Forwards the event to any registered `on_summary_applied` handlers.
+
+        Args:
+            summarizer: The summarizer that applied the summary.
+            event: The summary applied event.
+        """
+        await self._call_event_handler("on_summary_applied", summarizer, event)
 
 
 class LLMContextAggregatorPair:
