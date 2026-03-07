@@ -1,6 +1,6 @@
 """Cloudonix Media Streams WebSocket protocol serializer for Pipecat."""
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from loguru import logger
 

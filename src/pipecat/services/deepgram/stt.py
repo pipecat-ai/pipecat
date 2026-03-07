@@ -597,12 +597,7 @@ class DeepgramSTTService(STTService):
                     logger.debug(f"Final transcription: {transcript}")
                     await self.push_frame(
                         TranscriptionFrame(
-                            transcript,
-                            self._user_id,
-                            time_now_iso8601(),
-                            language,
-                            result=message,
-                            finalized=True
+                            transcript, self._user_id, time_now_iso8601(), language, result=message
                         )
                     )
                     await self._handle_transcription(transcript, is_final, language)

@@ -23,11 +23,14 @@ from loguru import logger
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
+    InterimTranscriptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
     StopFrame,
     SystemFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -652,6 +655,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         llm: LLMService,
         voicemail_response_delay: float = 2.0,
         custom_system_prompt: Optional[str] = None,
+        long_speech_timeout: Optional[float] = None,
     ):
         """Initialize the voicemail detector with classification and buffering components.
 
@@ -666,6 +670,12 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
                 uses the default prompt optimized for outbound calling scenarios.
                 Custom prompts should instruct the LLM to respond with exactly
                 "CONVERSATION" or "VOICEMAIL" for proper detection functionality.
+            long_speech_timeout: Optional timeout in seconds. When the first turn has
+                continuous speech exceeding this duration, classification is triggered
+                early with whatever transcript is available. Useful for detecting long
+                voicemail greetings without waiting for the caller to stop speaking.
+                Requires ``eager_eot_threshold`` on Deepgram Flux for interim
+                transcripts. Defaults to None (disabled).
         """
         self._classifier_llm = llm
         self._prompt = (
@@ -712,19 +722,35 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         )
         self._voicemail_gate = TTSGate(self._conversation_notifier, self._voicemail_notifier)
 
-        # Initialize the parallel pipeline with conversation and classifier branches
-        super().__init__(
-            # Conversation branch: gate to blocks after voicemail detection
-            [self._conversation_gate],
-            # Classification branch: classifier gate -> context -> LLM -> processor -> context -> upstream gate
+        # Create first-turn speech monitor if long speech timeout is configured
+        self._first_turn_speech_monitor = None
+        if long_speech_timeout is not None:
+            self._first_turn_speech_monitor = FirstTurnSpeechMonitor(
+                timeout_secs=long_speech_timeout,
+                context=self._context,
+                gate_notifier=self._gate_notifier,
+            )
+
+        # Build classification branch
+        classification_pipeline = [self._classifier_gate]
+        if self._first_turn_speech_monitor:
+            classification_pipeline.append(self._first_turn_speech_monitor)
+        classification_pipeline.extend(
             [
-                self._classifier_gate,
                 self._context_aggregator.user(),
                 self._classifier_llm,
                 self._classification_processor,
                 self._context_aggregator.assistant(),
                 self._classifier_upstream_gate,
-            ],
+            ]
+        )
+
+        # Initialize the parallel pipeline with conversation and classifier branches
+        super().__init__(
+            # Conversation pipeline: gate that blocks after voicemail detection
+            [self._conversation_gate],
+            # Classification pipeline
+            classification_pipeline,
         )
 
         # Register the voicemail detected event after super().__init__()
@@ -784,3 +810,110 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             self._classification_processor.add_event_handler(event_name, handler)
         else:
             super().add_event_handler(event_name, handler)
+
+
+class FirstTurnSpeechMonitor(FrameProcessor):
+    """Monitors the first conversation turn for extended continuous speech.
+
+    Used internally by :class:`VoicemailDetector`. When continuous speech in
+    the first turn exceeds the configured timeout, it adds the accumulated
+    transcript to the classifier ``LLMContext`` and pushes an
+    ``LLMContextFrame`` downstream. Because this processor lives inside the
+    classification branch of the parallel pipeline, the frame is consumed by
+    the classifier LLM and never leaks into the main pipeline.
+
+    For Deepgram Flux, ensure ``eager_eot_threshold`` is set so that
+    ``InterimTranscriptionFrame`` s are pushed during speech pauses.
+    """
+
+    def __init__(self, *, timeout_secs: float, context: LLMContext, gate_notifier: BaseNotifier):
+        """Initialize the first turn speech monitor.
+
+        Args:
+            timeout_secs: Duration in seconds of continuous first-turn speech
+                before classification is triggered.
+            context: The classifier LLM context to inject the transcript into.
+            gate_notifier: Notifier to close the ClassifierGate after triggering
+                early classification, preventing subsequent LLM calls.
+        """
+        super().__init__()
+        self._timeout_secs = timeout_secs
+        self._context = context
+        self._gate_notifier = gate_notifier
+        self._is_first_turn = True
+        self._is_user_speaking = False
+        self._final_transcripts: list[str] = []
+        self._latest_interim = ""
+        self._timer = None
+        self._triggered = False
+
+    async def cleanup(self):
+        """Clean up timer resources."""
+        await super().cleanup()
+        self._cancel_timer()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames, tracking first-turn speech and interim transcripts."""
+        await super().process_frame(frame, direction)
+
+        if not self._triggered and self._is_first_turn:
+            if isinstance(frame, UserStartedSpeakingFrame):
+                self._is_user_speaking = True
+                self._schedule_timer()
+
+            elif isinstance(frame, UserStoppedSpeakingFrame):
+                self._is_user_speaking = False
+                self._cancel_timer()
+                self._is_first_turn = False
+
+            elif isinstance(frame, TranscriptionFrame):
+                self._final_transcripts.append(frame.text)
+                self._latest_interim = ""
+
+            elif isinstance(frame, InterimTranscriptionFrame):
+                self._latest_interim = frame.text
+
+        await self.push_frame(frame, direction)
+
+    def _get_best_transcript(self) -> str:
+        """Return accumulated finals + latest interim."""
+        parts = list(self._final_transcripts)
+        if self._latest_interim:
+            parts.append(self._latest_interim)
+        return " ".join(parts).strip()
+
+    def _schedule_timer(self):
+        self._cancel_timer()
+        loop = asyncio.get_event_loop()
+        self._timer = loop.call_later(
+            self._timeout_secs,
+            lambda: asyncio.create_task(self._on_timeout()),
+        )
+
+    def _cancel_timer(self):
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
+
+    async def _on_timeout(self):
+        if self._is_first_turn and self._is_user_speaking and not self._triggered:
+            self._triggered = True
+            self._timer = None
+            transcript = self._get_best_transcript()
+            if not transcript:
+                logger.warning(
+                    f"{self}: First turn exceeded {self._timeout_secs}s "
+                    "but no transcript available yet"
+                )
+                return
+            logger.info(
+                f"{self}: First turn exceeded {self._timeout_secs}s, "
+                f"triggering classification with: {transcript!r}"
+            )
+            # Close the classifier gate to prevent subsequent UserStoppedSpeaking
+            # from triggering another classification LLM call
+            await self._gate_notifier.notify()
+
+            # Inject transcript into classifier context and trigger LLM
+            self._context.add_message({"role": "user", "content": transcript})
+            await self.push_frame(LLMContextFrame(self._context))

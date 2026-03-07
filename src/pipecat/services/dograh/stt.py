@@ -338,7 +338,6 @@ class DograhSTTService(STTService, WebsocketService):
                         timestamp=time_now_iso8601(),
                         language=language,
                         result={"confidence": confidence} if confidence else None,
-                        finalized=True,
                     )
                 )
                 await self._handle_transcription_traced(transcript, is_final, language)
