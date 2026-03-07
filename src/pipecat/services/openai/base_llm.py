@@ -49,7 +49,7 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 
 @dataclass
 class OpenAILLMSettings(LLMSettings):
-    """Settings for OpenAI-compatible LLM services.
+    """Settings for BaseOpenAILLMService.
 
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.

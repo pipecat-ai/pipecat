@@ -44,7 +44,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class GeminiLiveVertexLLMSettings(GeminiLiveLLMSettings):
-    """Settings for Gemini Live Vertex LLM service."""
+    """Settings for GeminiLiveVertexLLMService."""
 
     pass
 

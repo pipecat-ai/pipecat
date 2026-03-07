@@ -76,21 +76,21 @@ class AnthropicThinkingConfig(BaseModel):
         type: Type of thinking mode (currently only "enabled" or "disabled").
         budget_tokens: Maximum number of tokens for thinking.
             With today's models, the minimum is 1024.
-            Only allowed if type is "enabled".
+            Currently required when type is "enabled", not allowed when "disabled".
     """
 
     # Why `| str` here? To not break compatibility in case Anthropic adds
     # more types in the future.
     type: Literal["enabled", "disabled"] | str
 
-    # Why not enforce minimnum of 1024 here? To not break compatibility in
-    # case Anthropic changes this requirement in the future.
-    budget_tokens: int
+    # No client-side validation on budget_tokens — we let the server
+    # enforce the rules so we stay forward-compatible if they change.
+    budget_tokens: Optional[int] = None
 
 
 @dataclass
 class AnthropicLLMSettings(LLMSettings):
-    """Settings for Anthropic LLM services.
+    """Settings for AnthropicLLMService.
 
     Parameters:
         enable_prompt_caching: Whether to enable prompt caching.

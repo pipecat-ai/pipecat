@@ -25,7 +25,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class PerplexityLLMSettings(OpenAILLMSettings):
-    """Settings for Perplexity LLM service."""
+    """Settings for PerplexityLLMService."""
 
     pass
 
@@ -70,6 +70,8 @@ class PerplexityLLMService(OpenAILLMService):
         if model is not None:
             _warn_deprecated_param("model", PerplexityLLMSettings, "model")
             default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

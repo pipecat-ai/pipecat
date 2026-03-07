@@ -18,7 +18,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class OllamaLLMSettings(OpenAILLMSettings):
-    """Settings for Ollama LLM service."""
+    """Settings for OLLamaLLMService."""
 
     pass
 
@@ -61,6 +61,8 @@ class OLLamaLLMService(OpenAILLMService):
         if model is not None:
             _warn_deprecated_param("model", OllamaLLMSettings, "model")
             default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

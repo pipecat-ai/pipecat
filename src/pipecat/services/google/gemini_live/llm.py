@@ -607,7 +607,7 @@ class InputParams(BaseModel):
 
 @dataclass
 class GeminiLiveLLMSettings(LLMSettings):
-    """Settings for GeminiLiveLLMService and GeminiLiveVertexLLMService.
+    """Settings for GeminiLiveLLMService.
 
     Parameters:
         voice: TTS voice identifier (e.g. ``"Charon"``).

@@ -22,7 +22,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class OpenRouterLLMSettings(OpenAILLMSettings):
-    """Settings for OpenRouter LLM service."""
+    """Settings for OpenRouterLLMService."""
 
     pass
 
@@ -67,6 +67,8 @@ class OpenRouterLLMService(OpenAILLMService):
         if model is not None:
             _warn_deprecated_param("model", OpenRouterLLMSettings, "model")
             default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

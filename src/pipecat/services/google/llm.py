@@ -714,7 +714,7 @@ class GoogleThinkingConfig(BaseModel):
 
 @dataclass
 class GoogleLLMSettings(LLMSettings):
-    """Settings for Google LLM services.
+    """Settings for GoogleLLMService.
 
     Parameters:
         thinking: Thinking configuration.

@@ -25,7 +25,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AzureRealtimeBetaLLMSettings(OpenAIRealtimeBetaLLMSettings):
-    """Settings for Azure Realtime Beta LLM service."""
+    """Settings for AzureRealtimeBetaLLMService."""
 
     pass
 

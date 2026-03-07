@@ -23,7 +23,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class NvidiaLLMSettings(OpenAILLMSettings):
-    """Settings for NVIDIA LLM service."""
+    """Settings for NvidiaLLMService."""
 
     pass
 
@@ -69,6 +69,8 @@ class NvidiaLLMService(OpenAILLMService):
         if model is not None:
             _warn_deprecated_param("model", NvidiaLLMSettings, "model")
             default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

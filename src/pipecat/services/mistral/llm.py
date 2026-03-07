@@ -21,7 +21,7 @@ from pipecat.services.settings import _warn_deprecated_param
 
 @dataclass
 class MistralLLMSettings(OpenAILLMSettings):
-    """Settings for Mistral LLM service."""
+    """Settings for MistralLLMService."""
 
     pass
 
@@ -65,6 +65,8 @@ class MistralLLMService(OpenAILLMService):
         if model is not None:
             _warn_deprecated_param("model", MistralLLMSettings, "model")
             default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

@@ -30,7 +30,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class OpenPipeLLMSettings(OpenAILLMSettings):
-    """Settings for OpenPipe LLM service."""
+    """Settings for OpenPipeLLMService."""
 
     pass
 
@@ -81,6 +81,8 @@ class OpenPipeLLMService(OpenAILLMService):
         if model is not None:
             _warn_deprecated_param("model", OpenPipeLLMSettings, "model")
             default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

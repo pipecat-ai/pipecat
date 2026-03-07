@@ -100,7 +100,7 @@ class CurrentAudioResponse:
 
 @dataclass
 class OpenAIRealtimeLLMSettings(LLMSettings):
-    """Settings for OpenAI Realtime LLM services.
+    """Settings for OpenAIRealtimeLLMService.
 
     Parameters:
         session_properties: OpenAI Realtime session properties (modalities,

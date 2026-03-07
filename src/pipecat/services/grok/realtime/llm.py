@@ -94,7 +94,7 @@ class CurrentAudioResponse:
 
 @dataclass
 class GrokRealtimeLLMSettings(LLMSettings):
-    """Settings for Grok Realtime LLM services.
+    """Settings for GrokRealtimeLLMService.
 
     Parameters:
         session_properties: Grok Realtime session properties (voice, audio config,
