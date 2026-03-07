@@ -107,7 +107,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             _warn_deprecated_param("language", AWSTranscribeSTTSettings, "language")
             default_settings.language = self.language_to_service_language(language)
 
-        # 3. No params to apply
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -161,7 +161,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         """Apply a settings delta and reconnect if anything changed."""
         changed = await super()._update_settings(delta)
 
-        if changed:
+        if changed and self._websocket:
             await self._disconnect()
             await self._connect()
 

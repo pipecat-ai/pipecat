@@ -110,6 +110,8 @@ class DeepgramTTSService(WebsocketTTSService):
             default_settings.model = voice
             default_settings.voice = voice
 
+        # 3. (No step 3, as there's no params object to apply)
+
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
@@ -422,6 +424,8 @@ class DeepgramHttpTTSService(TTSService):
             _warn_deprecated_param("voice", DeepgramTTSSettings, "voice")
             default_settings.model = voice
             default_settings.voice = voice
+
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

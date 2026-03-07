@@ -124,6 +124,8 @@ class XTTSService(TTSService):
             _warn_deprecated_param("voice_id", XTTSTTSSettings, "voice")
             default_settings.voice = voice_id
 
+        # 3. (No step 3, as there's no params object to apply)
+
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)

@@ -12,7 +12,7 @@ WebSocket API for streaming audio transcription.
 
 import base64
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import STTSettings, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -77,7 +77,7 @@ class GradiumSTTSettings(STTSettings):
             Default is 10 (800ms). Lower values like 7-8 give faster response.
     """
 
-    delay_in_frames: Optional[int] = None
+    delay_in_frames: Optional[int] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GradiumSTTService(WebsocketSTTService):
@@ -157,7 +157,9 @@ class GradiumSTTService(WebsocketSTTService):
             delay_in_frames=None,
         )
 
-        # 2. Apply params overrides — only if settings not provided
+        # 2. (No step 2, as there are no deprecated direct args)
+
+        # 3. Apply params overrides — only if settings not provided
         if params is not None:
             _warn_deprecated_param("params", GradiumSTTSettings)
             if not settings:
@@ -165,7 +167,7 @@ class GradiumSTTService(WebsocketSTTService):
                 if params.delay_in_frames is not None:
                     default_settings.delay_in_frames = params.delay_in_frames
 
-        # 3. Apply settings delta (canonical API, always wins)
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -213,8 +215,9 @@ class GradiumSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        await self._disconnect()
-        await self._connect()
+        if self._websocket:
+            await self._disconnect()
+            await self._connect()
         return changed
 
     async def start(self, frame: StartFrame):

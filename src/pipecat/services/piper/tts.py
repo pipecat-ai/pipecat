@@ -82,7 +82,7 @@ class PiperTTSService(TTSService):
             _warn_deprecated_param("voice_id", PiperTTSSettings, "voice")
             default_settings.voice = voice_id
 
-        # 3. No params for this service
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -232,7 +232,7 @@ class PiperHttpTTSService(TTSService):
             _warn_deprecated_param("voice_id", PiperHttpTTSSettings, "voice")
             default_settings.voice = voice_id
 
-        # 3. No params for this service
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

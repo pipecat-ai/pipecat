@@ -605,8 +605,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        await self._disconnect()
-        await self._connect()
+        if self._websocket:
+            await self._disconnect()
+            await self._connect()
 
         return changed
 

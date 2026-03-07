@@ -365,7 +365,9 @@ class DeepgramSTTService(STTService):
             vad_events=False,
         )
 
-        # 2. Apply live_options overrides — only if settings not provided
+        # 2. (No step 2, as there are no deprecated direct args)
+
+        # 3. Apply live_options overrides — only if settings not provided
         if live_options is not None:
             _warn_deprecated_param("live_options", DeepgramSTTSettings)
             if not settings:
@@ -402,7 +404,7 @@ class DeepgramSTTService(STTService):
                 delta = DeepgramSTTSettings.from_mapping(lo_dict)
                 default_settings.apply_update(delta)
 
-        # 3. Apply settings delta (canonical API, always wins)
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -494,8 +496,9 @@ class DeepgramSTTService(STTService):
         if isinstance(self._settings, DeepgramSTTSettings):
             self._settings._sync_extra_to_fields()
 
-        await self._disconnect()
-        await self._connect()
+        if self._connection:
+            await self._disconnect()
+            await self._connect()
 
         return changed
 

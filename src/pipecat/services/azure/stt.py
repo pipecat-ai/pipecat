@@ -112,7 +112,7 @@ class AzureSTTService(STTService):
             _warn_deprecated_param("language", AzureSTTSettings, "language")
             default_settings.language = language_to_azure_language(language)
 
-        # 3. No params to apply
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -166,8 +166,9 @@ class AzureSTTService(STTService):
             self._speech_config.speech_recognition_language = (
                 self._settings.language or language_to_azure_language(Language.EN_US)
             )
-            await self._disconnect()
-            await self._connect()
+            if self._audio_stream:
+                await self._disconnect()
+                await self._connect()
 
         return changed
 

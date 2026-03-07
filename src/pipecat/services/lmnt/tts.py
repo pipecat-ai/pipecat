@@ -139,7 +139,7 @@ class LmntTTSService(InterruptibleTTSService):
             _warn_deprecated_param("model", LmntTTSSettings, "model")
             default_settings.model = model
 
-        # 3. No params for this service
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

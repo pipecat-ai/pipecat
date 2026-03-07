@@ -34,7 +34,6 @@ new services are covered automatically with no per-service maintenance.
 import importlib
 import inspect
 import pkgutil
-import warnings
 from dataclasses import fields
 
 import pytest
