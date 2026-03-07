@@ -159,6 +159,7 @@ class AnthropicLLMService(LLMService):
     Can use custom clients like AsyncAnthropicBedrock and AsyncAnthropicVertex.
     """
 
+    Settings = AnthropicLLMSettings
     _settings: AnthropicLLMSettings
 
     # Overriding the default adapter to use the Anthropic one.

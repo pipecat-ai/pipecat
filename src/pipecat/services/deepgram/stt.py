@@ -266,6 +266,7 @@ class DeepgramSTTService(STTService):
             ...
     """
 
+    Settings = DeepgramSTTSettings
     _settings: DeepgramSTTSettings
 
     def __init__(

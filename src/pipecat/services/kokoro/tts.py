@@ -101,6 +101,7 @@ class KokoroTTSService(TTSService):
     Automatically downloads model files on first use.
     """
 
+    Settings = KokoroTTSSettings
     _settings: KokoroTTSSettings
 
     class InputParams(BaseModel):

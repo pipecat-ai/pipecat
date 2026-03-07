@@ -48,6 +48,7 @@ class OpenAIImageGenService(ImageGenService):
     with configurable quality and style parameters.
     """
 
+    Settings = OpenAIImageGenSettings
     _settings: OpenAIImageGenSettings
 
     def __init__(

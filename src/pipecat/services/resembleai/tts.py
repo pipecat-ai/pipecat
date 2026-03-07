@@ -51,6 +51,7 @@ class ResembleAITTSService(WebsocketTTSService):
     multiple simultaneous synthesis requests with proper interruption support.
     """
 
+    Settings = ResembleAITTSSettings
     _settings: ResembleAITTSSettings
 
     def __init__(

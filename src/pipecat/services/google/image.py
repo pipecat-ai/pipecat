@@ -59,6 +59,9 @@ class GoogleImageGenService(ImageGenService):
     prompting for enhanced control over generated content.
     """
 
+    Settings = GoogleImageGenSettings
+    _settings: GoogleImageGenSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for Google image generation.
 
@@ -74,8 +77,6 @@ class GoogleImageGenService(ImageGenService):
         number_of_images: int = Field(default=1, ge=1, le=8)
         model: str = Field(default="imagen-3.0-generate-002")
         negative_prompt: Optional[str] = Field(default=None)
-
-    _settings: GoogleImageGenSettings
 
     def __init__(
         self,

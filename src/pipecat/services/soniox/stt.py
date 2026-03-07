@@ -174,6 +174,7 @@ class SonioxSTTService(WebsocketSTTService):
     For complete API documentation, see: https://soniox.com/docs/speech-to-text/api-reference/websocket-api
     """
 
+    Settings = SonioxSTTSettings
     _settings: SonioxSTTSettings
 
     def __init__(

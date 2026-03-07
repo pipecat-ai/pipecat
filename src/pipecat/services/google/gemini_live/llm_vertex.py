@@ -57,6 +57,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
     responses, and tool usage.
     """
 
+    Settings = GeminiLiveVertexLLMSettings
     _settings: GeminiLiveVertexLLMSettings
 
     def __init__(

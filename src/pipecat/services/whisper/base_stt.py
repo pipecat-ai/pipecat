@@ -122,6 +122,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
     including metrics generation and error handling.
     """
 
+    Settings = BaseWhisperSTTSettings
     _settings: BaseWhisperSTTSettings
 
     def __init__(

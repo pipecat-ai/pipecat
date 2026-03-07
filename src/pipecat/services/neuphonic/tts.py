@@ -91,6 +91,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
     parameters for high-quality speech generation.
     """
 
+    Settings = NeuphonicTTSSettings
     _settings: NeuphonicTTSSettings
 
     class InputParams(BaseModel):
@@ -430,6 +431,7 @@ class NeuphonicHttpTTSService(TTSService):
     HTTP-based communication over WebSocket connections.
     """
 
+    Settings = NeuphonicTTSSettings
     _settings: NeuphonicTTSSettings
 
     class InputParams(BaseModel):

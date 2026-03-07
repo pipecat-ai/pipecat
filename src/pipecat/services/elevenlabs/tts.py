@@ -316,6 +316,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
     customization options including stability, similarity boost, and speed controls.
     """
 
+    Settings = ElevenLabsTTSSettings
     _settings: ElevenLabsTTSSettings
 
     class InputParams(BaseModel):
@@ -904,6 +905,7 @@ class ElevenLabsHttpTTSService(TTSService):
     connection is not required or desired.
     """
 
+    Settings = ElevenLabsHttpTTSSettings
     _settings: ElevenLabsHttpTTSSettings
 
     class InputParams(BaseModel):

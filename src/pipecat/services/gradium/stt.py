@@ -88,6 +88,7 @@ class GradiumSTTService(WebsocketSTTService):
     for audio processing and connection management.
     """
 
+    Settings = GradiumSTTSettings
     _settings: GradiumSTTSettings
 
     class InputParams(BaseModel):

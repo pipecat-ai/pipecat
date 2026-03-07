@@ -67,6 +67,7 @@ class DeepgramSageMakerTTSService(TTSService):
         )
     """
 
+    Settings = DeepgramSageMakerTTSSettings
     _settings: DeepgramSageMakerTTSSettings
 
     def __init__(

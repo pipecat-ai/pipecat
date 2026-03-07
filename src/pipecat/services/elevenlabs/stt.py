@@ -216,6 +216,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
     The service uploads audio files to ElevenLabs and receives transcription results directly.
     """
 
+    Settings = ElevenLabsSTTSettings
     _settings: ElevenLabsSTTSettings
 
     class InputParams(BaseModel):
@@ -448,6 +449,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     commit transcript segments, providing consistency with other STT services.
     """
 
+    Settings = ElevenLabsRealtimeSTTSettings
     _settings: ElevenLabsRealtimeSTTSettings
 
     class InputParams(BaseModel):

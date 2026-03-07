@@ -140,6 +140,7 @@ class MiniMaxHttpTTSService(TTSService):
     https://www.minimax.io/platform/document/T2A%20V2?key=66719005a427f0c8a5701643
     """
 
+    Settings = MiniMaxTTSSettings
     _settings: MiniMaxTTSSettings
 
     class InputParams(BaseModel):

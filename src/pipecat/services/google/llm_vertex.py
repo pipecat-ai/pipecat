@@ -59,6 +59,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference
     """
 
+    Settings = GoogleVertexLLMSettings
     _settings: GoogleVertexLLMSettings
 
     class InputParams(GoogleLLMService.InputParams):

@@ -66,6 +66,7 @@ class AzureSTTService(STTService):
     provides real-time transcription results with timing information.
     """
 
+    Settings = AzureSTTSettings
     _settings: AzureSTTSettings
 
     def __init__(

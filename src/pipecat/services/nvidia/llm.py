@@ -36,6 +36,7 @@ class NvidiaLLMService(OpenAILLMService):
     in token usage reporting between NIM (incremental) and OpenAI (final summary).
     """
 
+    Settings = NvidiaLLMSettings
     _settings: NvidiaLLMSettings
 
     def __init__(

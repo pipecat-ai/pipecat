@@ -53,6 +53,7 @@ class SpeechmaticsTTSService(TTSService):
     It converts text to speech and returns raw PCM audio data for real-time playback.
     """
 
+    Settings = SpeechmaticsTTSSettings
     _settings: SpeechmaticsTTSSettings
 
     SPEECHMATICS_SAMPLE_RATE = 16000

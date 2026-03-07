@@ -31,6 +31,7 @@ class CerebrasLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    Settings = CerebrasLLMSettings
     _settings: CerebrasLLMSettings
 
     def __init__(

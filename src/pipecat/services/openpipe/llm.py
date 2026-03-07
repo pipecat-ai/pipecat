@@ -43,6 +43,7 @@ class OpenPipeLLMService(OpenAILLMService):
     for model training and evaluation.
     """
 
+    Settings = OpenPipeLLMSettings
     _settings: OpenPipeLLMSettings
 
     def __init__(

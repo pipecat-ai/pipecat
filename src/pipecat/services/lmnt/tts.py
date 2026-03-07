@@ -88,6 +88,7 @@ class LmntTTSService(InterruptibleTTSService):
     language settings.
     """
 
+    Settings = LmntTTSSettings
     _settings: LmntTTSSettings
 
     def __init__(

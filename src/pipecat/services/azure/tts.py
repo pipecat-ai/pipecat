@@ -246,6 +246,8 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
     available for lower latency playback and accurate word-level synchronization.
     """
 
+    Settings = AzureTTSSettings
+
     def __init__(
         self,
         *,
@@ -748,6 +750,8 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
     non-streaming synthesis. Suitable for use cases where streaming is not
     required and simpler integration is preferred.
     """
+
+    Settings = AzureTTSSettings
 
     def __init__(
         self,

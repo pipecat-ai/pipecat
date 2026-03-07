@@ -351,6 +351,7 @@ class SarvamHttpTTSService(TTSService):
         )
     """
 
+    Settings = SarvamHttpTTSSettings
     _settings: SarvamHttpTTSSettings
 
     class InputParams(BaseModel):
@@ -717,6 +718,7 @@ class SarvamTTSService(InterruptibleTTSService):
     See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for API details.
     """
 
+    Settings = SarvamTTSSettings
     _settings: SarvamTTSSettings
 
     class InputParams(BaseModel):

@@ -113,6 +113,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             ...
     """
 
+    Settings = DeepgramFluxSTTSettings
     _settings: DeepgramFluxSTTSettings
 
     class InputParams(BaseModel):

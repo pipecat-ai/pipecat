@@ -211,6 +211,7 @@ class OpenAIRealtimeLLMService(LLMService):
     management, and real-time transcription.
     """
 
+    Settings = OpenAIRealtimeLLMSettings
     _settings: OpenAIRealtimeLLMSettings
 
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.

@@ -34,6 +34,7 @@ class OpenRouterLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    Settings = OpenRouterLLMSettings
     _settings: OpenRouterLLMSettings
 
     def __init__(

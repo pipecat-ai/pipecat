@@ -83,6 +83,7 @@ class XTTSService(TTSService):
     studio speakers configuration.
     """
 
+    Settings = XTTSTTSSettings
     _settings: XTTSTTSSettings
 
     def __init__(
