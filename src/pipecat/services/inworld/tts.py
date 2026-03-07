@@ -73,27 +73,14 @@ class InworldTTSSettings(TTSSettings):
     Parameters:
         speaking_rate: Speaking rate for speech synthesis.
         temperature: Temperature for speech synthesis.
-        auto_mode: Whether to use auto mode. Recommended when texts are sent
-            in full sentences/phrases. When enabled, the server controls
-            flushing of buffered text to achieve minimal latency while
-            maintaining high quality audio output. If None (default),
-            automatically set based on aggregate_sentences.
-        apply_text_normalization: Whether to apply text normalization.
-        timestamp_transport_strategy: Strategy for timestamp transport ("ASYNC" or "SYNC").
     """
 
     speaking_rate: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    auto_mode: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    apply_text_normalization: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    timestamp_transport_strategy: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {
         "voiceId": "voice",
         "modelId": "model",
-        "applyTextNormalization": "apply_text_normalization",
-        "autoMode": "auto_mode",
-        "timestampTransportStrategy": "timestamp_transport_strategy",
     }
 
     @classmethod
@@ -141,6 +128,7 @@ class InworldHttpTTSService(TTSService):
         streaming: bool = True,
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
+        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC",
         params: Optional[InputParams] = None,
         settings: Optional[InworldTTSSettings] = None,
         **kwargs,
@@ -163,6 +151,8 @@ class InworldHttpTTSService(TTSService):
             streaming: Whether to use streaming mode.
             sample_rate: Audio sample rate in Hz.
             encoding: Audio encoding format.
+            timestamp_transport_strategy: Strategy for timestamp transport
+                ("ASYNC" or "SYNC"). Defaults to "ASYNC".
             params: Input parameters for Inworld TTS configuration.
 
                 .. deprecated:: 0.0.105
@@ -179,9 +169,6 @@ class InworldHttpTTSService(TTSService):
             language=None,
             speaking_rate=None,
             temperature=None,
-            timestamp_transport_strategy="ASYNC",
-            auto_mode=None,  # Not applicable for HTTP TTS
-            apply_text_normalization=None,  # Not applicable for HTTP TTS
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -201,9 +188,7 @@ class InworldHttpTTSService(TTSService):
                 if params.temperature is not None:
                     default_settings.temperature = params.temperature
                 if params.timestamp_transport_strategy is not None:
-                    default_settings.timestamp_transport_strategy = (
-                        params.timestamp_transport_strategy
-                    )
+                    timestamp_transport_strategy = params.timestamp_transport_strategy
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -230,9 +215,10 @@ class InworldHttpTTSService(TTSService):
 
         self._cumulative_time = 0.0
 
-        # Init-only audio format config (not runtime-updatable).
+        # Init-only config (not runtime-updatable).
         self._audio_encoding = encoding
         self._audio_sample_rate = 0  # Set in start()
+        self._timestamp_transport_strategy = timestamp_transport_strategy
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -250,22 +236,6 @@ class InworldHttpTTSService(TTSService):
         """
         await super().start(frame)
         self._audio_sample_rate = self.sample_rate
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Inworld TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Inworld TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
@@ -347,8 +317,8 @@ class InworldHttpTTSService(TTSService):
 
         # Use WORD timestamps for simplicity and correct spacing/capitalization
         payload["timestampType"] = self._timestamp_type
-        if self._settings.timestamp_transport_strategy is not None:
-            payload["timestampTransportStrategy"] = self._settings.timestamp_transport_strategy
+        if self._timestamp_transport_strategy is not None:
+            payload["timestampTransportStrategy"] = self._timestamp_transport_strategy
 
         request_id = str(uuid.uuid4())
         headers = {
@@ -556,6 +526,9 @@ class InworldTTSService(WebsocketTTSService):
         url: str = "wss://api.inworld.ai/tts/v1/voice:streamBidirectional",
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
+        auto_mode: Optional[bool] = None,
+        apply_text_normalization: Optional[str] = None,
+        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC",
         params: Optional[InputParams] = None,
         settings: Optional[InworldTTSSettings] = None,
         aggregate_sentences: Optional[bool] = None,
@@ -580,6 +553,12 @@ class InworldTTSService(WebsocketTTSService):
             url: URL of the Inworld WebSocket API.
             sample_rate: Audio sample rate in Hz.
             encoding: Audio encoding format.
+            auto_mode: Whether to use auto mode. When enabled, the server
+                controls flushing of buffered text. If None (default),
+                automatically set based on ``aggregate_sentences``.
+            apply_text_normalization: Whether to apply text normalization.
+            timestamp_transport_strategy: Strategy for timestamp transport
+                ("ASYNC" or "SYNC"). Defaults to "ASYNC".
             params: Input parameters for Inworld WebSocket TTS configuration.
 
                 .. deprecated:: 0.0.105
@@ -596,6 +575,10 @@ class InworldTTSService(WebsocketTTSService):
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
             **kwargs: Additional arguments passed to the parent class.
         """
+        # Derive auto_mode from aggregate_sentences if not explicitly set
+        if auto_mode is None:
+            auto_mode = True if aggregate_sentences is None else aggregate_sentences
+
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = InworldTTSSettings(
             model="inworld-tts-1.5-max",
@@ -603,9 +586,6 @@ class InworldTTSService(WebsocketTTSService):
             language=None,
             speaking_rate=None,
             temperature=None,
-            apply_text_normalization=None,
-            timestamp_transport_strategy="ASYNC",
-            auto_mode=True if aggregate_sentences is None else aggregate_sentences,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -627,13 +607,11 @@ class InworldTTSService(WebsocketTTSService):
                 if params.temperature is not None:
                     default_settings.temperature = params.temperature
                 if params.apply_text_normalization is not None:
-                    default_settings.apply_text_normalization = params.apply_text_normalization
+                    apply_text_normalization = params.apply_text_normalization
                 if params.timestamp_transport_strategy is not None:
-                    default_settings.timestamp_transport_strategy = (
-                        params.timestamp_transport_strategy
-                    )
+                    timestamp_transport_strategy = params.timestamp_transport_strategy
                 if params.auto_mode is not None:
-                    default_settings.auto_mode = params.auto_mode
+                    auto_mode = params.auto_mode
             _buffer_max_delay_ms = params.max_buffer_delay_ms
             _buffer_char_threshold = params.buffer_char_threshold
 
@@ -673,9 +651,12 @@ class InworldTTSService(WebsocketTTSService):
         # Track the end time of the last word in the current generation
         self._generation_end_time = 0.0
 
-        # Init-only audio format config (not runtime-updatable).
+        # Init-only config (not runtime-updatable).
         self._audio_encoding = encoding
         self._audio_sample_rate = 0  # Set in start()
+        self._auto_mode = auto_mode
+        self._apply_text_normalization = apply_text_normalization
+        self._timestamp_transport_strategy = timestamp_transport_strategy
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -1036,14 +1017,12 @@ class InworldTTSService(WebsocketTTSService):
 
         if self._settings.temperature is not None:
             create_config["temperature"] = self._settings.temperature
-        if self._settings.apply_text_normalization is not None:
-            create_config["applyTextNormalization"] = self._settings.apply_text_normalization
-        if self._settings.auto_mode is not None:
-            create_config["autoMode"] = self._settings.auto_mode
-        if self._settings.timestamp_transport_strategy is not None:
-            create_config["timestampTransportStrategy"] = (
-                self._settings.timestamp_transport_strategy
-            )
+        if self._apply_text_normalization is not None:
+            create_config["applyTextNormalization"] = self._apply_text_normalization
+        if self._auto_mode is not None:
+            create_config["autoMode"] = self._auto_mode
+        if self._timestamp_transport_strategy is not None:
+            create_config["timestampTransportStrategy"] = self._timestamp_transport_strategy
 
         # Set buffer settings for timely audio generation.
         # Use provided values or defaults that work well for streaming LLM output.

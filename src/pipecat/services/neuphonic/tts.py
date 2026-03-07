@@ -26,12 +26,10 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -487,7 +485,7 @@ class NeuphonicHttpTTSService(TTSService):
         default_settings = NeuphonicTTSSettings(
             model=None,
             voice=None,
-            language=self.language_to_service_language(Language.EN) or "en",
+            language=self.language_to_service_language(Language.EN),
             speed=1.0,
         )
 
@@ -501,9 +499,7 @@ class NeuphonicHttpTTSService(TTSService):
             _warn_deprecated_param("params", NeuphonicTTSSettings)
             if not settings:
                 if params.language is not None:
-                    default_settings.language = (
-                        self.language_to_service_language(params.language) or "en"
-                    )
+                    default_settings.language = self.language_to_service_language(params.language)
                 if params.speed is not None:
                     default_settings.speed = params.speed
 

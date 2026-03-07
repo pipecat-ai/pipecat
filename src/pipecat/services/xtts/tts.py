@@ -70,7 +70,7 @@ def language_to_xtts_language(language: Language) -> Optional[str]:
 
 @dataclass
 class XTTSTTSSettings(TTSSettings):
-    """Settings for XTTSTTSService."""
+    """Settings for XTTSService."""
 
     pass
 

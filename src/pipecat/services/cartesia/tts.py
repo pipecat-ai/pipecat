@@ -23,7 +23,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
@@ -705,7 +704,7 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: Optional[str] = None,
         model: Optional[str] = None,
         base_url: str = "https://api.cartesia.ai",
-        cartesia_version: str = "2024-11-13",
+        cartesia_version: str = "2026-03-01",
         aiohttp_session: Optional[aiohttp.ClientSession] = None,
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
