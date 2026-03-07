@@ -14,7 +14,7 @@ streaming audio output.
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -33,20 +33,16 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
 @dataclass
 class DeepgramSageMakerTTSSettings(TTSSettings):
-    """Settings for Deepgram SageMaker TTS service.
+    """Settings for Deepgram SageMaker TTS service."""
 
-    Parameters:
-        encoding: Audio encoding format (e.g. "linear16").
-    """
-
-    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class DeepgramSageMakerTTSService(TTSService):
@@ -78,9 +74,10 @@ class DeepgramSageMakerTTSService(TTSService):
         *,
         endpoint_name: str,
         region: str,
-        voice: str = "aura-2-helena-en",
+        voice: Optional[str] = None,
         sample_rate: Optional[int] = None,
         encoding: str = "linear16",
+        settings: Optional[DeepgramSageMakerTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Deepgram SageMaker TTS service.
@@ -90,26 +87,41 @@ class DeepgramSageMakerTTSService(TTSService):
                 deployed (e.g., "my-deepgram-tts-endpoint").
             region: AWS region where the endpoint is deployed (e.g., "us-east-2").
             voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=DeepgramSageMakerTTSSettings(voice=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If None, uses the value from StartFrame.
             encoding: Audio encoding format. Defaults to "linear16".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
+        if voice is not None:
+            _warn_deprecated_param("voice", DeepgramSageMakerTTSSettings, "voice")
+
+        voice = voice or "aura-2-helena-en"
+
+        default_settings = DeepgramSageMakerTTSSettings(
+            model=None,
+            voice=voice,
+            language=None,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             push_stop_frames=True,
             pause_frame_processing=True,
             append_trailing_space=True,
-            settings=DeepgramSageMakerTTSSettings(
-                model=voice,
-                voice=voice,
-                language=None,
-                encoding=encoding,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         self._endpoint_name = endpoint_name
         self._region = region
+        self._encoding = encoding
 
         self._client: Optional[SageMakerBidiClient] = None
         self._response_task: Optional[asyncio.Task] = None
@@ -175,8 +187,7 @@ class DeepgramSageMakerTTSService(TTSService):
         logger.debug("Connecting to Deepgram TTS on SageMaker...")
 
         query_string = (
-            f"model={self._settings.voice}&encoding={self._settings.encoding}"
-            f"&sample_rate={self.sample_rate}"
+            f"model={self._settings.voice}&encoding={self._encoding}&sample_rate={self.sample_rate}"
         )
 
         self._client = SageMakerBidiClient(
@@ -317,7 +328,7 @@ class DeepgramSageMakerTTSService(TTSService):
             except Exception as e:
                 logger.error(f"{self} error sending Clear message: {e}")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending Flush command.
 
         This should be called when the LLM finishes a complete response to force
@@ -344,12 +355,12 @@ class DeepgramSageMakerTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._ttfb_started:
-                await self.start_ttfb_metrics()
-                self._ttfb_started = True
-            await self.start_tts_usage_metrics(text)
-
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                if not self._ttfb_started:
+                    await self.start_ttfb_metrics()
+                    self._ttfb_started = True
+                yield TTSStartedFrame(context_id=context_id)
             self._context_id = context_id
 
             await self._client.send_json({"type": "Speak", "text": text})

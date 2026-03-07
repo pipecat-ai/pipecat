@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
 from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
 from pipecat.transports.heygen.transport import HeyGenParams, HeyGenTransport, ServiceType
 
@@ -56,12 +56,16 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="00967b2f-88a6-4a31-8153-110a92134b9f",
+            settings=CartesiaTTSSettings(
+                voice="00967b2f-88a6-4a31-8153-110a92134b9f",
+            ),
         )
 
         llm = GoogleLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),
-            system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+            settings=GoogleLLMSettings(
+                system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+            ),
         )
 
         context = LLMContext()
@@ -96,7 +100,7 @@ async def main():
             # Kick off the conversation.
             context.add_message(
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": "Start by saying 'Hello' and then a short greeting.",
                 }
             )

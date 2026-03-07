@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAIRealtimeSTTService
-from pipecat.services.openai.tts import OpenAITTSService
+from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
+from pipecat.services.openai.stt import OpenAIRealtimeSTTService, OpenAIRealtimeSTTSettings
+from pipecat.services.openai.tts import OpenAITTSService, OpenAITTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -55,20 +55,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = OpenAIRealtimeSTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-transcribe",
-        prompt="Expect words related to dogs, such as breed names.",
-        language=Language.EN,
-        # Uses local VAD by default.
-        # To enable server-side VAD, set turn_detection=None or
-        # a dict with server_vad settings.
-        # turn_detection={"type": "server_vad", "threshold": 0.5},
+        settings=OpenAIRealtimeSTTSettings(
+            model="gpt-4o-transcribe",
+            prompt="Expect words related to dogs, such as breed names.",
+            language=Language.EN,
+        ),
     )
 
-    tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), voice="ballad")
+    tts = OpenAITTSService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAITTSSettings(
+            voice="ballad",
+        ),
+    )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are very knowledgable about dogs. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenAILLMSettings(
+            system_instruction="You are very knowledgable about dogs. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     context = LLMContext()
@@ -103,7 +108,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

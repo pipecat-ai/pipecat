@@ -12,6 +12,8 @@ API format through Google's Gemini API OpenAI compatibility layer.
 
 import json
 import os
+from dataclasses import dataclass
+from typing import Optional
 
 from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
@@ -26,7 +28,16 @@ from loguru import logger
 from pipecat.frames.frames import LLMTextFrame
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class GoogleOpenAILLMSettings(OpenAILLMSettings):
+    """Settings for GoogleLLMOpenAIBetaService."""
+
+    pass
 
 
 class GoogleLLMOpenAIBetaService(OpenAILLMService):
@@ -47,12 +58,15 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
         https://ai.google.dev/gemini-api/docs/openai
     """
 
+    _settings: GoogleOpenAILLMSettings
+
     def __init__(
         self,
         *,
         api_key: str,
         base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/",
-        model: str = "gemini-2.0-flash",
+        model: Optional[str] = None,
+        settings: Optional[GoogleOpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Google LLM service.
@@ -61,6 +75,12 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             api_key: Google API key for authentication.
             base_url: Base URL for Google's OpenAI-compatible API.
             model: Google model name to use (e.g., "gemini-2.0-flash").
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent OpenAILLMService.
         """
         import warnings
@@ -74,7 +94,21 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
                 stacklevel=2,
             )
 
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = GoogleOpenAILLMSettings(model="gemini-2.0-flash")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GoogleOpenAILLMSettings, "model")
+            default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
 
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []

@@ -11,7 +11,8 @@ import io
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import fields as dataclass_fields
+from typing import Any, Dict, Mapping, Optional, Type
 
 from loguru import logger
 from PIL import Image
@@ -59,7 +60,13 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import (
+    NOT_GIVEN,
+    LLMSettings,
+    _NotGiven,
+    _warn_deprecated_param,
+    is_given,
+)
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -93,15 +100,107 @@ class CurrentAudioResponse:
 
 @dataclass
 class OpenAIRealtimeLLMSettings(LLMSettings):
-    """Settings for OpenAI Realtime LLM services.
+    """Settings for OpenAIRealtimeLLMService.
 
     Parameters:
-        session_properties: OpenAI Realtime session configuration.
+        session_properties: OpenAI Realtime session properties (modalities,
+            audio config, tools, etc.).  ``model`` and ``instructions`` are
+            synced bidirectionally with the top-level ``model`` and
+            ``system_instruction`` fields.
     """
 
     session_properties: events.SessionProperties | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+
+    # -- Bidirectional sync helpers ------------------------------------------
+
+    @staticmethod
+    def _sync_top_level_to_sp(settings: "OpenAIRealtimeLLMSettings"):
+        """Push top-level ``model``/``system_instruction`` into ``session_properties``."""
+        if not is_given(settings.session_properties):
+            return
+        sp = settings.session_properties
+        if is_given(settings.model) and settings.model is not None:
+            sp.model = settings.model
+        if is_given(settings.system_instruction):
+            sp.instructions = settings.system_instruction
+
+    # -- apply_update override -----------------------------------------------
+
+    def apply_update(self, delta: "OpenAIRealtimeLLMSettings") -> Dict[str, Any]:
+        """Merge a delta, keeping ``model``/``system_instruction`` in sync with SP.
+
+        When the delta contains ``session_properties``, it **replaces** the
+        stored SP wholesale (matching legacy behaviour).  Top-level field
+        values always take precedence over conflicting SP values.
+        """
+        # 1. Let the base class handle all fields including session_properties
+        #    (wholesale replacement when given).
+        changed = super().apply_update(delta)
+
+        # 2. SP → top-level: if the SP was just replaced and carries
+        #    model/instructions that the delta didn't set at top level,
+        #    pull them up.
+        if "session_properties" in changed and is_given(self.session_properties):
+            sp = self.session_properties
+            if "model" not in changed and sp.model is not None:
+                old_model = self.model
+                self.model = sp.model
+                if old_model != self.model:
+                    changed["model"] = old_model
+            if "system_instruction" not in changed and sp.instructions is not None:
+                old_si = self.system_instruction
+                self.system_instruction = sp.instructions
+                if old_si != self.system_instruction:
+                    changed["system_instruction"] = old_si
+
+        # 3. Top-level → SP: ensure SP mirrors the authoritative top-level
+        #    values.  Covers all cases: top-level-only delta, SP-only delta,
+        #    and mixed deltas where top-level takes precedence.
+        self._sync_top_level_to_sp(self)
+
+        return changed
+
+    # -- from_mapping override -----------------------------------------------
+
+    @classmethod
+    def from_mapping(
+        cls: Type["OpenAIRealtimeLLMSettings"], settings: Mapping[str, Any]
+    ) -> "OpenAIRealtimeLLMSettings":
+        """Build a delta from a plain dict, routing SP keys into ``session_properties``.
+
+        Keys that correspond to ``SessionProperties`` fields (except ``model``)
+        are collected into a nested ``session_properties`` value.  ``model`` is
+        always routed to the top-level field.  Unknown keys go to ``extra``.
+        """
+        # Determine which keys belong to our own dataclass fields.
+        own_field_names = {f.name for f in dataclass_fields(cls)} - {"extra"}
+
+        top: Dict[str, Any] = {}
+        sp_dict: Dict[str, Any] = {}
+        extra: Dict[str, Any] = {}
+
+        # Build the SP field set without instantiating (avoid __post_init__
+        # cost for every from_mapping call).
+        sp_keys = set(events.SessionProperties.model_fields.keys()) - {"model"}
+
+        for key, value in settings.items():
+            # Resolve aliases first
+            canonical = cls._aliases.get(key, key)
+            if canonical in own_field_names:
+                top[canonical] = value
+            elif canonical in sp_keys:
+                sp_dict[canonical] = value
+            else:
+                extra[key] = value
+
+        if sp_dict:
+            top["session_properties"] = events.SessionProperties(**sp_dict)
+
+        instance = cls(**top)
+        instance.extra = extra
+        return instance
 
 
 class OpenAIRealtimeLLMService(LLMService):
@@ -121,9 +220,10 @@ class OpenAIRealtimeLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gpt-realtime-1.5",
+        model: Optional[str] = None,
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
+        settings: Optional[OpenAIRealtimeLLMSettings] = None,
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         video_frame_detail: str = "auto",
@@ -134,14 +234,22 @@ class OpenAIRealtimeLLMService(LLMService):
 
         Args:
             api_key: OpenAI API key for authentication.
-            model: OpenAI model name. Defaults to "gpt-realtime".
+            model: OpenAI model name.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAIRealtimeLLMSettings(model=...)`` instead.
+
                 This is a connection-level parameter set via the WebSocket URL query
                 parameter and cannot be changed during the session.
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.openai.com/v1/realtime".
             session_properties: Configuration properties for the realtime session.
-                These are session-level settings that can be updated during the session
-                (except for voice and model). If None, uses default SessionProperties.
+                If None, uses default SessionProperties.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAIRealtimeLLMSettings(session_properties=...)``
+                    instead.
+            settings: Runtime-updatable settings for this service.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             video_frame_detail: Detail level for video processing. Can be "auto", "low", or "high".
@@ -168,24 +276,54 @@ class OpenAIRealtimeLLMService(LLMService):
                     stacklevel=2,
                 )
 
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = OpenAIRealtimeLLMSettings(
+            model="gpt-realtime-1.5",
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=events.SessionProperties(),
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", OpenAIRealtimeLLMSettings, "model")
+            default_settings.model = model
+
+        if session_properties is not None:
+            _warn_deprecated_param(
+                "session_properties",
+                OpenAIRealtimeLLMSettings,
+                "session_properties",
+            )
+            default_settings.session_properties = session_properties
+            # Sync model/instructions from the deprecated SP arg to top-level,
+            # but only if the deprecated `model` arg didn't already set it.
+            if model is None and session_properties.model is not None:
+                default_settings.model = session_properties.model
+            if session_properties.instructions is not None:
+                default_settings.system_instruction = session_properties.instructions
+
+        # Sync top-level model back into session_properties
+        OpenAIRealtimeLLMSettings._sync_top_level_to_sp(default_settings)
+
+        # 3. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         # Build WebSocket URL with model query parameter
         # Source: https://platform.openai.com/docs/guides/realtime-websocket
-        full_url = f"{base_url}?model={model}"
+        full_url = f"{base_url}?model={default_settings.model}"
         super().__init__(
             base_url=full_url,
-            settings=OpenAIRealtimeLLMSettings(
-                model=model,
-                temperature=None,
-                max_tokens=None,
-                top_p=None,
-                top_k=None,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                session_properties=session_properties or events.SessionProperties(),
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -423,16 +561,6 @@ class OpenAIRealtimeLLMService(LLMService):
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
-        # Backward-compatible dict path: frame.settings contains SessionProperties
-        # fields, not our Settings fields, so we construct SessionProperties
-        # directly. The frame.delta path falls through to super, which calls
-        # _update_settings → our override handles the rest.
-        if isinstance(frame, LLMUpdateSettingsFrame) and frame.delta is None:
-            self._settings.session_properties = events.SessionProperties(**frame.settings)
-            await self._send_session_update()
-            await self.push_frame(frame, direction)
-            return
-
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
@@ -547,11 +675,12 @@ class OpenAIRealtimeLLMService(LLMService):
             await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
     async def _update_settings(self, delta):
-        """Apply a settings delta, sending a session update if needed."""
+        """Apply a settings delta, sending a session update when needed."""
         changed = await super()._update_settings(delta)
-        if "session_properties" in changed:
+        handled = {"session_properties", "system_instruction"}
+        if changed.keys() & handled:
             await self._send_session_update()
-        self._warn_unhandled_updated_settings(changed.keys() - {"session_properties"})
+        self._warn_unhandled_updated_settings(changed.keys() - handled)
         return changed
 
     async def _send_session_update(self):

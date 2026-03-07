@@ -28,10 +28,8 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
@@ -68,6 +66,9 @@ class NvidiaTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Riva TTS configuration.
 
+        .. deprecated:: 0.0.105
+            Use ``NvidiaTTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             language: Language code for synthesis. Defaults to US English.
             quality: Audio quality setting (0-100). Defaults to 20.
@@ -81,13 +82,14 @@ class NvidiaTTSService(TTSService):
         *,
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: str = "Magpie-Multilingual.EN-US.Aria",
+        voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         model_function_map: Mapping[str, str] = {
             "function_id": "877104f7-e885-42b9-8de8-f6e4c6303969",
             "model_name": "magpie-tts-multilingual",
         },
         params: Optional[InputParams] = None,
+        settings: Optional[NvidiaTTSSettings] = None,
         use_ssl: bool = True,
         **kwargs,
     ):
@@ -96,23 +98,54 @@ class NvidiaTTSService(TTSService):
         Args:
             api_key: NVIDIA API key for authentication.
             server: gRPC server endpoint. Defaults to NVIDIA's cloud endpoint.
-            voice_id: Voice model identifier. Defaults to multilingual Ray voice.
+            voice_id: Voice model identifier. Defaults to multilingual Aria voice.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=NvidiaTTSSettings(voice=...)`` instead.
+
             sample_rate: Audio sample rate. If None, uses service default.
             model_function_map: Dictionary containing function_id and model_name for the TTS model.
             params: Additional configuration parameters for TTS synthesis.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=NvidiaTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        params = params or NvidiaTTSService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = NvidiaTTSSettings(
+            model=model_function_map.get("model_name"),
+            voice="Magpie-Multilingual.EN-US.Aria",
+            language=Language.EN_US,
+            quality=20,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", NvidiaTTSSettings, "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", NvidiaTTSSettings)
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.quality is not None:
+                    default_settings.quality = params.quality
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=NvidiaTTSSettings(
-                model=model_function_map.get("model_name"),
-                voice=voice_id,
-                language=params.language,
-                quality=params.quality,
-            ),
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
             **kwargs,
         )
 
@@ -238,9 +271,6 @@ class NvidiaTTSService(TTSService):
             assert self._service is not None, "TTS service not initialized"
             assert self._config is not None, "Synthesis configuration not created"
 
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame(context_id=context_id)
-
             logger.debug(f"{self}: Generating TTS [{text}]")
 
             responses = await asyncio.to_thread(read_audio_responses)
@@ -256,7 +286,6 @@ class NvidiaTTSService(TTSService):
                 yield frame
 
             await self.start_tts_usage_metrics(text)
-            yield TTSStoppedFrame(context_id=context_id)
         except asyncio.TimeoutError as e:
             logger.error(f"{self} timeout waiting for audio response")
             yield ErrorFrame(error=f"{self} error: {e}")

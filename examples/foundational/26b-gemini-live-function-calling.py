@@ -26,7 +26,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, GeminiLiveLLMSettings
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -120,7 +120,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_instruction,
+        settings=GeminiLiveLLMSettings(
+            system_instruction=system_instruction,
+        ),
         tools=tools,
     )
 
@@ -131,13 +133,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # than as arguments to GeminiLiveLLMService, but note that doing so will
     # trigger a (fast) reconnection when the GeminiLiveLLMService first
     # receives the context (i.e. when we send the LLMRunFrame below).
-    context = LLMContext(
-        [
-            # {"role": "system", "content": system_instruction},
-            {"role": "user", "content": "Say hello."},
-        ],
-        # tools,
-    )
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -172,6 +168,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

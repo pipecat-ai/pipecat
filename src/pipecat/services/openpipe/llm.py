@@ -10,12 +10,15 @@ This module provides an OpenPipe-specific implementation of the OpenAI LLM servi
 enabling integration with OpenPipe's fine-tuning and monitoring capabilities.
 """
 
+from dataclasses import dataclass
 from typing import Dict, Optional
 
 from loguru import logger
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 
 try:
     from openpipe import AsyncOpenAI as OpenPipeAI
@@ -23,6 +26,13 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenPipe, you need to `pip install pipecat-ai[openpipe]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class OpenPipeLLMSettings(OpenAILLMSettings):
+    """Settings for OpenPipeLLMService."""
+
+    pass
 
 
 class OpenPipeLLMService(OpenAILLMService):
@@ -33,34 +43,57 @@ class OpenPipeLLMService(OpenAILLMService):
     for model training and evaluation.
     """
 
+    _settings: OpenPipeLLMSettings
+
     def __init__(
         self,
         *,
-        model: str = "gpt-4.1",
+        model: Optional[str] = None,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         openpipe_api_key: Optional[str] = None,
         openpipe_base_url: str = "https://app.openpipe.ai/api/v1",
         tags: Optional[Dict[str, str]] = None,
+        settings: Optional[OpenPipeLLMSettings] = None,
         **kwargs,
     ):
         """Initialize OpenPipe LLM service.
 
         Args:
             model: The model name to use. Defaults to "gpt-4.1".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
             api_key: OpenAI API key for authentication. If None, reads from environment.
             base_url: Custom OpenAI API endpoint URL. Uses default if None.
             openpipe_api_key: OpenPipe API key for enhanced features. If None, reads from environment.
             openpipe_base_url: OpenPipe API endpoint URL. Defaults to "https://app.openpipe.ai/api/v1".
             tags: Optional dictionary of tags to apply to all requests for tracking.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent OpenAILLMService.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = OpenPipeLLMSettings(model="gpt-4.1")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", OpenPipeLLMSettings, "model")
+            default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
-            model=model,
             api_key=api_key,
             base_url=base_url,
             openpipe_api_key=openpipe_api_key,
             openpipe_base_url=openpipe_base_url,
+            settings=default_settings,
             **kwargs,
         )
         self._tags = tags

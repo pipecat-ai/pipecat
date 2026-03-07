@@ -77,28 +77,36 @@ async def test_run_piper_tts_success(aiohttp_client):
             TTSSpeakFrame(text="Hello world."),
         ]
 
-        expected_returned_frames = [
-            AggregatedTextFrame,
-            TTSStartedFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSAudioRawFrame,
-            TTSStoppedFrame,
-            TTSTextFrame,
-        ]
-
         frames_received = await run_test(
             tts_service,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
         )
         down_frames = frames_received[0]
+        frame_types = [type(f) for f in down_frames]
+
+        # Verify key frames are present
+        assert AggregatedTextFrame in frame_types
+        assert TTSStartedFrame in frame_types
+        assert TTSStoppedFrame in frame_types
+        assert TTSTextFrame in frame_types
+
+        # Verify ordering: Started → audio → Stopped → Text
+        started_idx = frame_types.index(TTSStartedFrame)
+        stopped_idx = frame_types.index(TTSStoppedFrame)
+        text_idx = frame_types.index(TTSTextFrame)
+        assert started_idx < text_idx < stopped_idx, (
+            "Expected: TTSStartedFrame < TTSTextFrame < TTSStoppedFrame"
+        )
+
+        # Frames between Started and Stopped must all be audio or text
+        for i in range(started_idx + 1, stopped_idx):
+            assert frame_types[i] in (TTSAudioRawFrame, TTSTextFrame), (
+                f"Unexpected frame type between Started and Stopped: {frame_types[i]}"
+            )
+
+        # All audio frames have correct sample rate
         audio_frames = [f for f in down_frames if isinstance(f, TTSAudioRawFrame)]
+        assert len(audio_frames) >= 1, "Expected at least one audio frame"
         for a_frame in audio_frames:
             assert a_frame.sample_rate == 24000, "Sample rate should match the default (24000)"
 
@@ -128,7 +136,7 @@ async def test_run_piper_tts_error(aiohttp_client):
             TTSSpeakFrame(text="Error case.", append_to_context=False),
         ]
 
-        expected_down_frames = [AggregatedTextFrame, TTSStoppedFrame, TTSTextFrame]
+        expected_down_frames = [AggregatedTextFrame, TTSStartedFrame, TTSTextFrame, TTSStoppedFrame]
 
         expected_up_frames = [ErrorFrame]
 

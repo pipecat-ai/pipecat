@@ -17,7 +17,7 @@ from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.services.fal.image import FalImageGenService
+from pipecat.services.fal.image import FalImageGenService, FalImageGenSettings
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
 load_dotenv(override=True)
@@ -37,7 +37,9 @@ async def main():
         )
 
         imagegen = FalImageGenService(
-            params=FalImageGenService.InputParams(image_size="square_hd"),
+            settings=FalImageGenSettings(
+                image_size="square_hd",
+            ),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )

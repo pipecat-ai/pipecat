@@ -124,6 +124,9 @@ AnyMessage = BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMess
 class AssemblyAIConnectionParams(BaseModel):
     """Configuration parameters for AssemblyAI WebSocket connection.
 
+    .. deprecated:: 0.0.105
+        Use ``settings=AssemblyAISTTSettings(foo=...)`` instead.
+
     Parameters:
         sample_rate: Audio sample rate in Hz. Defaults to 16000.
         encoding: Audio encoding format. Defaults to "pcm_s16le".

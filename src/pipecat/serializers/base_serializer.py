@@ -11,13 +11,13 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     Frame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
-from pipecat.processors.frameworks.rtvi import RTVI_MESSAGE_LABEL
 from pipecat.utils.base_object import BaseObject
 
 
@@ -64,7 +64,7 @@ class FrameSerializer(BaseObject):
         if (
             self._params.ignore_rtvi_messages
             and isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame))
-            and frame.message.get("label") == RTVI_MESSAGE_LABEL
+            and frame.message.get("label") == RTVI.MESSAGE_LABEL
         ):
             return True
         return False

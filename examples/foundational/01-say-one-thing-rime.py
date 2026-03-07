@@ -16,7 +16,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.rime.tts import RimeHttpTTSService
+from pipecat.services.rime.tts import RimeHttpTTSService, RimeTTSSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -39,8 +39,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async with aiohttp.ClientSession() as session:
         tts = RimeHttpTTSService(
             api_key=os.getenv("RIME_API_KEY", ""),
-            voice_id="rex",
             aiohttp_session=session,
+            settings=RimeTTSSettings(
+                voice="rex",
+            ),
         )
 
         task = PipelineTask(

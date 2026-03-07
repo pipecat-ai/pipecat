@@ -12,6 +12,7 @@ extending the GoogleLLMService with Vertex AI authentication.
 
 import json
 import os
+from dataclasses import dataclass
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -20,7 +21,8 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
+from pipecat.services.settings import _warn_deprecated_param
 
 try:
     from google.auth import default
@@ -38,6 +40,13 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class GoogleVertexLLMSettings(GoogleLLMSettings):
+    """Settings for GoogleVertexLLMService."""
+
+    pass
+
+
 class GoogleVertexLLMService(GoogleLLMService):
     """Google Vertex AI LLM service extending GoogleLLMService.
 
@@ -49,6 +58,8 @@ class GoogleVertexLLMService(GoogleLLMService):
     Reference:
         https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference
     """
+
+    _settings: GoogleVertexLLMSettings
 
     class InputParams(GoogleLLMService.InputParams):
         """Input parameters specific to Vertex AI.
@@ -99,10 +110,11 @@ class GoogleVertexLLMService(GoogleLLMService):
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        model: str = "gemini-2.5-flash",
+        model: Optional[str] = None,
         location: Optional[str] = None,
         project_id: Optional[str] = None,
         params: Optional[GoogleLLMService.InputParams] = None,
+        settings: Optional[GoogleVertexLLMSettings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[list] = None,
         tool_config: Optional[dict] = None,
@@ -115,10 +127,24 @@ class GoogleVertexLLMService(GoogleLLMService):
             credentials: JSON string of service account credentials.
             credentials_path: Path to the service account JSON file.
             model: Model identifier (e.g., "gemini-2.5-flash").
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleLLMSettings(model=...)`` instead.
+
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
             project_id: Google Cloud project ID.
             params: Input parameters for the model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleLLMSettings(...)`` instead.
+
+            settings: Runtime-updatable settings for this service.  When both
+                deprecated parameters and *settings* are provided, *settings*
+                values take precedence.
             system_instruction: System instruction/prompt for the model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleVertexLLMSettings(system_instruction=...)`` instead.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
@@ -135,10 +161,9 @@ class GoogleVertexLLMService(GoogleLLMService):
                 "Invalid parameter 'api_key'. Use 'credentials' or 'credentials_path' for Vertex AI authentication."
             )
 
-        # Handle deprecated InputParams fields
+        # Handle deprecated InputParams fields (location/project_id extraction
+        # must happen before validation, regardless of settings)
         if params and isinstance(params, GoogleVertexLLMService.InputParams):
-            # Extract location and project_id from params if not provided
-            # directly, for backward compatibility
             if project_id is None:
                 project_id = params.project_id
             if location is None:
@@ -170,13 +195,54 @@ class GoogleVertexLLMService(GoogleLLMService):
         self._project_id = project_id
         self._location = location
 
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = GoogleVertexLLMSettings(
+            model="gemini-2.5-flash",
+            system_instruction=None,
+            max_tokens=4096,
+            temperature=None,
+            top_k=None,
+            top_p=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            thinking=None,
+            extra={},
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GoogleVertexLLMSettings, "model")
+            default_settings.model = model
+        if system_instruction is not None:
+            _warn_deprecated_param(
+                "system_instruction", GoogleVertexLLMSettings, "system_instruction"
+            )
+            default_settings.system_instruction = system_instruction
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GoogleVertexLLMSettings)
+            if not settings:
+                default_settings.max_tokens = params.max_tokens
+                default_settings.temperature = params.temperature
+                default_settings.top_k = params.top_k
+                default_settings.top_p = params.top_p
+                default_settings.thinking = params.thinking
+                if isinstance(params.extra, dict):
+                    default_settings.extra = params.extra
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         # Call parent constructor with dummy api_key
         # (api_key is required by parent class, but not actually used with Vertex)
         super().__init__(
             api_key="dummy",
-            model=model,
-            params=params,
-            system_instruction=system_instruction,
+            settings=default_settings,
             tools=tools,
             tool_config=tool_config,
             http_options=http_options,

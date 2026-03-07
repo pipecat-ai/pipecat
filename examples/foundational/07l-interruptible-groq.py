@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.groq.llm import GroqLLMService
+from pipecat.services.groq.llm import GroqLLMService, GroqLLMSettings
 from pipecat.services.groq.stt import GroqSTTService
 from pipecat.services.groq.tts import GroqTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -56,8 +56,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GroqLLMService(
         api_key=os.getenv("GROQ_API_KEY"),
-        model="meta-llama/llama-4-maverick-17b-128e-instruct",
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=GroqLLMSettings(
+            model="meta-llama/llama-4-maverick-17b-128e-instruct",
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     tts = GroqTTSService(api_key=os.getenv("GROQ_API_KEY"))
@@ -93,7 +95,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

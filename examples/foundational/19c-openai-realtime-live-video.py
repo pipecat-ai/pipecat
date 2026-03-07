@@ -32,7 +32,10 @@ from pipecat.services.openai.realtime.events import (
     SemanticTurnDetection,
     SessionProperties,
 )
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from pipecat.services.openai.realtime.llm import (
+    OpenAIRealtimeLLMService,
+    OpenAIRealtimeLLMSettings,
+)
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
@@ -60,22 +63,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    session_properties = SessionProperties(
-        audio=AudioConfiguration(
-            input=AudioInput(
-                transcription=InputAudioTranscription(),
-                # Set openai TurnDetection parameters. Not setting this at all will turn it
-                # on by default
-                turn_detection=SemanticTurnDetection(),
-                # Or set to False to disable openai turn detection and use transport VAD
-                # turn_detection=False,
-                noise_reduction=InputAudioNoiseReduction(type="near_field"),
-            )
-        ),
-        # In this example we provide tools through the context, but you could
-        # alternatively provide them here.
-        # tools=tools,
-        instructions="""You are a helpful and friendly AI.
+    llm = OpenAIRealtimeLLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAIRealtimeLLMSettings(
+            system_instruction="""You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human
 things in the real world. Your voice and personality should be warm and engaging, with a lively and
@@ -89,11 +80,23 @@ You are participating in a voice conversation. Keep your responses concise, shor
 unless specifically asked to elaborate on a topic.
 
 Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
-    )
-
-    llm = OpenAIRealtimeLLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        session_properties=session_properties,
+            session_properties=SessionProperties(
+                audio=AudioConfiguration(
+                    input=AudioInput(
+                        transcription=InputAudioTranscription(),
+                        # Set openai TurnDetection parameters. Not setting this at all will turn it
+                        # on by default
+                        turn_detection=SemanticTurnDetection(),
+                        # Or set to False to disable openai turn detection and use transport VAD
+                        # turn_detection=False,
+                        noise_reduction=InputAudioNoiseReduction(type="near_field"),
+                    )
+                ),
+                # In this example we provide tools through the context, but you could
+                # alternatively provide them here.
+                # tools=tools,
+            ),
+        ),
     )
 
     # Create a standard OpenAI LLM context object using the normal messages format. The

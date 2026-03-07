@@ -6,10 +6,22 @@
 
 """Cerebras LLM service implementation using OpenAI-compatible interface."""
 
+from dataclasses import dataclass
+from typing import Optional
+
 from loguru import logger
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class CerebrasLLMSettings(OpenAILLMSettings):
+    """Settings for CerebrasLLMService."""
+
+    pass
 
 
 class CerebrasLLMService(OpenAILLMService):
@@ -19,12 +31,15 @@ class CerebrasLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    _settings: CerebrasLLMSettings
+
     def __init__(
         self,
         *,
         api_key: str,
         base_url: str = "https://api.cerebras.ai/v1",
-        model: str = "gpt-oss-120b",
+        model: Optional[str] = None,
+        settings: Optional[CerebrasLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Cerebras LLM service.
@@ -33,9 +48,29 @@ class CerebrasLLMService(OpenAILLMService):
             api_key: The API key for accessing Cerebras's API.
             base_url: The base URL for Cerebras API. Defaults to "https://api.cerebras.ai/v1".
             model: The model identifier to use. Defaults to "gpt-oss-120b".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = CerebrasLLMSettings(model="gpt-oss-120b")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", CerebrasLLMSettings, "model")
+            default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Cerebras API endpoint.
@@ -78,4 +113,12 @@ class CerebrasLLMService(OpenAILLMService):
         params.update(params_from_context)
 
         params.update(self._settings.extra)
+
+        # Prepend system instruction if set
+        if self._settings.system_instruction:
+            messages = params.get("messages", [])
+            params["messages"] = [
+                {"role": "system", "content": self._settings.system_instruction}
+            ] + messages
+
         return params

@@ -48,9 +48,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
+from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
@@ -243,7 +244,7 @@ async def run_eval_pipeline(
     # 5" (in audio) this can be converted to "32 is 5".
     stt = DeepgramSTTService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        live_options=LiveOptions(
+        settings=DeepgramSTTSettings(
             language="multi",
             smart_format=False,
         ),
@@ -251,12 +252,10 @@ async def run_eval_pipeline(
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
+        settings=CartesiaTTSSettings(
+            voice="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
+        ),
     )
-
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
-    llm.register_function("eval_function", eval_runner.function_assert_eval)
 
     eval_function = FunctionSchema(
         name="eval_function",
@@ -301,14 +300,14 @@ async def run_eval_pipeline(
     else:
         system_prompt = f"You are an evaluation agent, be extremly brief. First, ask one question: {example_prompt}. {common_system_prompt}"
 
-    messages = [
-        {
-            "role": "system",
-            "content": system_prompt,
-        },
-    ]
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMSettings(system_instruction=system_prompt),
+    )
 
-    context = LLMContext(messages, tools)
+    llm.register_function("eval_function", eval_runner.function_assert_eval)
+
+    context = LLMContext(tools=tools)
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(

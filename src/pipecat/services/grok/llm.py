@@ -12,6 +12,7 @@ and context aggregation functionality.
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 from loguru import logger
 
@@ -22,11 +23,13 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAILLMService,
     OpenAIUserContextAggregator,
 )
+from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
@@ -67,6 +70,13 @@ class GrokContextAggregatorPair:
         return self._assistant
 
 
+@dataclass
+class GrokLLMSettings(OpenAILLMSettings):
+    """Settings for GrokLLMService."""
+
+    pass
+
+
 class GrokLLMService(OpenAILLMService):
     """A service for interacting with Grok's API using the OpenAI-compatible interface.
 
@@ -76,12 +86,15 @@ class GrokLLMService(OpenAILLMService):
     processing and reports final totals.
     """
 
+    _settings: GrokLLMSettings
+
     def __init__(
         self,
         *,
         api_key: str,
         base_url: str = "https://api.x.ai/v1",
-        model: str = "grok-3-beta",
+        model: Optional[str] = None,
+        settings: Optional[GrokLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the GrokLLMService with API key and model.
@@ -90,9 +103,29 @@ class GrokLLMService(OpenAILLMService):
             api_key: The API key for accessing Grok's API.
             base_url: The base URL for Grok API. Defaults to "https://api.x.ai/v1".
             model: The model identifier to use. Defaults to "grok-3-beta".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = GrokLLMSettings(model="grok-3-beta")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", GrokLLMSettings, "model")
+            default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
         # Initialize counters for token usage metrics
         self._prompt_tokens = 0
         self._completion_tokens = 0

@@ -36,8 +36,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.google.tts import GoogleTTSService
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
+from pipecat.services.google.tts import GoogleTTSService, GoogleTTSSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -216,31 +216,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        model="gemini-2.5-flash",
-        # force a certain amount of thinking if you want it
-        # params=GoogleLLMService.InputParams(
-        #     thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
-        # ),
+        settings=GoogleLLMSettings(
+            model="gemini-2.5-flash",
+            system_instruction=system_message,
+            # force a certain amount of thinking if you want it
+            # thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
+        ),
     )
 
     tts = GoogleTTSService(
-        voice_id="en-US-Chirp3-HD-Charon",
+        settings=GoogleTTSSettings(
+            voice="en-US-Chirp3-HD-Charon",
+            language=Language.EN_US,
+        ),
         params=GoogleTTSService.InputParams(language=Language.EN_US),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
-    messages = [
-        {
-            "role": "system",
-            "content": system_message,
-        },
-        {
-            "role": "user",
-            "content": "Start by saying hello.",
-        },
-    ]
-
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -276,7 +269,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

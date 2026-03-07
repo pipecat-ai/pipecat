@@ -22,7 +22,7 @@ from pipecat.services.gladia.config import (
     RealtimeProcessingConfig,
     TranslationConfig,
 )
-from pipecat.services.gladia.stt import GladiaSTTService
+from pipecat.services.gladia.stt import GladiaSTTService, GladiaSTTSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -59,16 +59,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = GladiaSTTService(
         api_key=os.getenv("GLADIA_API_KEY"),
         region=os.getenv("GLADIA_REGION"),
-        params=GladiaInputParams(
+        settings=GladiaSTTSettings(
             language_config=LanguageConfig(
-                languages=[Language.EN],  # Input in English
+                languages=[Language.EN],
                 code_switching=False,
             ),
             realtime_processing=RealtimeProcessingConfig(
-                translation=True,  # Enable translation
+                translation=True,
                 translation_config=TranslationConfig(
-                    target_languages=[Language.ES],  # Translate to Spanish
-                    model="enhanced",  # Use the enhanced translation model
+                    target_languages=[Language.ES],
+                    model="enhanced",
                 ),
             ),
         ),

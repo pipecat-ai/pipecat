@@ -37,8 +37,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.anthropic.llm import AnthropicLLMService
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.anthropic.llm import AnthropicLLMService, AnthropicLLMSettings
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -120,14 +120,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            settings=CartesiaTTSSettings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
         )
 
-        llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
-        )
-
-        system = f"""
+        system_prompt = f"""
         You are a helpful LLM in a WebRTC call.
         Your goal is to demonstrate your capabilities in a succinct way.
         You have access to tools to search the Rijksmuseum collection and the user's GitHub repositories and account.
@@ -141,7 +139,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         Just respond with short sentences when you are carrying out tool calls.
         """
 
-        messages = [{"role": "system", "content": system}]
+        llm = AnthropicLLMService(
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            settings=AnthropicLLMSettings(
+                system_instruction=system_prompt,
+            ),
+        )
 
         try:
             rijksmuseum_mcp = MCPClient(
@@ -184,7 +187,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         all_standard_tools = rijksmuseum_tools.standard_tools + github_tools.standard_tools
         all_tools = ToolsSchema(standard_tools=all_standard_tools)
 
-        context = LLMContext(messages, all_tools)
+        context = LLMContext(tools=all_tools)
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

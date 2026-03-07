@@ -10,6 +10,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from openai import NOT_GIVEN
+
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -23,7 +25,8 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserContextAggregator,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai.base_llm import BaseOpenAILLMService
+from pipecat.services.openai.base_llm import BaseOpenAILLMService, OpenAILLMSettings
+from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
@@ -72,18 +75,75 @@ class OpenAILLMService(BaseOpenAILLMService):
     def __init__(
         self,
         *,
-        model: str = "gpt-4.1",
+        model: Optional[str] = None,
+        service_tier: Optional[str] = None,
         params: Optional[BaseOpenAILLMService.InputParams] = None,
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize OpenAI LLM service.
 
         Args:
             model: The OpenAI model name to use. Defaults to "gpt-4.1".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
+            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             params: Input parameters for model configuration.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent BaseOpenAILLMService.
         """
-        super().__init__(model=model, params=params, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = OpenAILLMSettings(
+            model="gpt-4.1",
+            system_instruction=None,
+            frequency_penalty=NOT_GIVEN,
+            presence_penalty=NOT_GIVEN,
+            seed=NOT_GIVEN,
+            temperature=NOT_GIVEN,
+            top_p=NOT_GIVEN,
+            top_k=None,
+            max_tokens=NOT_GIVEN,
+            max_completion_tokens=NOT_GIVEN,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            extra={},
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            default_settings.model = model
+
+        # Handle service_tier from deprecated params
+        if params is not None and not settings and params.service_tier is not NOT_GIVEN:
+            service_tier = service_tier or params.service_tier
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", OpenAILLMSettings)
+            if not settings:
+                default_settings.frequency_penalty = params.frequency_penalty
+                default_settings.presence_penalty = params.presence_penalty
+                default_settings.seed = params.seed
+                default_settings.temperature = params.temperature
+                default_settings.top_p = params.top_p
+                default_settings.max_tokens = params.max_tokens
+                default_settings.max_completion_tokens = params.max_completion_tokens
+                if isinstance(params.extra, dict):
+                    default_settings.extra = params.extra
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(service_tier=service_tier, settings=default_settings, **kwargs)
 
     def create_context_aggregator(
         self,

@@ -28,8 +28,8 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.cartesia.tts import CartesiaHttpTTSService
-from pipecat.services.fal.image import FalImageGenService
+from pipecat.services.cartesia.tts import CartesiaHttpTTSService, CartesiaTTSSettings
+from pipecat.services.fal.image import FalImageGenService, FalImageGenSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
@@ -49,7 +49,7 @@ async def main():
         async def get_month_data(month):
             messages = [
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
                 }
             ]
@@ -98,11 +98,15 @@ async def main():
 
             tts = CartesiaHttpTTSService(
                 api_key=os.getenv("CARTESIA_API_KEY"),
-                voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+                settings=CartesiaTTSSettings(
+                    voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+                ),
             )
 
             imagegen = FalImageGenService(
-                params=FalImageGenService.InputParams(image_size="square_hd"),
+                settings=FalImageGenSettings(
+                    image_size="square_hd",
+                ),
                 aiohttp_session=session,
                 key=os.getenv("FAL_KEY"),
             )

@@ -231,49 +231,102 @@ def can_generate_metrics(self) -> bool:
     return True
 ```
 
-### Dynamic Settings Updates
+### Service Settings
 
-STT, LLM, and TTS services support runtime configuration changes via `*UpdateSettingsFrame`s (e.g. `STTUpdateSettingsFrame`, `TTSUpdateSettingsFrame`, `LLMUpdateSettingsFrame`).
+Every AI service (STT, LLM, TTS, image generation, etc.) exposes a **Settings dataclass** that serves two roles:
 
-Each service declares a settings dataclass that extends the appropriate base (`STTSettings`, `TTSSettings`, `LLMSettings`). Fields default to `NOT_GIVEN` so that update objects can represent sparse deltas:
+1. **Store mode** — the service's `self._settings` holds the current value of every runtime-updatable field.
+2. **Delta mode** — an update frame (e.g. `TTSUpdateSettingsFrame`) specifies only the fields that should change; unspecified fields remain `NOT_GIVEN`.
+
+#### Defining your Settings class
+
+Extend `STTSettings`, `TTSSettings`, `LLMSettings`, or `ImageGenSettings` (or, if your service directly subclasses `AIService`, `ServiceSettings`). The base classes already provide common fields (e.g. `model`, `voice`, `language`). You only need to add **service-specific knobs that should be runtime-updatable**:
 
 ```python
 from dataclasses import dataclass, field
 
-from pipecat.services.settings import STTSettings, NOT_GIVEN
+from pipecat.services.settings import TTSSettings, NOT_GIVEN
 
 @dataclass
-class MySTTSettings(STTSettings):
-    """Settings for my STT service.
+class MyTTSSettings(TTSSettings):
+    """Settings for MyTTS service.
 
     Parameters:
-        region: Cloud region for the service.
+        speaking_rate: Speed multiplier (0.5–2.0).
     """
 
-    region: str = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None = field(default_factory=lambda: NOT_GIVEN)
 ```
 
-The service stores its current settings in `self._settings` and declares the type with a class-level annotation for editor support:
+**What goes in Settings vs. `__init__` params:**
+
+| Belongs in Settings                                      | Stays as `__init__` params                |
+| -------------------------------------------------------- | ----------------------------------------- |
+| Model name, voice, language                              | API keys, auth tokens                     |
+| Service-specific tuning knobs (rate, pitch, temperature) | Base URLs, endpoint overrides             |
+| Anything users may want to change mid-session            | Audio encoding, sample format             |
+|                                                          | Connection parameters (timeouts, retries) |
+
+The rule of thumb: if a caller might send an update frame to change it at runtime, it belongs in Settings. Everything else is init-only config stored as `self._xxx`.
+
+#### Wiring settings into `__init__`
+
+Accept an **optional** `settings` parameter. Build a `default_settings` object with all fields set to real values, then merge any caller overrides with `apply_update`:
 
 ```python
-class MySTTService(STTService):
-    _settings: MySTTSettings
+from typing import Optional
 
-    def __init__(self, *, model: str, language: str, region: str, **kwargs):
-        # An initial value should be provided for every settings field.
-        # This will be validated at service start.
-        # (If you track sample_rate, it can be a placeholder value like 0; see
-        # "Sample Rate Handling").
-        super().__init__(
-            settings=MySTTSettings(model=model, language=language, region=region), **kwargs
+class MyTTSService(TTSService):
+    _settings: MyTTSSettings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        settings: Optional[MyTTSSettings] = None,
+        **kwargs,
+    ):
+        # 1. Defaults — every field has a real value (store mode).
+        default_settings = MyTTSSettings(
+            model="my-model-v1",
+            voice="default-voice",
+            language="en",
+            speaking_rate=1.0,
         )
+
+        # 2. Merge caller overrides (only given fields win).
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        # 3. Pass the fully-populated settings to the base class.
+        super().__init__(settings=default_settings, **kwargs)
+
+        # 4. Init-only config stored separately.
+        self._api_key = api_key
 ```
+
+This pattern lets callers override only what they care about:
+
+```python
+# Uses all defaults
+svc = MyTTSService(api_key="sk-xxx")
+
+# Overrides just the voice
+svc = MyTTSService(
+    api_key="sk-xxx",
+    settings=MyTTSSettings(voice="custom-voice"),
+)
+```
+
+#### Reacting to runtime changes
+
+AI services support runtime configuration changes via `*UpdateSettingsFrame`s (e.g. `STTUpdateSettingsFrame`, `TTSUpdateSettingsFrame`, `LLMUpdateSettingsFrame`).
 
 To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns a `dict` mapping each changed field name to its **pre-update** value. Your override should call `super()` first, then act on the changed fields. A common implementation might look like:
 
 ```python
-async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
-    """Apply a settings update, reconfiguring the recognizer if needed."""
+async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+    """Apply a settings update, reconfiguring the connection if needed."""
     changed = await super()._update_settings(update)
 
     if not changed:
@@ -292,7 +345,7 @@ Note that, in this example, the service requires a reconnect to apply the new la
 If your service can't yet apply certain settings at runtime, call `self._warn_unhandled_updated_settings(changed)` with any unhandled field names so users get a clear log message:
 
 ```python
-async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
+async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
     changed = await super()._update_settings(update)
 
     if not changed:

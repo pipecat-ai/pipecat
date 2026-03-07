@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
 from pipecat.transports.tavus.transport import TavusParams, TavusTransport
 
 load_dotenv(override=True)
@@ -51,12 +51,16 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="a167e0f3-df7e-4d52-a9c3-f949145efdab",
+            settings=CartesiaTTSSettings(
+                voice="a167e0f3-df7e-4d52-a9c3-f949145efdab",
+            ),
         )
 
         llm = GoogleLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),
-            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            settings=GoogleLLMSettings(
+                system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            ),
         )
 
         context = LLMContext()
@@ -93,7 +97,7 @@ async def main():
             # Kick off the conversation.
             context.add_message(
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": "Start by greeting the user and ask how you can help.",
                 }
             )

@@ -6,10 +6,22 @@
 
 """DeepSeek LLM service implementation using OpenAI-compatible interface."""
 
+from dataclasses import dataclass
+from typing import Optional
+
 from loguru import logger
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
+
+
+@dataclass
+class DeepSeekLLMSettings(OpenAILLMSettings):
+    """Settings for DeepSeekLLMService."""
+
+    pass
 
 
 class DeepSeekLLMService(OpenAILLMService):
@@ -19,12 +31,15 @@ class DeepSeekLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    _settings: DeepSeekLLMSettings
+
     def __init__(
         self,
         *,
         api_key: str,
         base_url: str = "https://api.deepseek.com/v1",
-        model: str = "deepseek-chat",
+        model: Optional[str] = None,
+        settings: Optional[DeepSeekLLMSettings] = None,
         **kwargs,
     ):
         """Initialize the DeepSeek LLM service.
@@ -33,9 +48,29 @@ class DeepSeekLLMService(OpenAILLMService):
             api_key: The API key for accessing DeepSeek's API.
             base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
             model: The model identifier to use. Defaults to "deepseek-chat".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = DeepSeekLLMSettings(model="deepseek-chat")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            _warn_deprecated_param("model", DeepSeekLLMSettings, "model")
+            default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for DeepSeek API endpoint.
