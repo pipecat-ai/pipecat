@@ -122,6 +122,7 @@ uv run 07-interruptible.py -t twilio -x NGROK_HOST_NAME
 - **[21-tavus-layer-tavus-transport.py](./21-tavus-layer-tavus-transport.py)**: Tavus digital twin (Avatar integration)
 - **[27-simli-layer.py](./27-simli-layer.py)**: Simli avatar integration (Video synchronization)
 - **[56-lemonslice-transport.py](./56-lemonslice-transport.py)**: LemonSlice avatar integration (A/V Synced Avatar integration)
+- **[57-transports-telecmi.py](./57-transports-telecmi.py)**: TeleCMI (PSTN) integration for handling phone calls (WebRTC, STT, TTS)
 
 ### Performance & Optimization
 
