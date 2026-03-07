@@ -26,6 +26,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
 from pipecat.services.google.gemini_live.llm import (
     GeminiLiveLLMService,
+    GeminiLiveLLMSettings,
     GeminiModalities,
     InputParams,
 )
@@ -74,9 +75,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api/tools#native-audio).
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=SYSTEM_INSTRUCTION,
+        settings=GeminiLiveLLMSettings(
+            system_instruction=SYSTEM_INSTRUCTION,
+            modalities=GeminiModalities.TEXT,
+        ),
         tools=[{"google_search": {}}, {"code_execution": {}}],
-        params=InputParams(modalities=GeminiModalities.TEXT),
     )
 
     # Optionally, you can set the response modalities via a function
