@@ -199,7 +199,9 @@ Always be helpful and proactive in offering assistance.""",
     # Create the Grok Realtime LLM service
     llm = GrokRealtimeLLMService(
         api_key=os.getenv("GROK_API_KEY"),
-        session_properties=session_properties,
+        settings=GrokRealtimeLLMService.Settings(
+            session_properties=session_properties,
+        ),
     )
 
     # Register function handlers

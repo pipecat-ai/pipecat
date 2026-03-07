@@ -24,11 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.ultravox.llm import (
-    OneShotInputParams,
-    UltravoxRealtimeLLMService,
-    UltravoxRealtimeLLMSettings,
-)
+from pipecat.services.ultravox.llm import OneShotInputParams, UltravoxRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -112,13 +108,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await asyncio.sleep(10)
         logger.info("Updating Ultravox Realtime LLM settings: output_medium=text")
         await task.queue_frame(
-            LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMSettings(output_medium="text"))
+            LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMService.Settings(output_medium="text"))
         )
 
         await asyncio.sleep(10)
         logger.info("Updating Ultravox Realtime LLM settings: output_medium=voice")
         await task.queue_frame(
-            LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMSettings(output_medium="voice"))
+            LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMService.Settings(output_medium="voice"))
         )
 
     @transport.event_handler("on_client_disconnected")

@@ -24,7 +24,6 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.azure.realtime.llm import AzureRealtimeLLMService
 from pipecat.services.openai.realtime import events
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -102,7 +101,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating Azure Realtime LLM settings: output_modalities=['text']")
         await task.queue_frame(
             LLMUpdateSettingsFrame(
-                delta=OpenAIRealtimeLLMSettings(
+                delta=AzureRealtimeLLMService.Settings(
                     session_properties=events.SessionProperties(output_modalities=["text"])
                 )
             )
@@ -112,7 +111,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating Azure Realtime LLM settings: output_modalities=['audio']")
         await task.queue_frame(
             LLMUpdateSettingsFrame(
-                delta=OpenAIRealtimeLLMSettings(
+                delta=AzureRealtimeLLMService.Settings(
                     session_properties=events.SessionProperties(output_modalities=["audio"])
                 )
             )

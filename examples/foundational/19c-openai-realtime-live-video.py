@@ -32,10 +32,7 @@ from pipecat.services.openai.realtime.events import (
     SemanticTurnDetection,
     SessionProperties,
 )
-from pipecat.services.openai.realtime.llm import (
-    OpenAIRealtimeLLMService,
-    OpenAIRealtimeLLMSettings,
-)
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
@@ -65,7 +62,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAIRealtimeLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAIRealtimeLLMSettings(
+        settings=OpenAIRealtimeLLMService.Settings(
             system_instruction="""You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human

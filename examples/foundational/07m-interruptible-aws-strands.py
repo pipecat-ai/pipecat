@@ -22,7 +22,7 @@ from pipecat.processors.frameworks.strands_agents import StrandsAgentsProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.stt import AWSTranscribeSTTService
-from pipecat.services.aws.tts import AWSPollyTTSService, AWSPollyTTSSettings
+from pipecat.services.aws.tts import AWSPollyTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -95,7 +95,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = AWSPollyTTSService(
         region="us-west-2",  # only specific regions support generative TTS
-        settings=AWSPollyTTSSettings(
+        settings=AWSPollyTTSService.Settings(
             voice="Joanna",
             engine="generative",
             rate="1.1",

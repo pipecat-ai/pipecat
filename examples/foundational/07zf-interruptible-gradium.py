@@ -21,9 +21,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gradium.stt import GradiumSTTService, GradiumSTTSettings
-from pipecat.services.gradium.tts import GradiumTTSService, GradiumTTSSettings
-from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
+from pipecat.services.gradium.stt import GradiumSTTService
+from pipecat.services.gradium.tts import GradiumTTSService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -55,7 +55,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = GradiumSTTService(
         api_key=os.getenv("GRADIUM_API_KEY"),
         api_endpoint_base_url="wss://us.api.gradium.ai/api/speech/asr",
-        settings=GradiumSTTSettings(
+        settings=GradiumSTTService.Settings(
             language=Language.EN,
         ),
     )
@@ -63,14 +63,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = GradiumTTSService(
         api_key=os.getenv("GRADIUM_API_KEY"),
         url="wss://us.api.gradium.ai/api/speech/tts",
-        settings=GradiumTTSSettings(
+        settings=GradiumTTSService.Settings(
             voice="YTpq7expH9539ERJ",
         ),
     )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAILLMSettings(
+        settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),
     )
