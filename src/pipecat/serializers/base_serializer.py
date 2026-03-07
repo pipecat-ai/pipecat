@@ -6,7 +6,7 @@
 
 """Frame serialization interfaces for Pipecat."""
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Optional
 
 from pydantic import BaseModel

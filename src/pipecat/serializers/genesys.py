@@ -27,7 +27,6 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler

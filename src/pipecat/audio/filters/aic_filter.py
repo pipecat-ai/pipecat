@@ -23,7 +23,6 @@ from typing import List, Optional, Tuple
 import numpy as np
 from aic_sdk import (
     Model,
-    ParameterFixedError,
     ProcessorAsync,
     ProcessorConfig,
     ProcessorParameter,

@@ -17,7 +17,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.gladia.config import (
-    GladiaInputParams,
     LanguageConfig,
     RealtimeProcessingConfig,
     TranslationConfig,
