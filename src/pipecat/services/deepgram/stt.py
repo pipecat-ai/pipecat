@@ -365,7 +365,9 @@ class DeepgramSTTService(STTService):
             vad_events=False,
         )
 
-        # 2. Apply live_options overrides — only if settings not provided
+        # 2. (No step 2, as there are no deprecated direct args)
+
+        # 3. Apply live_options overrides — only if settings not provided
         if live_options is not None:
             _warn_deprecated_param("live_options", DeepgramSTTSettings)
             if not settings:
@@ -402,7 +404,7 @@ class DeepgramSTTService(STTService):
                 delta = DeepgramSTTSettings.from_mapping(lo_dict)
                 default_settings.apply_update(delta)
 
-        # 3. Apply settings delta (canonical API, always wins)
+        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -494,8 +496,9 @@ class DeepgramSTTService(STTService):
         if isinstance(self._settings, DeepgramSTTSettings):
             self._settings._sync_extra_to_fields()
 
-        await self._disconnect()
-        await self._connect()
+        if self._connection:
+            await self._disconnect()
+            await self._connect()
 
         return changed
 
@@ -594,13 +597,16 @@ class DeepgramSTTService(STTService):
             return
 
         logger.debug("Disconnecting from Deepgram")
-        # Ask Deepgram to close the stream gracefully before cancelling the task.
-        if self._connection:
-            await self._connection.send_close_stream()
+        # Clear self._connection first to prevent run_stt from sending audio
+        # during the close handshake, then close gracefully on the saved ref.
+        connection = self._connection
+        self._connection = None
+
+        if connection:
+            await connection.send_close_stream()
 
         await self.cancel_task(self._connection_task)
         self._connection_task = None
-        self._connection = None
 
     async def _connection_handler(self):
         """Manages the full WebSocket lifecycle inside a single async with block.

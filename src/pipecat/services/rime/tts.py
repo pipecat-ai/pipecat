@@ -73,7 +73,7 @@ def language_to_rime_language(language: Language) -> str:
 
 @dataclass
 class RimeTTSSettings(TTSSettings):
-    """Settings for Rime WS JSON and HTTP TTS services.
+    """Settings for RimeTTSService and RimeHttpTTSService.
 
     Parameters:
         segment: Text segmentation mode ("immediate", "bySentence", "never").
@@ -106,7 +106,7 @@ class RimeTTSSettings(TTSSettings):
 
 @dataclass
 class RimeNonJsonTTSSettings(TTSSettings):
-    """Settings for Rime non-JSON WS TTS service.
+    """Settings for RimeNonJsonTTSService.
 
     Parameters:
         segment: Text segmentation mode ("immediate", "bySentence", "never").

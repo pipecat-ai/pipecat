@@ -7,7 +7,6 @@
 
 import os
 
-from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -28,7 +27,7 @@ from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -102,7 +101,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"), live_options=LiveOptions(language="multi")
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        settings=DeepgramSTTSettings(
+            language="multi",
+        ),
     )
 
     tts = SwitchLanguage()

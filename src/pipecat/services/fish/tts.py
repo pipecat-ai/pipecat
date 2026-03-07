@@ -10,9 +10,8 @@ This module provides integration with Fish Audio's real-time TTS WebSocket API
 for streaming text-to-speech synthesis with customizable voice parameters.
 """
 
-import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, ClassVar, Dict, Literal, Mapping, Optional, Self
+from typing import Any, AsyncGenerator, Literal, Mapping, Optional, Self
 
 from loguru import logger
 from pydantic import BaseModel
@@ -25,7 +24,6 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -49,21 +47,23 @@ FishAudioOutputFormat = Literal["opus", "mp3", "pcm", "wav"]
 
 @dataclass
 class FishAudioTTSSettings(TTSSettings):
-    """Settings for Fish Audio TTS service.
+    """Settings for FishAudioTTSService.
 
     Parameters:
-        latency: Latency mode ("normal" or "balanced"). Defaults to "normal".
+        latency: Latency mode ("normal" or "balanced"). Defaults to "balanced".
         normalize: Whether to normalize audio output. Defaults to True.
+        temperature: Controls randomness in speech generation (0.0-1.0).
+        top_p: Controls diversity via nucleus sampling (0.0-1.0).
         prosody_speed: Speech speed multiplier (0.5-2.0). Defaults to 1.0.
-        prosody_volume: Volume adjustment in dB. Defaults to 0.
-        reference_id: Reference ID of the voice model.
+        prosody_volume: Volume adjustment in dB (-20 to 20). Defaults to 0.
     """
 
     latency: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     normalize: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prosody_speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prosody_volume: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> Self:
@@ -174,18 +174,18 @@ class FishAudioTTSService(InterruptibleTTSService):
             model="s1",
             voice=None,
             language=None,
-            latency="normal",
+            latency="balanced",
             normalize=True,
+            temperature=None,
+            top_p=None,
             prosody_speed=1.0,
             prosody_volume=0,
-            reference_id=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if reference_id is not None:
             _warn_deprecated_param("reference_id", FishAudioTTSSettings, "voice")
             default_settings.voice = reference_id
-            default_settings.reference_id = reference_id
         if model_id is not None:
             _warn_deprecated_param("model_id", FishAudioTTSSettings, "model")
             default_settings.model = model_id
@@ -317,8 +317,12 @@ class FishAudioTTSService(InterruptibleTTSService):
                     "speed": self._settings.prosody_speed,
                     "volume": self._settings.prosody_volume,
                 },
-                "reference_id": self._settings.reference_id,
+                "reference_id": self._settings.voice,
             }
+            if self._settings.temperature is not None:
+                request_settings["temperature"] = self._settings.temperature
+            if self._settings.top_p is not None:
+                request_settings["top_p"] = self._settings.top_p
             start_message = {"event": "start", "request": {"text": "", **request_settings}}
             await self._websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start message to Fish Audio")
@@ -375,7 +379,14 @@ class FishAudioTTSService(InterruptibleTTSService):
                                 frame = TTSAudioRawFrame(audio_data, self.sample_rate, 1)
                                 await self.push_frame(frame)
                                 await self.stop_ttfb_metrics()
-                                continue
+                        elif event == "finish":
+                            reason = msg.get("reason", "unknown")
+                            if reason == "error":
+                                await self.push_error(
+                                    error_msg="Fish Audio server error during synthesis"
+                                )
+                            else:
+                                logger.debug(f"Fish Audio session finished: {reason}")
 
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)

@@ -70,7 +70,7 @@ def language_to_xtts_language(language: Language) -> Optional[str]:
 
 @dataclass
 class XTTSTTSSettings(TTSSettings):
-    """Settings for XTTS TTS service."""
+    """Settings for XTTSService."""
 
     pass
 
@@ -123,6 +123,8 @@ class XTTSService(TTSService):
         if voice_id is not None:
             _warn_deprecated_param("voice_id", XTTSTTSSettings, "voice")
             default_settings.voice = voice_id
+
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

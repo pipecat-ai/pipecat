@@ -19,7 +19,6 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -48,6 +47,7 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
         The corresponding LMNT language code, or None if not supported.
     """
     LANGUAGE_MAP = {
+        Language.AR: "ar",
         Language.DE: "de",
         Language.EN: "en",
         Language.ES: "es",
@@ -65,6 +65,7 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
         Language.TH: "th",
         Language.TR: "tr",
         Language.UK: "uk",
+        Language.UR: "ur",
         Language.VI: "vi",
         Language.ZH: "zh",
     }
@@ -74,7 +75,7 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
 
 @dataclass
 class LmntTTSSettings(TTSSettings):
-    """Settings for LMNT TTS service."""
+    """Settings for LmntTTSService."""
 
     pass
 
@@ -96,6 +97,7 @@ class LmntTTSService(InterruptibleTTSService):
         voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         language: Language = Language.EN,
+        output_format: str = "pcm_s16le",
         model: Optional[str] = None,
         settings: Optional[LmntTTSSettings] = None,
         **kwargs,
@@ -111,6 +113,8 @@ class LmntTTSService(InterruptibleTTSService):
 
             sample_rate: Audio sample rate. If None, uses default.
             language: Language for synthesis. Defaults to English.
+            output_format: Audio output format. One of "pcm_s16le", "pcm_f32le",
+                "mp3", "ulaw", "webm". Defaults to "pcm_s16le".
             model: TTS model to use.
 
                 .. deprecated:: 0.0.105
@@ -122,7 +126,7 @@ class LmntTTSService(InterruptibleTTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = LmntTTSSettings(
-            model="blizzard",
+            model="aurora",
             voice=None,
             language=self.language_to_service_language(language),
         )
@@ -135,7 +139,7 @@ class LmntTTSService(InterruptibleTTSService):
             _warn_deprecated_param("model", LmntTTSSettings, "model")
             default_settings.model = model
 
-        # 3. No params for this service
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -151,7 +155,7 @@ class LmntTTSService(InterruptibleTTSService):
         )
 
         self._api_key = api_key
-        self._output_format = "raw"
+        self._output_format = output_format
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:

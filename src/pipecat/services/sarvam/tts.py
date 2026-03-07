@@ -53,11 +53,9 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -230,16 +228,27 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
     """
     LANGUAGE_MAP = {
         Language.BN: "bn-IN",  # Bengali
+        Language.BN_IN: "bn-IN",
         Language.EN: "en-IN",  # English (India)
+        Language.EN_IN: "en-IN",
         Language.GU: "gu-IN",  # Gujarati
+        Language.GU_IN: "gu-IN",
         Language.HI: "hi-IN",  # Hindi
+        Language.HI_IN: "hi-IN",
         Language.KN: "kn-IN",  # Kannada
+        Language.KN_IN: "kn-IN",
         Language.ML: "ml-IN",  # Malayalam
+        Language.ML_IN: "ml-IN",
         Language.MR: "mr-IN",  # Marathi
+        Language.MR_IN: "mr-IN",
         Language.OR: "od-IN",  # Odia
+        Language.OR_IN: "od-IN",
         Language.PA: "pa-IN",  # Punjabi
+        Language.PA_IN: "pa-IN",
         Language.TA: "ta-IN",  # Tamil
+        Language.TA_IN: "ta-IN",
         Language.TE: "te-IN",  # Telugu
+        Language.TE_IN: "te-IN",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
@@ -247,7 +256,7 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
 
 @dataclass
 class SarvamHttpTTSSettings(TTSSettings):
-    """Settings for Sarvam HTTP TTS service.
+    """Settings for SarvamHttpTTSService.
 
     Parameters:
         enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
@@ -273,7 +282,7 @@ class SarvamHttpTTSSettings(TTSSettings):
 
 @dataclass
 class SarvamTTSSettings(SarvamHttpTTSSettings):
-    """Settings for Sarvam WebSocket TTS service.
+    """Settings for SarvamTTSService.
 
     Extends :class:`SarvamHttpTTSSettings` with WebSocket-specific buffering parameters.
 
@@ -480,6 +489,10 @@ class SarvamHttpTTSService(TTSService):
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        # Convert Language enum to service-specific string
+        if isinstance(default_settings.language, Language):
+            default_settings.language = self.language_to_service_language(default_settings.language)
 
         # Get model configuration (validates model exists)
         resolved_model = default_settings.model
@@ -899,6 +912,10 @@ class SarvamTTSService(InterruptibleTTSService):
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        # Convert Language enum to service-specific string
+        if isinstance(default_settings.language, Language):
+            default_settings.language = self.language_to_service_language(default_settings.language)
 
         # Get model configuration (validates model exists)
         resolved_model = default_settings.model

@@ -68,7 +68,7 @@ def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputForma
 
 @dataclass
 class AzureTTSSettings(TTSSettings):
-    """Settings for Azure TTS services.
+    """Settings for AzureTTSService and AzureHttpTTSService.
 
     Parameters:
         emphasis: Emphasis level for speech ("strong", "moderate", "reduced").

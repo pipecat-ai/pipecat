@@ -40,7 +40,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 @dataclass
 class DeepgramSageMakerTTSSettings(TTSSettings):
-    """Settings for Deepgram SageMaker TTS service."""
+    """Settings for DeepgramSageMakerTTSService."""
 
     pass
 

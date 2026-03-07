@@ -37,7 +37,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class SpeechmaticsTTSSettings(TTSSettings):
-    """Settings for Speechmatics TTS service.
+    """Settings for SpeechmaticsTTSService.
 
     Parameters:
         max_retries: Maximum number of retries for HTTP requests.

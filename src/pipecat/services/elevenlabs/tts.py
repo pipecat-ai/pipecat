@@ -187,7 +187,7 @@ class PronunciationDictionaryLocator(BaseModel):
 
 @dataclass
 class ElevenLabsTTSSettings(TTSSettings):
-    """Settings for the ElevenLabs WebSocket TTS service.
+    """Settings for ElevenLabsTTSService.
 
     Fields that appear in the WebSocket URL (``voice``, ``model``,
     ``language``) require a full reconnect when changed.  Fields that
@@ -225,7 +225,7 @@ class ElevenLabsTTSSettings(TTSSettings):
 
 @dataclass
 class ElevenLabsHttpTTSSettings(TTSSettings):
-    """Settings for the ElevenLabs HTTP TTS service.
+    """Settings for ElevenLabsHttpTTSService.
 
     Parameters:
         optimize_streaming_latency: Latency optimization level (0-4).
@@ -358,6 +358,9 @@ class ElevenLabsTTSService(WebsocketTTSService):
         model: Optional[str] = None,
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
+        auto_mode: bool = True,
+        enable_ssml_parsing: Optional[bool] = None,
+        enable_logging: Optional[bool] = None,
         pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None,
         params: Optional[InputParams] = None,
         settings: Optional[ElevenLabsTTSSettings] = None,
@@ -381,6 +384,9 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
+            auto_mode: Whether to enable automatic mode optimization.
+            enable_ssml_parsing: Whether to parse SSML tags in text.
+            enable_logging: Whether to enable ElevenLabs server-side logging.
             pronunciation_dictionary_locators: List of pronunciation dictionary
                 locators to use.
             params: Additional input parameters for voice customization.
@@ -428,11 +434,6 @@ class ElevenLabsTTSService(WebsocketTTSService):
             apply_text_normalization=None,
         )
 
-        # Track init-only URL params through the override chain
-        _auto_mode = True
-        _enable_ssml_parsing = None
-        _enable_logging = None
-
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
             _warn_deprecated_param("voice_id", ElevenLabsTTSSettings, "voice")
@@ -459,11 +460,11 @@ class ElevenLabsTTSService(WebsocketTTSService):
                 if params.speed is not None:
                     default_settings.speed = params.speed
                 if params.auto_mode is not None:
-                    _auto_mode = str(params.auto_mode).lower()
+                    auto_mode = params.auto_mode
                 if params.enable_ssml_parsing is not None:
-                    _enable_ssml_parsing = params.enable_ssml_parsing
+                    enable_ssml_parsing = params.enable_ssml_parsing
                 if params.enable_logging is not None:
-                    _enable_logging = params.enable_logging
+                    enable_logging = params.enable_logging
                 if params.apply_text_normalization is not None:
                     default_settings.apply_text_normalization = params.apply_text_normalization
                 if _pronunciation_dictionary_locators is None:
@@ -488,9 +489,9 @@ class ElevenLabsTTSService(WebsocketTTSService):
         self._url = url
 
         # Init-only WebSocket URL params (not runtime-updatable).
-        self._auto_mode = _auto_mode
-        self._enable_ssml_parsing = _enable_ssml_parsing
-        self._enable_logging = _enable_logging
+        self._auto_mode = auto_mode
+        self._enable_ssml_parsing = enable_ssml_parsing
+        self._enable_logging = enable_logging
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
@@ -664,7 +665,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
             voice_id = self._settings.voice
             model = self._settings.model
             output_format = self._output_format
-            url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={self._auto_mode}"
+            url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={str(self._auto_mode).lower()}"
 
             if self._enable_ssml_parsing:
                 url += f"&enable_ssml_parsing={self._enable_ssml_parsing}"

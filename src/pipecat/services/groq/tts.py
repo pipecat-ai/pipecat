@@ -34,7 +34,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class GroqTTSSettings(TTSSettings):
-    """Settings for the Groq TTS service.
+    """Settings for GroqTTSService.
 
     Parameters:
         speed: Speech speed multiplier. Defaults to 1.0.

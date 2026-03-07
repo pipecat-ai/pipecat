@@ -74,7 +74,7 @@ def language_to_async_language(language: Language) -> Optional[str]:
 
 @dataclass
 class AsyncAITTSSettings(TTSSettings):
-    """Settings for Async AI TTS services."""
+    """Settings for AsyncAITTSService and AsyncAIHttpTTSService."""
 
     pass
 

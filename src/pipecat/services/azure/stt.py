@@ -112,7 +112,7 @@ class AzureSTTService(STTService):
             _warn_deprecated_param("language", AzureSTTSettings, "language")
             default_settings.language = language_to_azure_language(language)
 
-        # 3. No params to apply
+        # 3. (No step 3, as there's no params object to apply)
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -159,23 +159,16 @@ class AzureSTTService(STTService):
         return language_to_azure_language(language)
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta.
-
-        Settings are stored but not applied to the active recognizer.
-        """
+        """Apply a settings delta and reconnect if language changed."""
         changed = await super()._update_settings(delta)
 
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # if "language" in changed:
-        #     self._speech_config.speech_recognition_language = self._settings.language
-        #     if self._speech_recognizer:
-        #         # Requires refactoring to set up and tear down recognizer, as
-        #         # language is applied at recognizer initialization
-        #         await self._disconnect()
-        #         await self._connect()
-
-        self._warn_unhandled_updated_settings(changed)
+        if "language" in changed:
+            self._speech_config.speech_recognition_language = (
+                self._settings.language or language_to_azure_language(Language.EN_US)
+            )
+            if self._audio_stream:
+                await self._disconnect()
+                await self._connect()
 
         return changed
 
@@ -202,14 +195,32 @@ class AzureSTTService(STTService):
     async def start(self, frame: StartFrame):
         """Start the speech recognition service.
 
-        Initializes the Azure speech recognizer with audio stream configuration
-        and begins continuous speech recognition.
-
         Args:
             frame: Frame indicating the start of processing.
         """
         await super().start(frame)
+        await self._connect()
 
+    async def stop(self, frame: EndFrame):
+        """Stop the speech recognition service.
+
+        Args:
+            frame: Frame indicating the end of processing.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the speech recognition service.
+
+        Args:
+            frame: Frame indicating cancellation.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def _connect(self):
+        """Initialize the Azure speech recognizer and begin continuous recognition."""
         if self._audio_stream:
             return
 
@@ -231,37 +242,15 @@ class AzureSTTService(STTService):
                 error_msg=f"Uncaught exception during initialization: {e}", exception=e
             )
 
-    async def stop(self, frame: EndFrame):
-        """Stop the speech recognition service.
-
-        Cleanly shuts down the Azure speech recognizer and closes audio streams.
-
-        Args:
-            frame: Frame indicating the end of processing.
-        """
-        await super().stop(frame)
-
+    async def _disconnect(self):
+        """Stop recognition and close audio streams."""
         if self._speech_recognizer:
             self._speech_recognizer.stop_continuous_recognition_async()
+            self._speech_recognizer = None
 
         if self._audio_stream:
             self._audio_stream.close()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the speech recognition service.
-
-        Immediately stops recognition and closes resources.
-
-        Args:
-            frame: Frame indicating cancellation.
-        """
-        await super().cancel(frame)
-
-        if self._speech_recognizer:
-            self._speech_recognizer.stop_continuous_recognition_async()
-
-        if self._audio_stream:
-            self._audio_stream.close()
+            self._audio_stream = None
 
     @traced_stt
     async def _handle_transcription(

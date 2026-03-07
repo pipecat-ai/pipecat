@@ -297,9 +297,7 @@ class SonioxSTTService(WebsocketSTTService):
         await self._connect()
 
     async def _update_settings(self, delta: SonioxSTTSettings) -> dict[str, Any]:
-        """Apply settings delta.
-
-        Settings are stored but not applied to the active connection.
+        """Apply settings delta and reconnect if anything changed.
 
         Args:
             delta: A settings delta.
@@ -309,15 +307,9 @@ class SonioxSTTService(WebsocketSTTService):
         """
         changed = await super()._update_settings(delta)
 
-        if not changed:
-            return changed
-
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # await self._disconnect()
-        # await self._connect()
-
-        self._warn_unhandled_updated_settings(changed)
+        if changed:
+            await self._disconnect()
+            await self._connect()
 
         return changed
 

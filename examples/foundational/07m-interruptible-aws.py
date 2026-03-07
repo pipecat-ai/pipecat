@@ -64,7 +64,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AWSBedrockLLMService(
         aws_region="us-west-2",
         settings=AWSBedrockLLMSettings(
-            model="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            model="us.anthropic.claude-sonnet-4-6",
             temperature=0.8,
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),

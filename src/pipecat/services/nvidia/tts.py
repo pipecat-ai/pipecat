@@ -44,7 +44,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class NvidiaTTSSettings(TTSSettings):
-    """Settings for NVIDIA Riva TTS service.
+    """Settings for NvidiaTTSService.
 
     Parameters:
         quality: Audio quality setting (0-100).

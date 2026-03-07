@@ -87,10 +87,9 @@ def language_to_minimax_language(language: Language) -> Optional[str]:
 
 @dataclass
 class MiniMaxTTSSettings(TTSSettings):
-    """Settings for MiniMax TTS service.
+    """Settings for MiniMaxHttpTTSService.
 
     Parameters:
-        stream: Whether to use streaming mode.
         speed: Speech speed (range: 0.5 to 2.0).
         volume: Speech volume (range: 0 to 10).
         pitch: Pitch adjustment (range: -12 to 12).
@@ -101,7 +100,6 @@ class MiniMaxTTSSettings(TTSSettings):
         language_boost: Language boost string for multilingual support.
     """
 
-    stream: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     volume: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -189,6 +187,7 @@ class MiniMaxHttpTTSService(TTSService):
         voice_id: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
         sample_rate: Optional[int] = None,
+        stream: bool = True,
         params: Optional[InputParams] = None,
         settings: Optional[MiniMaxTTSSettings] = None,
         **kwargs,
@@ -217,6 +216,7 @@ class MiniMaxHttpTTSService(TTSService):
 
             aiohttp_session: aiohttp.ClientSession for API communication.
             sample_rate: Output audio sample rate in Hz. If None, uses pipeline default.
+            stream: Whether to use streaming mode. Defaults to True.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
@@ -231,7 +231,6 @@ class MiniMaxHttpTTSService(TTSService):
             model="speech-02-turbo",
             voice="Calm_Woman",
             language=None,
-            stream=True,
             speed=1.0,
             volume=1.0,
             pitch=0,
@@ -311,6 +310,7 @@ class MiniMaxHttpTTSService(TTSService):
 
         self._api_key = api_key
         self._group_id = group_id
+        self._stream = stream
         self._base_url = f"{base_url}?GroupId={group_id}"
         self._session = aiohttp_session
 
@@ -392,7 +392,7 @@ class MiniMaxHttpTTSService(TTSService):
 
         # Create payload from settings
         payload = {
-            "stream": self._settings.stream,
+            "stream": self._stream,
             "voice_setting": voice_setting,
             "audio_setting": audio_setting,
             "model": self._settings.model,

@@ -200,18 +200,12 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
         min_silence_duration_ms: Minimum silence duration for VAD (50-2000ms).
-        include_timestamps: Whether to include word-level timestamps in transcripts.
-        enable_logging: Whether to enable logging on ElevenLabs' side.
-        include_language_detection: Whether to include language detection in transcripts.
     """
 
     vad_silence_threshold_secs: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_silence_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    include_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_logging: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    include_language_detection: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ElevenLabsSTTService(SegmentedSTTService):
@@ -496,6 +490,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         commit_strategy: CommitStrategy = CommitStrategy.MANUAL,
         model: Optional[str] = None,
         sample_rate: Optional[int] = None,
+        include_timestamps: bool = False,
+        enable_logging: bool = False,
+        include_language_detection: bool = False,
         params: Optional[InputParams] = None,
         settings: Optional[ElevenLabsRealtimeSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = ELEVENLABS_REALTIME_TTFS_P99,
@@ -515,6 +512,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                     Use ``settings=ElevenLabsRealtimeSTTSettings(model=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
+            include_timestamps: Whether to include word-level timestamps in transcripts.
+            enable_logging: Whether to enable logging on ElevenLabs' side.
+            include_language_detection: Whether to include language detection in transcripts.
             params: Configuration parameters for the STT service.
 
                 .. deprecated:: 0.0.105
@@ -534,9 +534,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             vad_threshold=None,
             min_speech_duration_ms=None,
             min_silence_duration_ms=None,
-            include_timestamps=False,
-            enable_logging=False,
-            include_language_detection=False,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -555,9 +552,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 default_settings.vad_threshold = params.vad_threshold
                 default_settings.min_speech_duration_ms = params.min_speech_duration_ms
                 default_settings.min_silence_duration_ms = params.min_silence_duration_ms
-                default_settings.include_timestamps = params.include_timestamps
-                default_settings.enable_logging = params.enable_logging
-                default_settings.include_language_detection = params.include_language_detection
+                include_timestamps = params.include_timestamps
+                enable_logging = params.enable_logging
+                include_language_detection = params.include_language_detection
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -579,6 +576,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         # Init-only config (not runtime-updatable).
         self._commit_strategy = commit_strategy
+        self._include_timestamps = include_timestamps
+        self._enable_logging = enable_logging
+        self._include_language_detection = include_language_detection
 
         self._connected_event = asyncio.Event()
         self._connected_event.set()
@@ -605,8 +605,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        await self._disconnect()
-        await self._connect()
+        if self._websocket:
+            await self._disconnect()
+            await self._connect()
 
         return changed
 
@@ -762,17 +763,15 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             params.append(f"commit_strategy={self._commit_strategy.value}")
 
             # Add optional parameters
-            if self._settings.include_timestamps:
-                params.append(
-                    f"include_timestamps={str(self._settings.include_timestamps).lower()}"
-                )
+            if self._include_timestamps:
+                params.append(f"include_timestamps={str(self._include_timestamps).lower()}")
 
-            if self._settings.enable_logging:
-                params.append(f"enable_logging={str(self._settings.enable_logging).lower()}")
+            if self._enable_logging:
+                params.append(f"enable_logging={str(self._enable_logging).lower()}")
 
-            if self._settings.include_language_detection:
+            if self._include_language_detection:
                 params.append(
-                    f"include_language_detection={str(self._settings.include_language_detection).lower()}"
+                    f"include_language_detection={str(self._include_language_detection).lower()}"
                 )
 
             # Add VAD parameters if using VAD commit strategy and values are specified
@@ -920,7 +919,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         # If timestamps are enabled, skip this message and wait for the
         # committed_transcript_with_timestamps message which contains all the data
-        if self._settings.include_timestamps:
+        if self._include_timestamps:
             return
 
         text = data.get("text", "").strip()

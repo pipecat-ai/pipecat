@@ -89,7 +89,7 @@ def language_to_kokoro_language(language: Language) -> str:
 
 @dataclass
 class KokoroTTSSettings(TTSSettings):
-    """Settings for the Kokoro TTS service."""
+    """Settings for KokoroTTSService."""
 
     pass
 

@@ -12,7 +12,7 @@ WebSocket API for streaming audio transcription.
 
 import base64
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import STTSettings, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -68,9 +68,16 @@ def language_to_gradium_language(language: Language) -> Optional[str]:
 
 @dataclass
 class GradiumSTTSettings(STTSettings):
-    """Settings for GradiumSTTService."""
+    """Settings for GradiumSTTService.
 
-    pass
+    Parameters:
+        delay_in_frames: Delay in audio frames (80ms each) before text is
+            generated. Higher delays allow more context but increase latency.
+            Allowed values: 7, 8, 10, 12, 14, 16, 20, 24, 36, 48.
+            Default is 10 (800ms). Lower values like 7-8 give faster response.
+    """
+
+    delay_in_frames: Optional[int] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GradiumSTTService(WebsocketSTTService):
@@ -107,7 +114,6 @@ class GradiumSTTService(WebsocketSTTService):
         *,
         api_key: str,
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
-        delay_in_frames: Optional[int] = None,
         params: Optional[InputParams] = None,
         json_config: Optional[str] = None,
         settings: Optional[GradiumSTTSettings] = None,
@@ -119,9 +125,6 @@ class GradiumSTTService(WebsocketSTTService):
         Args:
             api_key: Gradium API key for authentication.
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
-            delay_in_frames: Delay in audio frames (80ms each) before text is
-                generated. Higher delays allow more context but increase latency.
-                Allowed values: 7, 8, 10, 12, 14, 16, 20, 24, 36, 48.
             params: Configuration parameters for language and delay settings.
 
                 .. deprecated:: 0.0.105
@@ -151,9 +154,10 @@ class GradiumSTTService(WebsocketSTTService):
         default_settings = GradiumSTTSettings(
             model=None,
             language=None,
+            delay_in_frames=None,
         )
 
-        # 2. (no deprecated direct args for this service)
+        # 2. (No step 2, as there are no deprecated direct args)
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
@@ -161,7 +165,7 @@ class GradiumSTTService(WebsocketSTTService):
             if not settings:
                 default_settings.language = params.language
                 if params.delay_in_frames is not None:
-                    delay_in_frames = params.delay_in_frames
+                    default_settings.delay_in_frames = params.delay_in_frames
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -178,7 +182,6 @@ class GradiumSTTService(WebsocketSTTService):
         self._api_endpoint_base_url = api_endpoint_base_url
         self._websocket = None
         self._json_config = json_config
-        self._config_delay_in_frames = delay_in_frames
 
         self._receive_task = None
 
@@ -212,8 +215,9 @@ class GradiumSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        await self._disconnect()
-        await self._connect()
+        if self._websocket:
+            await self._disconnect()
+            await self._connect()
         return changed
 
     async def start(self, frame: StartFrame):
@@ -358,8 +362,8 @@ class GradiumSTTService(WebsocketSTTService):
                 gradium_language = language_to_gradium_language(self._settings.language)
                 if gradium_language:
                     json_config["language"] = gradium_language
-            if self._config_delay_in_frames:
-                json_config["delay_in_frames"] = self._config_delay_in_frames
+            if self._settings.delay_in_frames:
+                json_config["delay_in_frames"] = self._settings.delay_in_frames
             if json_config:
                 setup_msg["json_config"] = json_config
             await self._websocket.send(json.dumps(setup_msg))
