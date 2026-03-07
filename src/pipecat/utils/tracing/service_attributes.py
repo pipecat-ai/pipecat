@@ -107,7 +107,7 @@ def add_tts_span_attributes(
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
 
-    # Add settings if provided
+    # Use given_fields() defensively in case a service doesn't initialize all settings.
     if settings:
         for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
@@ -171,7 +171,7 @@ def add_stt_span_attributes(
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
 
-    # Add settings if provided
+    # Use given_fields() defensively in case a service doesn't initialize all settings.
     if settings:
         for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
@@ -359,7 +359,7 @@ def add_gemini_live_span_attributes(
     if tools_serialized:
         span.set_attribute("tools.definitions", tools_serialized)
 
-    # Add settings if provided
+    # Use given_fields() defensively in case a service doesn't initialize all settings.
     if settings:
         for key, value in settings.given_fields().items():
             if isinstance(value, (str, int, float, bool)):
