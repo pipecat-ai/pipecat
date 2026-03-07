@@ -8,7 +8,7 @@
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 from urllib.parse import urlencode
 
 import aiohttp

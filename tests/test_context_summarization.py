@@ -10,7 +10,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock
 
-from pipecat.frames.frames import LLMContextSummaryRequestFrame, LLMContextSummaryResultFrame
+from pipecat.frames.frames import LLMContextSummaryRequestFrame
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.context.llm_context_summarization import (

@@ -6,7 +6,6 @@
 
 import os
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 

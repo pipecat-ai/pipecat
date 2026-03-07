@@ -8,8 +8,6 @@
 
 from unittest.mock import patch
 
-import pytest
-
 from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTSettings
 from pipecat.services.grok.realtime import events as grok_events
