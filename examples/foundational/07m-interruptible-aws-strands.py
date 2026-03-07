@@ -104,7 +104,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Create Strands agent processor
     try:
-        agent = build_agent(model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0", max_tokens=8000)
+        agent = build_agent(model_id="us.anthropic.claude-sonnet-4-6", max_tokens=8000)
         llm = StrandsAgentsProcessor(agent=agent)
         logger.info("Successfully created Strands agent for NAB customer service coaching")
     except Exception as e:
@@ -152,7 +152,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     messages=[
                         {
                             "role": "user",
-                            "content": f"Greet the user and introduce yourself.",
+                            "content": f"Greet the user and introduce yourself. Don't use emojis.",
                         }
                     ],
                     run_llm=True,

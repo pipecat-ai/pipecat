@@ -61,11 +61,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AWSBedrockLLMService(
         aws_region="us-west-2",
         settings=AWSBedrockLLMSettings(
-            model="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-            # Note: usually, prefer providing latency="optimized" param.
-            # Here we can't because AWS Bedrock doesn't support it for Claude 3.7,
-            # which we need for image input.
-            params=AWSBedrockLLMService.InputParams(temperature=0.8),
+            model="us.anthropic.claude-sonnet-4-6",
+            temperature=0.8,
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You are also able to describe images.",
         ),
     )
