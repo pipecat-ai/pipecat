@@ -907,7 +907,7 @@ class InworldTTSService(WebsocketTTSService):
                 for k in ["contextCreated", "audioChunk", "flushCompleted", "contextClosed"]
                 if k in result
             ]
-            logger.debug(f"{self}: Received message types={msg_types}, ctx_id={ctx_id}")
+            logger.trace(f"{self}: Received message types={msg_types}, ctx_id={ctx_id}")
 
             # Check for errors
             status = result.get("status", {})

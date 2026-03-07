@@ -104,7 +104,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         await asyncio.sleep(10)
         logger.info("Updating Gradium STT settings: delay_in_frames=5")
-        await task.queue_frame(STTUpdateSettingsFrame(delta=GradiumSTTSettings(delay_in_frames=5)))
+        await task.queue_frame(STTUpdateSettingsFrame(delta=GradiumSTTSettings(delay_in_frames=16)))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

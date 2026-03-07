@@ -400,12 +400,13 @@ class SarvamSTTService(STTService):
 
         changed = await super()._update_settings(delta)
 
-        # Prompt is a WebSocket connect-time parameter; reconnect to apply.
-        if "prompt" in changed:
+        # Language and prompt are WebSocket connect-time parameters; reconnect to apply.
+        reconnect_fields = {"language", "prompt"}
+        if changed.keys() & reconnect_fields:
             await self._disconnect()
             await self._connect()
 
-        unhandled = {k: v for k, v in changed.items() if k != "prompt"}
+        unhandled = {k: v for k, v in changed.items() if k not in reconnect_fields}
         if unhandled:
             self._warn_unhandled_updated_settings(unhandled)
 
@@ -483,7 +484,6 @@ class SarvamSTTService(STTService):
             Frame: None (transcription results come via WebSocket callbacks).
         """
         if not self._socket_client:
-            logger.warning("WebSocket not connected, cannot process audio")
             yield None
             return
 
@@ -636,18 +636,22 @@ class SarvamSTTService(STTService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._websocket_context and self._socket_client:
+        # Clear references first to prevent run_stt from sending audio
+        # during the close handshake.
+        socket_client = self._socket_client
+        websocket_context = self._websocket_context
+        self._socket_client = None
+        self._websocket_context = None
+
+        if websocket_context and socket_client:
             try:
-                # Exit the async context manager
-                await self._websocket_context.__aexit__(None, None, None)
+                await websocket_context.__aexit__(None, None, None)
             except Exception as e:
                 await self.push_error(
                     error_msg=f"Error closing WebSocket connection: {e}", exception=e
                 )
             finally:
                 logger.debug("Disconnected from Sarvam WebSocket")
-                self._socket_client = None
-                self._websocket_context = None
 
     async def _receive_task_handler(self):
         """Handle incoming messages from Sarvam WebSocket.

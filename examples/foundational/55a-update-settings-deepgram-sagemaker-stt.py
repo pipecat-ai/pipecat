@@ -7,7 +7,6 @@
 import asyncio
 import os
 
-from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -114,7 +113,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             STTUpdateSettingsFrame(
                 delta=DeepgramSageMakerSTTSettings(
                     language=Language.ES,
-                    live_options=LiveOptions(punctuate=False),
+                    punctuate=False,
                 )
             )
         )
