@@ -171,6 +171,7 @@ class SarvamSTTService(STTService):
             ...
     """
 
+    Settings = SarvamSTTSettings
     _settings: SarvamSTTSettings
 
     class InputParams(BaseModel):

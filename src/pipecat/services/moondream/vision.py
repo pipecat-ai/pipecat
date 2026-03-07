@@ -79,6 +79,9 @@ class MoondreamService(VisionService):
     including CUDA, MPS, and Intel XPU.
     """
 
+    Settings = MoondreamSettings
+    _settings: MoondreamSettings
+
     def __init__(
         self,
         *,

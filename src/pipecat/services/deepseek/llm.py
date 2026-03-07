@@ -31,6 +31,7 @@ class DeepSeekLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    Settings = DeepSeekLLMSettings
     _settings: DeepSeekLLMSettings
 
     def __init__(

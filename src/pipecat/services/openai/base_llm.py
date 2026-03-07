@@ -68,6 +68,7 @@ class BaseOpenAILLMService(LLMService):
     configurations.
     """
 
+    Settings = OpenAILLMSettings
     _settings: OpenAILLMSettings
 
     class InputParams(BaseModel):

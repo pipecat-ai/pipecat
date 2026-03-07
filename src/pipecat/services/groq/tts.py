@@ -51,6 +51,7 @@ class GroqTTSService(TTSService):
     and output formats.
     """
 
+    Settings = GroqTTSSettings
     _settings: GroqTTSSettings
 
     class InputParams(BaseModel):

@@ -23,10 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.grok.realtime import events
-from pipecat.services.grok.realtime.llm import (
-    GrokRealtimeLLMService,
-    GrokRealtimeLLMSettings,
-)
+from pipecat.services.grok.realtime.llm import GrokRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -101,7 +98,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating Grok Realtime LLM settings: voice='Rex'")
         await task.queue_frame(
             LLMUpdateSettingsFrame(
-                delta=GrokRealtimeLLMSettings(
+                delta=GrokRealtimeLLMService.Settings(
                     session_properties=events.SessionProperties(voice="Rex")
                 )
             )

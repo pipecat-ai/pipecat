@@ -16,7 +16,7 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.speechmatics.stt import SpeechmaticsSTTService, SpeechmaticsSTTSettings
+from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -65,7 +65,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
-        settings=SpeechmaticsSTTSettings(
+        settings=SpeechmaticsSTTService.Settings(
             language=Language.EN,
             speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
         ),

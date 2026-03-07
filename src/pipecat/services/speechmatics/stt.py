@@ -175,6 +175,7 @@ class SpeechmaticsSTTService(STTService):
             ...
     """
 
+    Settings = SpeechmaticsSTTSettings
     _settings: SpeechmaticsSTTSettings
 
     # Export related classes as class attributes

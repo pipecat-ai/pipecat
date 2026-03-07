@@ -26,10 +26,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -43,21 +43,21 @@ class SwitchVoices(ParallelPipeline):
 
         news_lady = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            settings=CartesiaTTSSettings(
+            settings=CartesiaTTSService.Settings(
                 voice="bf991597-6c13-47e4-8411-91ec2de5c466",  # Newslady
             ),
         )
 
         british_lady = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            settings=CartesiaTTSSettings(
+            settings=CartesiaTTSService.Settings(
                 voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
             ),
         )
 
         barbershop_man = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            settings=CartesiaTTSSettings(
+            settings=CartesiaTTSService.Settings(
                 voice="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
             ),
         )
@@ -120,7 +120,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAILLMSettings(
+        settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities. Respond to what the user said in a creative and helpful way. Your output should not include non-alphanumeric characters. You can do the following voices: 'News Lady', 'British Lady' and 'Barbershop Man'.",
         ),
     )

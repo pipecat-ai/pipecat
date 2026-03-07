@@ -24,10 +24,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.azure.tts import AzureTTSService, AzureTTSSettings
+from pipecat.services.azure.tts import AzureTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openrouter.llm import OpenRouterLLMService, OpenRouterLLMSettings
+from pipecat.services.openrouter.llm import OpenRouterLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -65,7 +65,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = AzureTTSService(
         api_key=os.getenv("AZURE_SPEECH_API_KEY"),
         region=os.getenv("AZURE_SPEECH_REGION"),
-        settings=AzureTTSSettings(
+        settings=AzureTTSService.Settings(
             voice="en-US-JennyNeural",
             language="en-US",
             rate="1.1",
@@ -75,7 +75,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenRouterLLMService(
         api_key=os.getenv("OPENROUTER_API_KEY"),
-        settings=OpenRouterLLMSettings(
+        settings=OpenRouterLLMService.Settings(
             model="openai/gpt-4o-2024-11-20",
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),

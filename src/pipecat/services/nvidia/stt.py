@@ -125,6 +125,7 @@ class NvidiaSTTService(STTService):
     processing for low-latency applications.
     """
 
+    Settings = NvidiaSTTSettings
     _settings: NvidiaSTTSettings
 
     class InputParams(BaseModel):
@@ -439,6 +440,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     audio buffering and speech detection.
     """
 
+    Settings = NvidiaSegmentedSTTSettings
     _settings: NvidiaSegmentedSTTSettings
 
     class InputParams(BaseModel):

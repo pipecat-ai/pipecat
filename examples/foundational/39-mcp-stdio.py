@@ -35,8 +35,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.anthropic.llm import AnthropicLLMService, AnthropicLLMSettings
-from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
+from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -137,7 +137,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            settings=CartesiaTTSSettings(
+            settings=CartesiaTTSService.Settings(
                 voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
             ),
         )
@@ -157,7 +157,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY"),
-            settings=AnthropicLLMSettings(
+            settings=AnthropicLLMService.Settings(
                 system_instruction=system_prompt,
             ),
         )

@@ -148,6 +148,7 @@ class AWSPollyTTSService(TTSService):
     options including prosody controls.
     """
 
+    Settings = AWSPollyTTSSettings
     _settings: AWSPollyTTSSettings
 
     class InputParams(BaseModel):
@@ -381,6 +382,8 @@ class PollyTTSService(AWSPollyTTSService):
         `PollyTTSService` is deprecated, use `AWSPollyTTSService` instead.
 
     """
+
+    Settings = AWSPollyTTSSettings
 
     def __init__(self, **kwargs):
         """Initialize the deprecated PollyTTSService.

@@ -17,12 +17,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.gladia.config import (
-    GladiaInputParams,
     LanguageConfig,
     RealtimeProcessingConfig,
     TranslationConfig,
 )
-from pipecat.services.gladia.stt import GladiaSTTService, GladiaSTTSettings
+from pipecat.services.gladia.stt import GladiaSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -59,7 +58,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = GladiaSTTService(
         api_key=os.getenv("GLADIA_API_KEY"),
         region=os.getenv("GLADIA_REGION"),
-        settings=GladiaSTTSettings(
+        settings=GladiaSTTService.Settings(
             language_config=LanguageConfig(
                 languages=[Language.EN],
                 code_switching=False,

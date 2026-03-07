@@ -168,6 +168,7 @@ class CambTTSService(TTSService):
         )
     """
 
+    Settings = CambTTSSettings
     _settings: CambTTSSettings
 
     class InputParams(BaseModel):

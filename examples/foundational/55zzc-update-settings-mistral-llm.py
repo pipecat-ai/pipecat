@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.mistral.llm import MistralLLMService, MistralLLMSettings
+from pipecat.services.mistral.llm import MistralLLMService
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -55,14 +55,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        settings=CartesiaTTSSettings(
+        settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
     )
 
     llm = MistralLLMService(
         api_key=os.getenv("MISTRAL_API_KEY"),
-        settings=MistralLLMSettings(
+        settings=MistralLLMService.Settings(
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),
     )
@@ -102,7 +102,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         await asyncio.sleep(10)
         logger.info("Updating Mistral LLM settings: temperature=0.1")
-        await task.queue_frame(LLMUpdateSettingsFrame(delta=OpenAILLMSettings(temperature=0.1)))
+        await task.queue_frame(
+            LLMUpdateSettingsFrame(delta=MistralLLMService.Settings(temperature=0.1))
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

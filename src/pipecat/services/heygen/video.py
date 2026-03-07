@@ -82,6 +82,9 @@ class HeyGenVideoService(AIService):
             Defaults to using the "Shawn_Therapist_public" avatar with "v2" version.
     """
 
+    Settings = HeyGenVideoSettings
+    _settings: HeyGenVideoSettings
+
     def __init__(
         self,
         *,

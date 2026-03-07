@@ -100,6 +100,7 @@ class InworldHttpTTSService(TTSService):
     Outputs LINEAR16 audio at configurable sample rates with word-level timestamps.
     """
 
+    Settings = InworldTTSSettings
     _settings: InworldTTSSettings
 
     class InputParams(BaseModel):
@@ -487,6 +488,7 @@ class InworldTTSService(WebsocketTTSService):
     with word-level timestamps.
     """
 
+    Settings = InworldTTSSettings
     _settings: InworldTTSSettings
 
     class InputParams(BaseModel):

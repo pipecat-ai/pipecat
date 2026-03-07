@@ -85,6 +85,7 @@ class AsyncAITTSService(WebsocketTTSService):
     Provides text-to-speech using Async's streaming WebSocket API.
     """
 
+    Settings = AsyncAITTSSettings
     _settings: AsyncAITTSSettings
 
     class InputParams(BaseModel):
@@ -485,6 +486,7 @@ class AsyncAIHttpTTSService(TTSService):
     connection is not required or desired.
     """
 
+    Settings = AsyncAITTSSettings
     _settings: AsyncAITTSSettings
 
     class InputParams(BaseModel):

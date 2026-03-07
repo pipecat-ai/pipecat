@@ -84,6 +84,7 @@ class FishAudioTTSService(InterruptibleTTSService):
     audio generation with interruption handling.
     """
 
+    Settings = FishAudioTTSSettings
     _settings: FishAudioTTSSettings
 
     class InputParams(BaseModel):

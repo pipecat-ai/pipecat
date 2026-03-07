@@ -69,6 +69,7 @@ class OpenAISTTService(BaseWhisperSTTService):
     set via the api_key parameter or OPENAI_API_KEY environment variable.
     """
 
+    Settings = OpenAISTTSettings
     _settings: OpenAISTTSettings
 
     def __init__(
@@ -224,6 +225,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         )
     """
 
+    Settings = OpenAIRealtimeSTTSettings
     _settings: OpenAIRealtimeSTTSettings
 
     def __init__(

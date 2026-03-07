@@ -746,6 +746,7 @@ class AWSBedrockLLMService(LLMService):
     vision capabilities.
     """
 
+    Settings = AWSBedrockLLMSettings
     _settings: AWSBedrockLLMSettings
 
     # Overriding the default adapter to use the Anthropic one.

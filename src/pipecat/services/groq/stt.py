@@ -37,6 +37,7 @@ class GroqSTTService(BaseWhisperSTTService):
     set via the api_key parameter or GROQ_API_KEY environment variable.
     """
 
+    Settings = GroqSTTSettings
     _settings: GroqSTTSettings
 
     def __init__(

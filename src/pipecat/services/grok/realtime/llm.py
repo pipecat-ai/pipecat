@@ -202,6 +202,7 @@ class GrokRealtimeLLMService(LLMService):
         - Server-side VAD (Voice Activity Detection)
     """
 
+    Settings = GrokRealtimeLLMSettings
     _settings: GrokRealtimeLLMSettings
 
     # Use the Grok-specific adapter

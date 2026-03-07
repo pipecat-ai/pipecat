@@ -24,9 +24,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
-from pipecat.services.openai.stt import OpenAISTTService, OpenAISTTSettings
-from pipecat.services.openai.tts import OpenAITTSService, OpenAITTSSettings
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -65,7 +65,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAISTTSettings(
+        settings=OpenAISTTService.Settings(
             model="gpt-4o-transcribe",
             prompt="Expect words related weather, such as temperature and conditions. And restaurant names.",
         ),
@@ -73,7 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = OpenAITTSService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAITTSSettings(
+        settings=OpenAITTSService.Settings(
             voice="ballad",
         ),
         instructions="Please speak clearly and at a moderate pace.",
@@ -82,7 +82,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # model choices: gpt-4o, gpt-4.1, etc.
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAILLMSettings(
+        settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),
     )

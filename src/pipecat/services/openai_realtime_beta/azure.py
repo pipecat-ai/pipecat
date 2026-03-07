@@ -42,6 +42,7 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
     real-time audio and text communication capabilities as the base OpenAI service.
     """
 
+    Settings = AzureRealtimeBetaLLMSettings
     _settings: AzureRealtimeBetaLLMSettings
 
     def __init__(

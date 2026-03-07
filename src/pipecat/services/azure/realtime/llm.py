@@ -35,6 +35,7 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
     real-time audio and text communication capabilities as the base OpenAI service.
     """
 
+    Settings = AzureRealtimeLLMSettings
     _settings: AzureRealtimeLLMSettings
 
     def __init__(

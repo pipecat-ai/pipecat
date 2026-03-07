@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
-from pipecat.services.google.stt import GoogleSTTService, GoogleSTTSettings
-from pipecat.services.google.tts import GoogleHttpTTSService, GoogleHttpTTSSettings
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.stt import GoogleSTTService
+from pipecat.services.google.tts import GoogleHttpTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = GoogleSTTService(
-        settings=GoogleSTTSettings(
+        settings=GoogleSTTService.Settings(
             languages=[Language.EN_US],
             # Add model to use a specific model
             # model="chirp_3",
@@ -64,7 +64,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     tts = GoogleHttpTTSService(
-        settings=GoogleHttpTTSSettings(
+        settings=GoogleHttpTTSService.Settings(
             voice="en-US-Chirp3-HD-Charon",
             language=Language.EN_US,
         ),
@@ -73,7 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        settings=GoogleLLMSettings(
+        settings=GoogleLLMService.GoogleLLMSettings(
             model="gemini-2.5-flash",
             # force a certain amount of thinking if you want it
             # thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)

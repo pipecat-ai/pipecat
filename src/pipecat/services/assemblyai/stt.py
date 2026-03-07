@@ -128,6 +128,7 @@ class AssemblyAISTTService(WebsocketSTTService):
     for audio processing and connection management.
     """
 
+    Settings = AssemblyAISTTSettings
     _settings: AssemblyAISTTSettings
 
     def __init__(

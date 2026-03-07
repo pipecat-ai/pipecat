@@ -47,6 +47,7 @@ class GradiumTTSSettings(TTSSettings):
 class GradiumTTSService(WebsocketTTSService):
     """Text-to-Speech service using Gradium's websocket API."""
 
+    Settings = GradiumTTSSettings
     _settings: GradiumTTSSettings
 
     class InputParams(BaseModel):

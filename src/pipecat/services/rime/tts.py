@@ -131,6 +131,7 @@ class RimeTTSService(WebsocketTTSService):
     within a turn.
     """
 
+    Settings = RimeTTSSettings
     _settings: RimeTTSSettings
 
     class InputParams(BaseModel):
@@ -661,6 +662,7 @@ class RimeHttpTTSService(TTSService):
     Suitable for use cases where streaming is not required.
     """
 
+    Settings = RimeTTSSettings
     _settings: RimeTTSSettings
 
     class InputParams(BaseModel):
@@ -885,6 +887,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
           accepts and returns non-JSON messages.
     """
 
+    Settings = RimeNonJsonTTSSettings
     _settings: RimeNonJsonTTSSettings
 
     class InputParams(BaseModel):

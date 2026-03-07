@@ -414,6 +414,7 @@ class GoogleSTTService(STTService):
         ValueError: If project ID is not found in credentials.
     """
 
+    Settings = GoogleSTTSettings
     _settings: GoogleSTTSettings
 
     # Google Cloud's STT service has a connection time limit of 5 minutes per stream.

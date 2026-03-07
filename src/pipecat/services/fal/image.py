@@ -70,6 +70,9 @@ class FalImageGenService(ImageGenService):
     parameters for image quality, safety, and format options.
     """
 
+    Settings = FalImageGenSettings
+    _settings: FalImageGenSettings
+
     class InputParams(BaseModel):
         """Input parameters for Fal.ai image generation.
 

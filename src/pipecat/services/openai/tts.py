@@ -81,6 +81,7 @@ class OpenAITTSService(TTSService):
     speech synthesis with streaming audio output.
     """
 
+    Settings = OpenAITTSSettings
     _settings: OpenAITTSSettings
 
     OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz

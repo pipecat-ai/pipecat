@@ -60,6 +60,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
     final transcription results.
     """
 
+    Settings = AWSTranscribeSTTSettings
     _settings: AWSTranscribeSTTSettings
 
     def __init__(

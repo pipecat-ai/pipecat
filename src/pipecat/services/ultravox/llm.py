@@ -166,6 +166,7 @@ class UltravoxRealtimeLLMService(LLMService):
     by the model and may not always align with its understanding of user input.
     """
 
+    Settings = UltravoxRealtimeLLMSettings
     _settings: UltravoxRealtimeLLMSettings
 
     def __init__(

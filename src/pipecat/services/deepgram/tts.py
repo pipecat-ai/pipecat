@@ -58,6 +58,7 @@ class DeepgramTTSService(WebsocketTTSService):
     message for conversational AI use cases.
     """
 
+    Settings = DeepgramTTSSettings
     _settings: DeepgramTTSSettings
 
     SUPPORTED_ENCODINGS = ("linear16", "mulaw", "alaw")
@@ -381,6 +382,7 @@ class DeepgramHttpTTSService(TTSService):
     configurable sample rates and quality settings.
     """
 
+    Settings = DeepgramTTSSettings
     _settings: DeepgramTTSSettings
 
     def __init__(

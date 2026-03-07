@@ -30,6 +30,7 @@ class QwenLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    Settings = QwenLLMSettings
     _settings: QwenLLMSettings
 
     def __init__(

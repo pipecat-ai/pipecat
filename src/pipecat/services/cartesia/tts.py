@@ -210,6 +210,7 @@ class CartesiaTTSService(WebsocketTTSService):
     customization options including generation configuration.
     """
 
+    Settings = CartesiaTTSSettings
     _settings: CartesiaTTSSettings
 
     class InputParams(BaseModel):
@@ -681,6 +682,7 @@ class CartesiaHttpTTSService(TTSService):
     integration is preferred.
     """
 
+    Settings = CartesiaTTSSettings
     _settings: CartesiaTTSSettings
 
     class InputParams(BaseModel):
