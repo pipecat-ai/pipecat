@@ -138,17 +138,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # Listen for summarization events
-    summarizer = assistant_aggregator._summarizer
-    if summarizer:
-
-        @summarizer.event_handler("on_summary_applied")
-        async def on_summary_applied(summarizer, event: SummaryAppliedEvent):
-            logger.info(
-                f"Context summarized: {event.original_message_count} messages -> "
-                f"{event.new_message_count} messages "
-                f"({event.summarized_message_count} summarized, "
-                f"{event.preserved_message_count} preserved)"
-            )
+    @assistant_aggregator.event_handler("on_summary_applied")
+    async def on_summary_applied(aggregator, summarizer, event: SummaryAppliedEvent):
+        logger.info(
+            f"Context summarized: {event.original_message_count} messages -> "
+            f"{event.new_message_count} messages "
+            f"({event.summarized_message_count} summarized, "
+            f"{event.preserved_message_count} preserved)"
+        )
 
     pipeline = Pipeline(
         [
