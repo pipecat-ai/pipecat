@@ -72,7 +72,7 @@ class UrlToImageProcessor(FrameProcessor):
                 return data["artObject"]["webImage"]["url"]
             if "artworks" in data and len(data["artworks"]):
                 return data["artworks"][0]["webImage"]["url"]
-        except:
+        except (json.JSONDecodeError, KeyError, TypeError):
             pass
 
     async def run_image_process(self, image_url: str):

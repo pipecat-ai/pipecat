@@ -212,7 +212,7 @@ class TwilioFrameSerializer(FrameSerializer):
                             if error_data.get("code") == 20404:
                                 logger.debug(f"Twilio call {call_sid} was already terminated")
                                 return
-                        except:
+                        except Exception:
                             pass  # Fall through to log the raw error
 
                         # Log other 404 errors
