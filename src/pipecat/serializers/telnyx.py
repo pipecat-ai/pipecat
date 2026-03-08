@@ -198,7 +198,7 @@ class TelnyxFrameSerializer(FrameSerializer):
                                     f"Telnyx call {call_control_id} was already terminated"
                                 )
                                 return
-                        except:
+                        except Exception:
                             pass  # Fall through to log the raw error
 
                         # Log other 422 errors

@@ -296,10 +296,7 @@ class MCPClient(BaseObject):
         available_tools = await session.list_tools()
         tool_schemas: List[FunctionSchema] = []
 
-        try:
-            logger.debug(f"Found {len(available_tools)} available tools")
-        except:
-            pass
+        logger.debug(f"Found {len(available_tools.tools)} available tools")
 
         for tool in available_tools.tools:
             tool_name = tool.name
