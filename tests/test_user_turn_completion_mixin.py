@@ -5,9 +5,10 @@
 #
 
 import unittest
+import unittest.mock
 from unittest.mock import AsyncMock
 
-from pipecat.frames.frames import LLMTextFrame
+from pipecat.frames.frames import LLMFullResponseEndFrame, LLMTextFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.turns.user_turn_completion_mixin import (
     USER_TURN_COMPLETE_MARKER,
@@ -111,6 +112,32 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         # Now frames should be pushed
         self.assertEqual(len(pushed_frames), 2)
+
+    async def test_turn_state_reset_after_llm_full_response_end_frame(self):
+        """Test that _turn_complete_found is reset when LLMFullResponseEndFrame is pushed."""
+        processor = MockProcessor()
+
+        # Mock push_frame on the instance so _push_turn_text can call it without
+        # a live pipeline, but keep _turn_reset as the real implementation.
+        processor.push_frame = AsyncMock()
+
+        # Simulate first LLM response: complete marker sets _turn_complete_found = True
+        await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello!")
+        self.assertTrue(processor._turn_complete_found)
+
+        # Restore the real push_frame so the mixin override runs, then call it
+        # with LLMFullResponseEndFrame as the LLM service would.
+        del processor.push_frame  # removes instance mock, restores class method
+
+        # Patch only the FrameProcessor-level send so no live pipeline is needed.
+        with unittest.mock.patch.object(FrameProcessor, "push_frame", AsyncMock()):
+            end_frame = LLMFullResponseEndFrame()
+            await processor.push_frame(end_frame)
+
+        # _turn_complete_found must now be False — ready for the next response
+        self.assertFalse(processor._turn_complete_found)
+        self.assertEqual(processor._turn_text_buffer, "")
+        self.assertFalse(processor._turn_suppressed)
 
 
 if __name__ == "__main__":
