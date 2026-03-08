@@ -676,7 +676,10 @@ class GrokRealtimeLLMService(LLMService):
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
-                if evt.error.code == "response_cancel_not_active":
+                if evt.error.code in (
+                    "response_cancel_not_active",
+                    "conversation_already_has_active_response",
+                ):
                     logger.debug(f"{self} {evt.error.message}")
                 else:
                     await self._handle_evt_error(evt)
