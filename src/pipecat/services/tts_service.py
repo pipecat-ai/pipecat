@@ -768,6 +768,8 @@ class TTSService(AIService):
         # Clean up context when we see TTSStoppedFrame
         if isinstance(frame, TTSStoppedFrame) and frame.context_id:
             if frame.context_id in self._tts_contexts:
+                if self._tts_contexts[frame.context_id].push_assistant_aggregation:
+                    await self.push_frame(LLMAssistantPushAggregationFrame())
                 logger.debug(f"{self} cleaning up TTS context {frame.context_id}")
                 del self._tts_contexts[frame.context_id]
 
@@ -1009,14 +1011,8 @@ class TTSService(AIService):
             # For services using the audio context we are appending to the context, so it preserves the ordering.
             if self.audio_context_available(context_id):
                 await self.append_to_audio_context(context_id, frame)
-                if push_assistant_aggregation:
-                    await self.append_to_audio_context(
-                        context_id, LLMAssistantPushAggregationFrame()
-                    )
             else:
                 await self.push_frame(frame)
-                if push_assistant_aggregation:
-                    await self.push_frame(LLMAssistantPushAggregationFrame())
 
     async def tts_process_generator(
         self, context_id: str, generator: AsyncGenerator[Frame | None, None]
@@ -1047,18 +1043,20 @@ class TTSService(AIService):
 
     async def _stop_frame_handler(self):
         has_started = False
+        context_id = None
         while True:
             try:
                 frame = await asyncio.wait_for(
                     self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
                 )
+                context_id = frame.context_id
                 if isinstance(frame, TTSStartedFrame):
                     has_started = True
                 elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
                     has_started = False
             except asyncio.TimeoutError:
                 if has_started:
-                    await self.push_frame(TTSStoppedFrame())
+                    await self.push_frame(TTSStoppedFrame(context_id=context_id))
                     has_started = False
 
     #
@@ -1142,9 +1140,6 @@ class TTSService(AIService):
                 frame.pts = self._word_last_pts
                 frame.context_id = context_id
                 await self.push_frame(frame)
-                if context_id in self._tts_contexts:
-                    if self._tts_contexts[context_id].push_assistant_aggregation:
-                        await self.push_frame(LLMAssistantPushAggregationFrame())
             else:
                 ts_ns = seconds_to_nanoseconds(timestamp)
                 if self._initial_word_timestamp == -1:
