@@ -52,17 +52,19 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         """
         return self.strategy.active_service
 
-    async def run_inference(self, context: LLMContext) -> Optional[str]:
+    async def run_inference(self, context: LLMContext, **kwargs) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context, using the currently active LLM.
 
         Args:
             context: The LLM context containing conversation history.
+            **kwargs: Additional arguments forwarded to the active LLM's run_inference
+                (e.g. max_tokens, system_instruction).
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
         if self.active_llm:
-            return await self.active_llm.run_inference(context=context)
+            return await self.active_llm.run_inference(context=context, **kwargs)
         return None
 
     def register_function(

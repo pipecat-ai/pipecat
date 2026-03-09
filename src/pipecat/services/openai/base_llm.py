@@ -341,7 +341,10 @@ class BaseOpenAILLMService(LLMService):
         return params
 
     async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+        self,
+        context: LLMContext | OpenAILLMContext,
+        max_tokens: Optional[int] = None,
+        system_instruction: Optional[str] = None,
     ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -349,6 +352,8 @@ class BaseOpenAILLMService(LLMService):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate. If provided,
                 overrides the service's default max_tokens/max_completion_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -369,6 +374,12 @@ class BaseOpenAILLMService(LLMService):
         # Override for non-streaming
         params["stream"] = False
         params.pop("stream_options", None)
+
+        # Prepend system instruction if provided
+        if system_instruction is not None:
+            params["messages"] = [{"role": "system", "content": system_instruction}] + params.get(
+                "messages", []
+            )
 
         # Override max_tokens if provided
         if max_tokens is not None:

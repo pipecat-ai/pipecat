@@ -881,7 +881,10 @@ class GoogleLLMService(LLMService):
         self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
 
     async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+        self,
+        context: LLMContext | OpenAILLMContext,
+        max_tokens: Optional[int] = None,
+        system_instruction: Optional[str] = None,
     ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -889,6 +892,8 @@ class GoogleLLMService(LLMService):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate. If provided,
                 overrides the service's default max_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -907,6 +912,15 @@ class GoogleLLMService(LLMService):
             messages = context.messages
             system = getattr(context, "system_message", None)
             tools = context.tools or []
+
+        # Override system instruction if provided
+        if system_instruction is not None:
+            if system:
+                logger.warning(
+                    f"{self}: Both system_instruction and a system message in context are set."
+                    " Using system_instruction."
+                )
+            system = system_instruction
 
         # Build generation config using the same method as streaming
         generation_params = self._build_generation_params(
