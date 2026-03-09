@@ -382,7 +382,7 @@ class LLMContextSummarizationUtil:
         return total
 
     @staticmethod
-    def _get_function_calls_in_progress_index(
+    def _get_earliest_function_call_not_resolved_in_range(
         messages: List[dict], start_idx: int, summary_end: int
     ) -> int:
         """Find the earliest message index with incomplete function calls.
@@ -491,8 +491,10 @@ class LLMContextSummarizationUtil:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
         # Check for function calls in progress in the range we want to summarize
-        function_call_start = LLMContextSummarizationUtil._get_function_calls_in_progress_index(
-            messages, summary_start, summary_end
+        function_call_start = (
+            LLMContextSummarizationUtil._get_earliest_function_call_not_resolved_in_range(
+                messages, summary_start, summary_end
+            )
         )
         if function_call_start >= 0 and function_call_start < summary_end:
             # Stop summarization before the function call

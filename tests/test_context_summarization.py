@@ -1168,7 +1168,7 @@ class TestLLMSpecificMessageHandling(unittest.TestCase):
             {"role": "tool", "tool_call_id": "call_123", "content": '{"time": "10:30 AM"}'},
         ]
 
-        result = LLMContextSummarizationUtil._get_function_calls_in_progress_index(
+        result = LLMContextSummarizationUtil._get_earliest_function_call_not_resolved_in_range(
             messages, 0, len(messages)
         )
         self.assertEqual(result, -1)
