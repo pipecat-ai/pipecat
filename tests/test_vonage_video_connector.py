@@ -150,6 +150,7 @@ class MockSubscriberVideoSettings:
 class MockSubscriberSettings:
     subscribe_to_audio: bool = True
     subscribe_to_video: bool = True
+    subscribe_to_captions: bool = False
     video_settings: MockSubscriberVideoSettings | None = None
 
 
@@ -1561,23 +1562,29 @@ class TestVonageVideoConnectorTransport:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "auto_audio, auto_video",
+        "auto_audio, auto_video, auto_captions",
         [
-            (True, False),
-            (False, True),
-            (True, True),
-            (False, False),
+            (True, False, False),
+            (False, True, False),
+            (True, True, False),
+            (False, False, False),
+            (True, False, True),
+            (False, True, True),
+            (True, True, True),
+            (False, False, True),
         ],
     )
     async def test_vonage_client_on_stream_received_auto_subscribe(
-        self, auto_audio: bool, auto_video: bool
+        self, auto_audio: bool, auto_video: bool, auto_captions: bool
     ) -> None:
         """Test that _on_stream_received_cb auto-subscribes when auto_subscribe is enabled."""
         params = self.VonageVideoConnectorTransportParams(
             audio_in_enabled=True,
             video_in_enabled=True,
+            captions_in_enabled=True,
             audio_in_auto_subscribe=auto_audio,
             video_in_auto_subscribe=auto_video,
+            captions_in_auto_subscribe=auto_captions,
             video_in_preferred_resolution=(640, 480) if auto_video else None,
             video_in_preferred_framerate=25 if auto_video else None,
         )
@@ -1594,7 +1601,7 @@ class TestVonageVideoConnectorTransport:
         client._on_stream_received_cb(session, stream)
         await self._wait_for_condition(lambda: stream.id in client._session_streams)
 
-        if not auto_audio and not auto_video:
+        if not auto_audio and not auto_video and not auto_captions:
             await self._wait_client_async_tasks(client)
             # No auto-subscribe should happen
             await self._wait_client_async_tasks(client)
@@ -1612,6 +1619,7 @@ class TestVonageVideoConnectorTransport:
         expected_settings = MockSubscriberSettings(
             subscribe_to_audio=auto_audio,
             subscribe_to_video=auto_video,
+            subscribe_to_captions=auto_captions,
             video_settings=MockSubscriberVideoSettings(
                 preferred_resolution=MockVideoResolution(width=640, height=480)
                 if auto_video
@@ -1626,6 +1634,9 @@ class TestVonageVideoConnectorTransport:
         assert "auto_sub_stream" in client._session_subscriptions
         assert client._session_subscriptions["auto_sub_stream"].subscribe_to_audio == auto_audio
         assert client._session_subscriptions["auto_sub_stream"].subscribe_to_video == auto_video
+        assert (
+            client._session_subscriptions["auto_sub_stream"].subscribe_to_captions == auto_captions
+        )
 
         self._subscriber_callbacks["auto_sub_stream"].on_connected_cb(MockSubscriber(stream=stream))
         await self._wait_client_async_tasks(client)
@@ -1634,7 +1645,8 @@ class TestVonageVideoConnectorTransport:
     async def test_vonage_client_on_stream_received_skips_existing_subscription(self) -> None:
         """Test that _on_stream_received_cb does not auto-subscribe if stream is already subscribed."""
         params = self.VonageVideoConnectorTransportParams(
-            audio_in_enabled=True, audio_in_auto_subscribe=True
+            audio_in_enabled=True,
+            audio_in_auto_subscribe=True,
         )
         client = await self._create_client(params)
 
@@ -1753,6 +1765,7 @@ class TestVonageVideoConnectorTransport:
             on_connected_cb=callbacks.on_connected_cb,
             on_disconnected_cb=callbacks.on_disconnected_cb,
             on_render_frame_cb=client._on_subscriber_video_data_cb,
+            on_caption_text_cb=client._on_subscriber_caption_text_cb,
         )
         listener.on_stream_received.reset_mock()
 
