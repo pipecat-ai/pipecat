@@ -736,6 +736,7 @@ class SmallWebRTCConnection(BaseObject):
                     f"Message queue is full ({MAX_MESSAGE_QUEUE_SIZE} messages). Discarding message."
                 )
         else:
+            # The client might choose never to create a data channel.
             logger.trace("Data channel unavailable and queueing disabled. Discarding message.")
 
     def _flush_message_queue(self):
