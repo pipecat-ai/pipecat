@@ -79,7 +79,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = WhisperSTTServiceMLX(
         settings=WhisperSTTServiceMLX.Settings(
-            model=MLXModel.LARGE_V3_TURBO,
+            model=MLXModel.LARGE_V3_TURBO.value,
         ),
     )
 
