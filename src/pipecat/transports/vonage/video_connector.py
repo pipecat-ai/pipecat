@@ -126,7 +126,7 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
             await self.push_video_frame(video)
 
     async def _caption_in_cb(self, _subscriber: Subscriber, caption: TextFrame) -> None:
-        if self._connected and self._params.caption_in_enabled:
+        if self._connected and self._params.captions_in_enabled:
             await self.push_caption_frame(caption)
 
     async def _on_error_cb(self, session: Session, description: str, code: int) -> None:
