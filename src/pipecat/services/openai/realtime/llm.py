@@ -37,7 +37,6 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
-    LLMUpdateSettingsFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
