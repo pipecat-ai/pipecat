@@ -94,7 +94,7 @@ class AzureSTTService(STTService):
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             private_endpoint: Private endpoint for STT behind firewall.
-                See https://docs.azure.cn/en-us/ai-services/speech-service/speech-services-private-link?tabs=portal
+                See https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-private-link?tabs=portal
             endpoint_id: Custom model endpoint id.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -126,13 +126,21 @@ class AzureSTTService(STTService):
             **kwargs,
         )
 
-        self._speech_config = SpeechConfig(
-            subscription=api_key,
-            region=region,
-            speech_recognition_language=default_settings.language
+        speech_config_kwargs: dict[str, Any] = {
+            "subscription": api_key,
+            "speech_recognition_language": default_settings.language
             or language_to_azure_language(Language.EN_US),
-            endpoint=private_endpoint,
-        )
+        }
+        if private_endpoint:
+            if region:
+                logger.warning(
+                    "Both 'region' and 'private_endpoint' provided; 'region' will be ignored."
+                )
+            speech_config_kwargs["endpoint"] = private_endpoint
+        else:
+            speech_config_kwargs["region"] = region
+
+        self._speech_config = SpeechConfig(**speech_config_kwargs)
 
         if endpoint_id:
             self._speech_config.endpoint_id = endpoint_id
