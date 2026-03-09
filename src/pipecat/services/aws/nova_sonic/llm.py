@@ -246,6 +246,7 @@ class AWSNovaSonicLLMService(LLMService):
     and function calling capabilities using AWS Nova Sonic model.
     """
 
+    Settings = AWSNovaSonicLLMSettings
     _settings: AWSNovaSonicLLMSettings
 
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one

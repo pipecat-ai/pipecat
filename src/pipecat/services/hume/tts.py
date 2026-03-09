@@ -78,6 +78,7 @@ class HumeTTSService(TTSService):
     - Provides metrics for Time To First Byte (TTFB) and TTS usage.
     """
 
+    Settings = HumeTTSSettings
     _settings: HumeTTSSettings
 
     class InputParams(BaseModel):

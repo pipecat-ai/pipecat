@@ -59,6 +59,9 @@ class TavusVideoService(AIService):
     - User room: Contains the Pipecat Bot and the user
     """
 
+    Settings = TavusVideoSettings
+    _settings: TavusVideoSettings
+
     def __init__(
         self,
         *,

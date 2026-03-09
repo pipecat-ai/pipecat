@@ -46,6 +46,7 @@ class PiperTTSService(TTSService):
     match the configured sample rate.
     """
 
+    Settings = PiperTTSSettings
     _settings: PiperTTSSettings
 
     def __init__(
@@ -199,6 +200,7 @@ class PiperHttpTTSService(TTSService):
     rates and automatic WAV header removal.
     """
 
+    Settings = PiperHttpTTSSettings
     _settings: PiperHttpTTSSettings
 
     def __init__(

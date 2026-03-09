@@ -642,6 +642,7 @@ class GeminiLiveLLMService(LLMService):
     responses, and tool usage.
     """
 
+    Settings = GeminiLiveLLMSettings
     _settings: GeminiLiveLLMSettings
 
     # Overriding the default adapter to use the Gemini one.

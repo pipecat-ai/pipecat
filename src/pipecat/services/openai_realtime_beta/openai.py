@@ -111,6 +111,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     management, and real-time transcription.
     """
 
+    Settings = OpenAIRealtimeBetaLLMSettings
     _settings: OpenAIRealtimeBetaLLMSettings
 
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.

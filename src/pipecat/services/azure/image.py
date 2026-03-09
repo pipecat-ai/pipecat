@@ -43,6 +43,7 @@ class AzureImageGenServiceREST(ImageGenService):
     and automatic image download and processing.
     """
 
+    Settings = AzureImageGenSettings
     _settings: AzureImageGenSettings
 
     def __init__(

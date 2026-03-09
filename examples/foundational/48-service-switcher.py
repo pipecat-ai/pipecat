@@ -27,12 +27,12 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.stt import CartesiaSTTService
-from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.deepgram.tts import DeepgramTTSService, DeepgramTTSSettings
-from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
+from pipecat.services.deepgram.tts import DeepgramTTSService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -102,13 +102,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts_cartesia = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        settings=CartesiaTTSSettings(
+        settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
     )
     tts_deepgram = DeepgramTTSService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        settings=DeepgramTTSSettings(
+        settings=DeepgramTTSService.Settings(
             voice="aura-2-helena-en",
         ),
     )
@@ -120,11 +120,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm_openai = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAILLMSettings(system_instruction=system_prompt),
+        settings=OpenAILLMService.Settings(system_instruction=system_prompt),
     )
     llm_google = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        settings=GoogleLLMSettings(system_instruction=system_prompt),
+        settings=GoogleLLMService.Settings(system_instruction=system_prompt),
     )
     llm_switcher = LLMSwitcher(
         llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual

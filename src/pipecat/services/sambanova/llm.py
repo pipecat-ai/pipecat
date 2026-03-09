@@ -42,6 +42,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    Settings = SambaNovaLLMSettings
     _settings: SambaNovaLLMSettings
 
     def __init__(

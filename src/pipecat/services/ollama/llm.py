@@ -30,6 +30,7 @@ class OLLamaLLMService(OpenAILLMService):
     providing a compatible interface for running large language models locally.
     """
 
+    Settings = OllamaLLMSettings
     _settings: OllamaLLMSettings
 
     def __init__(

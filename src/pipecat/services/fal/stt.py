@@ -155,6 +155,7 @@ class FalSTTService(SegmentedSTTService):
     segments. It inherits from SegmentedSTTService to handle audio buffering and speech detection.
     """
 
+    Settings = FalSTTSettings
     _settings: FalSTTSettings
 
     class InputParams(BaseModel):

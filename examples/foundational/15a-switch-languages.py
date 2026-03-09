@@ -26,10 +26,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
-from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -43,14 +43,14 @@ class SwitchLanguage(ParallelPipeline):
 
         english_tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            settings=CartesiaTTSSettings(
+            settings=CartesiaTTSService.Settings(
                 voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
             ),
         )
 
         spanish_tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            settings=CartesiaTTSSettings(
+            settings=CartesiaTTSService.Settings(
                 voice="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
             ),
         )
@@ -102,7 +102,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        settings=DeepgramSTTSettings(
+        settings=DeepgramSTTService.Settings(
             language="multi",
         ),
     )
@@ -111,7 +111,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAILLMSettings(
+        settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities. Respond to what the user said in a creative and helpful way. Your output should not include non-alphanumeric characters. You can speak the following languages: 'English' and 'Spanish'.",
         ),
     )

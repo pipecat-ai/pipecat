@@ -207,6 +207,7 @@ class WhisperSTTService(SegmentedSTTService):
     segments. It supports multiple languages and various model sizes.
     """
 
+    Settings = WhisperSTTSettings
     _settings: WhisperSTTSettings
 
     def __init__(
@@ -380,6 +381,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
     segments. It's optimized for Apple Silicon and supports multiple languages and quantizations.
     """
 
+    Settings = WhisperMLXSTTSettings
     _settings: WhisperMLXSTTSettings
 
     def __init__(

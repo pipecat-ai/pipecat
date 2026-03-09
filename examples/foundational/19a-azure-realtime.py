@@ -30,7 +30,6 @@ from pipecat.services.openai.realtime.events import (
     InputAudioTranscription,
     SessionProperties,
 )
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -115,7 +114,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AzureRealtimeLLMService(
         api_key=os.getenv("AZURE_REALTIME_API_KEY"),
         base_url=os.getenv("AZURE_REALTIME_BASE_URL"),
-        settings=OpenAIRealtimeLLMSettings(
+        settings=AzureRealtimeLLMService.Settings(
             system_instruction="""You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human

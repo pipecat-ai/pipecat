@@ -35,6 +35,8 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
     Requires a SambaNova API key set via the api_key parameter or SAMBANOVA_API_KEY environment variable.
     """
 
+    Settings = SambaNovaSTTSettings
+
     def __init__(
         self,
         *,

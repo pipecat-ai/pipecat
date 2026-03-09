@@ -31,6 +31,8 @@ class AzureLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    Settings = AzureLLMSettings
+
     def __init__(
         self,
         *,

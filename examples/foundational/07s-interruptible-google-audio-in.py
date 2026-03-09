@@ -36,8 +36,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
-from pipecat.services.google.tts import GoogleTTSService, GoogleTTSSettings
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.tts import GoogleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -216,7 +216,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        settings=GoogleLLMSettings(
+        settings=GoogleLLMService.Settings(
             model="gemini-2.5-flash",
             system_instruction=system_message,
             # force a certain amount of thinking if you want it
@@ -225,7 +225,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     tts = GoogleTTSService(
-        settings=GoogleTTSSettings(
+        settings=GoogleTTSService.Settings(
             voice="en-US-Chirp3-HD-Charon",
             language=Language.EN_US,
         ),

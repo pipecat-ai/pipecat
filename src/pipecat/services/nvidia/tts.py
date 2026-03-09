@@ -61,6 +61,7 @@ class NvidiaTTSService(TTSService):
     configurable quality settings.
     """
 
+    Settings = NvidiaTTSSettings
     _settings: NvidiaTTSSettings
 
     class InputParams(BaseModel):

@@ -271,12 +271,15 @@ The rule of thumb: if a caller might send an update frame to change it at runtim
 
 #### Wiring settings into `__init__`
 
-Accept an **optional** `settings` parameter. Build a `default_settings` object with all fields set to real values, then merge any caller overrides with `apply_update`:
+Accept an **optional** `settings` parameter. Build a `default_settings` object with all fields set to real values, then merge any caller overrides with `apply_update`.
+
+Add a `Settings` **class attribute** that points to your settings dataclass. This lets callers access the settings class through the service itself (e.g. `MyTTSService.Settings(...)`) without a separate import:
 
 ```python
 from typing import Optional
 
 class MyTTSService(TTSService):
+    Settings = MyTTSSettings
     _settings: MyTTSSettings
 
     def __init__(
@@ -311,10 +314,10 @@ This pattern lets callers override only what they care about:
 # Uses all defaults
 svc = MyTTSService(api_key="sk-xxx")
 
-# Overrides just the voice
+# Overrides just the voice — access Settings through the service class
 svc = MyTTSService(
     api_key="sk-xxx",
-    settings=MyTTSSettings(voice="custom-voice"),
+    settings=MyTTSService.Settings(voice="custom-voice"),
 )
 ```
 

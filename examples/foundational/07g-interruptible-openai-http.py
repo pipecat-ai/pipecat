@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
-from pipecat.services.openai.stt import OpenAISTTService, OpenAISTTSettings
-from pipecat.services.openai.tts import OpenAITTSService, OpenAITTSSettings
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAISTTSettings(
+        settings=OpenAISTTService.Settings(
             model="gpt-4o-transcribe",
             prompt="Expect words related to dogs, such as breed names.",
         ),
@@ -62,14 +62,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = OpenAITTSService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAITTSSettings(
+        settings=OpenAITTSService.Settings(
             voice="ballad",
         ),
     )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAILLMSettings(
+        settings=OpenAILLMService.Settings(
             system_instruction="You are very knowledgable about dogs. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),
     )

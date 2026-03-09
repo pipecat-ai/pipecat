@@ -115,6 +115,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             ...
     """
 
+    Settings = DeepgramFluxSTTSettings
     _settings: DeepgramFluxSTTSettings
     _CONFIGURE_FIELDS = {"keyterm", "eot_threshold", "eager_eot_threshold", "eot_timeout_ms"}
 

@@ -60,9 +60,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService, ElevenLabsTTSSettings
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.mem0.memory import Mem0MemoryService
-from pipecat.services.openai.llm import OpenAILLMService, OpenAILLMSettings
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -166,7 +166,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize text-to-speech service
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY"),
-        settings=ElevenLabsTTSSettings(
+        settings=ElevenLabsTTSService.Settings(
             voice="pNInz6obpgDQGcFmaJgB",
         ),
     )
@@ -225,7 +225,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize LLM service
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAILLMSettings(
+        settings=OpenAILLMService.Settings(
             model="gpt-4o-mini",
             system_instruction="""You are a personal assistant. You can remember things about the person you are talking to.
                         Some Guidelines:

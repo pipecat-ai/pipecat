@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
-from pipecat.services.google.stt import GoogleSTTService, GoogleSTTSettings
-from pipecat.services.google.tts import GeminiTTSService, GeminiTTSSettings
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.stt import GoogleSTTService
+from pipecat.services.google.tts import GeminiTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot with Gemini TTS")
 
     stt = GoogleSTTService(
-        settings=GoogleSTTSettings(
+        settings=GoogleSTTService.Settings(
             languages=[Language.EN_US],
         ),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
@@ -62,7 +62,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = GeminiTTSService(
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
-        settings=GeminiTTSSettings(
+        settings=GeminiTTSService.Settings(
             model="gemini-2.5-flash-tts",
             voice="Charon",
             language=Language.EN_US,
@@ -73,7 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         model="gemini-2.5-flash",
-        settings=GoogleLLMSettings(
+        settings=GoogleLLMService.Settings(
             system_instruction="""You are a helpful AI assistant in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
 
             IMPORTANT: You're using Gemini TTS which supports expressive markup tags. You can use these tags in your responses:

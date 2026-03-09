@@ -230,6 +230,7 @@ class GladiaSTTService(WebsocketSTTService):
         Use :class:`~pipecat.services.gladia.config.GladiaInputParams` directly instead.
     """
 
+    Settings = GladiaSTTSettings
     _settings: GladiaSTTSettings
 
     # Maintain backward compatibility

@@ -146,6 +146,7 @@ class CartesiaSTTService(WebsocketSTTService):
     See: https://docs.cartesia.ai/api-reference/stt/stt
     """
 
+    Settings = CartesiaSTTSettings
     _settings: CartesiaSTTSettings
 
     def __init__(
