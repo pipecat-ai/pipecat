@@ -1049,8 +1049,8 @@ class TTSService(AIService):
                 frame = await asyncio.wait_for(
                     self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
                 )
-                context_id = frame.context_id
                 if isinstance(frame, TTSStartedFrame):
+                    context_id = frame.context_id
                     has_started = True
                 elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
                     has_started = False
