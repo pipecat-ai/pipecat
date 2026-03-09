@@ -155,10 +155,6 @@ class FastAPIWebsocketClient:
             logger.warning(
                 f"{self} exception sending data: {e.__class__.__name__} ({e}), application_state: {self._websocket.application_state}"
             )
-            # For some reason the websocket is disconnected, and we are not able to send data
-            # So let's properly handle it and disconnect the transport if it is not already disconnecting
-            if self._websocket.application_state == WebSocketState.DISCONNECTED:
-                logger.warning("Closing already disconnected websocket!")
 
     async def disconnect(self):
         """Disconnect the WebSocket client."""
@@ -193,10 +189,17 @@ class FastAPIWebsocketClient:
     def is_connected(self) -> bool:
         """Check if the WebSocket is currently connected.
 
+        Checks both client and application state. The client side may still
+        appear CONNECTED while the application side has already sent a close
+        frame, making the connection unusable for sending.
+
         Returns:
-            True if the WebSocket is in connected state.
+            True if the WebSocket is usable in both directions.
         """
-        return self._websocket.client_state == WebSocketState.CONNECTED
+        return (
+            self._websocket.client_state == WebSocketState.CONNECTED
+            and self._websocket.application_state == WebSocketState.CONNECTED
+        )
 
     @property
     def is_closing(self) -> bool:
