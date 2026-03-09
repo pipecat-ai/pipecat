@@ -178,6 +178,7 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(filter_instance._model_path)
         self.assertIsNone(filter_instance._enhancement_level)
         self.assertTrue(filter_instance._is_filter_enabled)
+        self.assertFalse(filter_instance._bypass)
 
     async def test_initialization_with_model_path(self):
         """Test filter initialization with model_path."""
@@ -284,8 +285,8 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(filter_instance._processor_ctx)
             self.assertIsNotNone(filter_instance._vad_ctx)
 
-    async def test_start_does_not_apply_bypass_parameter(self):
-        """Test that start does not set SDK Bypass parameter."""
+    async def test_start_applies_initial_bypass_parameter(self):
+        """Test that start applies SDK Bypass parameter."""
         filter_instance = self._create_filter_with_mocks()
         await self._start_filter_with_mocks(filter_instance)
 
@@ -294,7 +295,8 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             for p, v in self.mock_processor.processor_ctx.parameters_set
             if p == aic_sdk.ProcessorParameter.Bypass
         ]
-        self.assertEqual(bypass_params, [])
+        self.assertTrue(len(bypass_params) > 0)
+        self.assertEqual(bypass_params[-1][1], 0.0)
 
     async def test_start_applies_enhancement_level_when_supported(self):
         """Test that start applies enhancement_level when supported by model."""
@@ -533,8 +535,15 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             for p, v in self.mock_processor.processor_ctx.parameters_set
             if p == aic_sdk.ProcessorParameter.EnhancementLevel
         ]
+        bypass_params = [
+            (p, v)
+            for p, v in self.mock_processor.processor_ctx.parameters_set
+            if p == aic_sdk.ProcessorParameter.Bypass
+        ]
         self.assertFalse(filter_instance._is_filter_enabled)
+        self.assertTrue(filter_instance._bypass)
         self.assertEqual(enhancement_params[-1][1], 0.0)
+        self.assertEqual(bypass_params[-1][1], 1.0)
 
     async def test_process_frame_enable_restores_configured_enhancement(self):
         """Test enable frame restores configured enhancement level."""
@@ -549,8 +558,15 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             for p, v in self.mock_processor.processor_ctx.parameters_set
             if p == aic_sdk.ProcessorParameter.EnhancementLevel
         ]
+        bypass_params = [
+            (p, v)
+            for p, v in self.mock_processor.processor_ctx.parameters_set
+            if p == aic_sdk.ProcessorParameter.Bypass
+        ]
         self.assertTrue(filter_instance._is_filter_enabled)
+        self.assertFalse(filter_instance._bypass)
         self.assertEqual(enhancement_params[-1][1], 0.7)
+        self.assertEqual(bypass_params[-1][1], 0.0)
 
     async def test_filter_when_not_ready(self):
         """Test that filter returns audio unchanged when not ready."""

@@ -260,6 +260,7 @@ class AICFilter(BaseAudioFilter):
         )
         self._enhancement_level = enhancement_level
         self._is_filter_enabled = True
+        self._bypass = False
 
         self._sample_rate = 0
         self._aic_ready = False
@@ -348,6 +349,13 @@ class AICFilter(BaseAudioFilter):
             logger.debug(f"AIC EnhancementLevel set_parameter out-of-range: {e}")
             self._enhancement_level = None
 
+    def _apply_bypass(self):
+        """Apply bypass parameter to the active processor."""
+        if self._processor_ctx is None:
+            return
+
+        self._processor_ctx.set_parameter(ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0)
+
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
 
@@ -396,7 +404,8 @@ class AICFilter(BaseAudioFilter):
         self._processor_ctx = self._processor.get_processor_context()
         self._vad_ctx = self._processor.get_vad_context()
 
-        # Apply initial enhancement settings (if configured)
+        # Apply initial control parameters
+        self._apply_bypass()
         self._apply_enhancement_level()
 
         # Log processor information
@@ -451,8 +460,13 @@ class AICFilter(BaseAudioFilter):
         """
         if isinstance(frame, FilterEnableFrame):
             self._is_filter_enabled = frame.enable
+            self._bypass = not frame.enable
             if self._processor_ctx is not None:
-                self._apply_enhancement_level()
+                try:
+                    self._apply_bypass()
+                    self._apply_enhancement_level()
+                except Exception as e:  # noqa: BLE001
+                    logger.error(f"AIC set_parameter failed: {e}")
 
     async def filter(self, audio: bytes) -> bytes:
         """Apply AIC enhancement to audio data.
