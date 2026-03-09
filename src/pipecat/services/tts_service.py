@@ -1038,7 +1038,9 @@ class TTSService(AIService):
         async for frame in generator:
             if frame:
                 await self.append_to_audio_context(context_id, frame)
-                is_yielding_frames = True
+                if isinstance(frame, TTSAudioRawFrame):
+                    is_yielding_frames = True
+
         self._is_yielding_frames_synchronously = is_yielding_frames
 
     async def _stop_frame_handler(self):
