@@ -17,6 +17,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    TTSStoppedFrame,
 )
 from pipecat.services.settings import TTSSettings, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
@@ -287,6 +288,7 @@ class PiperHttpTTSService(TTSService):
                     yield ErrorFrame(
                         error=f"Error getting audio (status: {response.status}, error: {error})"
                     )
+                    yield TTSStoppedFrame(context_id=context_id)
                     return
 
                 await self.start_tts_usage_metrics(text)
