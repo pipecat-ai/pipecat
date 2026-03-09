@@ -23,6 +23,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from aic_sdk import (
     Model,
+    ParameterOutOfRangeError,
     ProcessorAsync,
     ProcessorConfig,
     ProcessorParameter,
@@ -220,6 +221,7 @@ class AICFilter(BaseAudioFilter):
         model_id: Optional[str] = None,
         model_path: Optional[Path] = None,
         model_download_dir: Optional[Path] = None,
+        enhancement_level: Optional[float] = None,
     ) -> None:
         """Initialize the AIC filter.
 
@@ -231,9 +233,12 @@ class AICFilter(BaseAudioFilter):
                 model_id is ignored and no download occurs.
             model_download_dir: Directory for downloading models as a Path object.
                 Defaults to a cache directory in user's home folder.
+            enhancement_level: Optional overall enhancement strength (0.0..1.0).
+                If None, the model default is used.
 
         Raises:
-            ValueError: If neither model_id nor model_path is provided.
+            ValueError: If neither model_id nor model_path is provided, or if
+                enhancement_level is out of range.
         """
         # Set SDK ID for telemetry identification (6 = pipecat)
         set_sdk_id(6)
@@ -244,14 +249,18 @@ class AICFilter(BaseAudioFilter):
                 "See https://artifacts.ai-coustics.io/ for available models."
             )
 
+        if enhancement_level is not None and not 0.0 <= enhancement_level <= 1.0:
+            raise ValueError("'enhancement_level' must be between 0.0 and 1.0.")
+
         self._license_key = license_key
         self._model_id = model_id
         self._model_path = model_path
         self._model_download_dir = model_download_dir or (
             Path.home() / ".cache" / "pipecat" / "aic-models"
         )
+        self._enhancement_level = enhancement_level
+        self._is_filter_enabled = True
 
-        self._bypass = False
         self._sample_rate = 0
         self._aic_ready = False
         self._frames_per_block = 0
@@ -325,6 +334,20 @@ class AICFilter(BaseAudioFilter):
             sensitivity=sensitivity,
         )
 
+    def _apply_enhancement_level(self):
+        """Apply enhancement_level if configured and supported by the active model."""
+        if self._enhancement_level is None or self._processor_ctx is None:
+            return
+
+        level = float(self._enhancement_level if self._is_filter_enabled else 0.0)
+
+        try:
+            self._processor_ctx.set_parameter(ProcessorParameter.EnhancementLevel, level)
+        except ParameterOutOfRangeError as e:
+            logger.warning("AIC enhancement_level was rejected as out-of-range; ignoring it.")
+            logger.debug(f"AIC EnhancementLevel set_parameter out-of-range: {e}")
+            self._enhancement_level = None
+
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
 
@@ -373,14 +396,19 @@ class AICFilter(BaseAudioFilter):
         self._processor_ctx = self._processor.get_processor_context()
         self._vad_ctx = self._processor.get_vad_context()
 
-        # Apply initial parameters
-        self._processor_ctx.set_parameter(ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0)
+        # Apply initial enhancement settings (if configured)
+        self._apply_enhancement_level()
 
         # Log processor information
         logger.debug(f"ai-coustics filter started:")
         logger.debug(f"  Model ID: {self._model.get_id()}")
         logger.debug(f"  Sample rate: {self._sample_rate} Hz")
         logger.debug(f"  Frames per chunk: {self._frames_per_block}")
+        if self._enhancement_level is not None:
+            level = self._enhancement_level if self._is_filter_enabled else 0.0
+            logger.debug(f"  Enhancement strength: {int(level * 100)}%")
+        else:
+            logger.debug("  Enhancement level not configured; using the model's default behavior.")
         logger.debug(f"  Optimal sample rate: {self._model.get_optimal_sample_rate()} Hz")
         logger.debug(
             f"  Optimal number of frames for {self._sample_rate} Hz: "
@@ -422,14 +450,9 @@ class AICFilter(BaseAudioFilter):
             None
         """
         if isinstance(frame, FilterEnableFrame):
-            self._bypass = not frame.enable
+            self._is_filter_enabled = frame.enable
             if self._processor_ctx is not None:
-                try:
-                    self._processor_ctx.set_parameter(
-                        ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.error(f"AIC set_parameter failed: {e}")
+                self._apply_enhancement_level()
 
     async def filter(self, audio: bytes) -> bytes:
         """Apply AIC enhancement to audio data.

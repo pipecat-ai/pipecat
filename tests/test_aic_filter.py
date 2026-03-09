@@ -8,16 +8,19 @@ import asyncio
 import time
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 
 # Check if aic_sdk is available
+aic_sdk: Any
 try:
     import aic_sdk
 
     HAS_AIC_SDK = True
 except ImportError:
+    aic_sdk = None
     HAS_AIC_SDK = False
 
 # Module path for patching
@@ -65,6 +68,22 @@ class MockProcessorContext:
 
     def reset(self):
         self.reset_called = True
+
+
+class UnsupportedEnhancementProcessorContext(MockProcessorContext):
+    """Processor context mock that rejects EnhancementLevel updates."""
+
+    def __init__(self, enhancement_parameter, error_type):
+        super().__init__()
+        self._enhancement_parameter = enhancement_parameter
+        self._error_type = error_type
+        self.enhancement_attempts = 0
+
+    def set_parameter(self, param, value):
+        if param == self._enhancement_parameter:
+            self.enhancement_attempts += 1
+            raise self._error_type("EnhancementLevel out of range")
+        super().set_parameter(param, value)
 
 
 class MockVadContext:
@@ -157,7 +176,8 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(filter_instance._license_key, "test-key")
         self.assertEqual(filter_instance._model_id, "test-model")
         self.assertIsNone(filter_instance._model_path)
-        self.assertFalse(filter_instance._bypass)
+        self.assertIsNone(filter_instance._enhancement_level)
+        self.assertTrue(filter_instance._is_filter_enabled)
 
     async def test_initialization_with_model_path(self):
         """Test filter initialization with model_path."""
@@ -173,6 +193,29 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         filter_instance = self._create_filter_with_mocks(model_download_dir=download_dir)
 
         self.assertEqual(filter_instance._model_download_dir, download_dir)
+
+    async def test_initialization_with_valid_enhancement_level(self):
+        """Test filter initialization with a valid enhancement_level."""
+        filter_instance = self._create_filter_with_mocks(enhancement_level=0.75)
+
+        self.assertEqual(filter_instance._enhancement_level, 0.75)
+
+    async def test_initialization_with_none_enhancement_level(self):
+        """Test filter initialization with enhancement_level set to None."""
+        filter_instance = self._create_filter_with_mocks(enhancement_level=None)
+
+        self.assertIsNone(filter_instance._enhancement_level)
+
+    async def test_initialization_invalid_enhancement_level_raises(self):
+        """Test initialization rejects enhancement_level outside 0.0..1.0."""
+        with patch(f"{AIC_FILTER_MODULE}.set_sdk_id"):
+            with self.assertRaises(ValueError) as context:
+                self.AICFilter(
+                    license_key="test-key",
+                    model_id="test-model",
+                    enhancement_level=1.5,
+                )
+        self.assertIn("enhancement_level", str(context.exception))
 
     async def test_start_with_model_path(self):
         """Test starting filter with a local model path."""
@@ -241,19 +284,61 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(filter_instance._processor_ctx)
             self.assertIsNotNone(filter_instance._vad_ctx)
 
-    async def test_start_applies_initial_bypass_parameter(self):
-        """Test that start applies bypass parameter."""
+    async def test_start_does_not_apply_bypass_parameter(self):
+        """Test that start does not set SDK Bypass parameter."""
         filter_instance = self._create_filter_with_mocks()
         await self._start_filter_with_mocks(filter_instance)
 
-        # Check that bypass was set to 0.0 (enabled)
         bypass_params = [
             (p, v)
             for p, v in self.mock_processor.processor_ctx.parameters_set
             if p == aic_sdk.ProcessorParameter.Bypass
         ]
-        self.assertTrue(len(bypass_params) > 0)
-        self.assertEqual(bypass_params[-1][1], 0.0)
+        self.assertEqual(bypass_params, [])
+
+    async def test_start_applies_enhancement_level_when_supported(self):
+        """Test that start applies enhancement_level when supported by model."""
+        filter_instance = self._create_filter_with_mocks(enhancement_level=0.65)
+        await self._start_filter_with_mocks(filter_instance)
+
+        enhancement_params = [
+            (p, v)
+            for p, v in self.mock_processor.processor_ctx.parameters_set
+            if p == aic_sdk.ProcessorParameter.EnhancementLevel
+        ]
+        self.assertTrue(len(enhancement_params) > 0)
+        self.assertEqual(enhancement_params[-1][1], 0.65)
+
+    async def test_start_ignores_enhancement_level_when_unsupported(self):
+        """Test unsupported enhancement_level logs warning and keeps filter ready."""
+        filter_instance = self._create_filter_with_mocks(enhancement_level=0.65)
+
+        with patch(f"{AIC_FILTER_MODULE}.ParameterOutOfRangeError", ValueError):
+            unsupported_ctx = UnsupportedEnhancementProcessorContext(
+                aic_sdk.ProcessorParameter.EnhancementLevel, ValueError
+            )
+            self.mock_processor.processor_ctx = unsupported_ctx
+            await self._start_filter_with_mocks(filter_instance)
+
+        self.assertTrue(filter_instance._aic_ready)
+        self.assertIsNone(filter_instance._enhancement_level)
+        self.assertEqual(unsupported_ctx.enhancement_attempts, 1)
+
+    async def test_start_does_not_set_enhancement_level_when_none(self):
+        """Test start does not attempt enhancement_level when not configured."""
+        filter_instance = self._create_filter_with_mocks(enhancement_level=None)
+        with patch(f"{AIC_FILTER_MODULE}.logger.debug") as mock_debug:
+            await self._start_filter_with_mocks(filter_instance)
+
+        enhancement_params = [
+            (p, v)
+            for p, v in self.mock_processor.processor_ctx.parameters_set
+            if p == aic_sdk.ProcessorParameter.EnhancementLevel
+        ]
+        self.assertEqual(enhancement_params, [])
+        self.assertTrue(
+            any("default behavior" in str(call.args[0]) for call in mock_debug.call_args_list)
+        )
 
     async def test_stop_cleans_up_resources(self):
         """Test that stop properly cleans up resources and releases model reference."""
@@ -420,57 +505,52 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(filter_instance._processor)
         self.assertFalse(filter_instance._aic_ready)
 
-    async def test_start_parameter_fixed_error_logged(self):
-        """Test start() when set_parameter raises ParameterFixedError: logged, no raise."""
-        filter_instance = self._create_filter_with_mocks()
-        self.mock_processor.processor_ctx.set_parameter = MagicMock(
-            side_effect=aic_sdk.ParameterFixedError("fixed")
-        )
+    async def test_start_skips_unsupported_enhancement_level_after_first_attempt(self):
+        """Test unsupported enhancement_level is attempted once and then skipped."""
+        filter_instance = self._create_filter_with_mocks(enhancement_level=0.9)
 
-        with (
-            patch(f"{AIC_FILTER_MODULE}.AICModelManager") as mock_manager_cls,
-            patch(f"{AIC_FILTER_MODULE}.ProcessorConfig") as mock_config_cls,
-            patch(f"{AIC_FILTER_MODULE}.ProcessorAsync", return_value=self.mock_processor),
-        ):
-            mock_manager_cls.acquire = AsyncMock(return_value=(self.mock_model, "test-key"))
-            mock_config_cls.optimal.return_value = MagicMock()
+        with patch(f"{AIC_FILTER_MODULE}.ParameterOutOfRangeError", ValueError):
+            unsupported_ctx = UnsupportedEnhancementProcessorContext(
+                aic_sdk.ProcessorParameter.EnhancementLevel, ValueError
+            )
+            self.mock_processor.processor_ctx = unsupported_ctx
 
-            await filter_instance.start(16000)
+            await self._start_filter_with_mocks(filter_instance)
+            await filter_instance.stop()
+            await self._start_filter_with_mocks(filter_instance)
 
-        self.assertTrue(filter_instance._aic_ready)
+        self.assertEqual(unsupported_ctx.enhancement_attempts, 1)
 
-    async def test_process_frame_set_parameter_exception_logged(self):
-        """Test process_frame when set_parameter raises: exception logged, no raise."""
-        filter_instance = self._create_filter_with_mocks()
+    async def test_process_frame_disable_sets_enhancement_to_zero(self):
+        """Test disable frame sets enhancement level to 0.0."""
+        filter_instance = self._create_filter_with_mocks(enhancement_level=0.7)
         await self._start_filter_with_mocks(filter_instance)
-        filter_instance._processor_ctx.set_parameter = MagicMock(
-            side_effect=ValueError("param error")
-        )
 
+        await filter_instance.process_frame(self.FilterEnableFrame(enable=False))
+
+        enhancement_params = [
+            (p, v)
+            for p, v in self.mock_processor.processor_ctx.parameters_set
+            if p == aic_sdk.ProcessorParameter.EnhancementLevel
+        ]
+        self.assertFalse(filter_instance._is_filter_enabled)
+        self.assertEqual(enhancement_params[-1][1], 0.0)
+
+    async def test_process_frame_enable_restores_configured_enhancement(self):
+        """Test enable frame restores configured enhancement level."""
+        filter_instance = self._create_filter_with_mocks(enhancement_level=0.7)
+        await self._start_filter_with_mocks(filter_instance)
+
+        await filter_instance.process_frame(self.FilterEnableFrame(enable=False))
         await filter_instance.process_frame(self.FilterEnableFrame(enable=True))
 
-        self.assertFalse(filter_instance._bypass)
-
-    async def test_process_frame_enable(self):
-        """Test processing FilterEnableFrame to enable filtering."""
-        filter_instance = self._create_filter_with_mocks()
-        await self._start_filter_with_mocks(filter_instance)
-        filter_instance._bypass = True
-
-        enable_frame = self.FilterEnableFrame(enable=True)
-        await filter_instance.process_frame(enable_frame)
-
-        self.assertFalse(filter_instance._bypass)
-
-    async def test_process_frame_disable(self):
-        """Test processing FilterEnableFrame to disable filtering."""
-        filter_instance = self._create_filter_with_mocks()
-        await self._start_filter_with_mocks(filter_instance)
-
-        disable_frame = self.FilterEnableFrame(enable=False)
-        await filter_instance.process_frame(disable_frame)
-
-        self.assertTrue(filter_instance._bypass)
+        enhancement_params = [
+            (p, v)
+            for p, v in self.mock_processor.processor_ctx.parameters_set
+            if p == aic_sdk.ProcessorParameter.EnhancementLevel
+        ]
+        self.assertTrue(filter_instance._is_filter_enabled)
+        self.assertEqual(enhancement_params[-1][1], 0.7)
 
     async def test_filter_when_not_ready(self):
         """Test that filter returns audio unchanged when not ready."""
@@ -678,7 +758,6 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
 
             BufferError: Existing exports of data: object cannot be re-sized
 
-        This is the exact error path reported in production (line 414).
         The fix removes the memoryview by snapshotting data into immutable
         bytes before any await.
         """
