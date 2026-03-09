@@ -540,23 +540,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         # Create summary context
         transcript = LLMContextSummarizationUtil.format_messages_for_summary(result.messages)
-        prompt_messages = [
-            {
-                "role": "system",
-                "content": frame.summarization_prompt,
-            },
-            {
-                "role": "user",
-                "content": f"Conversation history:\n{transcript}",
-            },
-        ]
-        summary_context = LLMContext(messages=prompt_messages)
+        summary_context = LLMContext(
+            messages=[{"role": "user", "content": f"Conversation history:\n{transcript}"}]
+        )
 
         # Generate summary using run_inference
         # This will be overridden by each LLM service implementation
         try:
             summary_text = await self.run_inference(
-                summary_context, max_tokens=frame.target_context_tokens
+                summary_context,
+                max_tokens=frame.target_context_tokens,
+                system_instruction=frame.summarization_prompt,
             )
         except NotImplementedError:
             raise RuntimeError(

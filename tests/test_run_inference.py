@@ -544,13 +544,11 @@ async def test_openai_run_inference_system_instruction_overrides_context():
         assert result == "Response"
         call_kwargs = service._client.chat.completions.create.call_args.kwargs
         messages = call_kwargs["messages"]
-        # system_instruction should be prepended as the first message
+        # system_instruction should replace the original system message
         assert messages[0] == {"role": "system", "content": "New system instruction"}
-        # Original system message should still be present
-        assert messages[1] == {"role": "system", "content": "Original system message"}
-        # User message should still be present
-        assert messages[2] == {"role": "user", "content": "Hello"}
-        assert len(messages) == 3
+        # User message should follow directly (original system message stripped)
+        assert messages[1] == {"role": "user", "content": "Hello"}
+        assert len(messages) == 2
 
 
 @pytest.mark.asyncio
