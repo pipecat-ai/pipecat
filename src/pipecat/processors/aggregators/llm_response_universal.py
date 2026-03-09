@@ -568,9 +568,6 @@ class LLMUserAggregator(LLMContextAggregator):
                 )
             )
 
-            # Auto-inject turn completion instructions into context
-            self._context.add_message({"role": "system", "content": config.completion_instructions})
-
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
         await self._cleanup()
@@ -639,9 +636,6 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
-        if self._params.filter_incomplete_user_turns:
-            config = self._params.user_turn_completion_config or UserTurnCompletionConfig()
-            self._context.add_message({"role": "system", "content": config.completion_instructions})
         if frame.run_llm:
             await self.push_context_frame()
 

@@ -212,6 +212,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._run_in_parallel = run_in_parallel
         self._function_call_timeout_secs = function_call_timeout_secs
         self._filter_incomplete_user_turns: bool = False
+        self._base_system_instruction: Optional[str] = None
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
@@ -326,6 +327,19 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
 
+    def _compose_system_instruction(self):
+        """Compose system_instruction by appending turn completion instructions.
+
+        Combines the base system instruction with turn completion instructions
+        and writes the result to ``self._settings.system_instruction``.
+        """
+        base = self._base_system_instruction
+        completion_instructions = self._user_turn_completion_config.completion_instructions
+        if base:
+            self._settings.system_instruction = f"{base}\n\n{completion_instructions}"
+        else:
+            self._settings.system_instruction = completion_instructions
+
     async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
         """Apply a settings delta, handling turn-completion fields.
 
@@ -345,9 +359,28 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 f"{self}: Incomplete turn filtering "
                 f"{'enabled' if self._filter_incomplete_user_turns else 'disabled'}"
             )
+            if self._filter_incomplete_user_turns:
+                # Save the current system_instruction before composing
+                self._base_system_instruction = self._settings.system_instruction
+                self._compose_system_instruction()
+            else:
+                # Restore original system_instruction
+                self._settings.system_instruction = self._base_system_instruction
+                self._base_system_instruction = None
 
         if "user_turn_completion_config" in changed and self._filter_incomplete_user_turns:
             self.set_user_turn_completion_config(self._settings.user_turn_completion_config)
+            self._compose_system_instruction()
+
+        if (
+            "system_instruction" in changed
+            and self._filter_incomplete_user_turns
+            and "filter_incomplete_user_turns" not in changed
+        ):
+            # system_instruction changed while turn completion is active.
+            # Treat the new value as the new base and recompose.
+            self._base_system_instruction = self._settings.system_instruction
+            self._compose_system_instruction()
 
         return changed
 
