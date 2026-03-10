@@ -997,12 +997,16 @@ class GoogleLLMService(LLMService):
         self, params_from_context: GeminiLLMInvocationParams
     ) -> AsyncIterator[GenerateContentResponse]:
         messages = params_from_context["messages"]
-        if (
-            params_from_context["system_instruction"]
-            and self._settings.system_instruction != params_from_context["system_instruction"]
-        ):
-            logger.debug(f"System instruction changed: {params_from_context['system_instruction']}")
-            self._settings.system_instruction = params_from_context["system_instruction"]
+
+        # Constructor/settings system instruction takes priority over context.
+        if self._settings.system_instruction and params_from_context["system_instruction"]:
+            logger.warning(
+                f"{self}: Both system_instruction and a system message in context are"
+                " set. Using system_instruction."
+            )
+        system_instruction = (
+            self._settings.system_instruction or params_from_context["system_instruction"]
+        )
 
         tools = []
         if params_from_context["tools"]:
@@ -1015,7 +1019,7 @@ class GoogleLLMService(LLMService):
 
         # Build generation parameters
         generation_params = self._build_generation_params(
-            system_instruction=self._settings.system_instruction,
+            system_instruction=system_instruction,
             tools=tools,
             tool_config=tool_config,
         )
