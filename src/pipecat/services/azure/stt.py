@@ -73,7 +73,7 @@ class AzureSTTService(STTService):
         self,
         *,
         api_key: str,
-        region: str,
+        region: Optional[str] = None,
         language: Optional[Language] = Language.EN_US,
         sample_rate: Optional[int] = None,
         private_endpoint: Optional[str] = None,
@@ -87,6 +87,7 @@ class AzureSTTService(STTService):
         Args:
             api_key: Azure Cognitive Services subscription key.
             region: Azure region for the Speech service (e.g., 'eastus').
+                Required unless ``private_endpoint`` is provided.
             language: Language for speech recognition. Defaults to English (US).
 
                 .. deprecated:: 0.0.105
@@ -126,21 +127,29 @@ class AzureSTTService(STTService):
             **kwargs,
         )
 
-        speech_config_kwargs: dict[str, Any] = {
-            "subscription": api_key,
-            "speech_recognition_language": default_settings.language
-            or language_to_azure_language(Language.EN_US),
-        }
+        recognition_language = default_settings.language or language_to_azure_language(
+            Language.EN_US
+        )
+
+        if not region and not private_endpoint:
+            raise ValueError("Either 'region' or 'private_endpoint' must be provided.")
+
         if private_endpoint:
             if region:
                 logger.warning(
                     "Both 'region' and 'private_endpoint' provided; 'region' will be ignored."
                 )
-            speech_config_kwargs["endpoint"] = private_endpoint
+            self._speech_config = SpeechConfig(
+                subscription=api_key,
+                endpoint=private_endpoint,
+                speech_recognition_language=recognition_language,
+            )
         else:
-            speech_config_kwargs["region"] = region
-
-        self._speech_config = SpeechConfig(**speech_config_kwargs)
+            self._speech_config = SpeechConfig(
+                subscription=api_key,
+                region=region,
+                speech_recognition_language=recognition_language,
+            )
 
         if endpoint_id:
             self._speech_config.endpoint_id = endpoint_id
