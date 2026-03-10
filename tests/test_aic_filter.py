@@ -522,11 +522,10 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(unsupported_ctx.enhancement_attempts, 1)
 
-    async def test_process_frame_disable_sets_enhancement_to_zero(self):
-        """Test disable frame sets enhancement level to 0.0."""
+    async def test_process_frame_disable_sets_bypass(self):
+        """Test disable frame toggles bypass."""
         filter_instance = self._create_filter_with_mocks(enhancement_level=0.7)
         await self._start_filter_with_mocks(filter_instance)
-
         await filter_instance.process_frame(self.FilterEnableFrame(enable=False))
 
         enhancement_params = [
@@ -539,8 +538,9 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             for p, v in self.mock_processor.processor_ctx.parameters_set
             if p == aic_sdk.ProcessorParameter.Bypass
         ]
+
         self.assertTrue(filter_instance._bypass)
-        self.assertEqual(enhancement_params[-1][1], 0.0)
+        self.assertEqual(enhancement_params[-1][1], 0.7)
         self.assertEqual(bypass_params[-1][1], 1.0)
 
     async def test_process_frame_enable_restores_configured_enhancement(self):
