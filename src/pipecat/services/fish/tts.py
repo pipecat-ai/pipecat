@@ -172,7 +172,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = FishAudioTTSSettings(
-            model="s1",
+            model="s2-pro",
             voice=None,
             language=None,
             latency="balanced",
