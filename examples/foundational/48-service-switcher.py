@@ -96,6 +96,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt_cartesia = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
     stt_deepgram = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # Uses ServiceSwitcherStrategyManual by default
     stt_switcher = ServiceSwitcher(services=[stt_cartesia, stt_deepgram])
 
     tts_cartesia = CartesiaTTSService(
@@ -110,11 +111,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             voice="aura-2-helena-en",
         ),
     )
-    tts_deepgram = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # Uses ServiceSwitcherStrategyManual by default
     tts_switcher = ServiceSwitcher(services=[tts_cartesia, tts_deepgram])
 
-    llm_openai = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-    llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+    system_prompt = "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
+
+    llm_openai = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(system_instruction=system_prompt),
+    )
+    llm_google = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        settings=GoogleLLMService.Settings(system_instruction=system_prompt),
+    )
+    # Uses ServiceSwitcherStrategyManual by default
     llm_switcher = LLMSwitcher(llms=[llm_openai, llm_google])
     # Register a "classic" function
     llm_switcher.register_function("get_current_weather", fetch_weather_from_api)

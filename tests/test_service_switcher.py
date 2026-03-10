@@ -129,60 +129,17 @@ class TestServiceSwitcherStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(strategy.services, self.services)
         self.assertEqual(strategy.active_service, self.service1)
 
-    async def test_handle_manually_switch_service_frame(self):
-        """Test manual service switching with ManuallySwitchServiceFrame."""
+    async def test_handle_frame_returns_none_for_manual_switch(self):
+        """Test that base strategy does not handle ManuallySwitchServiceFrame."""
         strategy = ServiceSwitcherStrategy(self.services)
-
-        # Initially service1 should be active
-        self.assertEqual(strategy.active_service, self.service1)
-
-        # Switch to service2
-        switch_frame = ManuallySwitchServiceFrame(service=self.service2)
-        await strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
-        self.assertEqual(strategy.active_service, self.service2)
-
-        # Switch to service3
-        switch_frame = ManuallySwitchServiceFrame(service=self.service3)
-        await strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
-        self.assertEqual(strategy.active_service, self.service3)
-
-    async def test_on_service_switched_event(self):
-        """Test that on_service_switched event fires with correct arguments."""
-        strategy = ServiceSwitcherStrategy(self.services)
-
-        switched_events = []
-
-        @strategy.event_handler("on_service_switched")
-        async def on_service_switched(strategy, service):
-            switched_events.append((strategy, service))
 
         switch_frame = ManuallySwitchServiceFrame(service=self.service2)
-        await strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
-        await asyncio.sleep(0)
+        result = await strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
 
-        self.assertEqual(len(switched_events), 1)
-        self.assertIsInstance(switched_events[0][0], ServiceSwitcherStrategy)
-        self.assertEqual(switched_events[0][1], self.service2)
-
-    async def test_on_service_switched_event_not_fired_for_unknown_service(self):
-        """Test that on_service_switched event does not fire for services not in the list."""
-        strategy = ServiceSwitcherStrategy(self.services)
-
-        switched_events = []
-
-        @strategy.event_handler("on_service_switched")
-        async def on_service_switched(strategy, service):
-            switched_events.append(service)
-
-        unknown_service = MockFrameProcessor("unknown")
-        switch_frame = ManuallySwitchServiceFrame(service=unknown_service)
-        await strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
-        await asyncio.sleep(0)
-
-        self.assertEqual(len(switched_events), 0)
+        self.assertIsNone(result)
         self.assertEqual(strategy.active_service, self.service1)
 
-    async def test_handle_frame_unsupported_frame_type(self):
+    async def test_handle_frame_returns_none_for_unsupported_frame(self):
         """Test that unsupported frame types return None."""
         strategy = ServiceSwitcherStrategy(self.services)
         unsupported_frame = TextFrame(text="test")
@@ -202,13 +159,73 @@ class TestServiceSwitcherStrategy(unittest.IsolatedAsyncioTestCase):
 
 
 class TestServiceSwitcherStrategyManual(unittest.IsolatedAsyncioTestCase):
-    """Test cases for ServiceSwitcherStrategyManual (deprecated)."""
+    """Test cases for ServiceSwitcherStrategyManual."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.service1 = MockFrameProcessor("service1")
+        self.service2 = MockFrameProcessor("service2")
+        self.service3 = MockFrameProcessor("service3")
+        self.services = [self.service1, self.service2, self.service3]
 
     def test_is_subclass_of_base_strategy(self):
         """Test that ServiceSwitcherStrategyManual is a subclass of ServiceSwitcherStrategy."""
-        service = MockFrameProcessor("service1")
-        strategy = ServiceSwitcherStrategyManual([service])
+        strategy = ServiceSwitcherStrategyManual(self.services)
         self.assertIsInstance(strategy, ServiceSwitcherStrategy)
+
+    async def test_handle_manually_switch_service_frame(self):
+        """Test manual service switching with ManuallySwitchServiceFrame."""
+        strategy = ServiceSwitcherStrategyManual(self.services)
+
+        # Initially service1 should be active
+        self.assertEqual(strategy.active_service, self.service1)
+
+        # Switch to service2
+        switch_frame = ManuallySwitchServiceFrame(service=self.service2)
+        await strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
+        self.assertEqual(strategy.active_service, self.service2)
+
+        # Switch to service3
+        switch_frame = ManuallySwitchServiceFrame(service=self.service3)
+        await strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
+        self.assertEqual(strategy.active_service, self.service3)
+
+    async def test_on_service_switched_event(self):
+        """Test that on_service_switched event fires with correct arguments."""
+        strategy = ServiceSwitcherStrategyManual(self.services)
+
+        switched_events = []
+
+        @strategy.event_handler("on_service_switched")
+        async def on_service_switched(strategy, service):
+            switched_events.append((strategy, service))
+
+        switch_frame = ManuallySwitchServiceFrame(service=self.service2)
+        await strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0)
+
+        self.assertEqual(len(switched_events), 1)
+        self.assertIsInstance(switched_events[0][0], ServiceSwitcherStrategyManual)
+        self.assertEqual(switched_events[0][1], self.service2)
+
+    async def test_unknown_service_ignored(self):
+        """Test that switching to an unknown service is ignored."""
+        strategy = ServiceSwitcherStrategyManual(self.services)
+
+        switched_events = []
+
+        @strategy.event_handler("on_service_switched")
+        async def on_service_switched(strategy, service):
+            switched_events.append(service)
+
+        unknown_service = MockFrameProcessor("unknown")
+        switch_frame = ManuallySwitchServiceFrame(service=unknown_service)
+        result = await strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0)
+
+        self.assertIsNone(result)
+        self.assertEqual(len(switched_events), 0)
+        self.assertEqual(strategy.active_service, self.service1)
 
 
 class TestServiceSwitcher(unittest.IsolatedAsyncioTestCase):
@@ -226,7 +243,7 @@ class TestServiceSwitcher(unittest.IsolatedAsyncioTestCase):
         switcher = ServiceSwitcher(self.services)
 
         self.assertEqual(switcher.services, self.services)
-        self.assertIsInstance(switcher.strategy, ServiceSwitcherStrategy)
+        self.assertIsInstance(switcher.strategy, ServiceSwitcherStrategyManual)
         self.assertEqual(switcher.strategy.services, self.services)
 
     async def test_default_active_service(self):

@@ -9,7 +9,11 @@
 from typing import Any, List, Optional, Type
 
 from pipecat.adapters.schemas.direct_function import DirectFunction
-from pipecat.pipeline.service_switcher import ServiceSwitcher, ServiceSwitcherStrategy, StrategyType
+from pipecat.pipeline.service_switcher import (
+    ServiceSwitcher,
+    ServiceSwitcherStrategyManual,
+    StrategyType,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 
@@ -23,14 +27,16 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
     """
 
     def __init__(
-        self, llms: List[LLMService], strategy_type: Type[StrategyType] = ServiceSwitcherStrategy
+        self,
+        llms: List[LLMService],
+        strategy_type: Type[StrategyType] = ServiceSwitcherStrategyManual,
     ):
         """Initialize the service switcher with a list of LLMs and a switching strategy.
 
         Args:
             llms: List of LLM services to switch between.
             strategy_type: The strategy class to use for switching between LLMs.
-                Defaults to ``ServiceSwitcherStrategy`` (the base strategy; manual switching only).
+                Defaults to ``ServiceSwitcherStrategyManual``.
         """
         super().__init__(llms, strategy_type)
 
