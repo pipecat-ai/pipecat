@@ -4,5 +4,5 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
+from .llm import SarvamLLMService
 from .tts import *
