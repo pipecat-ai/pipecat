@@ -117,6 +117,7 @@ class ServiceSwitcherStrategy(BaseObject):
         """
         if service in self.services:
             self._active_service = service
+            await service.queue_frame(ServiceSwitcherRequestMetadataFrame(service=service))
             await self._call_event_handler("on_service_switched", service)
             return service
         return None
@@ -313,9 +314,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
         # Let the strategy react to non-fatal errors from the active service.
         if isinstance(frame, ErrorFrame) and not frame.fatal:
-            service = await self.strategy.handle_error(frame)
-            if service:
-                await service.queue_frame(ServiceSwitcherRequestMetadataFrame(service=service))
+            await self.strategy.handle_error(frame)
 
         await super().push_frame(frame, direction)
 
@@ -333,9 +332,5 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             # frame. If we switched, we just swallow the frame.
             if not service:
                 await super().process_frame(frame, direction)
-
-            # If we switched to a new service, request its metadata.
-            if service:
-                await service.queue_frame(ServiceSwitcherRequestMetadataFrame(service=service))
         else:
             await super().process_frame(frame, direction)
