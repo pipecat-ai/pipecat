@@ -1134,10 +1134,7 @@ class DailyTransportClient(EventHandler):
             return "Transcription can't be started without a room token"
 
         future = self._get_event_loop().create_future()
-        self._client.start_transcription(
-            settings=self._params.transcription_settings.model_dump(exclude_none=True),
-            completion=completion_callback(future),
-        )
+        self._client.start_transcription(settings=settings, completion=completion_callback(future))
         return await future
 
     async def stop_transcription(self) -> Optional[CallClientError]:
@@ -2727,7 +2724,8 @@ class DailyTransport(BaseTransport):
         if self._params.transcription_enabled:
             # We report an error because we are starting transcription
             # internally and if it fails we need to know.
-            error = await self.start_transcription(self._params.transcription_settings)
+            settings = self._params.transcription_settings.model_dump(exclude_none=True)
+            error = await self.start_transcription(settings)
             if error:
                 await self._on_error(f"Unable to start transcription: {error}")
         await self._call_event_handler("on_joined", data)
