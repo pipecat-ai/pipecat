@@ -285,7 +285,7 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(filter_instance._vad_ctx)
 
     async def test_start_applies_initial_bypass_parameter(self):
-        """Test that start applies SDK Bypass parameter."""
+        """Test that start applies bypass parameter."""
         filter_instance = self._create_filter_with_mocks()
         await self._start_filter_with_mocks(filter_instance)
 
