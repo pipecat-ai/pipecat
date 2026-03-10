@@ -356,7 +356,7 @@ class DailyParams(TransportParams):
         dialin_settings: Optional settings for dial-in functionality.
         microphone_out_enabled: Whether to enable the main microphone track.
         transcription_enabled: Whether to enable speech transcription.
-        transcription_settings: Configuration for transcription service.
+        transcription_settings: Optional configuration for transcription service.
     """
 
     api_url: str = "https://api.daily.co/v1"
@@ -368,7 +368,7 @@ class DailyParams(TransportParams):
     dialin_settings: Optional[DailyDialinSettings] = None
     microphone_out_enabled: bool = True
     transcription_enabled: bool = False
-    transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
+    transcription_settings: Optional[DailyTranscriptionSettings] = None
 
 
 class DailyCallbacks(BaseModel):
@@ -1134,10 +1134,7 @@ class DailyTransportClient(EventHandler):
             return "Transcription can't be started without a room token"
 
         future = self._get_event_loop().create_future()
-        self._client.start_transcription(
-            settings=self._params.transcription_settings.model_dump(exclude_none=True),
-            completion=completion_callback(future),
-        )
+        self._client.start_transcription(settings=settings, completion=completion_callback(future))
         return await future
 
     async def stop_transcription(self) -> Optional[CallClientError]:
@@ -2727,7 +2724,8 @@ class DailyTransport(BaseTransport):
         if self._params.transcription_enabled:
             # We report an error because we are starting transcription
             # internally and if it fails we need to know.
-            error = await self.start_transcription(self._params.transcription_settings)
+            settings = self._params.transcription_settings or DailyTranscriptionSettings()
+            error = await self.start_transcription(settings.model_dump(exclude_none=True))
             if error:
                 await self._on_error(f"Unable to start transcription: {error}")
         await self._call_event_handler("on_joined", data)
