@@ -886,9 +886,11 @@ class GoogleLLMService(LLMService):
 
         # Extract text from response
         if response.candidates and response.candidates[0].content:
-            for part in response.candidates[0].content.parts:
-                if part.text:
-                    return part.text
+            parts = response.candidates[0].content.parts
+            if parts:
+                for part in parts:
+                    if part.text:
+                        return part.text
 
         return None
 
