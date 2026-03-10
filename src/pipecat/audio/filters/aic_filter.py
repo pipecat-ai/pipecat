@@ -344,8 +344,7 @@ class AICFilter(BaseAudioFilter):
         try:
             self._processor_ctx.set_parameter(ProcessorParameter.EnhancementLevel, level)
         except ParameterOutOfRangeError as e:
-            logger.warning("AIC enhancement_level was rejected as out-of-range; ignoring it.")
-            logger.debug(f"AIC EnhancementLevel set_parameter out-of-range: {e}")
+            logger.warning(f"AIC EnhancementLevel set_parameter out-of-range: {e}")
             self._enhancement_level = None
 
     def _apply_bypass(self):
