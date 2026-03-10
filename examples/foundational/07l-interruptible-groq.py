@@ -57,7 +57,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GroqLLMService(
         api_key=os.getenv("GROQ_API_KEY"),
         settings=GroqLLMService.Settings(
-            model="meta-llama/llama-4-maverick-17b-128e-instruct",
+            model="llama-3.1-8b-instant",
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),
     )
