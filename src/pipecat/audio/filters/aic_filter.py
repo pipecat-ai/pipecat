@@ -336,13 +336,13 @@ class AICFilter(BaseAudioFilter):
 
     def _apply_enhancement_level(self):
         """Apply enhancement_level if configured and supported by the active model."""
-        if self._enhancement_level is None or self._processor_ctx is None:
+        if self._processor_ctx is None or self._enhancement_level is None:
             return
 
-        level = float(self._enhancement_level if not self._bypass else 0.0)
-
         try:
-            self._processor_ctx.set_parameter(ProcessorParameter.EnhancementLevel, level)
+            self._processor_ctx.set_parameter(
+                ProcessorParameter.EnhancementLevel, self._enhancement_level
+            )
         except ParameterOutOfRangeError as e:
             logger.warning(f"AIC EnhancementLevel set_parameter out-of-range: {e}")
             self._enhancement_level = None
