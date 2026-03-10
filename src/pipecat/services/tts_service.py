@@ -1182,6 +1182,9 @@ class TTSService(AIService):
             context_id: The context to append audio to.
             frame: The audio or control frame to append.
         """
+        if not context_id:
+            logger.debug(f"{self} unable to append audio to context: no context ID provided")
+            return
         if self.audio_context_available(context_id):
             logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
             await self._audio_contexts[context_id].put(frame)
