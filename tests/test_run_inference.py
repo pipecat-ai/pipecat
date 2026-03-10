@@ -511,5 +511,257 @@ async def test_aws_bedrock_run_inference_client_exception():
             await service.run_inference(mock_context)
 
 
-if __name__ == "__main__":
-    unittest.main()
+# --- system_instruction parameter tests ---
+
+
+@pytest.mark.asyncio
+async def test_openai_run_inference_system_instruction_overrides_context():
+    """Test that system_instruction overrides the system message from context."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(model="gpt-4")
+        service._client = AsyncMock()
+
+        mock_context = MagicMock(spec=LLMContext)
+        mock_adapter = MagicMock()
+        test_messages = [
+            {"role": "system", "content": "Original system message"},
+            {"role": "user", "content": "Hello"},
+        ]
+        mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
+            messages=test_messages, tools=OPENAI_NOT_GIVEN, tool_choice=OPENAI_NOT_GIVEN
+        )
+        service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Response"
+        service._client.chat.completions.create.return_value = mock_response
+
+        result = await service.run_inference(
+            mock_context, system_instruction="New system instruction"
+        )
+
+        assert result == "Response"
+        call_kwargs = service._client.chat.completions.create.call_args.kwargs
+        messages = call_kwargs["messages"]
+        # system_instruction should be prepended as the first message
+        assert messages[0] == {"role": "system", "content": "New system instruction"}
+        # Original system message should still be present
+        assert messages[1] == {"role": "system", "content": "Original system message"}
+        # User message should still be present
+        assert messages[2] == {"role": "user", "content": "Hello"}
+        assert len(messages) == 3
+
+
+@pytest.mark.asyncio
+async def test_openai_run_inference_system_instruction_none_unchanged():
+    """Test that when system_instruction is None, behavior is unchanged."""
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(model="gpt-4")
+        service._client = AsyncMock()
+
+        mock_context = MagicMock(spec=LLMContext)
+        mock_adapter = MagicMock()
+        test_messages = [
+            {"role": "system", "content": "Original system message"},
+            {"role": "user", "content": "Hello"},
+        ]
+        mock_adapter.get_llm_invocation_params.return_value = OpenAILLMInvocationParams(
+            messages=test_messages, tools=OPENAI_NOT_GIVEN, tool_choice=OPENAI_NOT_GIVEN
+        )
+        service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Response"
+        service._client.chat.completions.create.return_value = mock_response
+
+        result = await service.run_inference(mock_context)
+
+        assert result == "Response"
+        call_kwargs = service._client.chat.completions.create.call_args.kwargs
+        messages = call_kwargs["messages"]
+        assert messages[0] == {"role": "system", "content": "Original system message"}
+        assert messages[1] == {"role": "user", "content": "Hello"}
+
+
+@pytest.mark.asyncio
+async def test_anthropic_run_inference_system_instruction_overrides_context():
+    """Test that system_instruction overrides the system message for Anthropic."""
+    service = AnthropicLLMService(api_key="test-key", model="claude-3-sonnet-20240229")
+    service._client = AsyncMock()
+
+    mock_context = MagicMock(spec=LLMContext)
+    mock_adapter = MagicMock()
+    test_messages = [{"role": "user", "content": "Hello"}]
+    mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
+        messages=test_messages, system="Original system", tools=[]
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock()]
+    mock_response.content[0].text = "Response"
+    service._client.beta.messages.create.return_value = mock_response
+
+    result = await service.run_inference(mock_context, system_instruction="New system instruction")
+
+    assert result == "Response"
+    call_kwargs = service._client.beta.messages.create.call_args.kwargs
+    assert call_kwargs["system"] == "New system instruction"
+    assert call_kwargs["messages"] == test_messages
+
+
+@pytest.mark.asyncio
+async def test_anthropic_run_inference_system_instruction_none_unchanged():
+    """Test that when system_instruction is None, Anthropic behavior is unchanged."""
+    service = AnthropicLLMService(api_key="test-key", model="claude-3-sonnet-20240229")
+    service._client = AsyncMock()
+
+    mock_context = MagicMock(spec=LLMContext)
+    mock_adapter = MagicMock()
+    test_messages = [{"role": "user", "content": "Hello"}]
+    mock_adapter.get_llm_invocation_params.return_value = AnthropicLLMInvocationParams(
+        messages=test_messages, system="Original system", tools=[]
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock()]
+    mock_response.content[0].text = "Response"
+    service._client.beta.messages.create.return_value = mock_response
+
+    result = await service.run_inference(mock_context)
+
+    assert result == "Response"
+    call_kwargs = service._client.beta.messages.create.call_args.kwargs
+    assert call_kwargs["system"] == "Original system"
+
+
+@pytest.mark.asyncio
+async def test_google_run_inference_system_instruction_overrides_context():
+    """Test that system_instruction overrides the system message for Google."""
+    service = GoogleLLMService(api_key="test-key", model="gemini-2.0-flash")
+    service._client = AsyncMock()
+
+    mock_context = MagicMock(spec=LLMContext)
+    mock_adapter = MagicMock()
+    test_messages = [{"role": "user", "content": "Hello"}]
+    mock_adapter.get_llm_invocation_params.return_value = GeminiLLMInvocationParams(
+        messages=test_messages, system_instruction="Original system", tools=NotGiven()
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+    mock_response = MagicMock()
+    mock_response.candidates = [MagicMock()]
+    mock_response.candidates[0].content = MagicMock()
+    mock_response.candidates[0].content.parts = [MagicMock()]
+    mock_response.candidates[0].content.parts[0].text = "Response"
+    service._client.aio = AsyncMock()
+    service._client.aio.models = AsyncMock()
+    service._client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+    result = await service.run_inference(mock_context, system_instruction="New system instruction")
+
+    assert result == "Response"
+    call_kwargs = service._client.aio.models.generate_content.call_args.kwargs
+    config = call_kwargs["config"]
+    assert config.system_instruction == "New system instruction"
+
+
+@pytest.mark.asyncio
+async def test_google_run_inference_system_instruction_none_unchanged():
+    """Test that when system_instruction is None, Google behavior is unchanged."""
+    service = GoogleLLMService(api_key="test-key", model="gemini-2.0-flash")
+    service._client = AsyncMock()
+
+    mock_context = MagicMock(spec=LLMContext)
+    mock_adapter = MagicMock()
+    test_messages = [{"role": "user", "content": "Hello"}]
+    mock_adapter.get_llm_invocation_params.return_value = GeminiLLMInvocationParams(
+        messages=test_messages, system_instruction="Original system", tools=NotGiven()
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+    mock_response = MagicMock()
+    mock_response.candidates = [MagicMock()]
+    mock_response.candidates[0].content = MagicMock()
+    mock_response.candidates[0].content.parts = [MagicMock()]
+    mock_response.candidates[0].content.parts[0].text = "Response"
+    service._client.aio = AsyncMock()
+    service._client.aio.models = AsyncMock()
+    service._client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+    result = await service.run_inference(mock_context)
+
+    assert result == "Response"
+    call_kwargs = service._client.aio.models.generate_content.call_args.kwargs
+    config = call_kwargs["config"]
+    assert config.system_instruction == "Original system"
+
+
+@pytest.mark.asyncio
+async def test_aws_bedrock_run_inference_system_instruction_overrides_context():
+    """Test that system_instruction overrides the system message for AWS Bedrock."""
+    service = AWSBedrockLLMService(model="anthropic.claude-3-sonnet-20240229-v1:0")
+
+    mock_context = MagicMock(spec=LLMContext)
+    mock_adapter = MagicMock()
+    test_messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    mock_adapter.get_llm_invocation_params.return_value = AWSBedrockLLMInvocationParams(
+        messages=test_messages,
+        system=[{"text": "Original system"}],
+        tools=[],
+        tool_choice=None,
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+    mock_client = AsyncMock()
+    mock_response = {"output": {"message": {"content": [{"text": "Response"}]}}}
+    mock_client.converse.return_value = mock_response
+
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+    with patch.object(service._aws_session, "client", return_value=mock_context_manager):
+        result = await service.run_inference(
+            mock_context, system_instruction="New system instruction"
+        )
+
+        assert result == "Response"
+        call_kwargs = mock_client.converse.call_args.kwargs
+        assert call_kwargs["system"] == [{"text": "New system instruction"}]
+        assert call_kwargs["messages"] == test_messages
+
+
+@pytest.mark.asyncio
+async def test_aws_bedrock_run_inference_system_instruction_none_unchanged():
+    """Test that when system_instruction is None, AWS Bedrock behavior is unchanged."""
+    service = AWSBedrockLLMService(model="anthropic.claude-3-sonnet-20240229-v1:0")
+
+    mock_context = MagicMock(spec=LLMContext)
+    mock_adapter = MagicMock()
+    test_messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    mock_adapter.get_llm_invocation_params.return_value = AWSBedrockLLMInvocationParams(
+        messages=test_messages,
+        system=[{"text": "Original system"}],
+        tools=[],
+        tool_choice=None,
+    )
+    service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+    mock_client = AsyncMock()
+    mock_response = {"output": {"message": {"content": [{"text": "Response"}]}}}
+    mock_client.converse.return_value = mock_response
+
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+    with patch.object(service._aws_session, "client", return_value=mock_context_manager):
+        result = await service.run_inference(mock_context)
+
+        assert result == "Response"
+        call_kwargs = mock_client.converse.call_args.kwargs
+        assert call_kwargs["system"] == [{"text": "Original system"}]
