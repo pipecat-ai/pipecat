@@ -412,8 +412,7 @@ class AICFilter(BaseAudioFilter):
         logger.debug(f"  Sample rate: {self._sample_rate} Hz")
         logger.debug(f"  Frames per chunk: {self._frames_per_block}")
         if self._enhancement_level is not None:
-            level = self._enhancement_level if not self._bypass else 0.0
-            logger.debug(f"  Enhancement strength: {int(level * 100)}%")
+            logger.debug(f"  Enhancement level: {self._enhancement_level}")
         else:
             logger.debug("  Enhancement level not configured; using the model's default behavior.")
         logger.debug(f"  Optimal sample rate: {self._model.get_optimal_sample_rate()} Hz")
