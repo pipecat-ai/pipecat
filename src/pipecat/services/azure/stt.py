@@ -95,7 +95,7 @@ class AzureSTTService(STTService):
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             private_endpoint: Private endpoint for STT behind firewall.
-                See https://docs.azure.cn/en-us/ai-services/speech-service/speech-services-private-link?tabs=portal
+                See https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-private-link?tabs=portal
             endpoint_id: Custom model endpoint id.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
