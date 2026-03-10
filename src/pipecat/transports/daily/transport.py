@@ -356,7 +356,7 @@ class DailyParams(TransportParams):
         dialin_settings: Optional settings for dial-in functionality.
         microphone_out_enabled: Whether to enable the main microphone track.
         transcription_enabled: Whether to enable speech transcription.
-        transcription_settings: Optional configuration for transcription service.
+        transcription_settings: Configuration for transcription service.
     """
 
     api_url: str = "https://api.daily.co/v1"
@@ -368,7 +368,7 @@ class DailyParams(TransportParams):
     dialin_settings: Optional[DailyDialinSettings] = None
     microphone_out_enabled: bool = True
     transcription_enabled: bool = False
-    transcription_settings: Optional[DailyTranscriptionSettings] = None
+    transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
 
 
 class DailyCallbacks(BaseModel):
@@ -2724,8 +2724,8 @@ class DailyTransport(BaseTransport):
         if self._params.transcription_enabled:
             # We report an error because we are starting transcription
             # internally and if it fails we need to know.
-            settings = self._params.transcription_settings or DailyTranscriptionSettings()
-            error = await self.start_transcription(settings.model_dump(exclude_none=True))
+            settings = self._params.transcription_settings.model_dump(exclude_none=True)
+            error = await self.start_transcription(settings)
             if error:
                 await self._on_error(f"Unable to start transcription: {error}")
         await self._call_event_handler("on_joined", data)
