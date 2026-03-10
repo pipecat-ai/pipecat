@@ -177,7 +177,6 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(filter_instance._model_id, "test-model")
         self.assertIsNone(filter_instance._model_path)
         self.assertIsNone(filter_instance._enhancement_level)
-        self.assertTrue(filter_instance._is_filter_enabled)
         self.assertFalse(filter_instance._bypass)
 
     async def test_initialization_with_model_path(self):
@@ -540,7 +539,6 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             for p, v in self.mock_processor.processor_ctx.parameters_set
             if p == aic_sdk.ProcessorParameter.Bypass
         ]
-        self.assertFalse(filter_instance._is_filter_enabled)
         self.assertTrue(filter_instance._bypass)
         self.assertEqual(enhancement_params[-1][1], 0.0)
         self.assertEqual(bypass_params[-1][1], 1.0)
@@ -563,7 +561,6 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
             for p, v in self.mock_processor.processor_ctx.parameters_set
             if p == aic_sdk.ProcessorParameter.Bypass
         ]
-        self.assertTrue(filter_instance._is_filter_enabled)
         self.assertFalse(filter_instance._bypass)
         self.assertEqual(enhancement_params[-1][1], 0.7)
         self.assertEqual(bypass_params[-1][1], 0.0)

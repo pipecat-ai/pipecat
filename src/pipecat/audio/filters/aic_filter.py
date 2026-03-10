@@ -259,7 +259,6 @@ class AICFilter(BaseAudioFilter):
             Path.home() / ".cache" / "pipecat" / "aic-models"
         )
         self._enhancement_level = enhancement_level
-        self._is_filter_enabled = True
         self._bypass = False
 
         self._sample_rate = 0
@@ -340,7 +339,7 @@ class AICFilter(BaseAudioFilter):
         if self._enhancement_level is None or self._processor_ctx is None:
             return
 
-        level = float(self._enhancement_level if self._is_filter_enabled else 0.0)
+        level = float(self._enhancement_level if not self._bypass else 0.0)
 
         try:
             self._processor_ctx.set_parameter(ProcessorParameter.EnhancementLevel, level)
@@ -414,7 +413,7 @@ class AICFilter(BaseAudioFilter):
         logger.debug(f"  Sample rate: {self._sample_rate} Hz")
         logger.debug(f"  Frames per chunk: {self._frames_per_block}")
         if self._enhancement_level is not None:
-            level = self._enhancement_level if self._is_filter_enabled else 0.0
+            level = self._enhancement_level if not self._bypass else 0.0
             logger.debug(f"  Enhancement strength: {int(level * 100)}%")
         else:
             logger.debug("  Enhancement level not configured; using the model's default behavior.")
@@ -459,7 +458,6 @@ class AICFilter(BaseAudioFilter):
             None
         """
         if isinstance(frame, FilterEnableFrame):
-            self._is_filter_enabled = frame.enable
             self._bypass = not frame.enable
             if self._processor_ctx is not None:
                 try:
