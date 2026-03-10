@@ -12,7 +12,7 @@ from .frames import *
 from .gemini_live import *
 from .image import *
 from .llm import *
-from .llm_openai import *
+from .openai import *
 from .rtvi import *
 from .stt import *
 from .tts import *
