@@ -13,12 +13,12 @@ from pipecat.services import DeprecatedModuleProxy
 from .frames import *
 from .image import *
 from .llm import *
-from .llm_openai import *
-from .llm_vertex import *
+from .openai import *
 from .rtvi import *
 from .stt import *
 from .tts import *
+from .vertex import *
 
 sys.modules[__name__] = DeprecatedModuleProxy(
-    globals(), "google", "google.[frames,image,llm,llm_openai,llm_vertex,rtvi,stt,tts]"
+    globals(), "google", "google.[frames,image,llm,openai,vertex,rtvi,stt,tts]"
 )
