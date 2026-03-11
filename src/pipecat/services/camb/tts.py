@@ -138,10 +138,13 @@ class CambTTSSettings(TTSSettings):
     """Settings for CambTTSService.
 
     Parameters:
+        voice: Camb.ai voice ID. Overrides ``TTSSettings.voice`` (str) because
+            Camb.ai uses integer voice IDs.
         user_instructions: Custom instructions for mars-instruct model only.
             Ignored for other models. Max 1000 characters.
     """
 
+    voice: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     user_instructions: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
