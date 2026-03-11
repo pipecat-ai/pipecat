@@ -61,7 +61,7 @@ class SimliVideoService(AIService):
     class InputParams(BaseModel):
         """Input parameters for Simli video configuration.
 
-        .. deprecated:: 0.0.105
+        .. deprecated:: 0.0.106
             Use ``SimliVideoService.Settings(...)`` instead.
 
         Parameters:
@@ -116,7 +116,7 @@ class SimliVideoService(AIService):
                 which reduces latency when using Trinity.
             params: Additional input parameters for session configuration.
 
-                .. deprecated:: 0.0.105
+                .. deprecated:: 0.0.106
                     Use ``settings=SimliVideoService.Settings(...)`` instead.
 
             max_session_length: Absolute maximum session duration in seconds.
