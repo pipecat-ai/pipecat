@@ -190,7 +190,7 @@ class ServiceSettings:
         result.update(self.extra)
         return result
 
-    def apply_update(self: _S, delta: _S) -> Dict[str, Any]:
+    def apply_update(self: _S, delta: _S) -> _S:
         """Merge a delta-mode object into this store-mode object.
 
         Only fields in *delta* that are **given** (i.e. not ``NOT_GIVEN``)
@@ -204,9 +204,11 @@ class ServiceSettings:
             delta: A delta-mode settings object of the same type.
 
         Returns:
-            A dict mapping each changed field name to its **pre-update** value.
-            Use ``changed.keys()`` for the set of names, or index with
-            ``changed["field"]`` to inspect the old value.
+            A delta-mode settings instance of the same type, with changed
+            fields set to their **pre-update** (old) values and unchanged
+            fields left as ``NOT_GIVEN``.  Use ``changed.given_fields()``
+            for the set of changed names, or access fields directly with
+            typed attribute access (e.g. ``is_given(changed.voice)``).
 
         Examples::
 
@@ -215,10 +217,10 @@ class ServiceSettings:
             # delta-mode object (only voice is set)
             delta = TTSSettings(voice="bob")
             changed = current.apply_update(delta)
-            # changed == {"voice": "alice"}
+            # is_given(changed.voice) is True, changed.voice == "alice"
             # current.voice == "bob", current.language == "en"
         """
-        changed: Dict[str, Any] = {}
+        changed: _S = type(self)()  # delta-mode: all NOT_GIVEN
         for f in fields(self):
             if f.name == "extra":
                 continue
@@ -228,14 +230,19 @@ class ServiceSettings:
             old_val = getattr(self, f.name)
             if old_val != new_val:
                 setattr(self, f.name, new_val)
-                changed[f.name] = old_val
+                # Store the old value. Use None as a stand-in when the old
+                # value was NOT_GIVEN, since NOT_GIVEN is the "unset"
+                # sentinel in delta mode and would hide the change.  In
+                # store-mode objects (the normal case) this never triggers
+                # because validate_complete() ensures no NOT_GIVEN fields.
+                setattr(changed, f.name, None if isinstance(old_val, _NotGiven) else old_val)
 
         # Merge extra
         for key, new_val in delta.extra.items():
             old_val = self.extra.get(key, NOT_GIVEN)
             if old_val != new_val:
                 self.extra[key] = new_val
-                changed[key] = old_val
+                changed.extra[key] = old_val
 
         return changed
 

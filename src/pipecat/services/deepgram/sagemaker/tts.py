@@ -15,7 +15,7 @@ streaming audio output.
 import asyncio
 import json
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import TTSSettings, is_given
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -234,7 +234,7 @@ class DeepgramSageMakerTTSService(TTSService):
             logger.debug("Disconnected from Deepgram TTS on SageMaker")
             await self._call_event_handler("on_disconnected")
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Apply a settings delta and reconnect if necessary.
 
         Since all settings are part of the SageMaker session query string,
@@ -242,11 +242,11 @@ class DeepgramSageMakerTTSService(TTSService):
         """
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
         # Deepgram uses voice as the model, so keep them in sync for metrics
-        if "voice" in changed:
+        if is_given(changed.voice):
             self._settings.model = self._settings.voice
             self._sync_model_name_to_metrics()
 
@@ -255,7 +255,7 @@ class DeepgramSageMakerTTSService(TTSService):
         # await self._disconnect()
         # await self._connect()
 
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.given_fields())
 
         return changed
 

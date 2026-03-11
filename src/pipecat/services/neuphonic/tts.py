@@ -212,10 +212,10 @@ class NeuphonicTTSService(InterruptibleTTSService):
         """
         return language_to_neuphonic_lang_code(language)
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> Settings:
         """Apply a settings delta and reconnect with new configuration."""
         changed = await super()._update_settings(delta)
-        if changed:
+        if changed.given_fields():
             await self._disconnect()
             await self._connect()
             logger.info(f"Switching TTS to settings: [{self._settings}]")

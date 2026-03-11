@@ -186,16 +186,16 @@ class NvidiaTTSService(TTSService):
                 stacklevel=2,
             )
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> Settings:
         """Apply a settings delta.
 
         Settings are stored but not applied to the active connection.
         """
         changed = await super()._update_settings(delta)
-        if not changed:
+        if not changed.given_fields():
             return changed
         # TODO: reconnect gRPC client to apply changed settings.
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.given_fields())
         return changed
 
     def _initialize_client(self):

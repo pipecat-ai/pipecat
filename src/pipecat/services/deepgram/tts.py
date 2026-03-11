@@ -12,7 +12,7 @@ for generating speech from text using various voice models.
 
 import json
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import TTSSettings, is_given
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -185,23 +185,23 @@ class DeepgramTTSService(WebsocketTTSService):
 
         await self._disconnect_websocket()
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Apply a settings delta.
 
         Args:
             delta: A :class:`TTSSettings` (or ``DeepgramTTSService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object with changed fields.
         """
         changed = await super()._update_settings(delta)
 
         # Deepgram uses voice as the model, so keep them in sync for metrics
-        if "voice" in changed:
+        if is_given(changed.voice):
             self._settings.model = self._settings.voice
             self._sync_model_name_to_metrics()
 
-        if changed:
+        if changed.given_fields():
             await self._disconnect()
             await self._connect()
 

@@ -591,7 +591,7 @@ class TTSService(AIService):
             if not (agg_type == aggregation_type and func == transform_function)
         ]
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Apply a TTS settings delta.
 
         Translates language to service-specific value before applying.
@@ -600,7 +600,8 @@ class TTSService(AIService):
             delta: A TTS settings delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode ``TTSSettings`` with changed fields set to their
+            previous values.
         """
         # Translate language *before* applying so the stored value is canonical
         if is_given(delta.language) and isinstance(delta.language, Language):

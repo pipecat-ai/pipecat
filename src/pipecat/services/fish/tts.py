@@ -234,7 +234,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         """
         return True
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> Settings:
         """Apply a settings delta and reconnect if needed.
 
         Any change to voice or model triggers a WebSocket reconnect.
@@ -243,11 +243,11 @@ class FishAudioTTSService(InterruptibleTTSService):
             delta: A :class:`TTSSettings` (or ``FishAudioTTSService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object with only the changed fields set.
         """
         changed = await super()._update_settings(delta)
 
-        if changed:
+        if changed.given_fields():
             await self._disconnect()
             await self._connect()
 

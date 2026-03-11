@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.settings import ServiceSettings
+from pipecat.services.settings import ServiceSettings, is_given
 
 
 class AIService(FrameProcessor):
@@ -104,13 +104,13 @@ class AIService(FrameProcessor):
         """
         pass
 
-    async def _update_settings(self, delta: ServiceSettings) -> Dict[str, Any]:
+    async def _update_settings(self, delta: ServiceSettings) -> ServiceSettings:
         """Apply a settings delta and return the changed fields.
 
-        The delta is applied to ``_settings`` and a dict mapping each changed
-        field name to its **pre-update** value is returned.  The ``model``
-        field is handled specially: when it changes, ``set_model_name`` is
-        called.
+        The delta is applied to ``_settings`` and a delta-mode settings object
+        is returned with changed fields set to their **pre-update** values.
+        The ``model`` field is handled specially: when it changes,
+        ``set_model_name`` is called.
 
         Concrete services should override this method (calling ``super()``)
         to react to specific changed fields (e.g. reconnect on voice change).
@@ -119,15 +119,17 @@ class AIService(FrameProcessor):
             delta: A delta-mode settings object.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object with changed fields set to their
+            previous values. Unchanged fields are ``NOT_GIVEN``.
         """
         changed = self._settings.apply_update(delta)
 
-        if "model" in changed:
+        if is_given(changed.model):
             self._sync_model_name_to_metrics()
 
-        if changed:
-            logger.info(f"{self.name}: updated settings fields: {set(changed)}")
+        changed_fields = changed.given_fields()
+        if changed_fields:
+            logger.info(f"{self.name}: updated settings fields: {set(changed_fields)}")
 
         return changed
 

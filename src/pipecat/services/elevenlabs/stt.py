@@ -17,7 +17,7 @@ import io
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -593,18 +593,19 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> Settings:
         """Apply a settings delta and reconnect if anything changed.
 
         Args:
             delta: A :class:`STTSettings` (or ``ElevenLabsRealtimeSTTService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object whose ``given_fields()`` contains
+            only the fields that actually changed.
         """
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
         if self._websocket:

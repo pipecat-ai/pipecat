@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import TTSSettings, is_given
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -149,21 +149,21 @@ class GradiumTTSService(WebsocketTTSService):
         """
         return True
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> Settings:
         """Apply a settings delta and reconnect if voice changed.
 
         Args:
             delta: A :class:`TTSSettings` (or ``GradiumTTSService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object with only the changed fields set.
         """
         changed = await super()._update_settings(delta)
-        if "voice" in changed:
+        if is_given(changed.voice):
             await self._disconnect()
             await self._connect()
         else:
-            self._warn_unhandled_updated_settings(changed)
+            self._warn_unhandled_updated_settings(changed.given_fields())
         return changed
 
     def _build_msg(self, text: str = "", context_id: str = "") -> dict:

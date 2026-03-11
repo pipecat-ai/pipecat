@@ -325,14 +325,14 @@ svc = MyTTSService(
 
 AI services support runtime configuration changes via `*UpdateSettingsFrame`s (e.g. `STTUpdateSettingsFrame`, `TTSUpdateSettingsFrame`, `LLMUpdateSettingsFrame`).
 
-To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns a `dict` mapping each changed field name to its **pre-update** value. Your override should call `super()` first, then act on the changed fields. A common implementation might look like:
+To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns a delta-mode settings object of the same type with changed fields set to their **pre-update** values (unchanged fields are `NOT_GIVEN`). Your override should call `super()` first, then act on the changed fields. A common implementation might look like:
 
 ```python
-async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+async def _update_settings(self, update: TTSSettings) -> TTSSettings:
     """Apply a settings update, reconfiguring the connection if needed."""
     changed = await super()._update_settings(update)
 
-    if not changed:
+    if not changed.given_fields():
         return changed
 
     await self._disconnect()
@@ -341,24 +341,24 @@ async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
     return changed
 ```
 
-The dict keys work like a set for membership tests (`"language" in changed`) and truthiness (`if changed`). Use `changed.keys() - {"language"}` for set difference, or `changed["language"]` to inspect the previous value of a field.
+Use `is_given(changed.language)` to check whether a specific field changed, and `changed.given_fields()` to get a dict of all changed fields. Use `changed.given_fields().keys() - {"language"}` for set difference, or access old values directly with typed attributes (e.g. `changed.language`).
 
 Note that, in this example, the service requires a reconnect to apply the new language. Consider, for each setting, whether your service requires reconnection or can apply changes in-place.
 
-If your service can't yet apply certain settings at runtime, call `self._warn_unhandled_updated_settings(changed)` with any unhandled field names so users get a clear log message:
+If your service can't yet apply certain settings at runtime, call `self._warn_unhandled_updated_settings(changed.given_fields())` with any unhandled field names so users get a clear log message:
 
 ```python
-async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+async def _update_settings(self, update: TTSSettings) -> TTSSettings:
     changed = await super()._update_settings(update)
 
-    if not changed:
+    if not changed.given_fields():
         return changed
 
-    if "language" in changed:
+    if is_given(changed.language):
         await self._update_language()
     else:
         # TODO: this should be temporary - handle changes to other settings soon!
-        self._warn_unhandled_updated_settings(changed.keys() - {"language"})
+        self._warn_unhandled_updated_settings(changed.given_fields().keys() - {"language"})
 
     return changed
 ```

@@ -13,7 +13,7 @@ the Cartesia Live transcription API for real-time speech recognition.
 import json
 import urllib.parse
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -309,24 +309,25 @@ class CartesiaSTTService(WebsocketSTTService):
 
         await self._disconnect_websocket()
 
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> Settings:
         """Apply a settings delta.
 
         Args:
             delta: A :class:`STTSettings` (or ``CartesiaSTTService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object whose ``given_fields()`` contains
+            only the fields that actually changed.
         """
         changed = await super()._update_settings(delta)
 
         # TODO: someday we could reconnect here to apply updated settings.
         # Code might look something like the below:
-        # if changed:
+        # if changed.given_fields():
         #     await self._disconnect()
         #     await self._connect()
 
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.given_fields())
 
         return changed
 

@@ -121,16 +121,16 @@ class PiperTTSService(TTSService):
         """
         return True
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> Settings:
         """Apply a settings delta.
 
         Settings are stored but not applied to the active connection.
         """
         changed = await super()._update_settings(delta)
-        if not changed:
+        if not changed.given_fields():
             return changed
         # TODO: voice changes would require re-downloading and loading the model.
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.given_fields())
         return changed
 
     @traced_tts

@@ -208,11 +208,11 @@ class DeepgramSageMakerSTTService(STTService):
         """
         return True
 
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> STTSettings:
         """Apply a settings delta and warn about unhandled changes."""
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
         # Sync extra to fields after the update so self._settings stays unambiguous
@@ -224,7 +224,7 @@ class DeepgramSageMakerSTTService(STTService):
         # await self._disconnect()
         # await self._connect()
 
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.given_fields())
 
         return changed
 

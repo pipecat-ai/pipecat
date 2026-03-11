@@ -118,7 +118,9 @@ class GrokRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "GrokRealtimeLLMService.Settings") -> Dict[str, Any]:
+    def apply_update(
+        self, delta: "GrokRealtimeLLMService.Settings"
+    ) -> "GrokRealtimeLLMService.Settings":
         """Merge a delta, keeping ``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -131,13 +133,13 @@ class GrokRealtimeLLMSettings(LLMSettings):
 
         # 2. SP → top-level: if the SP was just replaced and carries
         #    instructions that the delta didn't set at top level, pull it up.
-        if "session_properties" in changed and is_given(self.session_properties):
+        if is_given(changed.session_properties) and is_given(self.session_properties):
             sp = self.session_properties
-            if "system_instruction" not in changed and sp.instructions is not None:
+            if not is_given(changed.system_instruction) and sp.instructions is not None:
                 old_si = self.system_instruction
                 self.system_instruction = sp.instructions
                 if old_si != self.system_instruction:
-                    changed["system_instruction"] = old_si
+                    changed.system_instruction = old_si
 
         # 3. Top-level → SP: ensure SP mirrors the authoritative top-level
         #    values.  Covers all cases: top-level-only delta, SP-only delta,
@@ -582,7 +584,7 @@ class GrokRealtimeLLMService(LLMService):
                 return
             await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
-    async def _update_settings(self, delta):
+    async def _update_settings(self, delta: Settings) -> Settings:
         """Apply a settings delta, sending a session update when needed."""
         # Capture audio config before the update — a wholesale SP replacement
         # would lose it since the new SP likely has audio=None.
@@ -592,13 +594,13 @@ class GrokRealtimeLLMService(LLMService):
         changed = await super()._update_settings(delta)
 
         # Re-establish audio config if it was lost during SP replacement.
-        if "session_properties" in changed and input_rate and output_rate:
+        if is_given(changed.session_properties) and input_rate and output_rate:
             self._ensure_audio_config(input_rate, output_rate)
 
         handled = {"session_properties", "system_instruction"}
-        if changed.keys() & handled:
+        if changed.given_fields().keys() & handled:
             await self._send_session_update()
-        self._warn_unhandled_updated_settings(changed.keys() - handled)
+        self._warn_unhandled_updated_settings(changed.given_fields().keys() - handled)
         return changed
 
     async def _send_session_update(self):

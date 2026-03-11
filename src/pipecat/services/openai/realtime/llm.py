@@ -126,7 +126,9 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "OpenAIRealtimeLLMService.Settings") -> Dict[str, Any]:
+    def apply_update(
+        self, delta: "OpenAIRealtimeLLMService.Settings"
+    ) -> "OpenAIRealtimeLLMService.Settings":
         """Merge a delta, keeping ``model``/``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -140,18 +142,18 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
         # 2. SP → top-level: if the SP was just replaced and carries
         #    model/instructions that the delta didn't set at top level,
         #    pull them up.
-        if "session_properties" in changed and is_given(self.session_properties):
+        if is_given(changed.session_properties) and is_given(self.session_properties):
             sp = self.session_properties
-            if "model" not in changed and sp.model is not None:
+            if not is_given(changed.model) and sp.model is not None:
                 old_model = self.model
                 self.model = sp.model
                 if old_model != self.model:
-                    changed["model"] = old_model
-            if "system_instruction" not in changed and sp.instructions is not None:
+                    changed.model = old_model
+            if not is_given(changed.system_instruction) and sp.instructions is not None:
                 old_si = self.system_instruction
                 self.system_instruction = sp.instructions
                 if old_si != self.system_instruction:
-                    changed["system_instruction"] = old_si
+                    changed.system_instruction = old_si
 
         # 3. Top-level → SP: ensure SP mirrors the authoritative top-level
         #    values.  Covers all cases: top-level-only delta, SP-only delta,
@@ -673,13 +675,13 @@ class OpenAIRealtimeLLMService(LLMService):
             # treat a send-side error as fatal.
             await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
-    async def _update_settings(self, delta):
+    async def _update_settings(self, delta: Settings) -> Settings:
         """Apply a settings delta, sending a session update when needed."""
         changed = await super()._update_settings(delta)
         handled = {"session_properties", "system_instruction"}
-        if changed.keys() & handled:
+        if changed.given_fields().keys() & handled:
             await self._send_session_update()
-        self._warn_unhandled_updated_settings(changed.keys() - handled)
+        self._warn_unhandled_updated_settings(changed.given_fields().keys() - handled)
         return changed
 
     async def _send_session_update(self):

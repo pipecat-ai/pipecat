@@ -529,7 +529,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> Settings:
         """Apply a settings delta, reconnecting as needed.
 
         Uses the declarative ``URL_FIELDS`` and ``VOICE_SETTINGS_FIELDS``
@@ -540,29 +540,32 @@ class ElevenLabsTTSService(WebsocketTTSService):
             delta: A :class:`TTSSettings` (or ``ElevenLabsTTSService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object whose ``given_fields()`` contains
+            only the fields that actually changed.
         """
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
         # Rebuild voice settings for next context
         self._voice_settings = self._set_voice_settings()
 
-        url_changed = bool(changed.keys() & self.Settings.URL_FIELDS)
-        voice_settings_changed = bool(changed.keys() & self.Settings.VOICE_SETTINGS_FIELDS)
+        url_changed = bool(changed.given_fields().keys() & self.Settings.URL_FIELDS)
+        voice_settings_changed = bool(
+            changed.given_fields().keys() & self.Settings.VOICE_SETTINGS_FIELDS
+        )
 
         if url_changed:
             logger.debug(
-                f"URL-level setting changed ({changed.keys() & self.Settings.URL_FIELDS}), "
+                f"URL-level setting changed ({changed.given_fields().keys() & self.Settings.URL_FIELDS}), "
                 f"reconnecting WebSocket"
             )
             await self._disconnect()
             await self._connect()
         elif voice_settings_changed:
             logger.debug(
-                f"Voice settings changed ({changed.keys() & self.Settings.VOICE_SETTINGS_FIELDS}), "
+                f"Voice settings changed ({changed.given_fields().keys() & self.Settings.VOICE_SETTINGS_FIELDS}), "
                 f"closing current context to apply changes"
             )
             audio_contexts = self.get_audio_contexts()
@@ -574,7 +577,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
             # Reconnect applies all settings; only warn about fields not handled
             # by voice settings or URL changes.
             handled = self.Settings.URL_FIELDS | self.Settings.VOICE_SETTINGS_FIELDS
-            self._warn_unhandled_updated_settings(changed.keys() - handled)
+            self._warn_unhandled_updated_settings(changed.given_fields().keys() - handled)
 
         return changed
 
@@ -1087,17 +1090,18 @@ class ElevenLabsHttpTTSService(TTSService):
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> Settings:
         """Apply a settings delta and rebuild voice settings.
 
         Args:
             delta: A :class:`TTSSettings` (or ``ElevenLabsHttpTTSService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object whose ``given_fields()`` contains
+            only the fields that actually changed.
         """
         changed = await super()._update_settings(delta)
-        if changed:
+        if changed.given_fields():
             self._voice_settings = self._set_voice_settings()
         return changed
 

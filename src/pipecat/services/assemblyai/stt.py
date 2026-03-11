@@ -353,18 +353,18 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> STTSettings:
         """Apply a settings delta and reconnect to apply changes.
 
         Args:
             delta: A settings delta with updated values.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object with changed fields.
         """
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
         # Reconnect to apply updated settings (they become WS query params)

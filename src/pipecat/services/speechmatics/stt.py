@@ -537,7 +537,7 @@ class SpeechmaticsSTTService(STTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> Settings:
         """Apply settings delta, reconnecting only when necessary.
 
         Fields are classified into three categories (see
@@ -554,25 +554,28 @@ class SpeechmaticsSTTService(STTService):
             delta: A settings delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object whose given fields are the ones that
+            actually changed (values are the *previous* values).
         """
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
         no_reconnect = self.Settings.HOT_FIELDS | self.Settings.LOCAL_FIELDS
-        needs_reconnect = bool(changed.keys() - no_reconnect)
+        needs_reconnect = bool(changed.given_fields().keys() - no_reconnect)
 
         if needs_reconnect:
-            logger.debug(f"{self} settings update requires reconnect: {changed.keys()}")
+            logger.debug(
+                f"{self} settings update requires reconnect: {changed.given_fields().keys()}"
+            )
             # Connection-level fields changed — rebuild the SDK config
             # from the now-updated self._settings, then reconnect.
             self._config = self._build_config(self._settings)
             await self._disconnect()
             await self._connect()
-        elif changed.keys() & self.Settings.HOT_FIELDS:
-            logger.debug(f"{self} applying hot settings update: {changed.keys()}")
+        elif changed.given_fields().keys() & self.Settings.HOT_FIELDS:
+            logger.debug(f"{self} applying hot settings update: {changed.given_fields().keys()}")
             if self._config.enable_diarization:
                 # Only hot-updatable fields changed — push to the live session.
                 self._config.speaker_config.focus_speakers = self._settings.focus_speakers
@@ -582,13 +585,13 @@ class SpeechmaticsSTTService(STTService):
                     self._client.update_diarization_config(self._config.speaker_config)
             else:
                 logger.debug(
-                    f"{self} hot settings updated but diarization not enabled: {changed.keys()}. ignoring."
+                    f"{self} hot settings updated but diarization not enabled: {changed.given_fields().keys()}. ignoring."
                 )
                 # Diarization not enabled — the new settings will take effect
                 # if/when diarization is enabled, which does require a reconnect.
-        elif changed.keys() & self.Settings.LOCAL_FIELDS:
+        elif changed.given_fields().keys() & self.Settings.LOCAL_FIELDS:
             logger.debug(
-                f"{self} local settings update, no special action required: {changed.keys()}"
+                f"{self} local settings update, no special action required: {changed.given_fields().keys()}"
             )
             # Only local fields changed — no need to push to the STT engine,
             # the new settings will take effect immediately.

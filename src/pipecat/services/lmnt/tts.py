@@ -233,18 +233,18 @@ class LmntTTSService(InterruptibleTTSService):
 
         await self._disconnect_websocket()
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> Settings:
         """Apply a settings delta.
 
         Args:
             delta: A :class:`TTSSettings` (or ``LmntTTSService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object with only the changed fields set.
         """
         changed = await super()._update_settings(delta)
 
-        if changed:
+        if changed.given_fields():
             await self._disconnect()
             await self._connect()
 

@@ -270,20 +270,21 @@ class STTService(AIService):
         await self._cancel_ttfb_timeout()
         await self._cancel_keepalive_task()
 
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> STTSettings:
         """Apply an STT settings delta.
 
         Handles ``model`` (via parent). Translates ``Language`` enum values
         before applying so the stored value is a service-specific string.
         Concrete services should override this method and handle language
         changes (including any reconnect logic) based on the returned
-        changed-field dict.
+        changed-field object.
 
         Args:
             delta: An STT settings delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode ``STTSettings`` with changed fields set to their
+            previous values.
         """
         # Translate language *before* applying so the stored value is canonical
         if is_given(delta.language) and isinstance(delta.language, Language):

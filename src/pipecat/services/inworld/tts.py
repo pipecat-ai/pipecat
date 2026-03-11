@@ -826,14 +826,14 @@ class InworldTTSService(WebsocketTTSService):
 
         await self._disconnect_websocket()
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Apply a settings delta.
 
         Settings are stored but not applied to the active connection.
         """
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
         await self._disconnect()

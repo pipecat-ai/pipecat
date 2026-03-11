@@ -485,11 +485,11 @@ class DeepgramSTTService(STTService):
         """
         return True
 
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> STTSettings:
         """Apply a settings delta and reconnect if anything changed."""
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
         # Sync extra to fields after the update so self._settings stays unambiguous

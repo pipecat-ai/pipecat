@@ -17,7 +17,7 @@ Provides two STT services:
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Literal, Optional, Union
+from typing import AsyncGenerator, Literal, Optional, Union
 
 from loguru import logger
 
@@ -369,7 +369,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> Settings:
         """Apply a settings delta and send session update if needed.
 
         Sends a ``session.update`` to the server when the session is active.
@@ -378,11 +378,12 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             delta: A :class:`STTSettings` (or ``OpenAIRealtimeSTTService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object whose ``given_fields()`` contains
+            only the fields that actually changed.
         """
         changed = await super()._update_settings(delta)
 
-        if changed and self._session_ready:
+        if changed.given_fields() and self._session_ready:
             await self._send_session_update()
 
         return changed

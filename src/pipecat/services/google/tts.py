@@ -740,7 +740,7 @@ class GoogleHttpTTSService(TTSService):
         """
         return language_to_google_tts_language(language)
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Override to handle speaking_rate validation.
 
         Args:
@@ -1112,7 +1112,7 @@ class GoogleTTSService(GoogleBaseTTSService):
             credentials, credentials_path
         )
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Override to handle speaking_rate validation.
 
         Args:
@@ -1395,14 +1395,15 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Apply a settings delta with voice validation.
 
         Args:
             delta: Settings delta. Can include 'voice', 'prompt', etc.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object whose given fields are the ones that
+            actually changed (values are the *previous* values).
         """
         if is_given(delta.voice) and delta.voice not in self.AVAILABLE_VOICES:
             logger.warning(f"Voice '{delta.voice}' not in known voices list. Using anyway.")

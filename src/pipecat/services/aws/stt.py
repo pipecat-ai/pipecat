@@ -15,7 +15,7 @@ import os
 import random
 import string
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -158,11 +158,11 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         }
         return encoding_map.get(encoding, encoding)
 
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> Settings:
         """Apply a settings delta and reconnect if anything changed."""
         changed = await super()._update_settings(delta)
 
-        if changed and self._websocket:
+        if changed.given_fields() and self._websocket:
             await self._disconnect()
             await self._connect()
 

@@ -59,7 +59,7 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, is_given
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
@@ -345,18 +345,19 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         else:
             self._settings.system_instruction = completion_instructions
 
-    async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: LLMSettings) -> LLMSettings:
         """Apply a settings delta, handling turn-completion fields.
 
         Args:
             delta: An LLM settings delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode ``LLMSettings`` with changed fields set to their
+            previous values.
         """
         changed = await super()._update_settings(delta)
 
-        if "filter_incomplete_user_turns" in changed:
+        if is_given(changed.filter_incomplete_user_turns):
             self._filter_incomplete_user_turns = (
                 self._settings.filter_incomplete_user_turns or False
             )
@@ -373,14 +374,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 self._settings.system_instruction = self._base_system_instruction
                 self._base_system_instruction = None
 
-        if "user_turn_completion_config" in changed and self._filter_incomplete_user_turns:
+        if is_given(changed.user_turn_completion_config) and self._filter_incomplete_user_turns:
             self.set_user_turn_completion_config(self._settings.user_turn_completion_config)
             self._compose_system_instruction()
 
         if (
-            "system_instruction" in changed
+            is_given(changed.system_instruction)
             and self._filter_incomplete_user_turns
-            and "filter_incomplete_user_turns" not in changed
+            and not is_given(changed.filter_incomplete_user_turns)
         ):
             # system_instruction changed while turn completion is active.
             # Treat the new value as the new base and recompose.

@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -448,7 +448,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> STTSettings:
         """Apply a settings delta.
 
         Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
@@ -457,14 +457,16 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
-        configure_fields = changed.keys() & self._CONFIGURE_FIELDS
+        configure_fields = changed.given_fields().keys() & self._CONFIGURE_FIELDS
         if configure_fields and self._websocket and self._websocket.state is State.OPEN:
             await self._send_configure(configure_fields)
 
-        self._warn_unhandled_updated_settings(changed.keys() - self._CONFIGURE_FIELDS)
+        self._warn_unhandled_updated_settings(
+            changed.given_fields().keys() - self._CONFIGURE_FIELDS
+        )
 
         return changed
 

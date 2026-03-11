@@ -9,7 +9,7 @@
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -297,18 +297,18 @@ class SonioxSTTService(WebsocketSTTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> STTSettings:
         """Apply settings delta and reconnect if anything changed.
 
         Args:
             delta: A settings delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object with changed fields.
         """
         changed = await super()._update_settings(delta)
 
-        if changed:
+        if changed.given_fields():
             await self._disconnect()
             await self._connect()
 

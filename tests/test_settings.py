@@ -102,8 +102,8 @@ class TestApplyUpdate:
         current = TTSSettings(voice="alice", language="en")
         delta = TTSSettings(voice="bob")
         changed = current.apply_update(delta)
-        assert changed.keys() == {"voice"}
-        assert changed["voice"] == "alice"  # old value
+        assert set(changed.given_fields()) == {"voice"}
+        assert changed.voice == "alice"  # old value
         assert current.voice == "bob"
         assert current.language == "en"
 
@@ -111,14 +111,14 @@ class TestApplyUpdate:
         current = TTSSettings(voice="alice", language="en")
         delta = TTSSettings(voice="alice")
         changed = current.apply_update(delta)
-        assert changed == {}
+        assert changed.given_fields() == {}
         assert current.voice == "alice"
 
     def test_apply_update_not_given_skipped(self):
         current = TTSSettings(voice="alice", language="en")
         delta = TTSSettings()  # all NOT_GIVEN
         changed = current.apply_update(delta)
-        assert changed == {}
+        assert changed.given_fields() == {}
         assert current.voice == "alice"
         assert current.language == "en"
 
@@ -126,9 +126,9 @@ class TestApplyUpdate:
         current = LLMSettings(temperature=0.7, max_tokens=100)
         delta = LLMSettings(temperature=0.9, max_tokens=200, top_p=0.95)
         changed = current.apply_update(delta)
-        assert changed.keys() == {"temperature", "max_tokens", "top_p"}
-        assert changed["temperature"] == 0.7
-        assert changed["max_tokens"] == 100
+        assert set(changed.given_fields()) == {"temperature", "max_tokens", "top_p"}
+        assert changed.temperature == 0.7
+        assert changed.max_tokens == 100
         assert current.temperature == 0.9
         assert current.max_tokens == 200
         assert current.top_p == 0.95
@@ -139,8 +139,8 @@ class TestApplyUpdate:
         delta = TTSSettings()
         delta.extra = {"speed": 1.2}
         changed = current.apply_update(delta)
-        assert "speed" in changed
-        assert changed["speed"] == 1.0  # old value
+        assert "speed" in changed.extra
+        assert changed.extra["speed"] == 1.0  # old value
         assert current.extra == {"speed": 1.2, "stability": 0.5}
 
     def test_apply_update_extra_no_change(self):
@@ -149,14 +149,14 @@ class TestApplyUpdate:
         delta = TTSSettings()
         delta.extra = {"speed": 1.0}
         changed = current.apply_update(delta)
-        assert changed == {}
+        assert changed.given_fields() == {}
 
     def test_apply_update_model_field(self):
         current = ServiceSettings(model="old-model")
         delta = ServiceSettings(model="new-model")
         changed = current.apply_update(delta)
-        assert changed.keys() == {"model"}
-        assert changed["model"] == "old-model"
+        assert set(changed.given_fields()) == {"model"}
+        assert changed.model == "old-model"
         assert current.model == "new-model"
 
     def test_apply_update_none_is_a_valid_value(self):
@@ -164,15 +164,15 @@ class TestApplyUpdate:
         current = TTSSettings()
         delta = TTSSettings(language=None)
         changed = current.apply_update(delta)
-        assert "language" in changed
+        assert is_given(changed.language)
         assert current.language is None
 
     def test_apply_update_none_to_value(self):
         current = TTSSettings(language=None)
         delta = TTSSettings(language="en")
         changed = current.apply_update(delta)
-        assert "language" in changed
-        assert changed["language"] is None  # old value was None
+        assert is_given(changed.language)
+        assert changed.language is None  # old value was None
         assert current.language == "en"
 
 
@@ -301,9 +301,9 @@ class TestRoundtrip:
         delta = TTSSettings.from_mapping(raw)
 
         changed = current.apply_update(delta)
-        assert changed.keys() == {"voice", "speed"}
-        assert changed["voice"] == "alice"
-        assert changed["speed"] == 1.0
+        assert set(changed.given_fields()) == {"voice", "speed"}
+        assert changed.voice == "alice"
+        assert changed.extra["speed"] == 1.0
         assert current.voice == "bob"
         assert current.language == "en"
         assert current.extra["speed"] == 1.2
@@ -313,8 +313,8 @@ class TestRoundtrip:
         current = LLMSettings(model="gpt-4o", temperature=0.7)
         delta = LLMSettings.from_mapping({"model": "gpt-4o-mini", "temperature": 0.9})
         changed = current.apply_update(delta)
-        assert changed.keys() == {"model", "temperature"}
-        assert changed["model"] == "gpt-4o"
+        assert set(changed.given_fields()) == {"model", "temperature"}
+        assert changed.model == "gpt-4o"
         assert current.model == "gpt-4o-mini"
         assert current.temperature == 0.9
 
@@ -348,7 +348,7 @@ class TestDeepgramSTTSettingsApplyUpdate:
         changed = current.apply_update(delta)
 
         assert current.punctuate is False
-        assert "punctuate" in changed
+        assert is_given(changed.punctuate)
         # Other fields are untouched
         assert current.model == "nova-3-general"
         assert current.language == "en"
@@ -362,7 +362,7 @@ class TestDeepgramSTTSettingsApplyUpdate:
         changed = current.apply_update(delta)
 
         assert current.model == "nova-2"
-        assert "model" in changed
+        assert is_given(changed.model)
 
     def test_apply_update_language(self):
         """language field is updated directly."""
@@ -373,14 +373,14 @@ class TestDeepgramSTTSettingsApplyUpdate:
         changed = current.apply_update(delta)
 
         assert current.language == "es"
-        assert "language" in changed
+        assert is_given(changed.language)
 
     def test_apply_update_no_change(self):
         """Delta with same values should report no changes."""
         current = self._make_store()
         delta = DeepgramSTTSettings(punctuate=True)
         changed = current.apply_update(delta)
-        assert changed == {}
+        assert changed.given_fields() == {}
 
     def test_apply_update_multiple_fields(self):
         """Multiple flat fields updated at once."""
@@ -392,7 +392,7 @@ class TestDeepgramSTTSettingsApplyUpdate:
         assert current.model == "nova-2"
         assert current.language == "fr"
         assert current.punctuate is False
-        assert changed.keys() == {"model", "language", "punctuate"}
+        assert set(changed.given_fields()) == {"model", "language", "punctuate"}
 
 
 class TestDeepgramSTTSettingsFromMapping:
@@ -441,7 +441,7 @@ class TestDeepgramSTTSettingsFromMapping:
         assert current.diarize is True
         # Unchanged fields stay put
         assert current.model == "nova-3-general"
-        assert "punctuate" in changed
+        assert is_given(changed.punctuate)
 
     def test_roundtrip_model_via_dict(self):
         """Dict update with model should change top-level model field."""
@@ -455,7 +455,7 @@ class TestDeepgramSTTSettingsFromMapping:
         changed = current.apply_update(delta)
 
         assert current.model == "nova-2"
-        assert "model" in changed
+        assert is_given(changed.model)
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +475,7 @@ class TestDeepgramSageMakerSTTSettings:
 
         assert store.model == "nova-2"
         assert store.language == "en"
-        assert "model" in changed
+        assert is_given(changed.model)
 
 
 # ---------------------------------------------------------------------------
@@ -650,7 +650,7 @@ class TestOpenAIRealtimeSettingsApplyUpdate:
         delta = OpenAIRealtimeLLMSettings(model="gpt-realtime-2.0")
         changed = store.apply_update(delta)
 
-        assert "model" in changed
+        assert is_given(changed.model)
         assert store.model == "gpt-realtime-2.0"
         assert store.session_properties.model == "gpt-realtime-2.0"
 
@@ -660,7 +660,7 @@ class TestOpenAIRealtimeSettingsApplyUpdate:
         delta = OpenAIRealtimeLLMSettings(system_instruction="Be helpful.")
         changed = store.apply_update(delta)
 
-        assert "system_instruction" in changed
+        assert is_given(changed.system_instruction)
         assert store.system_instruction == "Be helpful."
         assert store.session_properties.instructions == "Be helpful."
 
@@ -678,7 +678,7 @@ class TestOpenAIRealtimeSettingsApplyUpdate:
         delta = OpenAIRealtimeLLMSettings(session_properties=new_sp)
         changed = store.apply_update(delta)
 
-        assert "session_properties" in changed
+        assert is_given(changed.session_properties)
         assert store.session_properties.output_modalities == ["text"]
         # Fields not in the new SP become None (wholesale replacement)
         # But model is synced from top-level
@@ -691,7 +691,7 @@ class TestOpenAIRealtimeSettingsApplyUpdate:
         delta = OpenAIRealtimeLLMSettings(session_properties=new_sp)
         changed = store.apply_update(delta)
 
-        assert "model" in changed
+        assert is_given(changed.model)
         assert store.model == "gpt-realtime-2.0"
         assert store.session_properties.model == "gpt-realtime-2.0"
 
@@ -702,7 +702,7 @@ class TestOpenAIRealtimeSettingsApplyUpdate:
         delta = OpenAIRealtimeLLMSettings(session_properties=new_sp)
         changed = store.apply_update(delta)
 
-        assert "system_instruction" in changed
+        assert is_given(changed.system_instruction)
         assert store.system_instruction == "New instructions."
         assert store.session_properties.instructions == "New instructions."
 
@@ -740,7 +740,7 @@ class TestOpenAIRealtimeSettingsApplyUpdate:
         delta = OpenAIRealtimeLLMSettings(temperature=0.5)
         changed = store.apply_update(delta)
 
-        assert "temperature" in changed
+        assert is_given(changed.temperature)
         assert store.temperature == 0.5
         # SP should be untouched (same object)
         assert store.session_properties is original_sp
@@ -811,7 +811,7 @@ class TestOpenAIRealtimeSettingsFromMapping:
         delta = OpenAIRealtimeLLMSettings.from_mapping(raw)
         changed = store.apply_update(delta)
 
-        assert "session_properties" in changed
+        assert is_given(changed.session_properties)
         assert store.session_properties.instructions == "Be concise."
         assert store.session_properties.output_modalities == ["text"]
         assert store.system_instruction == "Be concise."
@@ -848,7 +848,7 @@ class TestGrokRealtimeSettingsApplyUpdate:
         delta = GrokRealtimeLLMSettings(system_instruction="Be helpful.")
         changed = store.apply_update(delta)
 
-        assert "system_instruction" in changed
+        assert is_given(changed.system_instruction)
         assert store.system_instruction == "Be helpful."
         assert store.session_properties.instructions == "Be helpful."
 
@@ -866,7 +866,7 @@ class TestGrokRealtimeSettingsApplyUpdate:
         delta = GrokRealtimeLLMSettings(session_properties=new_sp)
         changed = store.apply_update(delta)
 
-        assert "session_properties" in changed
+        assert is_given(changed.session_properties)
         assert store.session_properties.voice == "Sal"
         # instructions is synced from top-level system_instruction
         assert store.session_properties.instructions == "Old instructions."
@@ -878,7 +878,7 @@ class TestGrokRealtimeSettingsApplyUpdate:
         delta = GrokRealtimeLLMSettings(session_properties=new_sp)
         changed = store.apply_update(delta)
 
-        assert "system_instruction" in changed
+        assert is_given(changed.system_instruction)
         assert store.system_instruction == "New instructions."
         assert store.session_properties.instructions == "New instructions."
 
@@ -906,7 +906,7 @@ class TestGrokRealtimeSettingsApplyUpdate:
         delta = GrokRealtimeLLMSettings(temperature=0.5)
         changed = store.apply_update(delta)
 
-        assert "temperature" in changed
+        assert is_given(changed.temperature)
         assert store.temperature == 0.5
         # SP should be untouched (same object)
         assert store.session_properties is original_sp
@@ -977,7 +977,7 @@ class TestGrokRealtimeSettingsFromMapping:
         delta = GrokRealtimeLLMSettings.from_mapping(raw)
         changed = store.apply_update(delta)
 
-        assert "session_properties" in changed
+        assert is_given(changed.session_properties)
         assert store.session_properties.instructions == "Be concise."
         assert store.session_properties.voice == "Eve"
         assert store.system_instruction == "Be concise."

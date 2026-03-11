@@ -469,7 +469,7 @@ class GladiaSTTService(WebsocketSTTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> Settings:
         """Apply settings delta.
 
         Settings are stored but not applied to the active session.
@@ -478,11 +478,11 @@ class GladiaSTTService(WebsocketSTTService):
             delta: A settings delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object with only the changed fields set.
         """
         changed = await super()._update_settings(delta)
 
-        if not changed:
+        if not changed.given_fields():
             return changed
 
         # TODO: someday we could reconnect here to apply updated settings.
@@ -492,7 +492,7 @@ class GladiaSTTService(WebsocketSTTService):
         # await self._disconnect()
         # await self._connect()
 
-        self._warn_unhandled_updated_settings(changed)
+        self._warn_unhandled_updated_settings(changed.given_fields())
 
         return changed
 

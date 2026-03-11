@@ -13,7 +13,7 @@ can handle multiple audio formats for Indian language speech recognition.
 
 import base64
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, Literal, Optional
+from typing import AsyncGenerator, Dict, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -369,14 +369,14 @@ class SarvamSTTService(STTService):
                 if self._socket_client:
                     await self._socket_client.flush()
 
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> STTSettings:
         """Apply a settings delta, validate, sync state, and reconnect.
 
         Args:
             delta: A :class:`STTSettings` (or ``SarvamSTTService.Settings``) delta.
 
         Returns:
-            Dict mapping changed field names to their previous values.
+            A delta-mode settings object with changed fields.
 
         Raises:
             ValueError: If a setting is not supported by the current model.
@@ -398,11 +398,11 @@ class SarvamSTTService(STTService):
 
         # Language and prompt are WebSocket connect-time parameters; reconnect to apply.
         reconnect_fields = {"language", "prompt"}
-        if changed.keys() & reconnect_fields:
+        if changed.given_fields().keys() & reconnect_fields:
             await self._disconnect()
             await self._connect()
 
-        unhandled = {k: v for k, v in changed.items() if k not in reconnect_fields}
+        unhandled = {k: v for k, v in changed.given_fields().items() if k not in reconnect_fields}
         if unhandled:
             self._warn_unhandled_updated_settings(unhandled)
 

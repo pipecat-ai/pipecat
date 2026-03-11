@@ -503,10 +503,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # treat a send-side error as fatal.
             await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
-    async def _update_settings(self, delta):
+    async def _update_settings(self, delta: Settings) -> Settings:
         """Apply a settings delta."""
         changed = await super()._update_settings(delta)
-        self._warn_unhandled_updated_settings(changed.keys())
+        self._warn_unhandled_updated_settings(changed.given_fields().keys())
         return changed
 
     async def _send_session_update(self):

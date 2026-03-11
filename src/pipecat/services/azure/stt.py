@@ -12,7 +12,7 @@ Speech SDK for real-time audio transcription.
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import STTSettings
+from pipecat.services.settings import STTSettings, is_given
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -176,11 +176,11 @@ class AzureSTTService(STTService):
         """
         return language_to_azure_language(language)
 
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> Settings:
         """Apply a settings delta and reconnect if language changed."""
         changed = await super()._update_settings(delta)
 
-        if "language" in changed:
+        if is_given(changed.language):
             self._speech_config.speech_recognition_language = (
                 self._settings.language or language_to_azure_language(Language.EN_US)
             )

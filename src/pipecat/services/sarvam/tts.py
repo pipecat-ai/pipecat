@@ -42,7 +42,7 @@ import base64
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncGenerator, ClassVar, Dict, List, Optional, Tuple
+from typing import AsyncGenerator, ClassVar, Dict, List, Optional, Tuple
 
 import aiohttp
 from loguru import logger
@@ -1060,11 +1060,11 @@ class SarvamTTSService(InterruptibleTTSService):
         if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Apply a settings delta and resend config if voice changed."""
         changed = await super()._update_settings(delta)
 
-        if changed:
+        if changed.given_fields():
             await self._send_config()
 
         return changed

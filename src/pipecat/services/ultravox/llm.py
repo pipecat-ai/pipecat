@@ -57,7 +57,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, is_given
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -383,11 +383,11 @@ class UltravoxRealtimeLLMService(LLMService):
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
 
-    async def _update_settings(self, delta: Settings):
+    async def _update_settings(self, delta: Settings) -> Settings:
         changed = await super()._update_settings(delta)
-        if "output_medium" in changed:
+        if is_given(changed.output_medium):
             await self._update_output_medium(self._settings.output_medium)
-        self._warn_unhandled_updated_settings(changed.keys() - {"output_medium"})
+        self._warn_unhandled_updated_settings(changed.given_fields().keys() - {"output_medium"})
         return changed
 
     #

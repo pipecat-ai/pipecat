@@ -394,7 +394,7 @@ class RimeTTSService(WebsocketTTSService):
         self._extra_msg_fields["inlineSpeedAlpha"] = ",".join(speed_vals + [str(speed)])
         return f"[{text}]"
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Apply a settings delta and reconnect if necessary.
 
         Since all settings are WebSocket URL query parameters,
@@ -402,7 +402,7 @@ class RimeTTSService(WebsocketTTSService):
         """
         changed = await super()._update_settings(delta)
 
-        if changed and self._websocket:
+        if changed.given_fields() and self._websocket:
             await self._disconnect()
             await self._connect()
 
@@ -1199,7 +1199,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: TTSSettings) -> TTSSettings:
         """Apply a settings delta and reconnect if necessary.
 
         Since all settings are WebSocket URL query parameters,
@@ -1207,7 +1207,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         """
         changed = await super()._update_settings(delta)
 
-        if changed:
+        if changed.given_fields():
             logger.debug("Settings changed, reconnecting WebSocket with new parameters")
             await self._disconnect()
             await self._connect()
