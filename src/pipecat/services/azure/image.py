@@ -44,7 +44,7 @@ class AzureImageGenServiceREST(ImageGenService):
     """
 
     Settings = AzureImageGenSettings
-    _settings: AzureImageGenSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -55,7 +55,7 @@ class AzureImageGenServiceREST(ImageGenService):
         model: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
         api_version="2023-06-01-preview",
-        settings: Optional[AzureImageGenSettings] = None,
+        settings: Optional[Settings] = None,
     ):
         """Initialize the AzureImageGenServiceREST.
 
@@ -63,14 +63,14 @@ class AzureImageGenServiceREST(ImageGenService):
             image_size: Size specification for generated images (e.g., "1024x1024").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AzureImageGenSettings(image_size=...)`` instead.
+                    Use ``settings=AzureImageGenServiceREST.Settings(image_size=...)`` instead.
 
             api_key: Azure OpenAI API key for authentication.
             endpoint: Azure OpenAI endpoint URL.
             model: The image generation model to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AzureImageGenSettings(model=...)`` instead.
+                    Use ``settings=AzureImageGenServiceREST.Settings(model=...)`` instead.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             api_version: Azure API version string. Defaults to "2023-06-01-preview".
@@ -78,18 +78,18 @@ class AzureImageGenServiceREST(ImageGenService):
                 parameters, ``settings`` values take precedence.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AzureImageGenSettings(
+        default_settings = self.Settings(
             model=None,
             image_size=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", AzureImageGenSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         if image_size is not None:
-            _warn_deprecated_param("image_size", AzureImageGenSettings, "image_size")
+            _warn_deprecated_param("image_size", self.Settings, "image_size")
             default_settings.image_size = image_size
 
         # 4. Apply settings delta (canonical API, always wins)

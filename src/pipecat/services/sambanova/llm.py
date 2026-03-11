@@ -22,14 +22,14 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
 @dataclass
-class SambaNovaLLMSettings(OpenAILLMSettings):
+class SambaNovaLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for SambaNovaLLMService."""
 
     pass
@@ -43,7 +43,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
     """
 
     Settings = SambaNovaLLMSettings
-    _settings: SambaNovaLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -51,7 +51,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         api_key: str,
         model: Optional[str] = None,
         base_url: str = "https://api.sambanova.ai/v1",
-        settings: Optional[SambaNovaLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs: Dict[Any, Any],
     ) -> None:
         """Initialize SambaNova LLM service.
@@ -61,7 +61,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             model: The model identifier to use. Defaults to "Llama-4-Maverick-17B-128E-Instruct".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=SambaNovaLLMService.Settings(model=...)`` instead.
 
             base_url: The base URL for SambaNova API. Defaults to "https://api.sambanova.ai/v1".
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -69,11 +69,11 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = SambaNovaLLMSettings(model="Llama-4-Maverick-17B-128E-Instruct")
+        default_settings = self.Settings(model="Llama-4-Maverick-17B-128E-Instruct")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", SambaNovaLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

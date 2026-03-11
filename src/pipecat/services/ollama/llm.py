@@ -11,13 +11,13 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class OllamaLLMSettings(OpenAILLMSettings):
+class OllamaLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for OLLamaLLMService."""
 
     pass
@@ -31,14 +31,14 @@ class OLLamaLLMService(OpenAILLMService):
     """
 
     Settings = OllamaLLMSettings
-    _settings: OllamaLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         model: Optional[str] = None,
         base_url: str = "http://localhost:11434/v1",
-        settings: Optional[OllamaLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize OLLama LLM service.
@@ -47,7 +47,7 @@ class OLLamaLLMService(OpenAILLMService):
             model: The OLLama model to use. Defaults to "llama2".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=OLLamaLLMService.Settings(model=...)`` instead.
 
             base_url: The base URL for the OLLama API endpoint.
                     Defaults to "http://localhost:11434/v1".
@@ -56,11 +56,11 @@ class OLLamaLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OllamaLLMSettings(model="llama2")
+        default_settings = self.Settings(model="llama2")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OllamaLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

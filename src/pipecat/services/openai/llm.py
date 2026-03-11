@@ -25,7 +25,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserContextAggregator,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai.base_llm import BaseOpenAILLMService, OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
 
@@ -72,13 +72,15 @@ class OpenAILLMService(BaseOpenAILLMService):
     context aggregator creation.
     """
 
+    Settings = BaseOpenAILLMService.Settings
+
     def __init__(
         self,
         *,
         model: Optional[str] = None,
         service_tier: Optional[str] = None,
         params: Optional[BaseOpenAILLMService.InputParams] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize OpenAI LLM service.
@@ -87,20 +89,20 @@ class OpenAILLMService(BaseOpenAILLMService):
             model: The OpenAI model name to use. Defaults to "gpt-4.1".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=OpenAILLMService.Settings(model=...)`` instead.
 
             service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             params: Input parameters for model configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(...)`` instead.
+                    Use ``settings=OpenAILLMService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent BaseOpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(
+        default_settings = self.Settings(
             model="gpt-4.1",
             system_instruction=None,
             frequency_penalty=NOT_GIVEN,
@@ -118,7 +120,7 @@ class OpenAILLMService(BaseOpenAILLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAILLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # Handle service_tier from deprecated params
@@ -127,7 +129,7 @@ class OpenAILLMService(BaseOpenAILLMService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", OpenAILLMSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.frequency_penalty = params.frequency_penalty
                 default_settings.presence_penalty = params.presence_penalty

@@ -14,13 +14,13 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import FunctionCallFromLLM
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class MistralLLMSettings(OpenAILLMSettings):
+class MistralLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for MistralLLMService."""
 
     pass
@@ -34,7 +34,7 @@ class MistralLLMService(OpenAILLMService):
     """
 
     Settings = MistralLLMSettings
-    _settings: MistralLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -42,7 +42,7 @@ class MistralLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.mistral.ai/v1",
         model: Optional[str] = None,
-        settings: Optional[MistralLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Mistral LLM service.
@@ -53,18 +53,18 @@ class MistralLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "mistral-small-latest".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=MistralLLMService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = MistralLLMSettings(model="mistral-small-latest")
+        default_settings = self.Settings(model="mistral-small-latest")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", MistralLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

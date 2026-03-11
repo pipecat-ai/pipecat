@@ -85,13 +85,13 @@ class FishAudioTTSService(InterruptibleTTSService):
     """
 
     Settings = FishAudioTTSSettings
-    _settings: FishAudioTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Fish Audio TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=FishAudioTTSSettings(...)`` instead.
+            Use ``settings=FishAudioTTSService.Settings(...)`` instead.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -117,7 +117,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         output_format: FishAudioOutputFormat = "pcm",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[FishAudioTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Fish Audio TTS service.
@@ -127,7 +127,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             reference_id: Reference ID of the voice model to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=FishAudioTTSSettings(voice=...)`` instead.
+                    Use ``settings=FishAudioTTSService.Settings(voice=...)`` instead.
 
             model: Deprecated. Reference ID of the voice model to use for synthesis.
 
@@ -138,14 +138,14 @@ class FishAudioTTSService(InterruptibleTTSService):
             model_id: Specify which Fish Audio TTS model to use (e.g. "s1").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=FishAudioTTSSettings(model=...)`` instead.
+                    Use ``settings=FishAudioTTSService.Settings(model=...)`` instead.
 
             output_format: Audio output format. Defaults to "pcm".
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=FishAudioTTSSettings(...)`` instead.
+                    Use ``settings=FishAudioTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -171,7 +171,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             reference_id = model
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = FishAudioTTSSettings(
+        default_settings = self.Settings(
             model="s2-pro",
             voice=None,
             language=None,
@@ -185,15 +185,15 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if reference_id is not None:
-            _warn_deprecated_param("reference_id", FishAudioTTSSettings, "voice")
+            _warn_deprecated_param("reference_id", self.Settings, "voice")
             default_settings.voice = reference_id
         if model_id is not None:
-            _warn_deprecated_param("model_id", FishAudioTTSSettings, "model")
+            _warn_deprecated_param("model_id", self.Settings, "model")
             default_settings.model = model_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", FishAudioTTSSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 if params.latency is not None:
                     default_settings.latency = params.latency
@@ -240,7 +240,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         Any change to voice or model triggers a WebSocket reconnect.
 
         Args:
-            delta: A :class:`TTSSettings` (or ``FishAudioTTSSettings``) delta.
+            delta: A :class:`TTSSettings` (or ``FishAudioTTSService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.

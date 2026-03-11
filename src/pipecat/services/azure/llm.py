@@ -12,13 +12,13 @@ from typing import Optional
 from loguru import logger
 from openai import AsyncAzureOpenAI
 
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class AzureLLMSettings(OpenAILLMSettings):
+class AzureLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for AzureLLMService."""
 
     pass
@@ -40,7 +40,7 @@ class AzureLLMService(OpenAILLMService):
         endpoint: str,
         model: Optional[str] = None,
         api_version: str = "2024-09-01-preview",
-        settings: Optional[AzureLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Azure LLM service.
@@ -51,7 +51,7 @@ class AzureLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "gpt-4o".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=AzureLLMService.Settings(model=...)`` instead.
 
             api_version: Azure API version. Defaults to "2024-09-01-preview".
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -59,11 +59,11 @@ class AzureLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AzureLLMSettings(model="gpt-4o")
+        default_settings = self.Settings(model="gpt-4o")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", AzureLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

@@ -16,7 +16,7 @@ from typing import Dict, Optional
 from loguru import logger
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
@@ -29,7 +29,7 @@ except ModuleNotFoundError as e:
 
 
 @dataclass
-class OpenPipeLLMSettings(OpenAILLMSettings):
+class OpenPipeLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for OpenPipeLLMService."""
 
     pass
@@ -44,7 +44,7 @@ class OpenPipeLLMService(OpenAILLMService):
     """
 
     Settings = OpenPipeLLMSettings
-    _settings: OpenPipeLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -55,7 +55,7 @@ class OpenPipeLLMService(OpenAILLMService):
         openpipe_api_key: Optional[str] = None,
         openpipe_base_url: str = "https://app.openpipe.ai/api/v1",
         tags: Optional[Dict[str, str]] = None,
-        settings: Optional[OpenPipeLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize OpenPipe LLM service.
@@ -64,7 +64,7 @@ class OpenPipeLLMService(OpenAILLMService):
             model: The model name to use. Defaults to "gpt-4.1".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=OpenPipeLLMService.Settings(model=...)`` instead.
 
             api_key: OpenAI API key for authentication. If None, reads from environment.
             base_url: Custom OpenAI API endpoint URL. Uses default if None.
@@ -76,11 +76,11 @@ class OpenPipeLLMService(OpenAILLMService):
             **kwargs: Additional arguments passed to parent OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenPipeLLMSettings(model="gpt-4.1")
+        default_settings = self.Settings(model="gpt-4.1")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenPipeLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

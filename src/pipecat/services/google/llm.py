@@ -743,7 +743,7 @@ class GoogleLLMService(LLMService):
     """
 
     Settings = GoogleLLMSettings
-    _settings: GoogleLLMSettings
+    _settings: Settings
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
@@ -755,7 +755,7 @@ class GoogleLLMService(LLMService):
         """Input parameters for Google AI models.
 
         .. deprecated:: 0.0.105
-            Use ``settings=GoogleLLMSettings(...)`` instead.
+            Use ``settings=GoogleLLMService.Settings(...)`` instead.
 
         Parameters:
             max_tokens: Maximum number of tokens to generate.
@@ -784,7 +784,7 @@ class GoogleLLMService(LLMService):
         api_key: str,
         model: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[GoogleLLMSettings] = None,
+        settings: Optional[Settings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_config: Optional[Dict[str, Any]] = None,
@@ -798,12 +798,12 @@ class GoogleLLMService(LLMService):
             model: Model name to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GoogleLLMSettings(model=...)`` instead.
+                    Use ``settings=GoogleLLMService.Settings(model=...)`` instead.
 
             params: Optional model parameters for inference.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GoogleLLMSettings(...)`` instead.
+                    Use ``settings=GoogleLLMService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -811,14 +811,14 @@ class GoogleLLMService(LLMService):
             system_instruction: System instruction/prompt for the model.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GoogleLLMSettings(system_instruction=...)`` instead.
+                    Use ``settings=GoogleLLMService.Settings(system_instruction=...)`` instead.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent class.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GoogleLLMSettings(
+        default_settings = self.Settings(
             model="gemini-2.5-flash",
             system_instruction=None,
             max_tokens=4096,
@@ -836,15 +836,15 @@ class GoogleLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GoogleLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
         if system_instruction is not None:
-            _warn_deprecated_param("system_instruction", GoogleLLMSettings, "system_instruction")
+            _warn_deprecated_param("system_instruction", self.Settings, "system_instruction")
             default_settings.system_instruction = system_instruction
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GoogleLLMSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.max_tokens = params.max_tokens
                 default_settings.temperature = params.temperature

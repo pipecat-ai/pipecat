@@ -116,14 +116,14 @@ class DeepgramFluxSTTService(WebsocketSTTService):
     """
 
     Settings = DeepgramFluxSTTSettings
-    _settings: DeepgramFluxSTTSettings
+    _settings: Settings
     _CONFIGURE_FIELDS = {"keyterm", "eot_threshold", "eager_eot_threshold", "eot_timeout_ms"}
 
     class InputParams(BaseModel):
         """Configuration parameters for Deepgram Flux API.
 
         .. deprecated:: 0.0.105
-            Use ``settings=DeepgramFluxSTTSettings(...)`` instead.
+            Use ``settings=DeepgramFluxSTTService.Settings(...)`` instead.
 
         Parameters:
             eager_eot_threshold: Optional. EagerEndOfTurn/TurnResumed are off by default.
@@ -162,7 +162,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         tag: Optional[list] = None,
         params: Optional[InputParams] = None,
         should_interrupt: bool = True,
-        settings: Optional[DeepgramFluxSTTSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Deepgram Flux STT service.
@@ -176,7 +176,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             model: Deepgram Flux model to use for transcription.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=DeepgramFluxSTTSettings(model=...)`` instead.
+                    Use ``settings=DeepgramFluxSTTService.Settings(model=...)`` instead.
 
             flux_encoding: Audio encoding format required by Flux API. Must be "linear16".
                 Raw signed little-endian 16-bit PCM encoding.
@@ -184,7 +184,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             params: InputParams instance containing detailed API configuration options.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=DeepgramFluxSTTSettings(...)`` instead.
+                    Use ``settings=DeepgramFluxSTTService.Settings(...)`` instead.
 
             should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -200,7 +200,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
                 stt = DeepgramFluxSTTService(
                     api_key="your-api-key",
-                    settings=DeepgramFluxSTTSettings(
+                    settings=DeepgramFluxSTTService.Settings(
                         model="flux-general-en",
                         eager_eot_threshold=0.5,
                         eot_threshold=0.8,
@@ -221,7 +221,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         # already try to reconnect if needed.
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = DeepgramFluxSTTSettings(
+        default_settings = self.Settings(
             model="flux-general-en",
             language=Language.EN,
             eager_eot_threshold=None,
@@ -233,12 +233,12 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", DeepgramFluxSTTSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", DeepgramFluxSTTSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.eager_eot_threshold = params.eager_eot_threshold
                 default_settings.eot_threshold = params.eot_threshold
@@ -448,7 +448,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings(self, delta: DeepgramFluxSTTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
         Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,

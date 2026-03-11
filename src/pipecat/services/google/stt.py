@@ -415,7 +415,7 @@ class GoogleSTTService(STTService):
     """
 
     Settings = GoogleSTTSettings
-    _settings: GoogleSTTSettings
+    _settings: Settings
 
     # Google Cloud's STT service has a connection time limit of 5 minutes per stream.
     # They've shared an "endless streaming" example that guided this implementation:
@@ -427,7 +427,7 @@ class GoogleSTTService(STTService):
         """Configuration parameters for Google Speech-to-Text.
 
         .. deprecated:: 0.0.105
-            Use ``settings=GoogleSTTSettings(...)`` instead.
+            Use ``settings=GoogleSTTService.Settings(...)`` instead.
 
         Parameters:
             languages: Single language or list of recognition languages. First language is primary.
@@ -488,7 +488,7 @@ class GoogleSTTService(STTService):
         location: str = "global",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[GoogleSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = GOOGLE_TTFS_P99,
         **kwargs,
     ):
@@ -502,7 +502,7 @@ class GoogleSTTService(STTService):
             params: Configuration parameters for the service.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GoogleSTTSettings(...)`` instead.
+                    Use ``settings=GoogleSTTService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 ``params``, ``settings`` values take precedence.
@@ -511,7 +511,7 @@ class GoogleSTTService(STTService):
             **kwargs: Additional arguments passed to STTService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GoogleSTTSettings(
+        default_settings = self.Settings(
             language=None,
             languages=[Language.EN_US],
             language_codes=None,
@@ -531,7 +531,7 @@ class GoogleSTTService(STTService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GoogleSTTSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.languages = list(params.language_list)
                 default_settings.model = params.model
@@ -655,7 +655,7 @@ class GoogleSTTService(STTService):
         """Update the service's recognition languages.
 
         .. deprecated:: 0.0.104
-            Use ``STTUpdateSettingsFrame`` with ``GoogleSTTSettings(languages=...)``
+            Use ``STTUpdateSettingsFrame`` with ``GoogleSTTService.Settings(languages=...)``
             instead.
 
         Args:
@@ -665,13 +665,13 @@ class GoogleSTTService(STTService):
             warnings.simplefilter("always")
             warnings.warn(
                 "set_languages() is deprecated. Use STTUpdateSettingsFrame with "
-                "GoogleSTTSettings(languages=...) instead.",
+                "self.Settings(languages=...) instead.",
                 DeprecationWarning,
             )
         logger.debug(f"Switching STT languages to: {languages}")
-        await self._update_settings(GoogleSTTSettings(languages=list(languages)))
+        await self._update_settings(self.Settings(languages=list(languages)))
 
-    async def _update_settings(self, delta: GoogleSTTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
 
         Handles ``language`` from base ``set_language`` by converting it to
@@ -698,8 +698,8 @@ class GoogleSTTService(STTService):
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
-                    "GoogleSTTSettings.language_codes is deprecated. "
-                    "Use GoogleSTTSettings.languages (List[Language]) instead.",
+                    "self.Settings.language_codes is deprecated. "
+                    "Use self.Settings.languages (List[Language]) instead.",
                     DeprecationWarning,
                     stacklevel=2,
                 )
@@ -756,7 +756,7 @@ class GoogleSTTService(STTService):
         """Update service options dynamically.
 
         .. deprecated::
-            Use ``STTUpdateSettingsFrame`` with ``GoogleSTTSettings(...)``
+            Use ``STTUpdateSettingsFrame`` with ``GoogleSTTService.Settings(...)``
             instead.
 
         Args:
@@ -780,11 +780,11 @@ class GoogleSTTService(STTService):
             warnings.simplefilter("always")
             warnings.warn(
                 "update_options() is deprecated. Use STTUpdateSettingsFrame with "
-                "GoogleSTTSettings(...) instead.",
+                "self.Settings(...) instead.",
                 DeprecationWarning,
             )
         # Build a settings delta from the provided options
-        delta = GoogleSTTSettings()
+        delta = self.Settings()
 
         if languages is not None:
             delta.languages = list(languages)

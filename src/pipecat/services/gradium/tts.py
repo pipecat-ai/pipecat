@@ -48,13 +48,13 @@ class GradiumTTSService(WebsocketTTSService):
     """Text-to-Speech service using Gradium's websocket API."""
 
     Settings = GradiumTTSSettings
-    _settings: GradiumTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Gradium TTS service.
 
         .. deprecated:: 0.0.105
-            Use ``GradiumTTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``GradiumTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             temp: Temperature to be used for generation, defaults to 0.6.
@@ -71,7 +71,7 @@ class GradiumTTSService(WebsocketTTSService):
         model: Optional[str] = None,
         json_config: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[GradiumTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Gradium TTS service.
@@ -81,26 +81,26 @@ class GradiumTTSService(WebsocketTTSService):
             voice_id: the voice identifier.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GradiumTTSSettings(voice=...)`` instead.
+                    Use ``settings=GradiumTTSService.Settings(voice=...)`` instead.
 
             url: Gradium websocket API endpoint.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GradiumTTSSettings(model=...)`` instead.
+                    Use ``settings=GradiumTTSService.Settings(model=...)`` instead.
 
             json_config: Optional JSON configuration string for additional model settings.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GradiumTTSSettings(...)`` instead.
+                    Use ``settings=GradiumTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent class.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GradiumTTSSettings(
+        default_settings = self.Settings(
             model="default",
             voice="YTpq7expH9539ERJ",
             language=None,
@@ -108,15 +108,15 @@ class GradiumTTSService(WebsocketTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GradiumTTSSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", GradiumTTSSettings, "voice")
+            _warn_deprecated_param("voice_id", self.Settings, "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GradiumTTSSettings)
+            _warn_deprecated_param("params", self.Settings)
             # Note: params.temp has no corresponding settings field
 
         # 4. Apply settings delta (canonical API, always wins)
@@ -153,7 +153,7 @@ class GradiumTTSService(WebsocketTTSService):
         """Apply a settings delta and reconnect if voice changed.
 
         Args:
-            delta: A :class:`TTSSettings` (or ``GradiumTTSSettings``) delta.
+            delta: A :class:`TTSSettings` (or ``GradiumTTSService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.

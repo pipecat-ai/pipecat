@@ -18,13 +18,13 @@ from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class PerplexityLLMSettings(OpenAILLMSettings):
+class PerplexityLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for PerplexityLLMService."""
 
     pass
@@ -39,7 +39,7 @@ class PerplexityLLMService(OpenAILLMService):
     """
 
     Settings = PerplexityLLMSettings
-    _settings: PerplexityLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -47,7 +47,7 @@ class PerplexityLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.perplexity.ai",
         model: Optional[str] = None,
-        settings: Optional[PerplexityLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Perplexity LLM service.
@@ -58,18 +58,18 @@ class PerplexityLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "sonar".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=PerplexityLLMService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = PerplexityLLMSettings(model="sonar")
+        default_settings = self.Settings(model="sonar")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", PerplexityLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

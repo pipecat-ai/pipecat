@@ -11,13 +11,13 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class TogetherLLMSettings(OpenAILLMSettings):
+class TogetherLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for TogetherLLMService."""
 
     pass
@@ -31,7 +31,7 @@ class TogetherLLMService(OpenAILLMService):
     """
 
     Settings = TogetherLLMSettings
-    _settings: TogetherLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -39,7 +39,7 @@ class TogetherLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.together.xyz/v1",
         model: Optional[str] = None,
-        settings: Optional[TogetherLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize Together.ai LLM service.
@@ -50,18 +50,18 @@ class TogetherLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=TogetherLLMService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = TogetherLLMSettings(model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
+        default_settings = self.Settings(model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", TogetherLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

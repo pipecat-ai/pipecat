@@ -89,13 +89,13 @@ class GradiumSTTService(WebsocketSTTService):
     """
 
     Settings = GradiumSTTSettings
-    _settings: GradiumSTTSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Gradium STT API.
 
         .. deprecated:: 0.0.105
-            Use ``settings=GradiumSTTSettings(...)`` instead.
+            Use ``settings=GradiumSTTService.Settings(...)`` instead.
 
         Parameters:
             language: Expected language of the audio (e.g., "en", "es", "fr").
@@ -117,7 +117,7 @@ class GradiumSTTService(WebsocketSTTService):
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
         params: Optional[InputParams] = None,
         json_config: Optional[str] = None,
-        settings: Optional[GradiumSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = GRADIUM_TTFS_P99,
         **kwargs,
     ):
@@ -129,7 +129,7 @@ class GradiumSTTService(WebsocketSTTService):
             params: Configuration parameters for language and delay settings.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GradiumSTTSettings(...)`` instead.
+                    Use ``settings=GradiumSTTService.Settings(...)`` instead.
 
             json_config: Optional JSON configuration string for additional model settings.
 
@@ -152,7 +152,7 @@ class GradiumSTTService(WebsocketSTTService):
             )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GradiumSTTSettings(
+        default_settings = self.Settings(
             model=None,
             language=None,
             delay_in_frames=None,
@@ -162,7 +162,7 @@ class GradiumSTTService(WebsocketSTTService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GradiumSTTSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.language = params.language
                 if params.delay_in_frames is not None:
@@ -207,7 +207,7 @@ class GradiumSTTService(WebsocketSTTService):
         """Apply a settings delta, sync params, and reconnect.
 
         Args:
-            delta: A :class:`STTSettings` (or ``GradiumSTTSettings``) delta.
+            delta: A :class:`STTSettings` (or ``GradiumSTTService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.

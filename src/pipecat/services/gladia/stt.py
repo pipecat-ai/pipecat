@@ -231,7 +231,7 @@ class GladiaSTTService(WebsocketSTTService):
     """
 
     Settings = GladiaSTTSettings
-    _settings: GladiaSTTSettings
+    _settings: Settings
 
     # Maintain backward compatibility
     InputParams = _InputParamsDescriptor()
@@ -251,7 +251,7 @@ class GladiaSTTService(WebsocketSTTService):
         params: Optional[GladiaInputParams] = None,
         max_buffer_size: int = 1024 * 1024 * 20,  # 20MB default buffer
         should_interrupt: bool = True,
-        settings: Optional[GladiaSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = GLADIA_TTFS_P99,
         **kwargs,
     ):
@@ -274,12 +274,12 @@ class GladiaSTTService(WebsocketSTTService):
             model: Model to use for transcription.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GladiaSTTSettings(model=...)`` instead.
+                    Use ``settings=GladiaSTTService.Settings(model=...)`` instead.
 
             params: Additional configuration parameters for Gladia service.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GladiaSTTSettings(...)`` for runtime-updatable
+                    Use ``settings=GladiaSTTService.Settings(...)`` for runtime-updatable
                     fields and direct init parameters for encoding/bit_depth/channels.
 
             max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
@@ -302,7 +302,7 @@ class GladiaSTTService(WebsocketSTTService):
                 )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GladiaSTTSettings(
+        default_settings = self.Settings(
             model="solaria-1",
             language=None,
             language_config=None,
@@ -317,12 +317,12 @@ class GladiaSTTService(WebsocketSTTService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GladiaSTTSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GladiaSTTSettings)
+            _warn_deprecated_param("params", self.Settings)
             if params.language is not None:
                 with warnings.catch_warnings():
                     warnings.simplefilter("always")
@@ -469,7 +469,7 @@ class GladiaSTTService(WebsocketSTTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings(self, delta: GladiaSTTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta.
 
         Settings are stored but not applied to the active session.

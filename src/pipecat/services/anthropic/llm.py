@@ -160,7 +160,7 @@ class AnthropicLLMService(LLMService):
     """
 
     Settings = AnthropicLLMSettings
-    _settings: AnthropicLLMSettings
+    _settings: Settings
 
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AnthropicLLMAdapter
@@ -172,7 +172,7 @@ class AnthropicLLMService(LLMService):
         """Input parameters for Anthropic model inference.
 
         .. deprecated:: 0.0.105
-            Use ``AnthropicLLMSettings`` instead. Pass settings directly via the
+            Use ``AnthropicLLMService.Settings`` instead. Pass settings directly via the
             ``settings`` parameter of :class:`AnthropicLLMService`.
 
         Parameters:
@@ -220,7 +220,7 @@ class AnthropicLLMService(LLMService):
         api_key: str,
         model: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[AnthropicLLMSettings] = None,
+        settings: Optional[Settings] = None,
         client=None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
@@ -233,12 +233,12 @@ class AnthropicLLMService(LLMService):
             model: Model name to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AnthropicLLMSettings(model=...)`` instead.
+                    Use ``settings=AnthropicLLMService.Settings(model=...)`` instead.
 
             params: Optional model parameters for inference.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AnthropicLLMSettings(...)`` instead.
+                    Use ``settings=AnthropicLLMService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -249,7 +249,7 @@ class AnthropicLLMService(LLMService):
             **kwargs: Additional arguments passed to parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AnthropicLLMSettings(
+        default_settings = self.Settings(
             model="claude-sonnet-4-6",
             system_instruction=None,
             max_tokens=4096,
@@ -268,12 +268,12 @@ class AnthropicLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", AnthropicLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", AnthropicLLMSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.max_tokens = params.max_tokens
                 default_settings.temperature = params.temperature

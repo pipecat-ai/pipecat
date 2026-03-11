@@ -80,7 +80,7 @@ class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
 
     .. deprecated:: 0.0.105
-        Use ``settings=SonioxSTTSettings(...)`` instead.
+        Use ``settings=SonioxSTTService.Settings(...)`` instead.
 
     See Soniox WebSocket API documentation for more details:
     https://soniox.com/docs/speech-to-text/api-reference/websocket-api#configuration-parameters
@@ -175,7 +175,7 @@ class SonioxSTTService(WebsocketSTTService):
     """
 
     Settings = SonioxSTTSettings
-    _settings: SonioxSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -188,7 +188,7 @@ class SonioxSTTService(WebsocketSTTService):
         num_channels: int = 1,
         params: Optional[SonioxInputParams] = None,
         vad_force_turn_endpoint: bool = True,
-        settings: Optional[SonioxSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = SONIOX_TTFS_P99,
         **kwargs,
     ):
@@ -201,7 +201,7 @@ class SonioxSTTService(WebsocketSTTService):
             model: Soniox model to use for transcription.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=SonioxSTTSettings(model=...)`` instead.
+                    Use ``settings=SonioxSTTService.Settings(model=...)`` instead.
 
             audio_format: Audio format for transcription. Defaults to ``"pcm_s16le"``.
             num_channels: Number of audio channels. Defaults to 1.
@@ -209,7 +209,7 @@ class SonioxSTTService(WebsocketSTTService):
                 speaker diarization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=SonioxSTTSettings(...)`` instead.
+                    Use ``settings=SonioxSTTService.Settings(...)`` instead.
 
             vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox.
                 If disabled, Soniox will detect the end of the speech. Defaults to True.
@@ -220,7 +220,7 @@ class SonioxSTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to the STTService.
         """
         # --- 1. Hardcoded defaults ---
-        default_settings = SonioxSTTSettings(
+        default_settings = self.Settings(
             model="stt-rt-v4",
             language=None,
             language_hints=None,
@@ -233,12 +233,12 @@ class SonioxSTTService(WebsocketSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", SonioxSTTSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # --- 3. Deprecated params overrides ---
         if params is not None:
-            _warn_deprecated_param("params", SonioxSTTSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.model = params.model
                 if params.audio_format is not None:
@@ -297,7 +297,7 @@ class SonioxSTTService(WebsocketSTTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings(self, delta: SonioxSTTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
 
         Args:

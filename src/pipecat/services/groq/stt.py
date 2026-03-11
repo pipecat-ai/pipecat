@@ -13,14 +13,13 @@ from pipecat.services.settings import _warn_deprecated_param
 from pipecat.services.stt_latency import GROQ_TTFS_P99
 from pipecat.services.whisper.base_stt import (
     BaseWhisperSTTService,
-    BaseWhisperSTTSettings,
     Transcription,
 )
 from pipecat.transcriptions.language import Language
 
 
 @dataclass
-class GroqSTTSettings(BaseWhisperSTTSettings):
+class GroqSTTSettings(BaseWhisperSTTService.Settings):
     """Settings for the Groq STT service.
 
     Parameters:
@@ -38,7 +37,7 @@ class GroqSTTService(BaseWhisperSTTService):
     """
 
     Settings = GroqSTTSettings
-    _settings: GroqSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -49,7 +48,7 @@ class GroqSTTService(BaseWhisperSTTService):
         language: Optional[Language] = None,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
-        settings: Optional[GroqSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = GROQ_TTFS_P99,
         **kwargs,
     ):
@@ -59,24 +58,24 @@ class GroqSTTService(BaseWhisperSTTService):
             model: Whisper model to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GroqSTTSettings(model=...)`` instead.
+                    Use ``settings=GroqSTTService.Settings(model=...)`` instead.
 
             api_key: Groq API key. Defaults to None.
             base_url: API base URL. Defaults to "https://api.groq.com/openai/v1".
             language: Language of the audio input.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GroqSTTSettings(language=...)`` instead.
+                    Use ``settings=GroqSTTService.Settings(language=...)`` instead.
 
             prompt: Optional text to guide the model's style or continue a previous segment.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GroqSTTSettings(prompt=...)`` instead.
+                    Use ``settings=GroqSTTService.Settings(prompt=...)`` instead.
 
             temperature: Optional sampling temperature between 0 and 1.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GroqSTTSettings(temperature=...)`` instead.
+                    Use ``settings=GroqSTTService.Settings(temperature=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -85,7 +84,7 @@ class GroqSTTService(BaseWhisperSTTService):
             **kwargs: Additional arguments passed to BaseWhisperSTTService.
         """
         # --- 1. Hardcoded defaults ---
-        default_settings = GroqSTTSettings(
+        default_settings = self.Settings(
             model="whisper-large-v3-turbo",
             language=self.language_to_service_language(Language.EN),
             prompt=None,
@@ -94,16 +93,16 @@ class GroqSTTService(BaseWhisperSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", GroqSTTSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
         if language is not None:
-            _warn_deprecated_param("language", GroqSTTSettings, "language")
+            _warn_deprecated_param("language", self.Settings, "language")
             default_settings.language = self.language_to_service_language(language)
         if prompt is not None:
-            _warn_deprecated_param("prompt", GroqSTTSettings, "prompt")
+            _warn_deprecated_param("prompt", self.Settings, "prompt")
             default_settings.prompt = prompt
         if temperature is not None:
-            _warn_deprecated_param("temperature", GroqSTTSettings, "temperature")
+            _warn_deprecated_param("temperature", self.Settings, "temperature")
             default_settings.temperature = temperature
 
         # --- 3. (no params object for this service) ---

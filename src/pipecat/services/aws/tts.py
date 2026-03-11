@@ -149,13 +149,13 @@ class AWSPollyTTSService(TTSService):
     """
 
     Settings = AWSPollyTTSSettings
-    _settings: AWSPollyTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for AWS Polly TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``AWSPollyTTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``AWSPollyTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             engine: TTS engine to use ('standard', 'neural', etc.).
@@ -183,7 +183,7 @@ class AWSPollyTTSService(TTSService):
         voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[AWSPollyTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initializes the AWS Polly TTS service.
@@ -196,20 +196,20 @@ class AWSPollyTTSService(TTSService):
             voice_id: Voice ID to use for synthesis. Defaults to 'Joanna'.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSPollyTTSSettings(voice=...)`` instead.
+                    Use ``settings=AWSPollyTTSService.Settings(voice=...)`` instead.
 
             sample_rate: Audio sample rate. If None, uses service default.
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSPollyTTSSettings(...)`` instead.
+                    Use ``settings=AWSPollyTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AWSPollyTTSSettings(
+        default_settings = self.Settings(
             model=None,
             voice="Joanna",
             language="en-US",
@@ -222,12 +222,12 @@ class AWSPollyTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", AWSPollyTTSSettings, "voice")
+            _warn_deprecated_param("voice_id", self.Settings, "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", AWSPollyTTSSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.engine = params.engine
                 default_settings.language = (

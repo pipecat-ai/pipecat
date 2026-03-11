@@ -101,13 +101,13 @@ class InworldHttpTTSService(TTSService):
     """
 
     Settings = InworldTTSSettings
-    _settings: InworldTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Inworld TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``InworldTTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``InworldHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             temperature: Temperature for speech synthesis.
@@ -131,7 +131,7 @@ class InworldHttpTTSService(TTSService):
         encoding: str = "LINEAR16",
         timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC",
         params: Optional[InputParams] = None,
-        settings: Optional[InworldTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Inworld TTS service.
@@ -142,12 +142,12 @@ class InworldHttpTTSService(TTSService):
             voice_id: ID of the voice to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=InworldTTSSettings(voice=...)`` instead.
+                    Use ``settings=InworldHttpTTSService.Settings(voice=...)`` instead.
 
             model: ID of the model to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=InworldTTSSettings(model=...)`` instead.
+                    Use ``settings=InworldHttpTTSService.Settings(model=...)`` instead.
 
             streaming: Whether to use streaming mode.
             sample_rate: Audio sample rate in Hz.
@@ -157,14 +157,14 @@ class InworldHttpTTSService(TTSService):
             params: Input parameters for Inworld TTS configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=InworldTTSSettings(...)`` instead.
+                    Use ``settings=InworldHttpTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent class.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = InworldTTSSettings(
+        default_settings = self.Settings(
             model="inworld-tts-1.5-max",
             voice="Ashley",
             language=None,
@@ -174,15 +174,15 @@ class InworldHttpTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", InworldTTSSettings, "voice")
+            _warn_deprecated_param("voice_id", self.Settings, "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", InworldTTSSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", InworldTTSSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 if params.speaking_rate is not None:
                     default_settings.speaking_rate = params.speaking_rate
@@ -489,13 +489,13 @@ class InworldTTSService(WebsocketTTSService):
     """
 
     Settings = InworldTTSSettings
-    _settings: InworldTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Inworld WebSocket TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``InworldTTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``InworldTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             temperature: Temperature for speech synthesis.
@@ -532,7 +532,7 @@ class InworldTTSService(WebsocketTTSService):
         apply_text_normalization: Optional[str] = None,
         timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC",
         params: Optional[InputParams] = None,
-        settings: Optional[InworldTTSSettings] = None,
+        settings: Optional[Settings] = None,
         aggregate_sentences: Optional[bool] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         append_trailing_space: bool = True,
@@ -545,12 +545,12 @@ class InworldTTSService(WebsocketTTSService):
             voice_id: ID of the voice to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=InworldTTSSettings(voice=...)`` instead.
+                    Use ``settings=InworldTTSService.Settings(voice=...)`` instead.
 
             model: ID of the model to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=InworldTTSSettings(model=...)`` instead.
+                    Use ``settings=InworldTTSService.Settings(model=...)`` instead.
 
             url: URL of the Inworld WebSocket API.
             sample_rate: Audio sample rate in Hz.
@@ -564,7 +564,7 @@ class InworldTTSService(WebsocketTTSService):
             params: Input parameters for Inworld WebSocket TTS configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=InworldTTSSettings(...)`` instead.
+                    Use ``settings=InworldTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -582,7 +582,7 @@ class InworldTTSService(WebsocketTTSService):
             auto_mode = True if aggregate_sentences is None else aggregate_sentences
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = InworldTTSSettings(
+        default_settings = self.Settings(
             model="inworld-tts-1.5-max",
             voice="Ashley",
             language=None,
@@ -592,17 +592,17 @@ class InworldTTSService(WebsocketTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", InworldTTSSettings, "voice")
+            _warn_deprecated_param("voice_id", self.Settings, "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", InworldTTSSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         _buffer_max_delay_ms = None
         _buffer_char_threshold = None
         if params is not None:
-            _warn_deprecated_param("params", InworldTTSSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 if params.speaking_rate is not None:
                     default_settings.speaking_rate = params.speaking_rate

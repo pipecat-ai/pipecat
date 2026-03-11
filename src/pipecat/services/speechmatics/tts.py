@@ -54,7 +54,7 @@ class SpeechmaticsTTSService(TTSService):
     """
 
     Settings = SpeechmaticsTTSSettings
-    _settings: SpeechmaticsTTSSettings
+    _settings: Settings
 
     SPEECHMATICS_SAMPLE_RATE = 16000
 
@@ -62,7 +62,7 @@ class SpeechmaticsTTSService(TTSService):
         """Optional input parameters for Speechmatics TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=SpeechmaticsTTSSettings(...)`` instead.
+            Use ``settings=SpeechmaticsTTSService.Settings(...)`` instead.
 
         Parameters:
             max_retries: Maximum number of retries for TTS requests. Defaults to 5.
@@ -79,7 +79,7 @@ class SpeechmaticsTTSService(TTSService):
         aiohttp_session: aiohttp.ClientSession,
         sample_rate: Optional[int] = SPEECHMATICS_SAMPLE_RATE,
         params: Optional[InputParams] = None,
-        settings: Optional[SpeechmaticsTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Speechmatics TTS service.
@@ -90,14 +90,14 @@ class SpeechmaticsTTSService(TTSService):
             voice_id: Voice model to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=SpeechmaticsTTSSettings(voice=...)`` instead.
+                    Use ``settings=SpeechmaticsTTSService.Settings(voice=...)`` instead.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             sample_rate: Audio sample rate in Hz.
             params: Input parameters for the service.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=SpeechmaticsTTSSettings(...)`` instead.
+                    Use ``settings=SpeechmaticsTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -110,7 +110,7 @@ class SpeechmaticsTTSService(TTSService):
             )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = SpeechmaticsTTSSettings(
+        default_settings = self.Settings(
             model=None,
             voice="sarah",
             language=None,
@@ -119,12 +119,12 @@ class SpeechmaticsTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", SpeechmaticsTTSSettings, "voice")
+            _warn_deprecated_param("voice_id", self.Settings, "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", SpeechmaticsTTSSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.max_retries = params.max_retries
 

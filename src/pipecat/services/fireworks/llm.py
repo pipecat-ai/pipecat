@@ -12,13 +12,13 @@ from typing import Optional
 from loguru import logger
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class FireworksLLMSettings(OpenAILLMSettings):
+class FireworksLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for FireworksLLMService."""
 
     pass
@@ -32,7 +32,7 @@ class FireworksLLMService(OpenAILLMService):
     """
 
     Settings = FireworksLLMSettings
-    _settings: FireworksLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -40,7 +40,7 @@ class FireworksLLMService(OpenAILLMService):
         api_key: str,
         model: Optional[str] = None,
         base_url: str = "https://api.fireworks.ai/inference/v1",
-        settings: Optional[FireworksLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Fireworks LLM service.
@@ -50,7 +50,7 @@ class FireworksLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "accounts/fireworks/models/firefunction-v2".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=FireworksLLMService.Settings(model=...)`` instead.
 
             base_url: The base URL for Fireworks API. Defaults to "https://api.fireworks.ai/inference/v1".
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -58,11 +58,11 @@ class FireworksLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = FireworksLLMSettings(model="accounts/fireworks/models/firefunction-v2")
+        default_settings = self.Settings(model="accounts/fireworks/models/firefunction-v2")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", FireworksLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

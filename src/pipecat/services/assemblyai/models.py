@@ -125,7 +125,7 @@ class AssemblyAIConnectionParams(BaseModel):
     """Configuration parameters for AssemblyAI WebSocket connection.
 
     .. deprecated:: 0.0.105
-        Use ``settings=AssemblyAISTTSettings(foo=...)`` instead.
+        Use ``settings=AssemblyAISTTService.Settings(foo=...)`` instead.
 
     Parameters:
         sample_rate: Audio sample rate in Hz. Defaults to 16000.

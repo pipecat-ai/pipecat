@@ -61,7 +61,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
     """
 
     Settings = AWSTranscribeSTTSettings
-    _settings: AWSTranscribeSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -72,7 +72,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         region: Optional[str] = None,
         sample_rate: Optional[int] = None,
         language: Optional[Language] = None,
-        settings: Optional[AWSTranscribeSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = AWS_TRANSCRIBE_TTFS_P99,
         **kwargs,
     ):
@@ -89,7 +89,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             language: Language for transcription.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSTranscribeSTTSettings(language=...)`` instead.
+                    Use ``settings=AWSTranscribeSTTService.Settings(language=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -98,14 +98,14 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to parent STTService class.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AWSTranscribeSTTSettings(
+        default_settings = self.Settings(
             model=None,
             language=self.language_to_service_language(Language.EN),
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if language is not None:
-            _warn_deprecated_param("language", AWSTranscribeSTTSettings, "language")
+            _warn_deprecated_param("language", self.Settings, "language")
             default_settings.language = self.language_to_service_language(language)
 
         # 3. (No step 3, as there's no params object to apply)

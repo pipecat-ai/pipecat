@@ -11,13 +11,13 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class GroqLLMSettings(OpenAILLMSettings):
+class GroqLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for GroqLLMService."""
 
     pass
@@ -31,7 +31,7 @@ class GroqLLMService(OpenAILLMService):
     """
 
     Settings = GroqLLMSettings
-    _settings: GroqLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -39,7 +39,7 @@ class GroqLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.groq.com/openai/v1",
         model: Optional[str] = None,
-        settings: Optional[GroqLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize Groq LLM service.
@@ -50,18 +50,18 @@ class GroqLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "llama-3.3-70b-versatile".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=GroqLLMService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GroqLLMSettings(model="llama-3.3-70b-versatile")
+        default_settings = self.Settings(model="llama-3.3-70b-versatile")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GroqLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

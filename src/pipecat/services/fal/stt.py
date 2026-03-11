@@ -156,13 +156,13 @@ class FalSTTService(SegmentedSTTService):
     """
 
     Settings = FalSTTSettings
-    _settings: FalSTTSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Fal's Wizper API.
 
         .. deprecated:: 0.0.105
-            Use ``settings=FalSTTSettings(...)`` instead.
+            Use ``settings=FalSTTService.Settings(...)`` instead.
 
         Parameters:
             language: Language of the audio input. Defaults to English.
@@ -186,7 +186,7 @@ class FalSTTService(SegmentedSTTService):
         version: str = "3",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[FalSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = FAL_TTFS_P99,
         **kwargs,
     ):
@@ -204,7 +204,7 @@ class FalSTTService(SegmentedSTTService):
             params: Configuration parameters for the Wizper API.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=FalSTTSettings(...)`` for model/language and
+                    Use ``settings=FalSTTService.Settings(...)`` for model/language and
                     direct init parameters for task/chunk_level/version instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -214,7 +214,7 @@ class FalSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = FalSTTSettings(
+        default_settings = self.Settings(
             model=None,
             language=language_to_fal_language(Language.EN),
         )
@@ -223,7 +223,7 @@ class FalSTTService(SegmentedSTTService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", FalSTTSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 if params.language is not None:
                     default_settings.language = language_to_fal_language(params.language)

@@ -97,7 +97,8 @@ class AzureBaseTTSService:
     This is a mixin class and should be used alongside TTSService or its subclasses.
     """
 
-    _settings: AzureTTSSettings
+    Settings = AzureTTSSettings
+    _settings: Settings
 
     # Define SSML escape mappings based on SSML reserved characters
     # See - https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure
@@ -113,7 +114,7 @@ class AzureBaseTTSService:
         """Input parameters for Azure TTS voice configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=AzureTTSSettings(...)`` instead.
+            Use ``settings=AzureBaseTTSService.Settings(...)`` instead.
 
         Parameters:
             emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
@@ -256,7 +257,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         voice: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[AzureBaseTTSService.InputParams] = None,
-        settings: Optional[AzureTTSSettings] = None,
+        settings: Optional[Settings] = None,
         aggregate_sentences: Optional[bool] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
@@ -269,13 +270,13 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             voice: Voice name to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AzureTTSSettings(voice=...)`` instead.
+                    Use ``settings=AzureTTSService.Settings(voice=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AzureTTSSettings(...)`` instead.
+                    Use ``settings=AzureTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -288,7 +289,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             **kwargs: Additional arguments passed to parent WordTTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AzureTTSSettings(
+        default_settings = self.Settings(
             model=None,
             voice="en-US-SaraNeural",
             language="en-US",
@@ -303,12 +304,12 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice is not None:
-            _warn_deprecated_param("voice", AzureTTSSettings, "voice")
+            _warn_deprecated_param("voice", self.Settings, "voice")
             default_settings.voice = voice
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", AzureTTSSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.emphasis = params.emphasis
                 default_settings.language = (
@@ -761,7 +762,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         voice: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[AzureBaseTTSService.InputParams] = None,
-        settings: Optional[AzureTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Azure HTTP TTS service.
@@ -772,20 +773,20 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             voice: Voice name to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AzureTTSSettings(voice=...)`` instead.
+                    Use ``settings=AzureHttpTTSService.Settings(voice=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AzureTTSSettings(...)`` instead.
+                    Use ``settings=AzureHttpTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AzureTTSSettings(
+        default_settings = self.Settings(
             model=None,
             voice="en-US-SaraNeural",
             language="en-US",
@@ -800,12 +801,12 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice is not None:
-            _warn_deprecated_param("voice", AzureTTSSettings, "voice")
+            _warn_deprecated_param("voice", self.Settings, "voice")
             default_settings.voice = voice
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", AzureTTSSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.emphasis = params.emphasis
                 default_settings.language = (

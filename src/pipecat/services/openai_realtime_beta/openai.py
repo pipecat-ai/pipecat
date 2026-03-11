@@ -112,7 +112,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     """
 
     Settings = OpenAIRealtimeBetaLLMSettings
-    _settings: OpenAIRealtimeBetaLLMSettings
+    _settings: Settings
 
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
     adapter_class = OpenAIRealtimeLLMAdapter
@@ -124,7 +124,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         model: Optional[str] = None,
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
-        settings: Optional[OpenAIRealtimeBetaLLMSettings] = None,
+        settings: Optional[Settings] = None,
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
         **kwargs,
@@ -136,7 +136,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             model: OpenAI model name.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAIRealtimeBetaLLMSettings(model=...)`` instead.
+                    Use ``settings=OpenAIRealtimeBetaLLMService.Settings(model=...)`` instead.
 
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.openai.com/v1/realtime".
@@ -157,7 +157,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAIRealtimeBetaLLMSettings(
+        default_settings = self.Settings(
             model="gpt-4o-realtime-preview-2025-06-03",
             system_instruction=None,
             temperature=None,
@@ -173,7 +173,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAIRealtimeBetaLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
         # 3. Apply settings delta (canonical API, always wins)
         if settings is not None:

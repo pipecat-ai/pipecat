@@ -70,7 +70,7 @@ class DeepgramSageMakerTTSService(TTSService):
     """
 
     Settings = DeepgramSageMakerTTSSettings
-    _settings: DeepgramSageMakerTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -80,7 +80,7 @@ class DeepgramSageMakerTTSService(TTSService):
         voice: Optional[str] = None,
         sample_rate: Optional[int] = None,
         encoding: str = "linear16",
-        settings: Optional[DeepgramSageMakerTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Deepgram SageMaker TTS service.
@@ -92,7 +92,7 @@ class DeepgramSageMakerTTSService(TTSService):
             voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=DeepgramSageMakerTTSSettings(voice=...)`` instead.
+                    Use ``settings=DeepgramSageMakerTTSService.Settings(voice=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses the value from StartFrame.
             encoding: Audio encoding format. Defaults to "linear16".
@@ -101,11 +101,11 @@ class DeepgramSageMakerTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         if voice is not None:
-            _warn_deprecated_param("voice", DeepgramSageMakerTTSSettings, "voice")
+            _warn_deprecated_param("voice", self.Settings, "voice")
 
         voice = voice or "aura-2-helena-en"
 
-        default_settings = DeepgramSageMakerTTSSettings(
+        default_settings = self.Settings(
             model=None,
             voice=voice,
             language=None,

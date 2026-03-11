@@ -83,7 +83,7 @@ class HeyGenVideoService(AIService):
     """
 
     Settings = HeyGenVideoSettings
-    _settings: HeyGenVideoSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -92,7 +92,7 @@ class HeyGenVideoService(AIService):
         session: aiohttp.ClientSession,
         session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
         service_type: Optional[ServiceType] = None,
-        settings: Optional[HeyGenVideoSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ) -> None:
         """Initialize the HeyGen video service.

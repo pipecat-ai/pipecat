@@ -59,7 +59,7 @@ class LiveOptions:
     deepgram-sdk v6.
 
     .. deprecated:: 0.0.105
-        Use ``settings=DeepgramSTTSettings(...)`` for runtime-updatable fields
+        Use ``settings=DeepgramSTTService.Settings(...)`` for runtime-updatable fields
         and direct ``__init__`` parameters for connection-level config instead.
     """
 
@@ -267,7 +267,7 @@ class DeepgramSTTService(STTService):
     """
 
     Settings = DeepgramSTTSettings
-    _settings: DeepgramSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -286,7 +286,7 @@ class DeepgramSTTService(STTService):
         live_options: Optional[LiveOptions] = None,
         addons: Optional[dict] = None,
         should_interrupt: bool = True,
-        settings: Optional[DeepgramSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = DEEPGRAM_TTFS_P99,
         **kwargs,
     ):
@@ -313,7 +313,7 @@ class DeepgramSTTService(STTService):
             live_options: Legacy configuration options.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=DeepgramSTTSettings(...)`` for runtime-updatable
+                    Use ``settings=DeepgramSTTService.Settings(...)`` for runtime-updatable
                     fields and direct init parameters for connection-level config.
 
             addons: Additional Deepgram features to enable.
@@ -345,7 +345,7 @@ class DeepgramSTTService(STTService):
             base_url = url
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = DeepgramSTTSettings(
+        default_settings = self.Settings(
             model="nova-3-general",
             language=Language.EN,
             detect_entities=False,
@@ -370,7 +370,7 @@ class DeepgramSTTService(STTService):
 
         # 3. Apply live_options overrides — only if settings not provided
         if live_options is not None:
-            _warn_deprecated_param("live_options", DeepgramSTTSettings)
+            _warn_deprecated_param("live_options", self.Settings)
             if not settings:
                 # Extract init-only fields from live_options
                 if live_options.sample_rate is not None and sample_rate is None:
@@ -402,7 +402,7 @@ class DeepgramSTTService(STTService):
                     "mip_opt_out",
                 }
                 lo_dict = {k: v for k, v in live_options.to_dict().items() if k not in init_only}
-                delta = DeepgramSTTSettings.from_mapping(lo_dict)
+                delta = self.Settings.from_mapping(lo_dict)
                 default_settings.apply_update(delta)
 
         # 4. Apply settings delta (canonical API, always wins)
@@ -494,7 +494,7 @@ class DeepgramSTTService(STTService):
             return changed
 
         # Sync extra to fields after the update so self._settings stays unambiguous
-        if isinstance(self._settings, DeepgramSTTSettings):
+        if isinstance(self._settings, self.Settings):
             self._settings._sync_extra_to_fields()
 
         if self._connection:

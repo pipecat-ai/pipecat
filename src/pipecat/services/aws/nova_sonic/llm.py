@@ -150,7 +150,7 @@ class Params(BaseModel):
     """Configuration parameters for AWS Nova Sonic.
 
     .. deprecated:: 0.0.105
-        Use ``settings=AWSNovaSonicLLMSettings(...)`` for inference settings
+        Use ``settings=AWSNovaSonicLLMService.Settings(...)`` for inference settings
         and ``audio_config=AudioConfig(...)`` for audio configuration.
 
     Parameters:
@@ -247,7 +247,7 @@ class AWSNovaSonicLLMService(LLMService):
     """
 
     Settings = AWSNovaSonicLLMSettings
-    _settings: AWSNovaSonicLLMSettings
+    _settings: Settings
 
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
     adapter_class = AWSNovaSonicLLMAdapter
@@ -263,7 +263,7 @@ class AWSNovaSonicLLMService(LLMService):
         voice_id: str = "matthew",
         params: Optional[Params] = None,
         audio_config: Optional[AudioConfig] = None,
-        settings: Optional[AWSNovaSonicLLMSettings] = None,
+        settings: Optional[Settings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
         send_transcription_frames: bool = True,
@@ -282,7 +282,7 @@ class AWSNovaSonicLLMService(LLMService):
             model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSNovaSonicLLMSettings(model=...)`` instead.
+                    Use ``settings=AWSNovaSonicLLMService.Settings(model=...)`` instead.
 
             voice_id: Voice ID for speech synthesis.
                 Note that some voices are designed for use with a specific language.
@@ -291,12 +291,12 @@ class AWSNovaSonicLLMService(LLMService):
                 - Nova Sonic (the older model): see https://docs.aws.amazon.com/nova/latest/userguide/available-voices.html.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSNovaSonicLLMSettings(voice=...)`` instead.
+                    Use ``settings=AWSNovaSonicLLMService.Settings(voice=...)`` instead.
 
             params: Model parameters for audio configuration and inference.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSNovaSonicLLMSettings(...)`` for inference
+                    Use ``settings=AWSNovaSonicLLMService.Settings(...)`` for inference
                     settings and ``audio_config=AudioConfig(...)`` for audio
                     configuration.
 
@@ -308,7 +308,7 @@ class AWSNovaSonicLLMService(LLMService):
             system_instruction: System-level instruction for the model.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSNovaSonicLLMSettings(system_instruction=...)`` instead.
+                    Use ``settings=AWSNovaSonicLLMService.Settings(system_instruction=...)`` instead.
             tools: Available tools/functions for the model to use.
             send_transcription_frames: Whether to emit transcription frames.
 
@@ -319,7 +319,7 @@ class AWSNovaSonicLLMService(LLMService):
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AWSNovaSonicLLMSettings(
+        default_settings = self.Settings(
             model="amazon.nova-2-sonic-v1:0",
             system_instruction=None,
             voice="matthew",
@@ -337,15 +337,13 @@ class AWSNovaSonicLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model != "amazon.nova-2-sonic-v1:0":
-            _warn_deprecated_param("model", AWSNovaSonicLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
         if voice_id != "matthew":
-            _warn_deprecated_param("voice_id", AWSNovaSonicLLMSettings, "voice")
+            _warn_deprecated_param("voice_id", self.Settings, "voice")
             default_settings.voice = voice_id
         if system_instruction is not None:
-            _warn_deprecated_param(
-                "system_instruction", AWSNovaSonicLLMSettings, "system_instruction"
-            )
+            _warn_deprecated_param("system_instruction", self.Settings, "system_instruction")
             default_settings.system_instruction = system_instruction
 
         # 3. Apply params overrides — only if settings not provided
@@ -356,7 +354,7 @@ class AWSNovaSonicLLMService(LLMService):
                 warnings.simplefilter("always")
                 warnings.warn(
                     "The `params` parameter is deprecated. "
-                    "Use `settings=AWSNovaSonicLLMSettings(...)` for inference settings "
+                    "Use `settings=self.Settings(...)` for inference settings "
                     "(temperature, max_tokens, top_p, endpointing_sensitivity) "
                     "and `audio_config=AudioConfig(...)` for audio configuration "
                     "(sample rates, sample sizes, channel counts).",
@@ -447,7 +445,7 @@ class AWSNovaSonicLLMService(LLMService):
     # settings
     #
 
-    async def _update_settings(self, delta: AWSNovaSonicLLMSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
         Settings are stored but not applied to the active connection.

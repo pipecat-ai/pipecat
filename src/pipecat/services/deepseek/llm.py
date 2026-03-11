@@ -12,13 +12,13 @@ from typing import Optional
 from loguru import logger
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class DeepSeekLLMSettings(OpenAILLMSettings):
+class DeepSeekLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for DeepSeekLLMService."""
 
     pass
@@ -32,7 +32,7 @@ class DeepSeekLLMService(OpenAILLMService):
     """
 
     Settings = DeepSeekLLMSettings
-    _settings: DeepSeekLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -40,7 +40,7 @@ class DeepSeekLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.deepseek.com/v1",
         model: Optional[str] = None,
-        settings: Optional[DeepSeekLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the DeepSeek LLM service.
@@ -51,18 +51,18 @@ class DeepSeekLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "deepseek-chat".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=DeepSeekLLMService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = DeepSeekLLMSettings(model="deepseek-chat")
+        default_settings = self.Settings(model="deepseek-chat")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", DeepSeekLLMSettings, "model")
+            _warn_deprecated_param("model", self.Settings, "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

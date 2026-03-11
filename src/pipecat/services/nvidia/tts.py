@@ -62,13 +62,13 @@ class NvidiaTTSService(TTSService):
     """
 
     Settings = NvidiaTTSSettings
-    _settings: NvidiaTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Riva TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``NvidiaTTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``NvidiaTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             language: Language code for synthesis. Defaults to US English.
@@ -90,7 +90,7 @@ class NvidiaTTSService(TTSService):
             "model_name": "magpie-tts-multilingual",
         },
         params: Optional[InputParams] = None,
-        settings: Optional[NvidiaTTSSettings] = None,
+        settings: Optional[Settings] = None,
         use_ssl: bool = True,
         **kwargs,
     ):
@@ -102,14 +102,14 @@ class NvidiaTTSService(TTSService):
             voice_id: Voice model identifier. Defaults to multilingual Aria voice.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=NvidiaTTSSettings(voice=...)`` instead.
+                    Use ``settings=NvidiaTTSService.Settings(voice=...)`` instead.
 
             sample_rate: Audio sample rate. If None, uses service default.
             model_function_map: Dictionary containing function_id and model_name for the TTS model.
             params: Additional configuration parameters for TTS synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=NvidiaTTSSettings(...)`` instead.
+                    Use ``settings=NvidiaTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -117,7 +117,7 @@ class NvidiaTTSService(TTSService):
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = NvidiaTTSSettings(
+        default_settings = self.Settings(
             model=model_function_map.get("model_name"),
             voice="Magpie-Multilingual.EN-US.Aria",
             language=Language.EN_US,
@@ -126,12 +126,12 @@ class NvidiaTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", NvidiaTTSSettings, "voice")
+            _warn_deprecated_param("voice_id", self.Settings, "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", NvidiaTTSSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 if params.language is not None:
                     default_settings.language = params.language
@@ -186,7 +186,7 @@ class NvidiaTTSService(TTSService):
                 stacklevel=2,
             )
 
-    async def _update_settings(self, delta: NvidiaTTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
         Settings are stored but not applied to the active connection.

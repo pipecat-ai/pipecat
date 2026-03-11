@@ -48,7 +48,7 @@ class PiperTTSService(TTSService):
     """
 
     Settings = PiperTTSSettings
-    _settings: PiperTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -57,7 +57,7 @@ class PiperTTSService(TTSService):
         download_dir: Optional[Path] = None,
         force_redownload: bool = False,
         use_cuda: bool = False,
-        settings: Optional[PiperTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Piper TTS service.
@@ -66,7 +66,7 @@ class PiperTTSService(TTSService):
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=PiperTTSSettings(voice=...)`` instead.
+                    Use ``settings=PiperTTSService.Settings(voice=...)`` instead.
 
             download_dir: Directory for storing voice model files. Defaults to
                 the current working directory.
@@ -77,11 +77,11 @@ class PiperTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent `TTSService`.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = PiperTTSSettings(model=None, voice=None, language=None)
+        default_settings = self.Settings(model=None, voice=None, language=None)
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", PiperTTSSettings, "voice")
+            _warn_deprecated_param("voice_id", self.Settings, "voice")
             default_settings.voice = voice_id
 
         # 3. (No step 3, as there's no params object to apply)
@@ -121,7 +121,7 @@ class PiperTTSService(TTSService):
         """
         return True
 
-    async def _update_settings(self, delta: PiperTTSSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
         Settings are stored but not applied to the active connection.
@@ -202,7 +202,7 @@ class PiperHttpTTSService(TTSService):
     """
 
     Settings = PiperHttpTTSSettings
-    _settings: PiperHttpTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -210,7 +210,7 @@ class PiperHttpTTSService(TTSService):
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
         voice_id: Optional[str] = None,
-        settings: Optional[PiperHttpTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Piper TTS service.
@@ -221,18 +221,18 @@ class PiperHttpTTSService(TTSService):
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=PiperHttpTTSSettings(voice=...)`` instead.
+                    Use ``settings=PiperHttpTTSService.Settings(voice=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = PiperHttpTTSSettings(model=None, voice=None, language=None)
+        default_settings = self.Settings(model=None, voice=None, language=None)
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", PiperHttpTTSSettings, "voice")
+            _warn_deprecated_param("voice_id", self.Settings, "voice")
             default_settings.voice = voice_id
 
         # 3. (No step 3, as there's no params object to apply)

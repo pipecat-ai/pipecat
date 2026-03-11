@@ -176,7 +176,7 @@ class SpeechmaticsSTTService(STTService):
     """
 
     Settings = SpeechmaticsSTTSettings
-    _settings: SpeechmaticsSTTSettings
+    _settings: Settings
 
     # Export related classes as class attributes
     TurnDetectionMode = TurnDetectionMode
@@ -343,7 +343,7 @@ class SpeechmaticsSTTService(STTService):
         """Update parameters for Speechmatics STT service.
 
         .. deprecated:: 0.0.104
-            Use ``SpeechmaticsSTTSettings`` with ``STTUpdateSettingsFrame`` instead.
+            Use ``SpeechmaticsSTTService.Settings`` with ``STTUpdateSettingsFrame`` instead.
 
         Parameters:
             focus_speakers: List of speaker IDs to focus on. When enabled, only these speakers are
@@ -380,7 +380,7 @@ class SpeechmaticsSTTService(STTService):
         encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
         params: InputParams | None = None,
         should_interrupt: bool = True,
-        settings: SpeechmaticsSTTSettings | None = None,
+        settings: Settings | None = None,
         ttfs_p99_latency: float | None = SPEECHMATICS_TTFS_P99,
         **kwargs,
     ):
@@ -396,7 +396,7 @@ class SpeechmaticsSTTService(STTService):
             params: Input parameters for the service.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=SpeechmaticsSTTSettings(...)`` instead.
+                    Use ``settings=SpeechmaticsSTTService.Settings(...)`` instead.
 
             should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -424,7 +424,7 @@ class SpeechmaticsSTTService(STTService):
         self._check_deprecated_args(kwargs, _params)
 
         # --- 1. Hardcoded defaults ---
-        default_settings = SpeechmaticsSTTSettings(
+        default_settings = self.Settings(
             model=None,  # Will be resolved from operating_point after config is built
             language=Language.EN,
             domain=None,
@@ -454,7 +454,7 @@ class SpeechmaticsSTTService(STTService):
 
         # --- 3. Deprecated params overrides ---
         if params is not None:
-            _warn_deprecated_param("params", SpeechmaticsSTTSettings)
+            _warn_deprecated_param("params", self.Settings)
             if not settings:
                 default_settings.language = _params.language
                 default_settings.domain = _params.domain
@@ -537,11 +537,11 @@ class SpeechmaticsSTTService(STTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings(self, delta: SpeechmaticsSTTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta, reconnecting only when necessary.
 
         Fields are classified into three categories (see
-        ``SpeechmaticsSTTSettings``):
+        ``SpeechmaticsSTTService.Settings``):
 
         * **HOT_FIELDS** – diarization speaker settings that can be pushed
           to a live Speechmatics connection without reconnecting.
@@ -561,7 +561,7 @@ class SpeechmaticsSTTService(STTService):
         if not changed:
             return changed
 
-        no_reconnect = SpeechmaticsSTTSettings.HOT_FIELDS | SpeechmaticsSTTSettings.LOCAL_FIELDS
+        no_reconnect = self.Settings.HOT_FIELDS | self.Settings.LOCAL_FIELDS
         needs_reconnect = bool(changed.keys() - no_reconnect)
 
         if needs_reconnect:
@@ -571,7 +571,7 @@ class SpeechmaticsSTTService(STTService):
             self._config = self._build_config(self._settings)
             await self._disconnect()
             await self._connect()
-        elif changed.keys() & SpeechmaticsSTTSettings.HOT_FIELDS:
+        elif changed.keys() & self.Settings.HOT_FIELDS:
             logger.debug(f"{self} applying hot settings update: {changed.keys()}")
             if self._config.enable_diarization:
                 # Only hot-updatable fields changed — push to the live session.
@@ -586,7 +586,7 @@ class SpeechmaticsSTTService(STTService):
                 )
                 # Diarization not enabled — the new settings will take effect
                 # if/when diarization is enabled, which does require a reconnect.
-        elif changed.keys() & SpeechmaticsSTTSettings.LOCAL_FIELDS:
+        elif changed.keys() & self.Settings.LOCAL_FIELDS:
             logger.debug(
                 f"{self} local settings update, no special action required: {changed.keys()}"
             )
@@ -705,7 +705,7 @@ class SpeechmaticsSTTService(STTService):
     # CONFIGURATION
     # ============================================================================
 
-    def _build_config(self, settings: SpeechmaticsSTTSettings) -> VoiceAgentConfig:
+    def _build_config(self, settings: Settings) -> VoiceAgentConfig:
         """Build a ``VoiceAgentConfig`` from the given settings.
 
         Used both at init time (with explicit settings, before
@@ -778,7 +778,7 @@ class SpeechmaticsSTTService(STTService):
 
         .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame`` with
-            ``SpeechmaticsSTTSettings(...)`` instead.
+            ``SpeechmaticsSTTService.Settings(...)`` instead.
 
         This can update the speakers to listen to or ignore during an in-flight
         transcription. Only available if diarization is enabled.
@@ -790,7 +790,7 @@ class SpeechmaticsSTTService(STTService):
             warnings.simplefilter("always")
             warnings.warn(
                 "update_params() is deprecated. Use STTUpdateSettingsFrame with "
-                "SpeechmaticsSTTSettings(...) instead.",
+                "self.Settings(...) instead.",
                 DeprecationWarning,
             )
         # Check possible
