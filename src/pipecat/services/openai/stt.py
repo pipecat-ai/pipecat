@@ -187,9 +187,15 @@ class OpenAIRealtimeSTTSettings(STTSettings):
 
     Parameters:
         prompt: Optional prompt text to guide transcription style.
+        noise_reduction: Noise reduction mode. ``"near_field"`` for close
+            microphones, ``"far_field"`` for distant microphones, or ``None``
+            to disable.
     """
 
     prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    noise_reduction: Literal["near_field", "far_field"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class OpenAIRealtimeSTTService(WebsocketSTTService):
@@ -220,8 +226,10 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         stt = OpenAIRealtimeSTTService(
             api_key="sk-...",
-            model="gpt-4o-transcribe",
-            noise_reduction="near_field",
+            settings=OpenAIRealtimeSTTService.Settings(
+                model="gpt-4o-transcribe",
+                noise_reduction="near_field",
+            ),
         )
     """
 
@@ -274,6 +282,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             noise_reduction: Noise reduction mode. ``"near_field"`` for
                 close microphones, ``"far_field"`` for distant
                 microphones, or ``None`` to disable.
+
+                .. deprecated:: 0.0.106
+                    Use ``settings=OpenAIRealtimeSTTSettings(noise_reduction=...)`` instead.
             should_interrupt: Whether to interrupt bot output when
                 speech is detected by server-side VAD. Only applies when
                 turn detection is enabled. Defaults to True.
@@ -295,6 +306,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             model="gpt-4o-transcribe",
             language=Language.EN,
             prompt=None,
+            noise_reduction=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -307,6 +319,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         if prompt is not None:
             _warn_deprecated_param("prompt", OpenAIRealtimeSTTSettings, "prompt")
             default_settings.prompt = prompt
+        if noise_reduction is not None:
+            _warn_deprecated_param("noise_reduction", OpenAIRealtimeSTTSettings, "noise_reduction")
+            default_settings.noise_reduction = noise_reduction
 
         # --- 3. (no params object for this service) ---
 
@@ -324,7 +339,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         self._base_url = base_url
 
         self._turn_detection = turn_detection
-        self._noise_reduction = noise_reduction
         self._should_interrupt = should_interrupt
 
         self._receive_task = None
@@ -544,9 +558,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             input_audio["turn_detection"] = self._turn_detection
 
         # Noise reduction
-        if self._noise_reduction:
+        if self._settings.noise_reduction:
             input_audio["noise_reduction"] = {
-                "type": self._noise_reduction,
+                "type": self._settings.noise_reduction,
             }
 
         await self._ws_send(
