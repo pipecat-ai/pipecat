@@ -69,7 +69,7 @@ class DeepgramSageMakerSTTService(STTService):
         stt = DeepgramSageMakerSTTService(
             endpoint_name="my-deepgram-endpoint",
             region="us-east-2",
-            settings=DeepgramSageMakerSTTSettings(
+            settings=DeepgramSageMakerSTTService.Settings(
                 model="nova-3",
                 language="en",
                 interim_results=True,
