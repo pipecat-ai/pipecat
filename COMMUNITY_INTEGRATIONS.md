@@ -280,17 +280,17 @@ from typing import Optional
 
 class MyTTSService(TTSService):
     Settings = MyTTSSettings
-    _settings: MyTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
-        settings: Optional[MyTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         # 1. Defaults — every field has a real value (store mode).
-        default_settings = MyTTSSettings(
+        default_settings = self.Settings(
             model="my-model-v1",
             voice="default-voice",
             language="en",
