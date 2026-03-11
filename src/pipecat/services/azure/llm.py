@@ -47,7 +47,7 @@ class AzureLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Azure OpenAI.
             endpoint: The Azure endpoint URL.
-            model: The model identifier to use. Defaults to "gpt-4o".
+            model: The model identifier to use. Defaults to "gpt-4.1".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=AzureLLMService.Settings(model=...)`` instead.
@@ -58,7 +58,7 @@ class AzureLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="gpt-4o")
+        default_settings = self.Settings(model="gpt-4.1")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:

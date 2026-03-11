@@ -58,7 +58,6 @@ async def main():
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             settings=OpenAILLMService.Settings(
-                model="gpt-4o",
                 system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
             ),
         )

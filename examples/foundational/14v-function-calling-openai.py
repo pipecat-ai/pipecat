@@ -79,7 +79,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         instructions="Please speak clearly and at a moderate pace.",
     )
 
-    # model choices: gpt-4o, gpt-4.1, etc.
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         settings=OpenAILLMService.Settings(
