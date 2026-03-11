@@ -1014,8 +1014,8 @@ class GoogleTTSService(GoogleBaseTTSService):
 
         tts = GoogleTTSService(
             credentials_path="/path/to/service-account.json",
-            voice_id="en-US-Chirp3-HD-Charon",
-            params=GoogleTTSService.InputParams(
+            settings=GoogleTTSService.Settings(
+                voice="en-US-Chirp3-HD-Charon",
                 language=Language.EN_US,
             )
         )
@@ -1191,9 +1191,9 @@ class GeminiTTSService(GoogleBaseTTSService):
 
         tts = GeminiTTSService(
             credentials_path="/path/to/service-account.json",
-            model="gemini-2.5-flash-tts",
-            voice_id="Kore",
-            params=GeminiTTSService.InputParams(
+            settings=GeminiTTSService.Settings(
+                model="gemini-2.5-flash-tts",
+                voice="Kore",
                 language=Language.EN_US,
                 prompt="Say this in a friendly and helpful tone"
             )
