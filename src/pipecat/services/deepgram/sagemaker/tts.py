@@ -63,7 +63,9 @@ class DeepgramSageMakerTTSService(TTSService):
         tts = DeepgramSageMakerTTSService(
             endpoint_name="my-deepgram-tts-endpoint",
             region="us-east-2",
-            voice="aura-2-helena-en",
+            settings=DeepgramSageMakerTTSService.Settings(
+                voice="aura-2-helena-en",
+            )
         )
     """
 

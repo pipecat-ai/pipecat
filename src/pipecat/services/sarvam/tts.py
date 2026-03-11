@@ -326,28 +326,28 @@ class SarvamHttpTTSService(TTSService):
         # Using bulbul:v2 (default)
         tts = SarvamHttpTTSService(
             api_key="your-api-key",
-            voice_id="anushka",
-            model="bulbul:v2",
             aiohttp_session=session,
-            params=SarvamHttpTTSService.InputParams(
+            settings=SarvamHttpTTSService.Settings(
+                voice="anushka",
+                model="bulbul:v2",
                 language=Language.HI,
                 pitch=0.1,
                 pace=1.2,
-                loudness=1.5
-            )
+                loudness=1.5,
+            ),
         )
 
         # Using bulbul:v3-beta with temperature control
         tts_v3 = SarvamHttpTTSService(
             api_key="your-api-key",
-            voice_id="aditya",  # Use v3 speaker
-            model="bulbul:v3-beta",
             aiohttp_session=session,
-            params=SarvamHttpTTSService.InputParams(
+            settings=SarvamHttpTTSService.Settings(
+                voice="aditya",  # Use v3 speaker
+                model="bulbul:v3-beta",
                 language=Language.HI,
                 pace=1.2,  # Range: 0.5-2.0 for v3
-                temperature=0.8
-            )
+                temperature=0.8,
+            ),
         )
     """
 
@@ -693,26 +693,26 @@ class SarvamTTSService(InterruptibleTTSService):
         # Using bulbul:v2 (default)
         tts = SarvamTTSService(
             api_key="your-api-key",
-            voice_id="anushka",
-            model="bulbul:v2",
-            params=SarvamTTSService.InputParams(
+            settings=SarvamTTSService.Settings(
+                voice="anushka",
+                model="bulbul:v2",
                 language=Language.HI,
                 pitch=0.1,
                 pace=1.2,
-                loudness=1.5
-            )
+                loudness=1.5,
+            ),
         )
 
         # Using bulbul:v3-beta with temperature control
         tts_v3 = SarvamTTSService(
             api_key="your-api-key",
-            voice_id="aditya",  # Use v3 speaker
-            model="bulbul:v3-beta",
-            params=SarvamTTSService.InputParams(
+            settings=SarvamTTSService.Settings(
+                voice="aditya",  # Use v3 speaker
+                model="bulbul:v3-beta",
                 language=Language.HI,
                 pace=1.2,  # Range: 0.5-2.0 for v3
-                temperature=0.8
-            )
+                temperature=0.8,
+            ),
         )
 
     See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for API details.
