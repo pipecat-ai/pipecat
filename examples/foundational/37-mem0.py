@@ -24,7 +24,7 @@ Example usage (run from pipecat root directory):
     $ python examples/foundational/37-mem0.py
 
 Requirements:
-    - OpenAI API key (for GPT-4o-mini)
+    - OpenAI API key
     - ElevenLabs API key (for text-to-speech)
     - Daily API key (for video/audio transport)
     - Mem0 API key (for cloud-based memory storage)
@@ -226,7 +226,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         settings=OpenAILLMService.Settings(
-            model="gpt-4o-mini",
             system_instruction="""You are a personal assistant. You can remember things about the person you are talking to.
                         Some Guidelines:
                         - Make sure your responses are friendly yet short and concise.

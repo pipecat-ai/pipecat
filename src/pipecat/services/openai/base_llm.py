@@ -151,7 +151,7 @@ class BaseOpenAILLMService(LLMService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="gpt-4o",
+            model="gpt-4.1",
             system_instruction=None,
             frequency_penalty=NOT_GIVEN,
             presence_penalty=NOT_GIVEN,

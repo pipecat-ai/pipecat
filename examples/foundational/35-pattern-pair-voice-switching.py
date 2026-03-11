@@ -24,7 +24,7 @@ The PatternPairAggregator:
     - Returns processed text at sentence boundaries
 
 Requirements:
-    - OpenAI API key (for GPT-4o)
+    - OpenAI API key
     - Cartesia API key (for text-to-speech)
     - Daily API key (for video/audio transport)
 
