@@ -41,7 +41,7 @@ dependencies = [
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
     "transformers>=4.48.0,<6",
-    "onnxruntime~=1.23.2",
+    "onnxruntime~=1.24.3",
 ]
 
 [project.urls]
