@@ -98,18 +98,20 @@ class AnthropicLLMSettings(LLMSettings):
     """
 
     enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    thinking: AnthropicThinkingConfig | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    thinking: Union["AnthropicLLMService.ThinkingConfig", _NotGiven] = field(
+        default_factory=lambda: _NOT_GIVEN
+    )
 
     @classmethod
     def from_mapping(cls, settings):
         """Convert a plain dict to settings, coercing thinking dicts.
 
         For backward compatibility, a ``thinking`` value that is a plain dict
-        is converted to a :class:`AnthropicThinkingConfig`.
+        is converted to a :class:`AnthropicLLMService.ThinkingConfig`.
         """
         instance = super().from_mapping(settings)
         if is_given(instance.thinking) and isinstance(instance.thinking, dict):
-            instance.thinking = AnthropicThinkingConfig(**instance.thinking)
+            instance.thinking = AnthropicLLMService.ThinkingConfig(**instance.thinking)
         return instance
 
 
@@ -199,7 +201,9 @@ class AnthropicLLMService(LLMService):
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        thinking: Optional[AnthropicThinkingConfig] = Field(default_factory=lambda: NOT_GIVEN)
+        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(
+            default_factory=lambda: NOT_GIVEN
+        )
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
         def model_post_init(self, __context):

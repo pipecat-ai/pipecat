@@ -16,7 +16,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Union
 
 from loguru import logger
 from PIL import Image
@@ -719,18 +719,20 @@ class GoogleLLMSettings(LLMSettings):
         thinking: Thinking configuration.
     """
 
-    thinking: GoogleThinkingConfig | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    thinking: Union["GoogleLLMService.ThinkingConfig", _NotGiven] = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
     @classmethod
     def from_mapping(cls, settings):
         """Convert a plain dict to settings, coercing thinking dicts.
 
         For backward compatibility, a ``thinking`` value that is a plain dict
-        is converted to a :class:`GoogleThinkingConfig`.
+        is converted to a :class:`GoogleLLMService.ThinkingConfig`.
         """
         instance = super().from_mapping(settings)
         if is_given(instance.thinking) and isinstance(instance.thinking, dict):
-            instance.thinking = GoogleThinkingConfig(**instance.thinking)
+            instance.thinking = GoogleLLMService.ThinkingConfig(**instance.thinking)
         return instance
 
 
@@ -775,7 +777,7 @@ class GoogleLLMService(LLMService):
         temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
         top_k: Optional[int] = Field(default=None, ge=0)
         top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-        thinking: Optional[GoogleThinkingConfig] = Field(default=None)
+        thinking: Optional["GoogleLLMService.ThinkingConfig"] = Field(default=None)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(

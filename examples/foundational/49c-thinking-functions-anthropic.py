@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.anthropic.llm import AnthropicLLMService, AnthropicThinkingConfig
+from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
@@ -85,7 +85,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AnthropicLLMService(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         settings=AnthropicLLMService.Settings(
-            thinking=AnthropicThinkingConfig(
+            thinking=AnthropicLLMService.ThinkingConfig(
                 type="enabled",
                 budget_tokens=2048,
             ),
