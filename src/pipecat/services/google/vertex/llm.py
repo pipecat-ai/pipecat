@@ -21,8 +21,7 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.services.google.llm import GoogleLLMService, GoogleLLMSettings
-from pipecat.services.settings import _warn_deprecated_param
+from pipecat.services.google.llm import GoogleLLMService
 
 try:
     from google.auth import default
@@ -41,7 +40,7 @@ except ModuleNotFoundError as e:
 
 
 @dataclass
-class GoogleVertexLLMSettings(GoogleLLMSettings):
+class GoogleVertexLLMSettings(GoogleLLMService.Settings):
     """Settings for GoogleVertexLLMService."""
 
     pass
@@ -60,7 +59,7 @@ class GoogleVertexLLMService(GoogleLLMService):
     """
 
     Settings = GoogleVertexLLMSettings
-    _settings: GoogleVertexLLMSettings
+    _settings: Settings
 
     class InputParams(GoogleLLMService.InputParams):
         """Input parameters specific to Vertex AI.
@@ -115,7 +114,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         location: Optional[str] = None,
         project_id: Optional[str] = None,
         params: Optional[GoogleLLMService.InputParams] = None,
-        settings: Optional[GoogleVertexLLMSettings] = None,
+        settings: Optional[Settings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[list] = None,
         tool_config: Optional[dict] = None,
@@ -130,14 +129,14 @@ class GoogleVertexLLMService(GoogleLLMService):
             model: Model identifier (e.g., "gemini-2.5-flash").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GoogleLLMSettings(model=...)`` instead.
+                    Use ``settings=GoogleVertexLLMService.Settings(model=...)`` instead.
 
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
             project_id: Google Cloud project ID.
             params: Input parameters for the model.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GoogleLLMSettings(...)`` instead.
+                    Use ``settings=GoogleVertexLLMService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -145,7 +144,7 @@ class GoogleVertexLLMService(GoogleLLMService):
             system_instruction: System instruction/prompt for the model.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GoogleVertexLLMSettings(system_instruction=...)`` instead.
+                    Use ``settings=GoogleVertexLLMService.Settings(system_instruction=...)`` instead.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
@@ -197,7 +196,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         self._location = location
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GoogleVertexLLMSettings(
+        default_settings = self.Settings(
             model="gemini-2.5-flash",
             system_instruction=None,
             max_tokens=4096,
@@ -215,17 +214,15 @@ class GoogleVertexLLMService(GoogleLLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GoogleVertexLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if system_instruction is not None:
-            _warn_deprecated_param(
-                "system_instruction", GoogleVertexLLMSettings, "system_instruction"
-            )
+            self._warn_init_param_moved_to_settings("system_instruction", "system_instruction")
             default_settings.system_instruction = system_instruction
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GoogleVertexLLMSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.max_tokens = params.max_tokens
                 default_settings.temperature = params.temperature

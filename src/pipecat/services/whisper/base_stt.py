@@ -18,7 +18,7 @@ from openai import AsyncOpenAI
 from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import WHISPER_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -123,7 +123,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
     """
 
     Settings = BaseWhisperSTTSettings
-    _settings: BaseWhisperSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -136,7 +136,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         temperature: Optional[float] = None,
         include_prob_metrics: bool = False,
         push_empty_transcripts: bool = False,
-        settings: Optional[BaseWhisperSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = WHISPER_TTFS_P99,
         **kwargs,
     ):
@@ -146,24 +146,24 @@ class BaseWhisperSTTService(SegmentedSTTService):
             model: Name of the Whisper model to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=BaseWhisperSTTSettings(model=...)`` instead.
+                    Use ``settings=BaseWhisperSTTService.Settings(model=...)`` instead.
 
             api_key: Service API key. Defaults to None.
             base_url: Service API base URL. Defaults to None.
             language: Language of the audio input.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=BaseWhisperSTTSettings(language=...)`` instead.
+                    Use ``settings=BaseWhisperSTTService.Settings(language=...)`` instead.
 
             prompt: Optional text to guide the model's style or continue a previous segment.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=BaseWhisperSTTSettings(prompt=...)`` instead.
+                    Use ``settings=BaseWhisperSTTService.Settings(prompt=...)`` instead.
 
             temperature: Sampling temperature between 0 and 1.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=BaseWhisperSTTSettings(temperature=...)`` instead.
+                    Use ``settings=BaseWhisperSTTService.Settings(temperature=...)`` instead.
 
             include_prob_metrics: If True, enables probability metrics in API response.
                 Each service implements this differently (see child classes).
@@ -181,7 +181,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         # --- 1. Hardcoded defaults ---
-        default_settings = BaseWhisperSTTSettings(
+        default_settings = self.Settings(
             model=None,
             language=None,
             prompt=None,
@@ -190,16 +190,16 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", BaseWhisperSTTSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if language is not None:
-            _warn_deprecated_param("language", BaseWhisperSTTSettings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = self.language_to_service_language(language)
         if prompt is not None:
-            _warn_deprecated_param("prompt", BaseWhisperSTTSettings, "prompt")
+            self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt
         if temperature is not None:
-            _warn_deprecated_param("temperature", BaseWhisperSTTSettings, "temperature")
+            self._warn_init_param_moved_to_settings("temperature", "temperature")
             default_settings.temperature = temperature
 
         # --- 3. (no params object for this service) ---

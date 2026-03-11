@@ -36,7 +36,6 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     STTSettings,
     _NotGiven,
-    _warn_deprecated_param,
     is_given,
 )
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
@@ -172,13 +171,13 @@ class SarvamSTTService(STTService):
     """
 
     Settings = SarvamSTTSettings
-    _settings: SarvamSTTSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam STT service.
 
         .. deprecated:: 0.0.105
-            Use ``settings=SarvamSTTSettings(...)`` instead.
+            Use ``settings=SarvamSTTService.Settings(...)`` instead.
 
         Parameters:
             language: Target language for transcription.
@@ -210,7 +209,7 @@ class SarvamSTTService(STTService):
         sample_rate: Optional[int] = None,
         input_audio_codec: str = "wav",
         params: Optional[InputParams] = None,
-        settings: Optional[SarvamSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = SARVAM_TTFS_P99,
         keepalive_timeout: Optional[float] = None,
         keepalive_interval: float = 5.0,
@@ -223,7 +222,7 @@ class SarvamSTTService(STTService):
             model: Sarvam model to use for transcription.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=SarvamSTTSettings(model=...)`` instead.
+                    Use ``settings=SarvamSTTService.Settings(model=...)`` instead.
 
             mode: Mode of operation. Options: transcribe, translate, verbatim,
                 translit, codemix. Only applicable to models that support it
@@ -233,7 +232,7 @@ class SarvamSTTService(STTService):
             params: Configuration parameters for Sarvam STT service.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=SarvamSTTSettings(...)`` instead.
+                    Use ``settings=SarvamSTTService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -245,7 +244,7 @@ class SarvamSTTService(STTService):
             **kwargs: Additional arguments passed to the parent STTService.
         """
         # --- 1. Hardcoded defaults ---
-        default_settings = SarvamSTTSettings(
+        default_settings = self.Settings(
             model="saarika:v2.5",
             language=None,
             prompt=None,
@@ -255,12 +254,12 @@ class SarvamSTTService(STTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", SarvamSTTSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # --- 3. Deprecated params overrides ---
         if params is not None:
-            _warn_deprecated_param("params", SarvamSTTSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.language = params.language
                 default_settings.prompt = params.prompt
@@ -374,7 +373,7 @@ class SarvamSTTService(STTService):
         """Apply a settings delta, validate, sync state, and reconnect.
 
         Args:
-            delta: A :class:`STTSettings` (or ``SarvamSTTSettings``) delta.
+            delta: A :class:`STTSettings` (or ``SarvamSTTService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.
@@ -389,11 +388,7 @@ class SarvamSTTService(STTService):
                     f"Model '{self._settings.model}' does not support language parameter "
                     "(auto-detects language)."
                 )
-        if (
-            isinstance(delta, SarvamSTTSettings)
-            and is_given(delta.prompt)
-            and delta.prompt is not None
-        ):
+        if isinstance(delta, self.Settings) and is_given(delta.prompt) and delta.prompt is not None:
             if not self._config.supports_prompt:
                 raise ValueError(
                     f"Model '{self._settings.model}' does not support prompt parameter."
@@ -417,7 +412,7 @@ class SarvamSTTService(STTService):
         """Set the transcription/translation prompt and reconnect.
 
         .. deprecated:: 0.0.104
-            Use ``STTUpdateSettingsFrame(SarvamSTTSettings(prompt=...))`` instead.
+            Use ``STTUpdateSettingsFrame(SarvamSTTService.Settings(prompt=...))`` instead.
 
         Args:
             prompt: Prompt text to guide transcription/translation style/context.
@@ -430,7 +425,7 @@ class SarvamSTTService(STTService):
             warnings.simplefilter("always")
             warnings.warn(
                 f"{self.__class__.__name__}.set_prompt() is deprecated. "
-                "Use STTUpdateSettingsFrame(SarvamSTTSettings(prompt=...)) instead.",
+                "Use STTUpdateSettingsFrame(self.Settings(prompt=...)) instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )

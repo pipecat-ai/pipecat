@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -52,7 +52,7 @@ class ResembleAITTSService(WebsocketTTSService):
     """
 
     Settings = ResembleAITTSSettings
-    _settings: ResembleAITTSSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -63,7 +63,7 @@ class ResembleAITTSService(WebsocketTTSService):
         precision: Optional[str] = "PCM_16",
         output_format: Optional[str] = "wav",
         sample_rate: Optional[int] = 22050,
-        settings: Optional[ResembleAITTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Resemble AI TTS service.
@@ -73,7 +73,7 @@ class ResembleAITTSService(WebsocketTTSService):
             voice_id: Voice UUID to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=ResembleAITTSSettings(voice=...)`` instead.
+                    Use ``settings=ResembleAITTSService.Settings(voice=...)`` instead.
 
             url: WebSocket URL for Resemble AI TTS API.
             precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).
@@ -84,7 +84,7 @@ class ResembleAITTSService(WebsocketTTSService):
             **kwargs: Additional arguments passed to the parent service.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = ResembleAITTSSettings(
+        default_settings = self.Settings(
             model=None,
             voice=None,
             language=None,
@@ -92,7 +92,7 @@ class ResembleAITTSService(WebsocketTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", ResembleAITTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. (No step 3, as there's no params object to apply)

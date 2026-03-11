@@ -15,13 +15,12 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class OpenRouterLLMSettings(OpenAILLMSettings):
+class OpenRouterLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for OpenRouterLLMService."""
 
     pass
@@ -35,7 +34,7 @@ class OpenRouterLLMService(OpenAILLMService):
     """
 
     Settings = OpenRouterLLMSettings
-    _settings: OpenRouterLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -43,7 +42,7 @@ class OpenRouterLLMService(OpenAILLMService):
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         base_url: str = "https://openrouter.ai/api/v1",
-        settings: Optional[OpenRouterLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the OpenRouter LLM service.
@@ -54,7 +53,7 @@ class OpenRouterLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "openai/gpt-4o-2024-11-20".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=OpenRouterLLMService.Settings(model=...)`` instead.
 
             base_url: The base URL for OpenRouter API. Defaults to "https://openrouter.ai/api/v1".
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -62,11 +61,11 @@ class OpenRouterLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenRouterLLMSettings(model="openai/gpt-4o-2024-11-20")
+        default_settings = self.Settings(model="openai/gpt-4o-2024-11-20")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenRouterLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

@@ -32,8 +32,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.deepgram.stt import DeepgramSTTSettings, LiveOptions
-from pipecat.services.settings import STTSettings, _warn_deprecated_param, is_given
+from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
+from pipecat.services.settings import STTSettings, is_given
 from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -42,10 +42,10 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 
 @dataclass
-class DeepgramSageMakerSTTSettings(DeepgramSTTSettings):
+class DeepgramSageMakerSTTSettings(DeepgramSTTService.Settings):
     """Settings for the Deepgram SageMaker STT service.
 
-    Inherits all fields from :class:`DeepgramSTTSettings`.
+    Inherits all fields from :class:`DeepgramSTTService.Settings`.
     """
 
     pass
@@ -79,7 +79,7 @@ class DeepgramSageMakerSTTService(STTService):
     """
 
     Settings = DeepgramSageMakerSTTSettings
-    _settings: DeepgramSageMakerSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -92,7 +92,7 @@ class DeepgramSageMakerSTTService(STTService):
         sample_rate: Optional[int] = None,
         mip_opt_out: Optional[bool] = None,
         live_options: Optional[LiveOptions] = None,
-        settings: Optional[DeepgramSageMakerSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = DEEPGRAM_SAGEMAKER_TTFS_P99,
         **kwargs,
     ):
@@ -112,7 +112,7 @@ class DeepgramSageMakerSTTService(STTService):
             live_options: Legacy configuration options.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=DeepgramSageMakerSTTSettings(...)`` for
+                    Use ``settings=DeepgramSageMakerSTTService.Settings(...)`` for
                     runtime-updatable fields and direct init parameters for
                     connection-level config.
 
@@ -124,7 +124,7 @@ class DeepgramSageMakerSTTService(STTService):
             **kwargs: Additional arguments passed to the parent STTService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = DeepgramSageMakerSTTSettings(
+        default_settings = self.Settings(
             model="nova-3",
             language=Language.EN,
             detect_entities=False,
@@ -147,7 +147,7 @@ class DeepgramSageMakerSTTService(STTService):
 
         # 2. Apply live_options overrides — only if settings not provided
         if live_options is not None:
-            _warn_deprecated_param("live_options", DeepgramSageMakerSTTSettings)
+            self._warn_init_param_moved_to_settings("live_options")
             if not settings:
                 # Extract init-only fields from live_options
                 if live_options.sample_rate is not None and sample_rate is None:
@@ -170,7 +170,7 @@ class DeepgramSageMakerSTTService(STTService):
                     "mip_opt_out",
                 }
                 lo_dict = {k: v for k, v in live_options.to_dict().items() if k not in init_only}
-                delta = DeepgramSageMakerSTTSettings.from_mapping(lo_dict)
+                delta = self.Settings.from_mapping(lo_dict)
                 default_settings.apply_update(delta)
 
         # 3. Apply settings delta (canonical API, always wins)
@@ -216,7 +216,7 @@ class DeepgramSageMakerSTTService(STTService):
             return changed
 
         # Sync extra to fields after the update so self._settings stays unambiguous
-        if isinstance(self._settings, DeepgramSTTSettings):
+        if isinstance(self._settings, self.Settings):
             self._settings._sync_extra_to_fields()
 
         # TODO: someday we could reconnect here to apply updated settings.

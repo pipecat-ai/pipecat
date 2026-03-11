@@ -69,13 +69,13 @@ class BaseOpenAILLMService(LLMService):
     """
 
     Settings = OpenAILLMSettings
-    _settings: OpenAILLMSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=OpenAILLMSettings(...)`` instead of
+            Use ``settings=BaseOpenAILLMService.Settings(...)`` instead of
             ``params=InputParams(...)``.
 
         Parameters:
@@ -119,7 +119,7 @@ class BaseOpenAILLMService(LLMService):
         default_headers: Optional[Mapping[str, str]] = None,
         service_tier: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[Settings] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
         **kwargs,
@@ -130,7 +130,7 @@ class BaseOpenAILLMService(LLMService):
             model: The OpenAI model name to use (e.g., "gpt-4.1", "gpt-4o").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=BaseOpenAILLMService.Settings(model=...)`` instead.
 
             api_key: OpenAI API key. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
@@ -141,7 +141,7 @@ class BaseOpenAILLMService(LLMService):
             params: Input parameters for model configuration and behavior.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(...)`` instead.
+                    Use ``settings=BaseOpenAILLMService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -150,7 +150,7 @@ class BaseOpenAILLMService(LLMService):
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(
+        default_settings = self.Settings(
             model="gpt-4o",
             system_instruction=None,
             frequency_penalty=NOT_GIVEN,

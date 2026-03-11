@@ -28,13 +28,12 @@ from loguru import logger
 from pipecat.frames.frames import LLMTextFrame
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class GoogleOpenAILLMSettings(OpenAILLMSettings):
+class GoogleOpenAILLMSettings(BaseOpenAILLMService.Settings):
     """Settings for GoogleLLMOpenAIBetaService."""
 
     pass
@@ -59,7 +58,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
     """
 
     Settings = GoogleOpenAILLMSettings
-    _settings: GoogleOpenAILLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -67,7 +66,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/",
         model: Optional[str] = None,
-        settings: Optional[GoogleOpenAILLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Google LLM service.
@@ -78,7 +77,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             model: Google model name to use (e.g., "gemini-2.0-flash").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=GoogleLLMOpenAIBetaService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -96,11 +95,11 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GoogleOpenAILLMSettings(model="gemini-2.0-flash")
+        default_settings = self.Settings(model="gemini-2.0-flash")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GoogleOpenAILLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

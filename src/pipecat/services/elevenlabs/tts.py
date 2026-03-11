@@ -44,7 +44,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import (
     TextAggregationMode,
     TTSService,
@@ -317,13 +317,13 @@ class ElevenLabsTTSService(WebsocketTTSService):
     """
 
     Settings = ElevenLabsTTSSettings
-    _settings: ElevenLabsTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=ElevenLabsTTSSettings(...)`` instead.
+            Use ``settings=ElevenLabsTTSService.Settings(...)`` instead.
 
         Parameters:
             language: Language to use for synthesis.
@@ -364,7 +364,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         enable_logging: Optional[bool] = None,
         pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[ElevenLabsTTSSettings] = None,
+        settings: Optional[Settings] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         aggregate_sentences: Optional[bool] = None,
         **kwargs,
@@ -376,12 +376,12 @@ class ElevenLabsTTSService(WebsocketTTSService):
             voice_id: ID of the voice to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=ElevenLabsTTSSettings(voice=...)`` instead.
+                    Use ``settings=ElevenLabsTTSService.Settings(voice=...)`` instead.
 
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=ElevenLabsTTSSettings(model=...)`` instead.
+                    Use ``settings=ElevenLabsTTSService.Settings(model=...)`` instead.
 
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
@@ -393,7 +393,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=ElevenLabsTTSSettings(...)`` instead.
+                    Use ``settings=ElevenLabsTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -423,7 +423,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         # after a short period not receiving any audio.
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = ElevenLabsTTSSettings(
+        default_settings = self.Settings(
             model="eleven_turbo_v2_5",
             voice=None,
             language=None,
@@ -437,16 +437,16 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", ElevenLabsTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", ElevenLabsTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         _pronunciation_dictionary_locators = pronunciation_dictionary_locators
         if params is not None:
-            _warn_deprecated_param("params", ElevenLabsTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
                     default_settings.language = self.language_to_service_language(params.language)
@@ -533,11 +533,11 @@ class ElevenLabsTTSService(WebsocketTTSService):
         """Apply a settings delta, reconnecting as needed.
 
         Uses the declarative ``URL_FIELDS`` and ``VOICE_SETTINGS_FIELDS``
-        sets on :class:`ElevenLabsTTSSettings` to decide whether to
+        sets on :class:`ElevenLabsTTSService.Settings` to decide whether to
         reconnect the WebSocket or close the current audio context.
 
         Args:
-            delta: A :class:`TTSSettings` (or ``ElevenLabsTTSSettings``) delta.
+            delta: A :class:`TTSSettings` (or ``ElevenLabsTTSService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.
@@ -550,19 +550,19 @@ class ElevenLabsTTSService(WebsocketTTSService):
         # Rebuild voice settings for next context
         self._voice_settings = self._set_voice_settings()
 
-        url_changed = bool(changed.keys() & ElevenLabsTTSSettings.URL_FIELDS)
-        voice_settings_changed = bool(changed.keys() & ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS)
+        url_changed = bool(changed.keys() & self.Settings.URL_FIELDS)
+        voice_settings_changed = bool(changed.keys() & self.Settings.VOICE_SETTINGS_FIELDS)
 
         if url_changed:
             logger.debug(
-                f"URL-level setting changed ({changed.keys() & ElevenLabsTTSSettings.URL_FIELDS}), "
+                f"URL-level setting changed ({changed.keys() & self.Settings.URL_FIELDS}), "
                 f"reconnecting WebSocket"
             )
             await self._disconnect()
             await self._connect()
         elif voice_settings_changed:
             logger.debug(
-                f"Voice settings changed ({changed.keys() & ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS}), "
+                f"Voice settings changed ({changed.keys() & self.Settings.VOICE_SETTINGS_FIELDS}), "
                 f"closing current context to apply changes"
             )
             audio_contexts = self.get_audio_contexts()
@@ -573,7 +573,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         if not url_changed:
             # Reconnect applies all settings; only warn about fields not handled
             # by voice settings or URL changes.
-            handled = ElevenLabsTTSSettings.URL_FIELDS | ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS
+            handled = self.Settings.URL_FIELDS | self.Settings.VOICE_SETTINGS_FIELDS
             self._warn_unhandled_updated_settings(changed.keys() - handled)
 
         return changed
@@ -906,13 +906,13 @@ class ElevenLabsHttpTTSService(TTSService):
     """
 
     Settings = ElevenLabsHttpTTSSettings
-    _settings: ElevenLabsHttpTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs HTTP TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=ElevenLabsHttpTTSSettings(...)`` instead.
+            Use ``settings=ElevenLabsHttpTTSService.Settings(...)`` instead.
 
         Parameters:
             language: Language to use for synthesis.
@@ -947,7 +947,7 @@ class ElevenLabsHttpTTSService(TTSService):
         sample_rate: Optional[int] = None,
         pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[ElevenLabsHttpTTSSettings] = None,
+        settings: Optional[Settings] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         aggregate_sentences: Optional[bool] = None,
         **kwargs,
@@ -959,13 +959,13 @@ class ElevenLabsHttpTTSService(TTSService):
             voice_id: ID of the voice to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=ElevenLabsHttpTTSSettings(voice=...)`` instead.
+                    Use ``settings=ElevenLabsHttpTTSService.Settings(voice=...)`` instead.
 
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=ElevenLabsHttpTTSSettings(model=...)`` instead.
+                    Use ``settings=ElevenLabsHttpTTSService.Settings(model=...)`` instead.
 
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
@@ -974,7 +974,7 @@ class ElevenLabsHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=ElevenLabsHttpTTSSettings(...)`` instead.
+                    Use ``settings=ElevenLabsHttpTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -987,7 +987,7 @@ class ElevenLabsHttpTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent service.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = ElevenLabsHttpTTSSettings(
+        default_settings = self.Settings(
             model="eleven_turbo_v2_5",
             voice=None,
             language=None,
@@ -1002,16 +1002,16 @@ class ElevenLabsHttpTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", ElevenLabsHttpTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", ElevenLabsHttpTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         _pronunciation_dictionary_locators = pronunciation_dictionary_locators
         if params is not None:
-            _warn_deprecated_param("params", ElevenLabsHttpTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
                     default_settings.language = self.language_to_service_language(params.language)
@@ -1091,7 +1091,7 @@ class ElevenLabsHttpTTSService(TTSService):
         """Apply a settings delta and rebuild voice settings.
 
         Args:
-            delta: A :class:`TTSSettings` (or ``ElevenLabsHttpTTSSettings``) delta.
+            delta: A :class:`TTSSettings` (or ``ElevenLabsHttpTTSService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.

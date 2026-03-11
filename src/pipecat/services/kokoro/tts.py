@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import TTSSettings, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -102,13 +102,13 @@ class KokoroTTSService(TTSService):
     """
 
     Settings = KokoroTTSSettings
-    _settings: KokoroTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Kokoro TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``KokoroTTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``KokoroTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             language: Language to use for synthesis.
@@ -123,7 +123,7 @@ class KokoroTTSService(TTSService):
         model_path: Optional[str] = None,
         voices_path: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[KokoroTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Kokoro TTS service.
@@ -132,14 +132,14 @@ class KokoroTTSService(TTSService):
             voice_id: Voice identifier to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=KokoroTTSSettings(voice=...)`` instead.
+                    Use ``settings=KokoroTTSService.Settings(voice=...)`` instead.
 
             model_path: Path to the kokoro ONNX model file. Defaults to auto-downloaded file.
             voices_path: Path to the voices binary file. Defaults to auto-downloaded file.
             params: Configuration parameters for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=KokoroTTSSettings(...)`` instead.
+                    Use ``settings=KokoroTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -147,7 +147,7 @@ class KokoroTTSService(TTSService):
 
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = KokoroTTSSettings(
+        default_settings = self.Settings(
             model=None,
             voice=None,
             language=language_to_kokoro_language(Language.EN),
@@ -155,12 +155,12 @@ class KokoroTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", KokoroTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", KokoroTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.language = language_to_kokoro_language(params.language)
 

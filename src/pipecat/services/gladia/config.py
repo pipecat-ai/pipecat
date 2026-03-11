@@ -153,7 +153,7 @@ class GladiaInputParams(BaseModel):
     """Configuration parameters for the Gladia STT service.
 
     .. deprecated:: 0.0.105
-        Use ``settings=GladiaSTTSettings(...)`` for runtime-updatable
+        Use ``settings=GladiaSTTService.Settings(...)`` for runtime-updatable
         fields and direct init parameters for encoding/bit_depth/channels.
 
     Parameters:

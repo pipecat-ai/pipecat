@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -126,13 +126,13 @@ class NvidiaSTTService(STTService):
     """
 
     Settings = NvidiaSTTSettings
-    _settings: NvidiaSTTSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva STT service.
 
         .. deprecated:: 0.0.105
-            Use ``settings=NvidiaSTTSettings(...)`` instead.
+            Use ``settings=NvidiaSTTService.Settings(...)`` instead.
 
         Parameters:
             language: Target language for transcription. Defaults to EN_US.
@@ -152,7 +152,7 @@ class NvidiaSTTService(STTService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         use_ssl: bool = True,
-        settings: Optional[NvidiaSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
         **kwargs,
     ):
@@ -166,7 +166,7 @@ class NvidiaSTTService(STTService):
             params: Additional configuration parameters for NVIDIA Riva.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=NvidiaSTTSettings(...)`` instead.
+                    Use ``settings=NvidiaSTTService.Settings(...)`` instead.
 
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -176,7 +176,7 @@ class NvidiaSTTService(STTService):
             **kwargs: Additional arguments passed to STTService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = NvidiaSTTSettings(
+        default_settings = self.Settings(
             model=model_function_map.get("model_name"),
             language=Language.EN_US,
         )
@@ -185,7 +185,7 @@ class NvidiaSTTService(STTService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", NvidiaSTTSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.language = params.language
 
@@ -441,13 +441,13 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     """
 
     Settings = NvidiaSegmentedSTTSettings
-    _settings: NvidiaSegmentedSTTSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva segmented STT service.
 
         .. deprecated:: 0.0.105
-            Use ``settings=NvidiaSegmentedSTTSettings(...)`` instead.
+            Use ``settings=NvidiaSegmentedSTTService.Settings(...)`` instead.
 
         Parameters:
             language: Target language for transcription. Defaults to EN_US.
@@ -477,7 +477,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         use_ssl: bool = True,
-        settings: Optional[NvidiaSegmentedSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
         **kwargs,
     ):
@@ -491,7 +491,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             params: Additional configuration parameters for NVIDIA Riva
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=NvidiaSegmentedSTTSettings(...)`` instead.
+                    Use ``settings=NvidiaSegmentedSTTService.Settings(...)`` instead.
 
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -501,7 +501,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = NvidiaSegmentedSTTSettings(
+        default_settings = self.Settings(
             model=model_function_map.get("model_name"),
             language=language_to_nvidia_riva_language(Language.EN_US) or "en-US",
             profanity_filter=False,
@@ -515,7 +515,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", NvidiaSegmentedSTTSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.language = (
                     language_to_nvidia_riva_language(params.language or Language.EN_US) or "en-US"
@@ -641,7 +641,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         """Apply a settings delta and sync internal state.
 
         Args:
-            delta: A :class:`STTSettings` (or ``NvidiaSegmentedSTTSettings``) delta.
+            delta: A :class:`STTSettings` (or ``NvidiaSegmentedSTTService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.

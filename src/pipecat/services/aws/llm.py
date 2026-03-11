@@ -55,7 +55,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -747,7 +747,7 @@ class AWSBedrockLLMService(LLMService):
     """
 
     Settings = AWSBedrockLLMSettings
-    _settings: AWSBedrockLLMSettings
+    _settings: Settings
 
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AWSBedrockLLMAdapter
@@ -756,7 +756,7 @@ class AWSBedrockLLMService(LLMService):
         """Input parameters for AWS Bedrock LLM service.
 
         .. deprecated:: 0.0.105
-            Use ``AWSBedrockLLMSettings`` instead. Pass settings directly via the
+            Use ``AWSBedrockLLMService.Settings`` instead. Pass settings directly via the
             ``settings`` parameter of :class:`AWSBedrockLLMService`.
 
         Parameters:
@@ -784,7 +784,7 @@ class AWSBedrockLLMService(LLMService):
         aws_session_token: Optional[str] = None,
         aws_region: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[AWSBedrockLLMSettings] = None,
+        settings: Optional[Settings] = None,
         stop_sequences: Optional[List[str]] = None,
         client_config: Optional[Config] = None,
         retry_timeout_secs: Optional[float] = 5.0,
@@ -797,7 +797,7 @@ class AWSBedrockLLMService(LLMService):
             model: The AWS Bedrock model identifier to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSBedrockLLMSettings(model=...)`` instead.
+                    Use ``settings=AWSBedrockLLMService.Settings(model=...)`` instead.
 
             aws_access_key: AWS access key ID. If None, uses default credentials.
             aws_secret_key: AWS secret access key. If None, uses default credentials.
@@ -806,7 +806,7 @@ class AWSBedrockLLMService(LLMService):
             params: Model parameters and configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSBedrockLLMSettings(...)`` instead.
+                    Use ``settings=AWSBedrockLLMService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -814,7 +814,7 @@ class AWSBedrockLLMService(LLMService):
             stop_sequences: List of strings that stop generation.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSBedrockLLMSettings(stop_sequences=...)`` instead.
+                    Use ``settings=AWSBedrockLLMService.Settings(stop_sequences=...)`` instead.
 
             client_config: Custom boto3 client configuration.
             retry_timeout_secs: Request timeout in seconds for retry logic.
@@ -822,7 +822,7 @@ class AWSBedrockLLMService(LLMService):
             **kwargs: Additional arguments passed to parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AWSBedrockLLMSettings(
+        default_settings = self.Settings(
             model="us.amazon.nova-lite-v1:0",
             system_instruction=None,
             max_tokens=None,
@@ -841,15 +841,15 @@ class AWSBedrockLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", AWSBedrockLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if stop_sequences is not None:
-            _warn_deprecated_param("stop_sequences", AWSBedrockLLMSettings, "stop_sequences")
+            self._warn_init_param_moved_to_settings("stop_sequences", "stop_sequences")
             default_settings.stop_sequences = stop_sequences
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", AWSBedrockLLMSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.max_tokens = params.max_tokens
                 default_settings.temperature = params.temperature

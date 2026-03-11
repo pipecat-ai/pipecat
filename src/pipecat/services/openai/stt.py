@@ -35,12 +35,11 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.services.whisper.base_stt import (
     BaseWhisperSTTService,
-    BaseWhisperSTTSettings,
     Transcription,
 )
 from pipecat.transcriptions.language import Language
@@ -56,7 +55,7 @@ except ModuleNotFoundError:
 
 
 @dataclass
-class OpenAISTTSettings(BaseWhisperSTTSettings):
+class OpenAISTTSettings(BaseWhisperSTTService.Settings):
     """Settings for the OpenAI STT service."""
 
     pass
@@ -70,7 +69,7 @@ class OpenAISTTService(BaseWhisperSTTService):
     """
 
     Settings = OpenAISTTSettings
-    _settings: OpenAISTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -81,7 +80,7 @@ class OpenAISTTService(BaseWhisperSTTService):
         language: Optional[Language] = Language.EN,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
-        settings: Optional[OpenAISTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = OPENAI_TTFS_P99,
         **kwargs,
     ):
@@ -91,24 +90,24 @@ class OpenAISTTService(BaseWhisperSTTService):
             model: Model to use — either gpt-4o or Whisper.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAISTTSettings(model=...)`` instead.
+                    Use ``settings=OpenAISTTService.Settings(model=...)`` instead.
 
             api_key: OpenAI API key. Defaults to None.
             base_url: API base URL. Defaults to None.
             language: Language of the audio input. Defaults to English.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAISTTSettings(language=...)`` instead.
+                    Use ``settings=OpenAISTTService.Settings(language=...)`` instead.
 
             prompt: Optional text to guide the model's style or continue a previous segment.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAISTTSettings(prompt=...)`` instead.
+                    Use ``settings=OpenAISTTService.Settings(prompt=...)`` instead.
 
             temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAISTTSettings(temperature=...)`` instead.
+                    Use ``settings=OpenAISTTService.Settings(temperature=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -118,7 +117,7 @@ class OpenAISTTService(BaseWhisperSTTService):
         """
         # --- 1. Hardcoded defaults ---
         _language = language or Language.EN
-        default_settings = OpenAISTTSettings(
+        default_settings = self.Settings(
             model="gpt-4o-transcribe",
             language=self.language_to_service_language(_language),
             prompt=None,
@@ -127,13 +126,13 @@ class OpenAISTTService(BaseWhisperSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", OpenAISTTSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if prompt is not None:
-            _warn_deprecated_param("prompt", OpenAISTTSettings, "prompt")
+            self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt
         if temperature is not None:
-            _warn_deprecated_param("temperature", OpenAISTTSettings, "temperature")
+            self._warn_init_param_moved_to_settings("temperature", "temperature")
             default_settings.temperature = temperature
 
         # --- 3. (no params object for this service) ---
@@ -234,7 +233,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     """
 
     Settings = OpenAIRealtimeSTTSettings
-    _settings: OpenAIRealtimeSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -247,7 +246,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         turn_detection: Optional[Union[dict, Literal[False]]] = False,
         noise_reduction: Optional[Literal["near_field", "far_field"]] = None,
         should_interrupt: bool = True,
-        settings: Optional[OpenAIRealtimeSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = OPENAI_REALTIME_TTFS_P99,
         **kwargs,
     ):
@@ -259,20 +258,20 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                 ``"gpt-4o-transcribe"`` and ``"gpt-4o-mini-transcribe"``.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAIRealtimeSTTSettings(model=...)`` instead.
+                    Use ``settings=OpenAIRealtimeSTTService.Settings(model=...)`` instead.
 
             base_url: WebSocket base URL for the Realtime API.
                 Defaults to ``"wss://api.openai.com/v1/realtime"``.
             language: Language of the audio input. Defaults to English.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAIRealtimeSTTSettings(language=...)`` instead.
+                    Use ``settings=OpenAIRealtimeSTTService.Settings(language=...)`` instead.
 
             prompt: Optional prompt text to guide transcription style
                 or provide keyword hints.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAIRealtimeSTTSettings(prompt=...)`` instead.
+                    Use ``settings=OpenAIRealtimeSTTService.Settings(prompt=...)`` instead.
 
             turn_detection: Server-side VAD configuration. Defaults to
                 ``False`` (disabled), which relies on a local VAD
@@ -284,7 +283,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                 microphones, or ``None`` to disable.
 
                 .. deprecated:: 0.0.106
-                    Use ``settings=OpenAIRealtimeSTTSettings(noise_reduction=...)`` instead.
+                    Use ``settings=OpenAIRealtimeSTTService.Settings(noise_reduction=...)`` instead.
             should_interrupt: Whether to interrupt bot output when
                 speech is detected by server-side VAD. Only applies when
                 turn detection is enabled. Defaults to True.
@@ -302,7 +301,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             )
 
         # --- 1. Hardcoded defaults ---
-        default_settings = OpenAIRealtimeSTTSettings(
+        default_settings = self.Settings(
             model="gpt-4o-transcribe",
             language=Language.EN,
             prompt=None,
@@ -311,16 +310,16 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", OpenAIRealtimeSTTSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if language is not None and language != Language.EN:
-            _warn_deprecated_param("language", OpenAIRealtimeSTTSettings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = language
         if prompt is not None:
-            _warn_deprecated_param("prompt", OpenAIRealtimeSTTSettings, "prompt")
+            self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt
         if noise_reduction is not None:
-            _warn_deprecated_param("noise_reduction", OpenAIRealtimeSTTSettings, "noise_reduction")
+            self._warn_init_param_moved_to_settings("noise_reduction", "noise_reduction")
             default_settings.noise_reduction = noise_reduction
 
         # --- 3. (no params object for this service) ---
@@ -376,7 +375,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         Sends a ``session.update`` to the server when the session is active.
 
         Args:
-            delta: A :class:`STTSettings` (or ``OpenAIRealtimeSTTSettings``) delta.
+            delta: A :class:`STTSettings` (or ``OpenAIRealtimeSTTService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.

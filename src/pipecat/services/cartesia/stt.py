@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import STTSettings, _warn_deprecated_param
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -55,7 +55,7 @@ class CartesiaLiveOptions:
     """Configuration options for Cartesia Live STT service.
 
     .. deprecated:: 0.0.105
-        Use ``settings=CartesiaSTTSettings(...)`` for model/language and
+        Use ``settings=CartesiaSTTService.Settings(...)`` for model/language and
         direct ``__init__`` parameters for encoding/sample_rate instead.
     """
 
@@ -147,7 +147,7 @@ class CartesiaSTTService(WebsocketSTTService):
     """
 
     Settings = CartesiaSTTSettings
-    _settings: CartesiaSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -157,7 +157,7 @@ class CartesiaSTTService(WebsocketSTTService):
         encoding: str = "pcm_s16le",
         sample_rate: Optional[int] = None,
         live_options: Optional[CartesiaLiveOptions] = None,
-        settings: Optional[CartesiaSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = CARTESIA_TTFS_P99,
         **kwargs,
     ):
@@ -172,7 +172,7 @@ class CartesiaSTTService(WebsocketSTTService):
             live_options: Configuration options for transcription service.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaSTTSettings(...)`` for model/language
+                    Use ``settings=CartesiaSTTService.Settings(...)`` for model/language
                     and direct init parameters for encoding/sample_rate instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -182,14 +182,14 @@ class CartesiaSTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to parent STTService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = CartesiaSTTSettings(
+        default_settings = self.Settings(
             model="ink-whisper",
             language=Language.EN.value,
         )
 
         # 2. Apply live_options overrides — only if settings not provided
         if live_options is not None:
-            _warn_deprecated_param("live_options", CartesiaSTTSettings)
+            self._warn_init_param_moved_to_settings("live_options")
             if not settings:
                 if live_options.sample_rate and sample_rate is None:
                     sample_rate = live_options.sample_rate
@@ -313,7 +313,7 @@ class CartesiaSTTService(WebsocketSTTService):
         """Apply a settings delta.
 
         Args:
-            delta: A :class:`STTSettings` (or ``CartesiaSTTSettings``) delta.
+            delta: A :class:`STTSettings` (or ``CartesiaSTTService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.
