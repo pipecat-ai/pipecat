@@ -29,7 +29,6 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     STTSettings,
     _NotGiven,
-    _warn_deprecated_param,
     is_given,
 )
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
@@ -370,7 +369,7 @@ class DeepgramSTTService(STTService):
 
         # 3. Apply live_options overrides — only if settings not provided
         if live_options is not None:
-            _warn_deprecated_param("live_options", self.Settings)
+            self._warn_init_param_moved_to_settings("live_options")
             if not settings:
                 # Extract init-only fields from live_options
                 if live_options.sample_rate is not None and sample_rate is None:

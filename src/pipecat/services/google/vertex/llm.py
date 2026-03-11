@@ -22,7 +22,6 @@ from typing import Optional
 from loguru import logger
 
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.settings import _warn_deprecated_param
 
 try:
     from google.auth import default
@@ -215,15 +214,15 @@ class GoogleVertexLLMService(GoogleLLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if system_instruction is not None:
-            _warn_deprecated_param("system_instruction", self.Settings, "system_instruction")
+            self._warn_init_param_moved_to_settings("system_instruction", "system_instruction")
             default_settings.system_instruction = system_instruction
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.max_tokens = params.max_tokens
                 default_settings.temperature = params.temperature

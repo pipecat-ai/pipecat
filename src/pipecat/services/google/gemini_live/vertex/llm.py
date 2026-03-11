@@ -26,7 +26,6 @@ from pipecat.services.google.gemini_live.llm import (
     InputParams,
     language_to_gemini_language,
 )
-from pipecat.services.settings import _warn_deprecated_param
 
 try:
     from google.auth import default
@@ -160,15 +159,15 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id != "Charon":
-            _warn_deprecated_param("voice_id", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.frequency_penalty = params.frequency_penalty
                 default_settings.max_tokens = params.max_tokens

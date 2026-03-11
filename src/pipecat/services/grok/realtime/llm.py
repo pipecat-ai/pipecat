@@ -60,7 +60,6 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
     _NotGiven,
-    _warn_deprecated_param,
     is_given,
 )
 from pipecat.utils.time import time_now_iso8601

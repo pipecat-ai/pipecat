@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
-from pipecat.services.settings import STTSettings, _warn_deprecated_param
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -105,7 +105,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if language is not None:
-            _warn_deprecated_param("language", self.Settings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = self.language_to_service_language(language)
 
         # 3. (No step 3, as there's no params object to apply)

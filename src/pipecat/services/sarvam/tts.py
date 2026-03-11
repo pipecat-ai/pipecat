@@ -60,7 +60,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -462,15 +462,15 @@ class SarvamHttpTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
                     default_settings.language = (
@@ -874,10 +874,10 @@ class SarvamTTSService(InterruptibleTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # Init-only audio format fields (not runtime-updatable)
@@ -886,7 +886,7 @@ class SarvamTTSService(InterruptibleTTSService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
                     default_settings.language = (

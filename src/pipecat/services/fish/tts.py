@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -185,15 +185,15 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if reference_id is not None:
-            _warn_deprecated_param("reference_id", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("reference_id", "voice")
             default_settings.voice = reference_id
         if model_id is not None:
-            _warn_deprecated_param("model_id", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model_id", "model")
             default_settings.model = model_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.latency is not None:
                     default_settings.latency = params.latency

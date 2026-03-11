@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
 
 try:
     from google import genai
@@ -110,7 +110,7 @@ class GoogleImageGenService(ImageGenService):
 
         # 2. Apply params overrides (deprecated)
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.model = params.model
                 default_settings.number_of_images = params.number_of_images

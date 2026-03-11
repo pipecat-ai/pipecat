@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.services.whisper.base_stt import (
@@ -126,13 +126,13 @@ class OpenAISTTService(BaseWhisperSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if prompt is not None:
-            _warn_deprecated_param("prompt", self.Settings, "prompt")
+            self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt
         if temperature is not None:
-            _warn_deprecated_param("temperature", self.Settings, "temperature")
+            self._warn_init_param_moved_to_settings("temperature", "temperature")
             default_settings.temperature = temperature
 
         # --- 3. (no params object for this service) ---
@@ -310,16 +310,16 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if language is not None and language != Language.EN:
-            _warn_deprecated_param("language", self.Settings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = language
         if prompt is not None:
-            _warn_deprecated_param("prompt", self.Settings, "prompt")
+            self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt
         if noise_reduction is not None:
-            _warn_deprecated_param("noise_reduction", self.Settings, "noise_reduction")
+            self._warn_init_param_moved_to_settings("noise_reduction", "noise_reduction")
             default_settings.noise_reduction = noise_reduction
 
         # --- 3. (no params object for this service) ---

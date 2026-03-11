@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     URLImageRawFrame,
 )
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
 
 
 @dataclass
@@ -90,11 +90,11 @@ class OpenAIImageGenService(ImageGenService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         if image_size is not None:
-            _warn_deprecated_param("image_size", self.Settings, "image_size")
+            self._warn_init_param_moved_to_settings("image_size", "image_size")
             default_settings.image_size = image_size
 
         # 4. Apply settings delta (canonical API, always wins)

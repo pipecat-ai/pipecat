@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
 from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
-from pipecat.services.settings import STTSettings, _warn_deprecated_param, is_given
+from pipecat.services.settings import STTSettings, is_given
 from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -147,7 +147,7 @@ class DeepgramSageMakerSTTService(STTService):
 
         # 2. Apply live_options overrides — only if settings not provided
         if live_options is not None:
-            _warn_deprecated_param("live_options", self.Settings)
+            self._warn_init_param_moved_to_settings("live_options")
             if not settings:
                 # Extract init-only fields from live_options
                 if live_options.sample_rate is not None and sample_rate is None:

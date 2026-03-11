@@ -39,7 +39,6 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     TTSSettings,
     _NotGiven,
-    _warn_deprecated_param,
     is_given,
 )
 from pipecat.services.tts_service import TTSService
@@ -636,12 +635,12 @@ class GoogleHttpTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.pitch is not None:
                     default_settings.pitch = params.pitch
@@ -1083,12 +1082,12 @@ class GoogleTTSService(GoogleBaseTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
                     default_settings.language = self.language_to_service_language(params.language)
@@ -1331,10 +1330,10 @@ class GeminiTTSService(GoogleBaseTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         if default_settings.voice not in self.AVAILABLE_VOICES:
@@ -1344,7 +1343,7 @@ class GeminiTTSService(GoogleBaseTTSService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
                     default_settings.language = self.language_to_service_language(params.language)

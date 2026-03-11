@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -105,7 +105,7 @@ class DeepgramTTSService(WebsocketTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice is not None:
-            _warn_deprecated_param("voice", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice", "voice")
             default_settings.model = voice
             default_settings.voice = voice
 
@@ -407,7 +407,7 @@ class DeepgramHttpTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice is not None:
-            _warn_deprecated_param("voice", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice", "voice")
             default_settings.model = voice
             default_settings.voice = voice
 

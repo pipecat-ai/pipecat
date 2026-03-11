@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import STTSettings, _warn_deprecated_param
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -111,7 +111,7 @@ class AzureSTTService(STTService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if language is not None and language != Language.EN_US:
-            _warn_deprecated_param("language", self.Settings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = language_to_azure_language(language)
 
         # 3. (No step 3, as there's no params object to apply)

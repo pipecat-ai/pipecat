@@ -20,7 +20,7 @@ from loguru import logger
 from typing_extensions import TYPE_CHECKING, override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -256,13 +256,13 @@ class WhisperSTTService(SegmentedSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model if isinstance(model, str) else model.value
         if no_speech_prob is not None:
-            _warn_deprecated_param("no_speech_prob", self.Settings, "no_speech_prob")
+            self._warn_init_param_moved_to_settings("no_speech_prob", "no_speech_prob")
             default_settings.no_speech_prob = no_speech_prob
         if language is not None:
-            _warn_deprecated_param("language", self.Settings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = language
 
         # --- 3. (no params object for this service) ---
@@ -432,16 +432,16 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model if isinstance(model, str) else model.value
         if no_speech_prob is not None:
-            _warn_deprecated_param("no_speech_prob", self.Settings, "no_speech_prob")
+            self._warn_init_param_moved_to_settings("no_speech_prob", "no_speech_prob")
             default_settings.no_speech_prob = no_speech_prob
         if language is not None:
-            _warn_deprecated_param("language", self.Settings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = language
         if temperature is not None:
-            _warn_deprecated_param("temperature", self.Settings, "temperature")
+            self._warn_init_param_moved_to_settings("temperature", "temperature")
             default_settings.temperature = temperature
 
         # --- 3. (no params object for this service) ---

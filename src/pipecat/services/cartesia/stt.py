@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import STTSettings, _warn_deprecated_param
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -189,7 +189,7 @@ class CartesiaSTTService(WebsocketSTTService):
 
         # 2. Apply live_options overrides — only if settings not provided
         if live_options is not None:
-            _warn_deprecated_param("live_options", self.Settings)
+            self._warn_init_param_moved_to_settings("live_options")
             if not settings:
                 if live_options.sample_rate and sample_rate is None:
                     sample_rate = live_options.sample_rate

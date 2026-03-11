@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -208,12 +208,12 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if language is not None:
-            _warn_deprecated_param("language", self.Settings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = language
 
         # 3. Apply connection_params overrides (deprecated) — only if settings not provided
         if connection_params is not None:
-            _warn_deprecated_param("connection_params", self.Settings)
+            self._warn_init_param_moved_to_settings("connection_params")
             if not settings:
                 sample_rate = connection_params.sample_rate
                 encoding = connection_params.encoding

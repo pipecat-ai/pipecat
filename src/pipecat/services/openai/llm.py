@@ -26,7 +26,6 @@ from pipecat.processors.aggregators.llm_response import (
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
-from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
@@ -120,7 +119,7 @@ class OpenAILLMService(BaseOpenAILLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # Handle service_tier from deprecated params
@@ -129,7 +128,7 @@ class OpenAILLMService(BaseOpenAILLMService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.frequency_penalty = params.frequency_penalty
                 default_settings.presence_penalty = params.presence_penalty

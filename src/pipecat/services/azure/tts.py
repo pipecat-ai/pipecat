@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -304,12 +304,12 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice is not None:
-            _warn_deprecated_param("voice", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice", "voice")
             default_settings.voice = voice
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.emphasis = params.emphasis
                 default_settings.language = (
@@ -801,12 +801,12 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice is not None:
-            _warn_deprecated_param("voice", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice", "voice")
             default_settings.voice = voice
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.emphasis = params.emphasis
                 default_settings.language = (

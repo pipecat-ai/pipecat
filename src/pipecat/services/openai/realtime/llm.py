@@ -63,7 +63,6 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
     _NotGiven,
-    _warn_deprecated_param,
     is_given,
 )
 from pipecat.transcriptions.language import Language
@@ -294,7 +293,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         if session_properties is not None:

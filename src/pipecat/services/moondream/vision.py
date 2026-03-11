@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     VisionFullResponseStartFrame,
     VisionTextFrame,
 )
-from pipecat.services.settings import VisionSettings, _warn_deprecated_param
+from pipecat.services.settings import VisionSettings
 from pipecat.services.vision_service import VisionService
 
 try:
@@ -110,7 +110,7 @@ class MoondreamService(VisionService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

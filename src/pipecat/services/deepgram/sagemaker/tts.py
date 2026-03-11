@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.settings import TTSSettings, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -101,7 +101,7 @@ class DeepgramSageMakerTTSService(TTSService):
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         if voice is not None:
-            _warn_deprecated_param("voice", self.Settings, "voice")
+            self._warn_init_param_moved_to_settings("voice", "voice")
 
         voice = voice or "aura-2-helena-en"
 

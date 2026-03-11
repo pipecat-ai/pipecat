@@ -9,7 +9,6 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from pipecat.services.settings import _warn_deprecated_param
 from pipecat.services.stt_latency import GROQ_TTFS_P99
 from pipecat.services.whisper.base_stt import (
     BaseWhisperSTTService,
@@ -93,16 +92,16 @@ class GroqSTTService(BaseWhisperSTTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if language is not None:
-            _warn_deprecated_param("language", self.Settings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = self.language_to_service_language(language)
         if prompt is not None:
-            _warn_deprecated_param("prompt", self.Settings, "prompt")
+            self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt
         if temperature is not None:
-            _warn_deprecated_param("temperature", self.Settings, "temperature")
+            self._warn_init_param_moved_to_settings("temperature", "temperature")
             default_settings.temperature = temperature
 
         # --- 3. (no params object for this service) ---

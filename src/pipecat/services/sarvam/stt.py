@@ -36,7 +36,6 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     STTSettings,
     _NotGiven,
-    _warn_deprecated_param,
     is_given,
 )
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
@@ -255,12 +254,12 @@ class SarvamSTTService(STTService):
 
         # --- 2. Deprecated direct-arg overrides ---
         if model is not None:
-            _warn_deprecated_param("model", self.Settings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # --- 3. Deprecated params overrides ---
         if params is not None:
-            _warn_deprecated_param("params", self.Settings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.language = params.language
                 default_settings.prompt = params.prompt
