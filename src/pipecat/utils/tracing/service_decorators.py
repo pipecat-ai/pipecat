@@ -368,6 +368,51 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
     return decorator
 
 
+def trace_stt_cancellation(
+    service,
+    *,
+    error_type: str,
+    cancel_reason: str,
+    cancel_code: str,
+    recoverable: bool,
+    phase: str,
+    region: str | None = None,
+) -> None:
+    """Create a trace span for STT cancellation events.
+
+    Args:
+        service: STT service instance generating the cancellation.
+        error_type: Stable error classification.
+        cancel_reason: Provider cancellation reason.
+        cancel_code: Provider cancellation code.
+        recoverable: Whether the application should attempt recovery.
+        phase: Service lifecycle phase where cancellation happened.
+        region: Cloud region associated with the service, if known.
+    """
+    if not is_tracing_available() or not getattr(service, "_tracing_enabled", False):
+        return
+
+    service_class_name = service.__class__.__name__
+    parent_context = _get_turn_context(service) or _get_parent_service_context(service)
+
+    tracer = trace.get_tracer("pipecat")
+    with tracer.start_as_current_span("stt.cancel", context=parent_context) as current_span:
+        current_span.set_attribute(
+            "gen_ai.system", service_class_name.replace("STTService", "").lower()
+        )
+        current_span.set_attribute("gen_ai.operation.name", "stt.cancel")
+        current_span.set_attribute("error.type", error_type)
+        current_span.set_attribute("stt.cancel.reason", cancel_reason)
+        current_span.set_attribute("stt.cancel.code", cancel_code)
+        current_span.set_attribute("stt.cancel.recoverable", recoverable)
+        current_span.set_attribute("stt.cancel.phase", phase)
+        if region:
+            current_span.set_attribute("cloud.region", region)
+
+        if cancel_reason == "Error":
+            current_span.set_status(trace.Status(trace.StatusCode.ERROR, cancel_code))
+
+
 def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Callable:
     """Trace LLM service methods with LLM-specific attributes.
 

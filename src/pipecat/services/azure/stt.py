@@ -32,7 +32,7 @@ from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.tracing.service_decorators import trace_stt_cancellation, traced_stt
 
 try:
     from azure.cognitiveservices.speech import (
@@ -156,6 +156,10 @@ class AzureSTTService(STTService):
 
         self._audio_stream = None
         self._speech_recognizer = None
+        self._audio_sent = False
+        self._recognition_active = False
+        self._recognition_terminated = False
+        self._shutdown_requested = False
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate performance metrics.
@@ -205,7 +209,12 @@ class AzureSTTService(STTService):
         try:
             await self.start_processing_metrics()
             if self._audio_stream:
+                if self._recognition_terminated and not self._shutdown_requested:
+                    logger.warning("Azure STT recognition terminated, dropping audio chunk")
+                    yield None
+                    return
                 self._audio_stream.write(audio)
+                self._audio_sent = True
             yield None
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
@@ -242,6 +251,11 @@ class AzureSTTService(STTService):
         if self._audio_stream:
             return
 
+        self._audio_sent = False
+        self._recognition_active = False
+        self._recognition_terminated = False
+        self._shutdown_requested = False
+
         try:
             stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
             self._audio_stream = PushAudioInputStream(stream_format)
@@ -264,6 +278,36 @@ class AzureSTTService(STTService):
                 error_msg=f"Uncaught exception during initialization: {e}", exception=e
             )
 
+    async def stop(self, frame: EndFrame):
+        """Stop the speech recognition service.
+
+        Cleanly shuts down the Azure speech recognizer and closes audio streams.
+
+        Args:
+            frame: Frame indicating the end of processing.
+        """
+        await super().stop(frame)
+
+        self._shutdown_requested = True
+        self._recognition_active = False
+        self._recognition_terminated = True
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the speech recognition service.
+
+        Immediately stops recognition and closes resources.
+
+        Args:
+            frame: Frame indicating cancellation.
+        """
+        await super().cancel(frame)
+
+        self._shutdown_requested = True
+        self._recognition_active = False
+        self._recognition_terminated = True
+        await self._disconnect()
+
     async def _disconnect(self):
         """Stop recognition and close audio streams."""
         if self._speech_recognizer:
@@ -280,6 +324,25 @@ class AzureSTTService(STTService):
     ):
         """Handle a transcription result with tracing."""
         await self.stop_processing_metrics()
+
+    async def _trace_cancellation(
+        self,
+        *,
+        reason: str,
+        code: str,
+        recoverable: bool,
+        phase: str,
+    ):
+        """Record a trace span for a canceled Azure STT recognition."""
+        trace_stt_cancellation(
+            self,
+            error_type="azure.stt.canceled",
+            cancel_reason=reason,
+            cancel_code=code,
+            recoverable=recoverable,
+            phase=phase,
+            region=self._settings.region if isinstance(self._settings.region, str) else None,
+        )
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
@@ -310,30 +373,87 @@ class AzureSTTService(STTService):
 
     def _on_handle_canceled(self, event):
         details = getattr(event, "cancellation_details", None)
-        reason = getattr(details, "reason", "UNKNOWN")
-        code = getattr(details, "code", "UNKNOWN")
+        reason = self._normalize_cancellation_value(getattr(details, "reason", "UNKNOWN"))
+        code = self._normalize_cancellation_value(getattr(details, "code", "UNKNOWN"))
         error_details = getattr(details, "error_details", "")
+        phase = self._get_cancellation_phase()
+        recoverable = self._is_cancellation_recoverable(reason, code)
+
+        self._recognition_active = False
+        self._recognition_terminated = True
 
         logger.error(
-            "Azure STT recognition canceled: reason={}, code={}, details={}",
+            "Azure STT recognition canceled: reason={}, code={}, phase={}, recoverable={}, details={}",
             reason,
             code,
+            phase,
+            recoverable,
             error_details,
         )
 
-        error_message = f"Azure STT recognition canceled: {code} - {error_details}"
+        asyncio.run_coroutine_threadsafe(
+            self._trace_cancellation(
+                reason=reason,
+                code=code,
+                recoverable=recoverable,
+                phase=phase,
+            ),
+            self.get_event_loop(),
+        )
+
+        error_message = f"Azure STT recognition canceled: {reason} ({code})"
         asyncio.run_coroutine_threadsafe(
             self.push_error(error_msg=error_message), self.get_event_loop()
         )
 
     def _on_handle_session_started(self, event):
+        self._recognition_active = True
+        self._recognition_terminated = False
         logger.info(
             "Azure STT session started: session_id={}",
             getattr(event, "session_id", "unknown"),
         )
 
     def _on_handle_session_stopped(self, event):
-        logger.warning(
-            "Azure STT session stopped: session_id={}",
-            getattr(event, "session_id", "unknown"),
-        )
+        self._recognition_active = False
+        self._recognition_terminated = True
+        if self._shutdown_requested:
+            logger.info(
+                "Azure STT session stopped during shutdown: session_id={}",
+                getattr(event, "session_id", "unknown"),
+            )
+        else:
+            logger.warning(
+                "Azure STT session stopped: session_id={}",
+                getattr(event, "session_id", "unknown"),
+            )
+
+    @staticmethod
+    def _normalize_cancellation_value(value: Any) -> str:
+        normalized = getattr(value, "name", None)
+        if normalized:
+            return normalized
+        return str(value)
+
+    def _get_cancellation_phase(self) -> str:
+        if self._shutdown_requested:
+            return "shutdown"
+        if not self._recognition_active and not self._audio_sent:
+            return "startup"
+        return "streaming"
+
+    @staticmethod
+    def _is_cancellation_recoverable(reason: str, code: str) -> bool:
+        if reason == "CancelledByUser":
+            return True
+        if reason != "Error":
+            return False
+
+        return code in {
+            "ConnectionFailure",
+            "ServiceRedirectPermanent",
+            "ServiceRedirectTemporary",
+            "ServiceTimeout",
+            "ServiceUnavailable",
+            "TooManyRequests",
+        }
