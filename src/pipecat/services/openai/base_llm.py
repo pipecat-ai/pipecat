@@ -332,8 +332,7 @@ class BaseOpenAILLMService(LLMService):
             messages = params.get("messages", [])
             if messages and messages[0].get("role") == "system":
                 logger.warning(
-                    f"{self}: Both system_instruction and a system message in context are set."
-                    " Using system_instruction."
+                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
                 )
             params["messages"] = [
                 {"role": "system", "content": self._settings.system_instruction}
@@ -381,8 +380,7 @@ class BaseOpenAILLMService(LLMService):
             messages = params.get("messages", [])
             if messages and messages[0].get("role") == "system":
                 logger.warning(
-                    f"{self}: Both system_instruction and a system message in context are set."
-                    " Using system_instruction."
+                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
                 )
             params["messages"] = [{"role": "system", "content": system_instruction}] + messages
 
