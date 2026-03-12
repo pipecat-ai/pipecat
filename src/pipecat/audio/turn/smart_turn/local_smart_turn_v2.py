@@ -10,6 +10,7 @@ This module provides a smart turn analyzer that uses PyTorch models for
 local end-of-turn detection without requiring network connectivity.
 """
 
+from packaging import version
 from typing import Any, Dict
 
 import numpy as np
@@ -21,6 +22,7 @@ try:
     import torch
     import torch.nn.functional as F
     from torch import nn
+    import transformers
     from transformers import (
         Wav2Vec2Config,
         Wav2Vec2Model,
@@ -134,6 +136,9 @@ class _Wav2Vec2ForEndpointing(Wav2Vec2PreTrainedModel):
                 module.weight.data.normal_(mean=0.0, std=0.1)
                 if module.bias is not None:
                     module.bias.data.zero_()
+
+        if version.parse(transformers.__version__) >= "5.0.0":
+            self.post_init()
 
     def attention_pool(self, hidden_states, attention_mask):
         # Calculate attention weights
