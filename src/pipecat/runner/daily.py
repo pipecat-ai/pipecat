@@ -85,6 +85,8 @@ async def configure(
     sip_enable_video: Optional[bool] = False,
     sip_num_endpoints: Optional[int] = 1,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
+    sip_provider: Optional[str] = None,
+    room_geo: Optional[str] = None,
     room_properties: Optional[DailyRoomProperties] = None,
     token_properties: Optional["DailyMeetingTokenProperties"] = None,
 ) -> DailyRoomConfig:
@@ -105,6 +107,10 @@ async def configure(
         sip_num_endpoints: Number of allowed SIP endpoints.
         sip_codecs: Codecs to support for audio and video. If None, uses Daily defaults.
             Example: {"audio": ["OPUS"], "video": ["H264"]}
+        sip_provider: SIP provider name (e.g., "daily"). Only used when
+            sip_caller_phone is provided and room_properties is not.
+        room_geo: Daily room geographic region (e.g., "us-east-1"). Only used
+            when room_properties is not provided.
         room_properties: Optional DailyRoomProperties to use instead of building from
             individual parameters. When provided, this overrides room_exp_duration and
             SIP-related parameters. If not provided, properties are built from the
@@ -154,6 +160,8 @@ async def configure(
                 sip_enable_video is not False,
                 sip_num_endpoints != 1,
                 sip_codecs is not None,
+                sip_provider is not None,
+                room_geo is not None,
             ]
         )
         if individual_params_provided:
@@ -207,6 +215,9 @@ async def configure(
             eject_at_room_exp=True,
         )
 
+        if room_geo:
+            room_properties.geo = room_geo
+
         # Add SIP configuration if enabled
         if sip_enabled:
             sip_params = DailyRoomSipParams(
@@ -215,6 +226,7 @@ async def configure(
                 sip_mode="dial-in",
                 num_endpoints=sip_num_endpoints,
                 codecs=sip_codecs,
+                provider=sip_provider,
             )
             room_properties.sip = sip_params
             room_properties.enable_dialout = True  # Enable outbound calls if needed
