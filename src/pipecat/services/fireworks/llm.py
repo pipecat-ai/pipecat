@@ -118,6 +118,10 @@ class FireworksLLMService(OpenAILLMService):
         # Prepend system instruction if set
         if self._settings.system_instruction:
             messages = params.get("messages", [])
+            if messages and messages[0].get("role") == "system":
+                logger.warning(
+                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
+                )
             params["messages"] = [
                 {"role": "system", "content": self._settings.system_instruction}
             ] + messages
