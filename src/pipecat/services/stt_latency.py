@@ -51,4 +51,3 @@ SPEECHMATICS_TTFS_P99: float = 0.74
 # These services run locally and should be replaced with measured values
 NVIDIA_TTFS_P99: float = DEFAULT_TTFS_P99
 WHISPER_TTFS_P99: float = DEFAULT_TTFS_P99
-
