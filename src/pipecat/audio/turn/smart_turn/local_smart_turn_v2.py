@@ -137,7 +137,7 @@ class _Wav2Vec2ForEndpointing(Wav2Vec2PreTrainedModel):
                 if module.bias is not None:
                     module.bias.data.zero_()
 
-        if version.parse(transformers.__version__) >= "5.0.0":
+        if version.parse(transformers.__version__) >= version.parse("5.0.0"):
             self.post_init()
 
     def attention_pool(self, hidden_states, attention_mask):
