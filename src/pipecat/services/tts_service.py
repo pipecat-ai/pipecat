@@ -536,15 +536,15 @@ class TTSService(AIService):
             frame: The end frame.
         """
         await super().stop(frame)
-        if self._stop_frame_task:
-            await self.cancel_task(self._stop_frame_task)
-            self._stop_frame_task = None
         if self._audio_context_task:
             # Indicate no more audio contexts are available; this will end the
             # task cleanly after all contexts have been processed.
             await self._contexts_queue.put(None)
             await self._audio_context_task
             self._audio_context_task = None
+        if self._stop_frame_task:
+            await self.cancel_task(self._stop_frame_task)
+            self._stop_frame_task = None
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the TTS service.
