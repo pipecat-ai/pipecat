@@ -1044,7 +1044,9 @@ class AWSNovaSonicLLMService(LLMService):
                     "toolResult": {
                         "promptName": self._prompt_name,
                         "contentName": content_name,
-                        "content": json.dumps(result) if isinstance(result, dict) else result,
+                        "content": json.dumps(result, ensure_ascii=False)
+                        if isinstance(result, dict)
+                        else result,
                     }
                 }
             }
