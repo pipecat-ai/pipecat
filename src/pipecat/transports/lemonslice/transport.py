@@ -676,6 +676,8 @@ class LemonSliceTransport(BaseTransport):
 
     - on_client_connected(transport, participant): Participant connected to the session
     - on_client_disconnected(transport, participant): Participant disconnected from the session
+    - on_avatar_connected(transport, participant): LemonSlice avatar connected to the session
+    - on_avatar_disconnected(transport, participant, reason): LemonSlice avatar disconnected from the session
 
     Example::
 
@@ -729,11 +731,15 @@ class LemonSliceTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
+        self._register_event_handler("on_avatar_connected")
+        self._register_event_handler("on_avatar_disconnected")
 
     async def _on_participant_left(self, participant, reason):
         """Handle participant left events."""
         ls_bot_name = await self._client.get_bot_name()
-        if participant.get("info", {}).get("userName", "") != ls_bot_name:
+        if participant.get("info", {}).get("userName", "") == ls_bot_name:
+            await self._on_avatar_disconnected(participant)
+        else:
             await self._on_client_disconnected(participant)
 
     async def _on_participant_joined(self, participant):
@@ -743,6 +749,7 @@ class LemonSliceTransport(BaseTransport):
         # Ignore the LemonSlice bot's microphone
         if participant.get("info", {}).get("userName", "") == ls_bot_name:
             self._lemonslice_participant_id = participant["id"]
+            await self._on_avatar_connected(participant)
         else:
             await self._on_client_connected(participant)
             if self._lemonslice_participant_id:
@@ -788,6 +795,14 @@ class LemonSliceTransport(BaseTransport):
         if not self._output:
             self._output = LemonSliceOutputTransport(client=self._client, params=self._params)
         return self._output
+
+    async def _on_avatar_connected(self, participant: Any):
+        """Handle avatar connected events."""
+        await self._call_event_handler("on_avatar_connected", participant)
+
+    async def _on_avatar_disconnected(self, participant: Any):
+        """Handle avatar disconnected events."""
+        await self._call_event_handler("on_avatar_disconnected", participant)
 
     async def _on_client_connected(self, participant: Any):
         """Handle client connected events."""

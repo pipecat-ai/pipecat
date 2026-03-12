@@ -114,6 +114,14 @@ async def main():
             logger.info("Client disconnected")
             await task.cancel()
 
+        @transport.event_handler("on_avatar_connected")
+        async def on_avatar_connected(transport, participant):
+            logger.info(f"Avatar connected")
+
+        @transport.event_handler("on_avatar_disconnected")
+        async def on_avatar_disconnected(transport, participant):
+            logger.info(f"Avatar disconnected")
+
         runner = PipelineRunner()
 
         await runner.run(task)
