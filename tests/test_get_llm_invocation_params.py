@@ -1090,8 +1090,8 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(merged["content"][0]["text"], "Be concise.")
         self.assertEqual(merged["content"][1]["text"], "Tell me about Python.")
 
-    def test_multiple_system_messages_at_start_merged(self):
-        """Test that multiple consecutive system messages at start are merged into one."""
+    def test_multiple_system_messages_at_start_preserved(self):
+        """Test that multiple consecutive system messages at start pass through unchanged."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "system", "content": "Always be polite."},
@@ -1101,18 +1101,13 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
         params = self.adapter.get_llm_invocation_params(context)
 
-        self.assertEqual(len(params["messages"]), 2)
-
-        # First message should be merged system
-        system_msg = params["messages"][0]
-        self.assertEqual(system_msg["role"], "system")
-        self.assertIsInstance(system_msg["content"], list)
-        self.assertEqual(len(system_msg["content"]), 2)
-        self.assertEqual(system_msg["content"][0]["text"], "You are a helpful assistant.")
-        self.assertEqual(system_msg["content"][1]["text"], "Always be polite.")
-
-        self.assertEqual(params["messages"][1]["role"], "user")
-        self.assertEqual(params["messages"][1]["content"], "Hello")
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][0]["role"], "system")
+        self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
+        self.assertEqual(params["messages"][1]["role"], "system")
+        self.assertEqual(params["messages"][1]["content"], "Always be polite.")
+        self.assertEqual(params["messages"][2]["role"], "user")
+        self.assertEqual(params["messages"][2]["content"], "Hello")
 
     def test_trailing_assistant_removed(self):
         """Test that a trailing assistant message is removed."""
@@ -1140,6 +1135,22 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
+
+    def test_only_system_messages_last_converted_to_user(self):
+        """Test that when only system messages exist, the last one is converted to user."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "system", "content": "Always be polite."},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][0]["role"], "system")
+        self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
+        self.assertEqual(params["messages"][1]["role"], "user")
+        self.assertEqual(params["messages"][1]["content"], "Always be polite.")
 
     def test_consecutive_assistants_merged_then_trailing_removed(self):
         """Test that consecutive assistant messages are merged, then trailing assistant is removed."""
