@@ -36,7 +36,6 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from azure.cognitiveservices.speech import (
-        CancellationReason,
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
@@ -255,7 +254,11 @@ class AzureSTTService(STTService):
             self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
             self._speech_recognizer.recognized.connect(self._on_handle_recognized)
             self._speech_recognizer.canceled.connect(self._on_handle_canceled)
-            self._speech_recognizer.start_continuous_recognition_async()
+            self._speech_recognizer.session_started.connect(self._on_handle_session_started)
+            self._speech_recognizer.session_stopped.connect(self._on_handle_session_stopped)
+
+            start_future = self._speech_recognizer.start_continuous_recognition_async()
+            await self.get_event_loop().run_in_executor(None, start_future.get)
         except Exception as e:
             await self.push_error(
                 error_msg=f"Uncaught exception during initialization: {e}", exception=e
@@ -306,11 +309,31 @@ class AzureSTTService(STTService):
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
     def _on_handle_canceled(self, event):
-        details = event.result.cancellation_details
-        if details.reason == CancellationReason.Error:
-            error_msg = f"Azure STT recognition canceled: {details.reason}"
-            if details.error_details:
-                error_msg += f" - {details.error_details}"
-            asyncio.run_coroutine_threadsafe(
-                self.push_error(error_msg=error_msg), self.get_event_loop()
-            )
+        details = getattr(event, "cancellation_details", None)
+        reason = getattr(details, "reason", "UNKNOWN")
+        code = getattr(details, "code", "UNKNOWN")
+        error_details = getattr(details, "error_details", "")
+
+        logger.error(
+            "Azure STT recognition canceled: reason={}, code={}, details={}",
+            reason,
+            code,
+            error_details,
+        )
+
+        error_message = f"Azure STT recognition canceled: {code} - {error_details}"
+        asyncio.run_coroutine_threadsafe(
+            self.push_error(error_msg=error_message), self.get_event_loop()
+        )
+
+    def _on_handle_session_started(self, event):
+        logger.info(
+            "Azure STT session started: session_id={}",
+            getattr(event, "session_id", "unknown"),
+        )
+
+    def _on_handle_session_stopped(self, event):
+        logger.warning(
+            "Azure STT session stopped: session_id={}",
+            getattr(event, "session_id", "unknown"),
+        )
