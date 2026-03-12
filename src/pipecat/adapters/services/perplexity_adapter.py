@@ -84,8 +84,11 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
            "assistant", remove it. OpenAI appears to silently ignore trailing
            assistant messages server-side, so removing them preserves equivalent
            behavior while satisfying Perplexity's "last message must be
-           user/tool" constraint. If the last message is "system" (e.g. the
-           context only contains system messages), convert it to "user".
+           user/tool" constraint. If the last message is "system", convert it
+           to "user". A trailing system message can only occur when the context
+           consists entirely of system messages (possibly followed by assistant
+           messages that were just removed), because step 1 converts any system
+           message that appears after a non-system message to "user".
 
         Args:
             messages: List of message dicts with "role" and "content" keys.
@@ -144,8 +147,7 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
             while messages and messages[-1].get("role") == "assistant":
                 messages.pop()
 
-            # If the last message is "system" (e.g. the context only contains
-            # system messages), convert it to "user".
+            # If the last message is "system", convert it to "user".
             if messages and messages[-1].get("role") == "system":
                 messages[-1]["role"] = "user"
 

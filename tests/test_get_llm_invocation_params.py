@@ -1152,6 +1152,25 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][1]["role"], "user")
         self.assertEqual(params["messages"][1]["content"], "Always be polite.")
 
+    def test_trailing_assistant_removed_then_system_converted(self):
+        """Test that trailing assistant is removed, exposing a system message that becomes user.
+
+        This exercises the ordering of step 3: strip trailing assistants first,
+        then convert a trailing system to user.
+        """
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "assistant", "content": "Sure thing."},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Trailing assistant removed → [system] → system converted to user → [user]
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["content"], "You are helpful.")
+
     def test_consecutive_assistants_merged_then_trailing_removed(self):
         """Test that consecutive assistant messages are merged, then trailing assistant is removed."""
         messages: list[LLMStandardMessage] = [
