@@ -19,8 +19,9 @@ import base64
 import io
 import wave
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
+from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union, get_args
 
+import aiohttp
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
 from openai._types import NotGiven as OpenAINotGiven
@@ -173,6 +174,11 @@ class LLMContext:
             image: Raw image bytes.
             text: Optional text to include with the image.
         """
+        # Format is a data URL: data:<mime type>;base64,<data> already provided
+        if format.startswith("url/"):
+            url = image
+            return LLMContext.create_image_url_message(role=role, url=url, text=text)
+
         # Format is a mime type: image is already encoded
         image_already_encoded = format.startswith("image/")
 
@@ -192,6 +198,34 @@ class LLMContext:
         url = f"data:{format if image_already_encoded else 'image/jpeg'};base64,{encoded_image}"
 
         return LLMContext.create_image_url_message(role=role, url=url, text=text)
+
+    @staticmethod
+    async def create_file_message(
+        *,
+        role: str = "user",
+        file: bytes,
+        name: Optional[str] = None,
+        text: Optional[str] = None,
+    ) -> LLMContextMessage:
+        """Create a context message containing a file.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            file: Raw file bytes.
+            name: Optional name of the file.
+            text: Optional text to include with the file.
+        """
+        # Right now: assumes file is already encoded properly as a data URL:
+        #  data:<mime type>;base64,<data>
+        #   TODO: support not already encoded?
+        content = []
+        if text:
+            content.append({"type": "text", "text": text})
+
+        file = {"file_data": file, "filename": name if name else ""}
+        content.append({"type": "file", "file": file})
+
+        return {"role": role, "content": content}
 
     @staticmethod
     async def create_audio_message(
@@ -356,6 +390,46 @@ class LLMContext:
             tool_choice: Tool selection strategy for the LLM.
         """
         self._tool_choice = tool_choice
+
+    async def add_file_frame_message(
+        self,
+        *,
+        type: str,
+        format: str,
+        file: bytes | str,
+        text: Optional[str] = None,
+        name: Optional[str] = None,
+        role: str = "user",
+    ):
+        """Add a message containing a file frame.
+
+        Args:
+            type: File type (e.g., 'bytes' or 'url').
+            format: File format (the MIME type like 'image/jpeg').
+            file: Raw file bytes or URL string.
+            text: Optional text to include with the file.
+            name: Optional name of the file.
+            role: The role of this message (defaults to "user").
+        """
+        bytes = file
+        is_image = format.startswith("image/")
+        if not is_image and format != "application/pdf":
+            # TODO how to send error back?
+            logger.warning(f"Unsupported file format for LLM context: {format}")
+            return
+        if type == "url":
+            async with aiohttp.ClientSession() as session:
+                async with session.get(file) as response:
+                    content = io.BytesIO(await response.content.read())
+                    base64_string = base64.b64encode(content.getvalue()).decode("utf-8")
+                    bytes = f"data:{format};base64,{base64_string}"
+            if is_image:
+                message = LLMContext.create_image_url_message(role=role, url=bytes, text=text)
+                self.add_message(message)
+                return
+
+        message = await LLMContext.create_file_message(role=role, file=bytes, name=name, text=text)
+        self.add_message(message)
 
     async def add_image_frame_message(
         self,
