@@ -200,7 +200,9 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
             if message.role == "user":
                 for part in message.parts:
                     if part.function_response and part.function_response.id == tool_call_id:
-                        part.function_response.response = {"value": json.dumps(result)}
+                        part.function_response.response = {
+                            "value": json.dumps(result, ensure_ascii=False)
+                        }
 
 
 @dataclass
