@@ -39,12 +39,12 @@ def _install_websockets_stub() -> None:
     class WebSocketClientProtocol:
         pass
 
-    protocol_module.State = State
-    exceptions_module.ConnectionClosedError = ConnectionClosedError
-    exceptions_module.ConnectionClosedOK = ConnectionClosedOK
-    websockets_module.protocol = protocol_module
-    websockets_module.exceptions = exceptions_module
-    websockets_module.WebSocketClientProtocol = WebSocketClientProtocol
+    setattr(protocol_module, "State", State)
+    setattr(exceptions_module, "ConnectionClosedError", ConnectionClosedError)
+    setattr(exceptions_module, "ConnectionClosedOK", ConnectionClosedOK)
+    setattr(websockets_module, "protocol", protocol_module)
+    setattr(websockets_module, "exceptions", exceptions_module)
+    setattr(websockets_module, "WebSocketClientProtocol", WebSocketClientProtocol)
 
 
 def _install_azure_speech_stub() -> None:
@@ -118,17 +118,17 @@ def _install_azure_speech_stub() -> None:
         def __init__(self, stream=None):
             self.stream = stream
 
-    speech_module.ResultReason = ResultReason
-    speech_module.SpeechConfig = SpeechConfig
-    speech_module.SpeechRecognizer = SpeechRecognizer
-    audio_module.AudioStreamFormat = AudioStreamFormat
-    audio_module.PushAudioInputStream = PushAudioInputStream
-    dialog_module.AudioConfig = AudioConfig
+    setattr(speech_module, "ResultReason", ResultReason)
+    setattr(speech_module, "SpeechConfig", SpeechConfig)
+    setattr(speech_module, "SpeechRecognizer", SpeechRecognizer)
+    setattr(audio_module, "AudioStreamFormat", AudioStreamFormat)
+    setattr(audio_module, "PushAudioInputStream", PushAudioInputStream)
+    setattr(dialog_module, "AudioConfig", AudioConfig)
 
-    azure_module.cognitiveservices = cognitiveservices_module
-    cognitiveservices_module.speech = speech_module
-    speech_module.audio = audio_module
-    speech_module.dialog = dialog_module
+    setattr(azure_module, "cognitiveservices", cognitiveservices_module)
+    setattr(cognitiveservices_module, "speech", speech_module)
+    setattr(speech_module, "audio", audio_module)
+    setattr(speech_module, "dialog", dialog_module)
 
 
 _install_azure_speech_stub()
@@ -137,16 +137,16 @@ _install_websockets_stub()
 azure_package_module = types.ModuleType("pipecat.services.azure")
 azure_package_module.__path__ = []
 common_module = types.ModuleType("pipecat.services.azure.common")
-common_module.language_to_azure_language = lambda _language: "en-US"
+setattr(common_module, "language_to_azure_language", lambda _language: "en-US")
 
 sys.modules["pipecat.services.azure"] = azure_package_module
 sys.modules["pipecat.services.azure.common"] = common_module
 
 stt_file = pathlib.Path(__file__).resolve().parents[1] / "src/pipecat/services/azure/stt.py"
 spec = importlib.util.spec_from_file_location("pipecat.services.azure.stt", stt_file)
+assert spec is not None and spec.loader is not None
 stt_module = importlib.util.module_from_spec(spec)
 sys.modules["pipecat.services.azure.stt"] = stt_module
-assert spec and spec.loader
 spec.loader.exec_module(stt_module)
 
 from pipecat.frames.frames import StartFrame
@@ -192,6 +192,7 @@ def test_canceled_handler_pushes_error_with_details():
     service = stt_module.AzureSTTService(api_key="test-key", region="eastus")
     service.push_error = AsyncMock()
     service.get_event_loop = MagicMock(return_value=MagicMock())
+    service._trace_cancellation = AsyncMock()
 
     canceled_event = MagicMock()
     canceled_event.cancellation_details.reason = "Error"
@@ -202,12 +203,19 @@ def test_canceled_handler_pushes_error_with_details():
         service._on_handle_canceled(canceled_event)
 
     service.push_error.assert_called_once_with(
-        error_msg="Azure STT recognition canceled: AuthenticationFailure - 401 Unauthorized"
+        error_msg="Azure STT recognition canceled: Error (AuthenticationFailure)"
     )
-    assert run_threadsafe.call_count == 1
+    service._trace_cancellation.assert_called_once_with(
+        reason="Error",
+        code="AuthenticationFailure",
+        recoverable=False,
+        phase="startup",
+    )
+    assert run_threadsafe.call_count == 2
 
-    pending_coroutine = run_threadsafe.call_args.args[0]
-    pending_coroutine.close()
+    for call in run_threadsafe.call_args_list:
+        pending_coroutine = call.args[0]
+        pending_coroutine.close()
 
 
 def test_canceled_handler_uses_safe_defaults_when_details_missing():
@@ -216,6 +224,7 @@ def test_canceled_handler_uses_safe_defaults_when_details_missing():
     service = stt_module.AzureSTTService(api_key="test-key", region="eastus")
     service.push_error = AsyncMock()
     service.get_event_loop = MagicMock(return_value=MagicMock())
+    service._trace_cancellation = AsyncMock()
 
     canceled_event = MagicMock()
     canceled_event.cancellation_details = None
@@ -224,9 +233,33 @@ def test_canceled_handler_uses_safe_defaults_when_details_missing():
         service._on_handle_canceled(canceled_event)
 
     service.push_error.assert_called_once_with(
-        error_msg="Azure STT recognition canceled: UNKNOWN - "
+        error_msg="Azure STT recognition canceled: UNKNOWN (UNKNOWN)"
     )
-    assert run_threadsafe.call_count == 1
+    service._trace_cancellation.assert_called_once_with(
+        reason="UNKNOWN",
+        code="UNKNOWN",
+        recoverable=False,
+        phase="startup",
+    )
+    assert run_threadsafe.call_count == 2
 
-    pending_coroutine = run_threadsafe.call_args.args[0]
-    pending_coroutine.close()
+    for call in run_threadsafe.call_args_list:
+        pending_coroutine = call.args[0]
+        pending_coroutine.close()
+
+
+@pytest.mark.asyncio
+async def test_run_stt_drops_audio_after_terminated_session():
+    """Verify audio is not written after a terminated session."""
+
+    service = stt_module.AzureSTTService(api_key="test-key", region="eastus")
+    service.start_processing_metrics = AsyncMock()
+    service._audio_stream = MagicMock()
+    service._recognition_terminated = True
+
+    frames = []
+    async for frame in service.run_stt(b"audio"):
+        frames.append(frame)
+
+    service._audio_stream.write.assert_not_called()
+    assert frames == [None]
