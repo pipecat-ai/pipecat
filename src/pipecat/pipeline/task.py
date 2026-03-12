@@ -876,22 +876,22 @@ class PipelineTask(BasePipelineTask):
 
         if isinstance(frame, EndTaskFrame):
             # Tell the task we should end nicely.
-            logger.debug(f"{self}: received end task frame {frame}")
+            logger.debug(f"{self}: received end task frame upstream {frame}")
             await self.queue_frame(EndFrame(reason=frame.reason))
         elif isinstance(frame, CancelTaskFrame):
             # Tell the task we should end right away.
-            logger.debug(f"{self}: received cancel task frame {frame}")
+            logger.debug(f"{self}: received cancel task frame upstream {frame}")
             await self.queue_frame(CancelFrame(reason=frame.reason))
         elif isinstance(frame, StopTaskFrame):
             # Tell the task we should stop nicely.
-            logger.debug(f"{self}: received stop task frame {frame}")
+            logger.debug(f"{self}: received stop task frame upstream {frame}")
             await self.queue_frame(StopFrame())
         elif isinstance(frame, InterruptionTaskFrame):
             # Tell the task we should interrupt the pipeline. Note that we are
             # bypassing the push queue and directly queue into the
             # pipeline. This is in case the push task is blocked waiting for a
             # pipeline-ending frame to finish traversing the pipeline.
-            logger.debug(f"{self}: received interruption task frame {frame}")
+            logger.debug(f"{self}: received interruption task frame upstream {frame}")
             await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
             await self._call_event_handler("on_pipeline_error", frame)
@@ -934,6 +934,18 @@ class PipelineTask(BasePipelineTask):
             self._pipeline_end_event.set()
         elif isinstance(frame, HeartbeatFrame):
             await self._heartbeat_queue.put(frame)
+        elif isinstance(frame, EndTaskFrame):
+            logger.debug(f"{self}: received end task frame downstream {frame}")
+            await self.queue_frame(EndTaskFrame(reason=frame.reason), FrameDirection.UPSTREAM)
+        elif isinstance(frame, StopTaskFrame):
+            logger.debug(f"{self}: received stop task frame downstream {frame}")
+            await self.queue_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
+        elif isinstance(frame, CancelTaskFrame):
+            logger.debug(f"{self}: received cancel task frame downstream {frame}")
+            await self.queue_frame(CancelTaskFrame(reason=frame.reason), FrameDirection.UPSTREAM)
+        elif isinstance(frame, InterruptionTaskFrame):
+            logger.debug(f"{self}: received interruption task frame downstream {frame}")
+            await self.queue_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
 
     async def _heartbeat_push_handler(self):
         """Push heartbeat frames at regular intervals."""
