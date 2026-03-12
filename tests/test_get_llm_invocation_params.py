@@ -1123,8 +1123,14 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Hello")
 
-    def test_only_system_message_converted_to_user(self):
-        """Test that a single system message is converted to user role."""
+    def test_only_system_messages_preserved(self):
+        """Test that system-only contexts are left unchanged (no system→user conversion).
+
+        We intentionally do not convert trailing system messages to "user"
+        because that would make the transformation unstable across calls —
+        Perplexity has statefulness within a conversation, so a message that
+        was "user" in one call but becomes "system" in the next causes errors.
+        """
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are a helpful assistant."},
         ]
@@ -1133,30 +1139,15 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context)
 
         self.assertEqual(len(params["messages"]), 1)
-        self.assertEqual(params["messages"][0]["role"], "user")
-        self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
-
-    def test_only_system_messages_last_converted_to_user(self):
-        """Test that when only system messages exist, the last one is converted to user."""
-        messages: list[LLMStandardMessage] = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "system", "content": "Always be polite."},
-        ]
-
-        context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
-
-        self.assertEqual(len(params["messages"]), 2)
         self.assertEqual(params["messages"][0]["role"], "system")
-        self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
-        self.assertEqual(params["messages"][1]["role"], "user")
-        self.assertEqual(params["messages"][1]["content"], "Always be polite.")
 
-    def test_trailing_assistant_removed_then_system_converted(self):
-        """Test that trailing assistant is removed, exposing a system message that becomes user.
+    def test_system_exposed_after_trailing_assistant_removed(self):
+        """Test that a system message exposed by trailing assistant removal stays system.
 
-        This exercises the ordering of step 3: strip trailing assistants first,
-        then convert a trailing system to user.
+        It's important that initial system messages are never converted to
+        "user", because Perplexity has statefulness within a conversation — if
+        a message was sent as "system" in one call and then becomes "user" in a
+        later call (after more messages are appended), the API rejects it.
         """
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -1166,9 +1157,9 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
         params = self.adapter.get_llm_invocation_params(context)
 
-        # Trailing assistant removed → [system] → system converted to user → [user]
+        # Trailing assistant removed → [system], system stays as-is
         self.assertEqual(len(params["messages"]), 1)
-        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["role"], "system")
         self.assertEqual(params["messages"][0]["content"], "You are helpful.")
 
     def test_consecutive_assistants_merged_then_trailing_removed(self):

@@ -80,15 +80,19 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
            (e.g. a converted system→user message adjacent to an existing user
            message gets merged).
 
-        3. **Ensure last message is user/tool** — If the last message is
+        3. **Remove trailing assistant messages** — If the last message is
            "assistant", remove it. OpenAI appears to silently ignore trailing
            assistant messages server-side, so removing them preserves equivalent
            behavior while satisfying Perplexity's "last message must be
-           user/tool" constraint. If the last message is "system", convert it
-           to "user". A trailing system message can only occur when the context
-           consists entirely of system messages (possibly followed by assistant
-           messages that were just removed), because step 1 converts any system
-           message that appears after a non-system message to "user".
+           user/tool" constraint.
+
+        Note: we intentionally do *not* convert a trailing system message to
+        "user". That would make the transformation unstable across calls —
+        Perplexity appears to have statefulness/caching within a conversation,
+        so a message that was sent as "user" in one call but becomes "system"
+        in the next (once more messages are appended) causes errors. If the
+        context consists entirely of system messages, the Perplexity API call
+        will fail, but that mistake will be caught right away.
 
         Args:
             messages: List of message dicts with "role" and "content" keys.
@@ -138,17 +142,11 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
             else:
                 i += 1
 
-        # Step 3: Handle trailing messages.
+        # Step 3: Remove trailing assistant messages.
         # Perplexity requires the last message to be "user" or "tool".
-        if messages:
-            # Remove trailing assistant messages. OpenAI appears to silently
-            # ignore trailing assistant messages server-side, so removing them
-            # preserves equivalent behavior.
-            while messages and messages[-1].get("role") == "assistant":
-                messages.pop()
-
-            # If the last message is "system", convert it to "user".
-            if messages and messages[-1].get("role") == "system":
-                messages[-1]["role"] = "user"
+        # OpenAI appears to silently ignore trailing assistant messages
+        # server-side, so removing them preserves equivalent behavior.
+        while messages and messages[-1].get("role") == "assistant":
+            messages.pop()
 
         return messages
