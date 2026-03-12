@@ -386,11 +386,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         # fields, not our Settings fields, so we construct SessionProperties
         # directly. The frame.delta path falls through to super, which calls
         # _update_settings → our override handles the rest.
-        if (
-            isinstance(frame, LLMUpdateSettingsFrame)
-            and frame.delta is None
-            and (frame.service is None or frame.service is self)
-        ):
+        if isinstance(frame, LLMUpdateSettingsFrame) and frame.delta is None:
             self._session_properties = events.SessionProperties(**frame.settings)
             await self._send_session_update()
             await self.push_frame(frame, direction)
