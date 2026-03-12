@@ -738,7 +738,9 @@ class TTSService(AIService):
             self._turn_context_id = saved_turn_context_id
             self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
-            if frame.delta is not None:
+            if frame.service is not None and frame.service is not self:
+                await self.push_frame(frame, direction)
+            elif frame.delta is not None:
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.

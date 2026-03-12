@@ -2154,10 +2154,15 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
 
         delta: :class:`~pipecat.services.settings.ServiceSettings` delta-mode
             object describing the fields to change.
+
+        service: Optional target service instance. When provided, only that
+            service will apply the settings; other services will forward the
+            frame unchanged.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
     delta: Optional["ServiceSettings"] = None
+    service: Optional["FrameProcessor"] = None
 
 
 @dataclass
