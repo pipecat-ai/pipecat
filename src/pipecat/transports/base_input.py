@@ -150,8 +150,9 @@ class BaseInputTransport(FrameProcessor):
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
-                    "Parameter 'vad_analyzer' is deprecated, use `LLMUserAggregator`'s new "
-                    "`vad_analyzer` parameter instead.",
+                    "Parameter 'vad_analyzer' is deprecated. Use `LLMUserAggregator`'s "
+                    "`vad_analyzer` parameter, or `VADProcessor` if no `LLMUserAggregator` "
+                    "is needed.",
                     DeprecationWarning,
                 )
 

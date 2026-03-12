@@ -115,8 +115,9 @@ class TransportParams(BaseModel):
         vad_analyzer: Voice Activity Detection analyzer instance.
 
             .. deprecated:: 0.0.101
-                The `vad_analyzer` parameter is deprecated, use `LLMUSerAggregator`'s
-                new `vad_analyzer` parameter instead.
+                The `vad_analyzer` parameter is deprecated. Use `LLMUserAggregator`'s
+                `vad_analyzer` parameter, or `VADProcessor` if no `LLMUserAggregator`
+                is needed.
 
         turn_analyzer: Turn-taking analyzer instance for conversation management.
 
