@@ -220,5 +220,23 @@ class TestUserIdleProcessor(unittest.IsolatedAsyncioTestCase):
         assert callback_called.is_set(), "Idle callback not called after bot speech"
 
 
+    async def test_signal_preserved_during_callback(self):
+        """Regression: event set during callback must not be cleared."""
+
+        class _Sentinel(Exception):
+            pass
+
+        async def callback(proc, retry_count):
+            proc._idle_event.set()
+            raise _Sentinel()
+
+        processor = UserIdleProcessor(callback=callback, timeout=0.01)
+
+        with self.assertRaises(_Sentinel):
+            await processor._idle_task_handler()
+
+        self.assertTrue(processor._idle_event.is_set())
+
+
 if __name__ == "__main__":
     unittest.main()
