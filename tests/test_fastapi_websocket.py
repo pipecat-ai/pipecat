@@ -5,9 +5,17 @@
 #
 
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
-from pipecat.transports.websocket.fastapi import _WebSocketMessageIterator
+import pytest
+from starlette.websockets import WebSocketState
+
+from pipecat.frames.frames import StartFrame
+from pipecat.transports.websocket.fastapi import (
+    FastAPIWebsocketCallbacks,
+    FastAPIWebsocketClient,
+    _WebSocketMessageIterator,
+)
 
 
 class TestWebSocketMessageIterator(unittest.IsolatedAsyncioTestCase):
@@ -64,6 +72,55 @@ class TestWebSocketMessageIterator(unittest.IsolatedAsyncioTestCase):
         messages = [msg async for msg in iterator]
 
         self.assertEqual(len(messages), 0)
+
+
+class TestFastAPIWebsocketClient:
+    """Tests for FastAPIWebsocketClient focusing on _closing flag behaviour."""
+
+    def _make_client(self, ws=None):
+        if ws is None:
+            ws = MagicMock()
+            ws.client_state = WebSocketState.CONNECTED
+            ws.application_state = WebSocketState.CONNECTED
+        callbacks = FastAPIWebsocketCallbacks(
+            on_client_connected=AsyncMock(),
+            on_client_disconnected=AsyncMock(),
+            on_session_timeout=AsyncMock(),
+        )
+        return FastAPIWebsocketClient(ws, callbacks)
+
+    @pytest.mark.asyncio
+    async def test_send_exception_does_not_set_closing(self):
+        """When send raises and the socket is already DISCONNECTED, _closing must stay False."""
+        ws = MagicMock()
+        ws.client_state = WebSocketState.CONNECTED
+        ws.application_state = WebSocketState.DISCONNECTED
+        ws.send_bytes = AsyncMock(side_effect=RuntimeError("connection lost"))
+
+        client = self._make_client(ws)
+        assert not client.is_closing
+
+        await client.send(b"hello")
+
+        # _closing must remain False so the receive loop can still fire on_client_disconnected
+        assert not client.is_closing
+
+    @pytest.mark.asyncio
+    async def test_disconnect_sets_closing(self):
+        """Calling disconnect() must set _closing to True."""
+        ws = MagicMock()
+        ws.client_state = WebSocketState.CONNECTED
+        ws.application_state = WebSocketState.CONNECTED
+        ws.close = AsyncMock()
+
+        client = self._make_client(ws)
+        await client.setup(MagicMock(spec=StartFrame))
+
+        assert not client.is_closing
+
+        await client.disconnect()
+
+        assert client.is_closing
 
 
 if __name__ == "__main__":
