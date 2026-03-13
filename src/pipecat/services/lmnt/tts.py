@@ -129,7 +129,7 @@ class LmntTTSService(InterruptibleTTSService):
         default_settings = self.Settings(
             model="aurora",
             voice=None,
-            language=self.language_to_service_language(language),
+            language=language,
         )
 
         # 2. Apply direct init arg overrides (deprecated)

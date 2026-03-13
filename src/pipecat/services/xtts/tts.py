@@ -117,7 +117,7 @@ class XTTSService(TTSService):
         default_settings = self.Settings(
             model=None,
             voice=None,
-            language=self.language_to_service_language(language),
+            language=language,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
