@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,
     LLMFullResponseStartFrame,
+    OutputImageRawFrame,
     TextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -42,6 +43,18 @@ class MonthFrame(DataFrame):
 
     def __str__(self):
         return f"{self.name}(month: {self.month})"
+
+
+class ImageAudioSync(FrameProcessor):
+    """Marks output image frames to be synchronized with audio playback."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, OutputImageRawFrame):
+            frame.sync_with_audio = True
+
+        await self.push_frame(frame, direction)
 
 
 class MonthPrepender(FrameProcessor):
@@ -129,7 +142,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 sentence_aggregator,  # Aggregates LLM output into full sentences
                 SyncParallelPipeline(  # Run pipelines in parallel aggregating the result
                     [month_prepender, tts],  # Create "Month: sentence" and output audio
-                    [imagegen],  # Generate image
+                    [
+                        imagegen,  # Generate image
+                        ImageAudioSync(),  # Mark image as needing sync output w/audio
+                    ],
                 ),
                 transport.output(),  # Transport output
             ]
