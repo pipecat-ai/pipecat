@@ -43,6 +43,7 @@ try:
     import vonage_video_connector as vonage_video
     from vonage_video_connector.models import (
         AudioData,
+        CaptionsData,
         Connection,
         LoggingSettings,
         Publisher,
@@ -1079,10 +1080,12 @@ class VonageClient:
 
         self._sdk_video_cb_to_loop(async_cb())
 
-    def _on_subscriber_caption_text_cb(self, subscriber: Subscriber, caption_text: str) -> None:
+    def _on_subscriber_caption_text_cb(
+        self, subscriber: Subscriber, caption_data: CaptionsData
+    ) -> None:
         async def async_cb() -> None:
             pipecat_frame = TextFrame(
-                text=caption_text,
+                text=caption_data.text,
             )
             await self._notify_listeners(
                 lambda listener: listener.on_caption_text_in(subscriber, pipecat_frame)
