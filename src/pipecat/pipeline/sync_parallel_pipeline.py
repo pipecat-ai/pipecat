@@ -184,7 +184,7 @@ class SyncParallelPipeline(BasePipeline):
         Returns:
             The list of entry processors.
         """
-        return self._sources
+        return [s["processor"] for s in self._sources]
 
     def processors_with_metrics(self) -> List[FrameProcessor]:
         """Collect processors that can generate metrics from all parallel pipelines.
