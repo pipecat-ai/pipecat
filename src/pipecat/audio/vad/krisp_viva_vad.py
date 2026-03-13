@@ -133,7 +133,13 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
             ValueError: If sample rate is not 8000, 16000, 32000 or 48000 Hz.
             RuntimeError: If VAD session creation fails.
         """
-        if sample_rate != 48000 and sample_rate != 44100 and sample_rate != 32000 and sample_rate != 16000 and sample_rate != 8000:
+        if (
+            sample_rate != 48000
+            and sample_rate != 44100
+            and sample_rate != 32000
+            and sample_rate != 16000
+            and sample_rate != 8000
+        ):
             raise ValueError(
                 f"Krisp VIVA VAD sample rate needs to be 8000, 16000, 32000, 44100 or 48000 (sample rate: {sample_rate})"
             )
