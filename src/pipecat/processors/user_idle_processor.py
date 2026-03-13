@@ -201,9 +201,12 @@ class UserIdleProcessor(FrameProcessor):
         while running:
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
+                # Event was set (activity detected) — clear immediately
+                self._idle_event.clear()
             except asyncio.TimeoutError:
+                # No activity within timeout — trigger callback.
+                # Don't clear the event: if set() was called between the
+                # timeout and now, the next iteration should see it.
                 if not self._interrupted:
                     self._retry_count += 1
                     running = await self._callback(self, self._retry_count)
-            finally:
-                self._idle_event.clear()
