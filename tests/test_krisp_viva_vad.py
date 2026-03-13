@@ -88,9 +88,7 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
         self.krisp_audio_patch.start()
 
         # Patch KrispVivaSDKManager
-        self.sdk_manager_patcher = patch(
-            "pipecat.audio.vad.krisp_viva_vad.KrispVivaSDKManager"
-        )
+        self.sdk_manager_patcher = patch("pipecat.audio.vad.krisp_viva_vad.KrispVivaSDKManager")
         self.mock_sdk_manager = self.sdk_manager_patcher.start()
         self.mock_sdk_manager.acquire = MagicMock()
         self.mock_sdk_manager.release = MagicMock()
