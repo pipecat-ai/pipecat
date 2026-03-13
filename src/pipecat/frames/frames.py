@@ -274,7 +274,15 @@ class OutputImageRawFrame(DataFrame, ImageRawFrame):
     An image that will be shown by the transport. If the transport supports
     multiple video destinations (e.g. multiple video tracks) the destination
     name can be specified in transport_destination.
+
+    Parameters:
+        sync_with_audio: If True, the image is queued with audio frames so
+            it is only displayed after all preceding audio has been sent.
+            Defaults to False (image is displayed immediately when the output
+            transport receives it).
     """
+
+    sync_with_audio: bool = field(default=False, init=False)
 
     def __str__(self):
         pts = format_pts(self.pts)
