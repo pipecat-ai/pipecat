@@ -225,7 +225,7 @@ class SyncParallelPipeline(BasePipeline):
         # this element won't work. Since, we know it should be synchronous we
         # push a SyncFrame. Since frames are ordered we know this frame will be
         # pushed after the synchronous processor has pushed its data allowing us
-        # to synchrnonize all the internal pipelines by waiting for the
+        # to synchronize all the internal pipelines by waiting for the
         # SyncFrame in all of them.
         async def wait_for_sync(
             obj, main_queue: asyncio.Queue, frame: Frame, direction: FrameDirection
