@@ -345,13 +345,25 @@ class VonageClient:
             await self.disconnect()
 
         if self._event_task and self._task_manager:
-            await self._task_manager.cancel_task(self._event_task)
+            try:
+                await self._task_manager.cancel_task(self._event_task)
+                await self._event_task
+            except asyncio.CancelledError:
+                pass
             self._event_task = None
         if self._audio_task and self._task_manager:
-            await self._task_manager.cancel_task(self._audio_task)
+            try:
+                await self._task_manager.cancel_task(self._audio_task)
+                await self._audio_task
+            except asyncio.CancelledError:
+                pass
             self._audio_task = None
         if self._video_task and self._task_manager:
-            await self._task_manager.cancel_task(self._video_task)
+            try:
+                await self._task_manager.cancel_task(self._video_task)
+                await self._video_task
+            except asyncio.CancelledError:
+                pass
             self._video_task = None
 
     def add_listener(self, listener: VonageClientListener) -> int:
