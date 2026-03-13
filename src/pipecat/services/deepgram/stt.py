@@ -247,6 +247,45 @@ class DeepgramSTTSettings(STTSettings):
                 del self.extra[key]
 
 
+def _derive_deepgram_urls(base_url: str) -> tuple[str, str]:
+    """Derive paired WebSocket and HTTP URLs from a single base URL.
+
+    The Deepgram SDK client requires both a WebSocket URL (for streaming)
+    and an HTTP URL (for REST calls). This helper lets developers provide
+    a single ``base_url`` and consistently derives both, preserving the
+    security level they chose. Useful for air-gapped or private deployments
+    where insecure schemes (ws:// / http://) are acceptable.
+
+    Accepted inputs:
+        - ``wss://`` or ``https://`` — secure (paired as wss + https)
+        - ``ws://`` or ``http://`` — insecure (paired as ws + http)
+        - Bare hostname (no scheme) — defaults to secure
+        - Unrecognized scheme — logs a warning, defaults to secure
+
+    Args:
+        base_url: Host with optional scheme, port, and path.
+
+    Returns:
+        A (ws_url, http_url) tuple with consistent schemes.
+    """
+    known_schemes = ("wss://", "https://", "ws://", "http://")
+    if "://" in base_url:
+        scheme, host = base_url.split("://", 1)
+        scheme += "://"
+        if scheme not in known_schemes:
+            logger.warning(
+                f"Unrecognized scheme in base_url '{base_url}', defaulting to wss:// / https://"
+            )
+    else:
+        scheme = ""
+        host = base_url
+
+    insecure = scheme in ("ws://", "http://")
+    ws_url = f"{'ws' if insecure else 'wss'}://{host}"
+    http_url = f"{'http' if insecure else 'https'}://{host}"
+    return ws_url, http_url
+
+
 class DeepgramSTTService(STTService):
     """Deepgram speech-to-text service.
 
@@ -445,8 +484,7 @@ class DeepgramSTTService(STTService):
             try:
                 from deepgram import DeepgramClientEnvironment
 
-                ws_url = base_url if base_url.startswith("wss://") else f"wss://{base_url}"
-                http_url = base_url if base_url.startswith("https://") else f"https://{base_url}"
+                ws_url, http_url = _derive_deepgram_urls(base_url)
                 environment = DeepgramClientEnvironment(
                     base=http_url,
                     production=ws_url,
