@@ -43,18 +43,15 @@ R = TypeVar("R")
 
 
 def _get_model_name(service) -> str:
-    """Get the model name from a service instance.
+    """Get the requested model name from a service instance.
 
-    This is a bit of a mess — there were multiple places a model name could live.
-    Soon, self._settings should be the only source of truth about model name.
-    In fact...it might already be the case, but juuuuust to be safe, we'll
-    check all the places we used to store it.
+    Returns the user-configured request model name (for gen_ai.request.model).
+    API-response-provided model names (_full_model_name) are handled separately
+    as gen_ai.response.model. We check multiple attribute locations for
+    backwards compatibility.
     """
     return (
-        # Some services store an API-response-provided detailed "full" name,
-        # which is distinct from the user-provided model name
-        getattr(service, "_full_model_name", None)
-        or getattr(getattr(service, "_settings", None), "model", None)
+        getattr(getattr(service, "_settings", None), "model", None)
         or getattr(service, "model_name", None)
         or getattr(service, "_model_name", None)
         or "unknown"
@@ -528,6 +525,10 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                                 "stream": True,  # Most LLM services use streaming
                                 "parameters": params,
                             }
+
+                            full_model_name = getattr(self, "_full_model_name", None)
+                            if full_model_name:
+                                attribute_kwargs["response_model"] = full_model_name
 
                             # Add optional attributes only if they exist
                             if serialized_messages:

@@ -40,6 +40,10 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven
 from pipecat.utils.tracing.service_decorators import traced_llm
+from pipecat.utils.tracing.setup import is_tracing_available
+
+if is_tracing_available():
+    from opentelemetry import trace
 
 
 @dataclass
@@ -255,6 +259,11 @@ class BaseOpenAILLMService(LLMService):
             full_model_name: The full name of the AI model to use.
         """
         self._full_model_name = full_model_name
+
+        if is_tracing_available() and "trace" in globals():
+            current_span = trace.get_current_span()
+            if current_span.is_recording():
+                current_span.set_attribute("gen_ai.response.model", full_model_name)
 
     def get_full_model_name(self):
         """Get the current full model name.
