@@ -187,6 +187,7 @@ def add_llm_span_attributes(
     span: "Span",
     service_name: str,
     model: str,
+    response_model: Optional[str] = None,
     stream: bool = True,
     messages: Optional[str] = None,
     output: Optional[str] = None,
@@ -204,7 +205,8 @@ def add_llm_span_attributes(
     Args:
         span: The span to add attributes to.
         service_name: Name of the LLM service (e.g., "openai").
-        model: Model name/identifier.
+        model: Requested model name/identifier.
+        response_model: Actual model name returned by the provider.
         stream: Whether streaming is enabled.
         messages: JSON-serialized messages.
         output: Aggregated output text from the LLM.
@@ -220,6 +222,8 @@ def add_llm_span_attributes(
     # Add standard attributes
     span.set_attribute("gen_ai.system", _get_gen_ai_system_from_service_name(service_name))
     span.set_attribute("gen_ai.request.model", model)
+    if response_model:
+        span.set_attribute("gen_ai.response.model", response_model)
     span.set_attribute("gen_ai.operation.name", "chat")
     span.set_attribute("gen_ai.output.type", "text")
     span.set_attribute("stream", stream)
