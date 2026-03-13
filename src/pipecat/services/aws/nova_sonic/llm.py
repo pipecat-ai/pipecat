@@ -12,6 +12,7 @@ bidirectional audio streaming, text generation, and function calling capabilitie
 
 import asyncio
 import base64
+import concurrent.futures
 import json
 import time
 import uuid
@@ -50,6 +51,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.aws.nova_sonic.session_continuation import (
+    SessionContinuationHelper,
+    SessionContinuationParams,
+)
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.time import time_now_iso8601
@@ -257,6 +262,7 @@ class AWSNovaSonicLLMService(LLMService):
         settings: Settings | None = None,
         system_instruction: str | None = None,
         tools: ToolsSchema | None = None,
+        session_continuation: SessionContinuationParams | None = None,
         **kwargs,
     ):
         """Initializes the AWS Nova Sonic LLM service.
@@ -300,6 +306,9 @@ class AWSNovaSonicLLMService(LLMService):
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMService.Settings(system_instruction=...)`` instead.
             tools: Available tools/functions for the model to use.
+            session_continuation: Configuration for automatic session continuation.
+                When enabled (the default), sessions are seamlessly rotated before
+                the AWS time limit (~8 minutes) with no user-perceptible interruption.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -406,6 +415,18 @@ class AWSNovaSonicLLMService(LLMService):
         self._user_text_buffer = ""
         self._completed_tool_calls = set()
         self._audio_input_started = False
+
+        # Session continuation helper. The service itself implements the
+        # NovaSonicSessionSender protocol (see methods below) so the helper can
+        # target either the current or next session without coupling to the
+        # service's internal config.
+        sc_params = session_continuation or SessionContinuationParams()
+        self._sc = SessionContinuationHelper(
+            sc_params,
+            sender=self,
+            create_task=lambda coro: self.create_task(coro),
+            cancel_task=lambda task, timeout: self.cancel_task(task, timeout=timeout),
+        )
         self._pending_speculative_text: str | None = None
 
         file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
@@ -533,6 +554,16 @@ class AWSNovaSonicLLMService(LLMService):
         if self._triggering_assistant_response:
             return
 
+        # Session continuation: let the helper buffer audio during the transition window
+        self._sc.on_audio_input(frame.audio)
+
+        # Stop sending audio to the old stream once a handoff is in progress.
+        # Audio is still being buffered above and will be replayed to the new
+        # session. Matches reference: old session state set to CLOSING stops
+        # audio routing before close events are sent.
+        if self._sc.handoff_in_progress:
+            return
+
         await self._send_user_audio_event(frame.audio)
 
     async def _handle_interruption_frame(self):
@@ -555,7 +586,7 @@ class AWSNovaSonicLLMService(LLMService):
             self._input_audio_content_name = str(uuid.uuid4())
 
             # Create the client
-            self._client = self._create_client()
+            self._client = self.create_client()
 
             # Start the bidirectional stream
             self._stream = await self._client.invoke_model_with_bidirectional_stream(
@@ -643,13 +674,21 @@ class AWSNovaSonicLLMService(LLMService):
                 text=last_user_message.text, role=last_user_message.role, interactive=True
             )
 
-        # Start receiving events
-        self._receive_task = self.create_task(self._receive_task_handler())
+        # Start receiving events (bound to the current stream)
+        self._receive_task = self.create_task(self._receive_task_handler(stream=self._stream))
 
         # Record finished connecting time (must be done before sending assistant response trigger)
         self._connected_time = time.time()
 
         logger.info("Finished connecting")
+
+        # Notify session continuation helper of connection and start monitoring
+        self._sc.set_connected(self._connected_time)
+        # Seed the helper's history with initial context messages (these wouldn't be
+        # captured via real-time FINAL text events since they pre-date the session)
+        for message in llm_connection_params["messages"]:
+            self._sc.seed_history(message.role.value, message.text)
+        self._sc.start_monitor()
 
         # If we need to, send assistant response trigger (depends on self._connected_time)
         if self._triggering_assistant_response:
@@ -705,11 +744,17 @@ class AWSNovaSonicLLMService(LLMService):
             self._audio_input_started = False
             self._pending_speculative_text = None
 
+            # Stop session continuation monitor and notify of disconnect
+            await self._sc.stop_monitor()
+            await self._sc.cleanup_next_session()
+            self._sc.set_disconnected()
+
             logger.info("Finished disconnecting")
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
 
-    def _create_client(self) -> BedrockRuntimeClient:
+    def create_client(self) -> BedrockRuntimeClient:
+        """Create a new Bedrock runtime client (NovaSonicSessionSender protocol)."""
         config = Config(
             endpoint_uri=f"https://bedrock-runtime.{self._region}.amazonaws.com",
             region=self._region,
@@ -720,6 +765,11 @@ class AWSNovaSonicLLMService(LLMService):
             auth_schemes={"aws.auth#sigv4": SigV4AuthScheme(service="bedrock")},
         )
         return BedrockRuntimeClient(config=config)
+
+    @property
+    def audio_config(self) -> AudioConfig:
+        """Return the audio configuration (NovaSonicSessionSender protocol)."""
+        return self._audio_config
 
     def _is_first_generation_sonic_model(self) -> bool:
         # Nova Sonic (the older model) is identified by "amazon.nova-sonic-v1:0"
@@ -737,98 +787,26 @@ class AWSNovaSonicLLMService(LLMService):
     #
     # LLM communication: input events (pipecat -> LLM)
     #
+    # These methods operate on the current session. They're thin wrappers over
+    # the NovaSonicSessionSender protocol methods (which accept an explicit
+    # stream/prompt_name), reusing the same Nova Sonic wire-format serialization
+    # for both the current session and next-session setup during a handoff.
+    #
 
     async def _send_session_start_event(self):
-        turn_detection_config = (
-            f""",
-              "turnDetectionConfiguration": {{
-                "endpointingSensitivity": "{self._settings.endpointing_sensitivity}"
-              }}"""
-            if self._settings.endpointing_sensitivity
-            else ""
-        )
-
-        session_start = f"""
-        {{
-          "event": {{
-            "sessionStart": {{
-              "inferenceConfiguration": {{
-                "maxTokens": {self._settings.max_tokens},
-                "topP": {self._settings.top_p},
-                "temperature": {self._settings.temperature}
-              }}{turn_detection_config}
-            }}
-          }}
-        }}
-        """
-        await self._send_client_event(session_start)
+        await self._send_client_event(self.build_session_start_json())
 
     async def _send_prompt_start_event(self, tools: list[Any]):
         if not self._prompt_name:
             return
-
-        tools_config = (
-            f""",
-        "toolUseOutputConfiguration": {{
-          "mediaType": "application/json"
-        }},
-        "toolConfiguration": {{
-          "tools": {json.dumps(tools)}
-        }}
-        """
-            if tools
-            else ""
-        )
-
-        prompt_start = f'''
-        {{
-          "event": {{
-            "promptStart": {{
-              "promptName": "{self._prompt_name}",
-              "textOutputConfiguration": {{
-                "mediaType": "text/plain"
-              }},
-              "audioOutputConfiguration": {{
-                "mediaType": "audio/lpcm",
-                "sampleRateHertz": {self._audio_config.output_sample_rate},
-                "sampleSizeBits": {self._audio_config.output_sample_size},
-                "channelCount": {self._audio_config.output_channel_count},
-                "voiceId": "{self._settings.voice}",
-                "encoding": "base64",
-                "audioType": "SPEECH"
-              }}{tools_config}
-            }}
-          }}
-        }}
-        '''
-        await self._send_client_event(prompt_start)
+        await self.send_prompt_start(tools, self._prompt_name, self._stream)
 
     async def _send_audio_input_start_event(self):
         if not self._prompt_name:
             return
-
-        audio_content_start = f'''
-        {{
-            "event": {{
-                "contentStart": {{
-                    "promptName": "{self._prompt_name}",
-                    "contentName": "{self._input_audio_content_name}",
-                    "type": "AUDIO",
-                    "interactive": true,
-                    "role": "USER",
-                    "audioInputConfiguration": {{
-                        "mediaType": "audio/lpcm",
-                        "sampleRateHertz": {self._audio_config.input_sample_rate},
-                        "sampleSizeBits": {self._audio_config.input_sample_size},
-                        "channelCount": {self._audio_config.input_channel_count},
-                        "audioType": "SPEECH",
-                        "encoding": "base64"
-                    }}
-                }}
-            }}
-        }}
-        '''
-        await self._send_client_event(audio_content_start)
+        await self.send_audio_input_start(
+            self._prompt_name, self._input_audio_content_name, self._stream
+        )
         self._audio_input_started = True
 
     async def _send_text_event(self, text: str, role: Role, interactive: bool = False):
@@ -843,70 +821,14 @@ class AWSNovaSonicLLMService(LLMService):
         """
         if not self._stream or not self._prompt_name or not text:
             return
-
-        content_name = str(uuid.uuid4())
-
-        text_content_start = f'''
-        {{
-            "event": {{
-                "contentStart": {{
-                    "promptName": "{self._prompt_name}",
-                    "contentName": "{content_name}",
-                    "type": "TEXT",
-                    "interactive": {json.dumps(interactive)},
-                    "role": "{role.value}",
-                    "textInputConfiguration": {{
-                        "mediaType": "text/plain"
-                    }}
-                }}
-            }}
-        }}
-        '''
-        await self._send_client_event(text_content_start)
-
-        escaped_text = json.dumps(text)  # includes quotes
-        text_input = f'''
-        {{
-            "event": {{
-                "textInput": {{
-                    "promptName": "{self._prompt_name}",
-                    "contentName": "{content_name}",
-                    "content": {escaped_text}
-                }}
-            }}
-        }}
-        '''
-        await self._send_client_event(text_input)
-
-        text_content_end = f'''
-        {{
-            "event": {{
-                "contentEnd": {{
-                    "promptName": "{self._prompt_name}",
-                    "contentName": "{content_name}"
-                }}
-            }}
-        }}
-        '''
-        await self._send_client_event(text_content_end)
+        await self.send_text(text, role.value, self._prompt_name, self._stream, interactive)
 
     async def _send_user_audio_event(self, audio: bytes):
         if not self._stream or not self._audio_input_started:
             return
-
-        blob = base64.b64encode(audio)
-        audio_event = f'''
-        {{
-            "event": {{
-                "audioInput": {{
-                    "promptName": "{self._prompt_name}",
-                    "contentName": "{self._input_audio_content_name}",
-                    "content": "{blob.decode("utf-8")}"
-                }}
-            }}
-        }}
-        '''
-        await self._send_client_event(audio_event)
+        await self.send_audio(
+            audio, self._prompt_name, self._input_audio_content_name, self._stream
+        )
 
     async def _send_session_end_events(self):
         if not self._stream or not self._prompt_name:
@@ -997,6 +919,248 @@ class AWSNovaSonicLLMService(LLMService):
         await self._stream.input_stream.send(event)
 
     #
+    # NovaSonicSessionSender protocol implementation
+    #
+    # These methods expose the Nova Sonic wire protocol to the session
+    # continuation helper. Each accepts an explicit ``stream`` / ``prompt_name``
+    # so the helper can target either the current session or a pre-created
+    # next session during a handoff.
+    #
+
+    def build_session_start_json(self) -> str:
+        """Build the ``sessionStart`` event JSON.
+
+        Shared between the current and next session setup.
+        """
+        turn_detection_config = (
+            f""",
+              "turnDetectionConfiguration": {{
+                "endpointingSensitivity": "{self._settings.endpointing_sensitivity}"
+              }}"""
+            if self._settings.endpointing_sensitivity
+            else ""
+        )
+        return f"""
+        {{
+          "event": {{
+            "sessionStart": {{
+              "inferenceConfiguration": {{
+                "maxTokens": {self._settings.max_tokens},
+                "topP": {self._settings.top_p},
+                "temperature": {self._settings.temperature}
+              }}{turn_detection_config}
+            }}
+          }}
+        }}
+        """
+
+    async def open_stream(self, client):
+        """Open a bidirectional stream on the given client."""
+        return await client.invoke_model_with_bidirectional_stream(
+            InvokeModelWithBidirectionalStreamOperationInput(model_id=self._settings.model)
+        )
+
+    async def send_event(self, event_json: str, stream):
+        """Send a raw event JSON to the given stream."""
+        if not stream:
+            return
+        event = InvokeModelWithBidirectionalStreamInputChunk(
+            value=BidirectionalInputPayloadPart(bytes_=event_json.encode("utf-8"))
+        )
+        await stream.input_stream.send(event)
+
+    async def send_text(
+        self,
+        text: str,
+        role: str,
+        prompt_name: str,
+        stream,
+        interactive: bool,
+    ):
+        """Send a text content block (contentStart/textInput/contentEnd) to the given stream."""
+        if not text or not stream or not prompt_name:
+            return
+        content_name = str(uuid.uuid4())
+        escaped_text = json.dumps(text)
+
+        content_start = f'''
+        {{
+            "event": {{
+                "contentStart": {{
+                    "promptName": "{prompt_name}",
+                    "contentName": "{content_name}",
+                    "type": "TEXT",
+                    "interactive": {json.dumps(interactive)},
+                    "role": "{role}",
+                    "textInputConfiguration": {{
+                        "mediaType": "text/plain"
+                    }}
+                }}
+            }}
+        }}
+        '''
+        await self.send_event(content_start, stream)
+
+        text_input = f'''
+        {{
+            "event": {{
+                "textInput": {{
+                    "promptName": "{prompt_name}",
+                    "contentName": "{content_name}",
+                    "content": {escaped_text}
+                }}
+            }}
+        }}
+        '''
+        await self.send_event(text_input, stream)
+
+        content_end = f'''
+        {{
+            "event": {{
+                "contentEnd": {{
+                    "promptName": "{prompt_name}",
+                    "contentName": "{content_name}"
+                }}
+            }}
+        }}
+        '''
+        await self.send_event(content_end, stream)
+
+    async def send_audio_input_start(self, prompt_name: str, content_name: str, stream):
+        """Send an audio input ``contentStart`` to the given stream."""
+        event_json = f'''
+        {{
+            "event": {{
+                "contentStart": {{
+                    "promptName": "{prompt_name}",
+                    "contentName": "{content_name}",
+                    "type": "AUDIO",
+                    "interactive": true,
+                    "role": "USER",
+                    "audioInputConfiguration": {{
+                        "mediaType": "audio/lpcm",
+                        "sampleRateHertz": {self._audio_config.input_sample_rate},
+                        "sampleSizeBits": {self._audio_config.input_sample_size},
+                        "channelCount": {self._audio_config.input_channel_count},
+                        "audioType": "SPEECH",
+                        "encoding": "base64"
+                    }}
+                }}
+            }}
+        }}
+        '''
+        await self.send_event(event_json, stream)
+
+    async def send_audio(self, audio: bytes, prompt_name: str, content_name: str, stream):
+        """Send an ``audioInput`` event to the given stream."""
+        blob = base64.b64encode(audio)
+        event_json = f'''
+        {{
+            "event": {{
+                "audioInput": {{
+                    "promptName": "{prompt_name}",
+                    "contentName": "{content_name}",
+                    "content": "{blob.decode("utf-8")}"
+                }}
+            }}
+        }}
+        '''
+        await self.send_event(event_json, stream)
+
+    async def send_prompt_start(self, tools: list, prompt_name: str, stream):
+        """Send a ``promptStart`` event to the given stream."""
+        tools_config = (
+            f""",
+        "toolUseOutputConfiguration": {{
+          "mediaType": "application/json"
+        }},
+        "toolConfiguration": {{
+          "tools": {json.dumps(tools)}
+        }}
+        """
+            if tools
+            else ""
+        )
+        event_json = f'''
+        {{
+          "event": {{
+            "promptStart": {{
+              "promptName": "{prompt_name}",
+              "textOutputConfiguration": {{
+                "mediaType": "text/plain"
+              }},
+              "audioOutputConfiguration": {{
+                "mediaType": "audio/lpcm",
+                "sampleRateHertz": {self._audio_config.output_sample_rate},
+                "sampleSizeBits": {self._audio_config.output_sample_size},
+                "channelCount": {self._audio_config.output_channel_count},
+                "voiceId": "{self._settings.voice}",
+                "encoding": "base64",
+                "audioType": "SPEECH"
+              }}{tools_config}
+            }}
+          }}
+        }}
+        '''
+        await self.send_event(event_json, stream)
+
+    def get_setup_params(self):
+        """Return ``(system_instruction, tools)`` for the next session setup."""
+        if not self._context:
+            return None, []
+        adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
+        llm_params = adapter.get_llm_invocation_params(
+            self._context, system_instruction=self._settings.system_instruction
+        )
+        tools = (
+            llm_params["tools"] if llm_params["tools"] else adapter.from_standard_tools(self._tools)
+        )
+        return llm_params["system_instruction"], tools
+
+    async def _run_sc_handoff(self):
+        """Swap the current session with the pre-created next one."""
+        # Snapshot the old session's resources before the helper swaps them out
+        old_client = self._client
+        old_stream = self._stream
+        old_receive_task = self._receive_task
+        old_prompt_name = self._prompt_name
+        old_input_audio_content_name = self._input_audio_content_name
+
+        next_session = await self._sc.execute_handoff()
+        if not next_session:
+            return
+
+        # Swap in the new session's stream and names. The helper already sent
+        # sessionStart, promptStart, system instruction, conversation history,
+        # audioInputStart, and buffered audio to the new stream.
+        self._client = next_session.client
+        self._stream = next_session.stream
+        self._prompt_name = next_session.prompt_name
+        self._input_audio_content_name = next_session.input_audio_content_name
+        self._connected_time = time.time()
+        self._audio_input_started = True
+
+        # Start the main receive loop on the new stream (bound to that stream)
+        self._receive_task = self.create_task(self._receive_task_handler(stream=self._stream))
+
+        # Update the helper's connected time so the threshold timer restarts
+        self._sc.set_connected(self._connected_time)
+
+        logger.info("Session continuation: swap complete, closing old session in background")
+
+        # Close the old session in the background — do not block the pipeline
+        self.create_task(
+            self._sc.close_old_session(
+                old_client,
+                old_stream,
+                old_receive_task,
+                old_prompt_name,
+                old_input_audio_content_name,
+            ),
+            name="sc_close_old_session",
+        )
+
+    #
     # LLM communication: output events (LLM -> pipecat)
     #
 
@@ -1011,11 +1175,28 @@ class AWSNovaSonicLLMService(LLMService):
     # Each piece of content is wrapped by "contentStart" and "contentEnd" events. The content is
     # delivered sequentially: one piece of content will end before another starts.
     # The overall completion is wrapped by "completionStart" and "completionEnd" events.
-    async def _receive_task_handler(self):
+    async def _receive_task_handler(self, stream=None):
+        # Bind to the specific stream given at creation time.
+        # Do NOT re-read ``self._stream`` in the loop — during a session
+        # continuation handoff, ``self._stream`` gets swapped to a new session,
+        # and reading from the wrong stream here would cause two receive loops
+        # to compete on the same stream (yielding "Invalid input request" from
+        # the AWS event stream layer).
+        if stream is None:
+            stream = self._stream
         try:
-            while self._stream and not self._disconnecting:
-                output = await self._stream.await_output()
-                result = await output[1].receive()
+            while stream and not self._disconnecting:
+                try:
+                    output = await stream.await_output()
+                    result = await output[1].receive()
+                except concurrent.futures.InvalidStateError:
+                    break
+
+                # After a session continuation handoff, this receive task
+                # is stale — stop processing events so close_old_session
+                # can drain the stream without interference.
+                if stream is not self._stream:
+                    return
 
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")
@@ -1046,8 +1227,12 @@ class AWSNovaSonicLLMService(LLMService):
                             await self._handle_completion_end_event(event_json)
         except Exception as e:
             if self._disconnecting:
-                # Errors are kind of expected while disconnecting, so just
-                # ignore them and do nothing
+                return
+            # If this receive task is for a stale (old) stream that was replaced
+            # by a session continuation handoff, don't reset the conversation —
+            # the new session is already active on self._stream.
+            if stream is not self._stream:
+                logger.debug(f"Session continuation: old receive task error (expected): {e}")
                 return
             await self.push_error(error_msg=f"Error processing responses: {e}", exception=e)
             if self._wants_connection:
@@ -1083,6 +1268,16 @@ class AWSNovaSonicLLMService(LLMService):
                     self._assistant_is_responding = True
                     await self._report_user_transcription_ended()  # Consider user turn over
                     await self._report_assistant_response_started()
+            elif content.type == ContentType.AUDIO:
+                # Session continuation: AUDIO contentStart from assistant is the
+                # trigger to start buffering user audio and creating the next session
+                # (if we're past the threshold).
+                await self._sc.on_assistant_audio_started()
+        elif content.role == Role.USER:
+            # Session continuation: USER contentStart during a forced transition
+            # (no assistant response yet) should complete the handoff immediately.
+            if self._sc.on_user_content_started():
+                self.create_task(self._run_sc_handoff(), name="sc_handoff")
 
     async def _handle_text_output_event(self, event_json):
         if not self._content_being_received:  # should never happen
@@ -1094,6 +1289,12 @@ class AWSNovaSonicLLMService(LLMService):
         # Bookkeeping: augment the current content being received with text
         # Assumption: only one text content per content block
         content.text_content = text_content
+
+        # Session continuation: track speculative/final text counts for completion signal
+        self._sc.on_text_output(
+            content.role.value,
+            content.text_stage.value if content.text_stage else None,
+        )
 
     async def _handle_audio_output_event(self, event_json):
         if not self._content_being_received:  # should never happen
@@ -1158,12 +1359,21 @@ class AWSNovaSonicLLMService(LLMService):
                 if stop_reason != "INTERRUPTED":
                     if content.text_stage == TextStage.SPECULATIVE:
                         await self._report_llm_text(content.text_content)
-                elif self._assistant_is_responding:
-                    # TEXT INTERRUPTED with no audio means the user interrupted
-                    # before audio started. End the response here since no AUDIO
-                    # contentEnd will arrive.
-                    self._assistant_is_responding = False
-                    await self._report_assistant_response_ended()
+                    # Session continuation: ASSISTANT FINAL text — add to history
+                    # and check for completion signal (speculative/final counts match)
+                    if content.text_stage == TextStage.FINAL:
+                        if self._sc.on_content_end_assistant_final_text(content.text_content):
+                            self.create_task(self._run_sc_handoff(), name="sc_handoff")
+                else:
+                    if self._assistant_is_responding:
+                        # TEXT INTERRUPTED before audio started means no AUDIO
+                        # contentEnd will arrive — end the response here.
+                        self._assistant_is_responding = False
+                        await self._report_assistant_response_ended()
+                    # Session continuation: TEXT INTERRUPTED is a completion
+                    # signal regardless of audio state (reference lines 650-654)
+                    if self._sc.on_content_end_text_interrupted():
+                        self.create_task(self._run_sc_handoff(), name="sc_handoff")
             elif content.type == ContentType.AUDIO:
                 # Emit deferred TTSTextFrame after all audio chunks have been sent
                 await self._report_tts_text()
@@ -1177,9 +1387,13 @@ class AWSNovaSonicLLMService(LLMService):
                 if content.text_stage == TextStage.FINAL:
                     # User transcription text added
                     await self._report_user_transcription_text_added(content.text_content)
+                    # Session continuation: add to real-time history
+                    self._sc.on_content_end_user_final_text(content.text_content)
 
     async def _handle_completion_end_event(self, _):
-        pass
+        # Session continuation: completionEnd is a fallback completion signal
+        if self._sc.on_completion_end():
+            self.create_task(self._run_sc_handoff(), name="sc_handoff")
 
     #
     # assistant response reporting
