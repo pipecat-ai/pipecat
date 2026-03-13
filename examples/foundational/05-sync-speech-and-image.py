@@ -31,6 +31,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService
 from pipecat.services.fal.image import FalImageGenService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.tts_service import TextAggregationMode
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
@@ -114,6 +115,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             settings=CartesiaHttpTTSService.Settings(
                 voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
             ),
+            # No need to aggregate by sentences (the default), as we already know we're getting full sentences
+            # (Otherwise the service will unnecessarily wait for follow-up input to confirm the sentence is complete,
+            #  which, sadly, actually breaks the synchronization mechanism)
+            text_aggregation_mode=TextAggregationMode.TOKEN,
         )
 
         imagegen = FalImageGenService(
