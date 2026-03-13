@@ -82,7 +82,10 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
 
             self._session = None
             self._frame_duration_ms = frame_duration
-            self._samples_per_frame = frame_duration * sample_rate / 1000
+            self._samples_per_frame = None
+            # Calculate samples per frame if sample_rate is provided
+            if sample_rate is not None:
+                self._samples_per_frame = int((sample_rate * frame_duration) / 1000)
 
             # Acquire SDK reference (will initialize on first call)
             KrispVivaSDKManager.acquire()
@@ -154,7 +157,26 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
         super().set_sample_rate(sample_rate)
 
     def num_frames_required(self) -> int:
-        pass
+        """Get the number of audio frames required for analysis.
+
+        Returns:
+            Number of frames (samples) needed for VAD processing based on
+            current sample rate and frame duration.
+        """
+        # If already calculated from session creation, return it
+        if self._samples_per_frame is not None:
+            return self._samples_per_frame
+
+        # Calculate from current sample rate if available
+        if self.sample_rate > 0:
+            return int((self.sample_rate * self._frame_duration_ms) / 1000)
+
+        # Fallback: calculate from initial sample rate if provided
+        if self._init_sample_rate is not None:
+            return int((self._init_sample_rate * self._frame_duration_ms) / 1000)
+
+        # Default fallback: assume 16kHz @ 10ms = 160 samples
+        return int((16000 * self._frame_duration_ms) / 1000)
 
     def voice_confidence(self, buffer) -> float:
         """Calculate voice activity confidence for the given audio buffer.
