@@ -633,7 +633,7 @@ class FrameProcessor(BaseObject):
 
     async def pause_processing_frames(self):
         """Pause processing of queued frames."""
-        logger.trace(f"{self}: pausing frame processing")
+        logger.debug(f"{self}: pausing frame processing")
         self.__should_block_frames = True
         if self.__process_event:
             self.__process_event.clear()
@@ -647,7 +647,7 @@ class FrameProcessor(BaseObject):
 
     async def resume_processing_frames(self):
         """Resume processing of queued frames."""
-        logger.trace(f"{self}: resuming frame processing")
+        logger.debug(f"{self}: resuming frame processing")
         if self.__process_event:
             self.__process_event.set()
 
