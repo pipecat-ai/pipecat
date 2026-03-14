@@ -166,7 +166,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize text-to-speech service
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY"),
-        voice_id="pNInz6obpgDQGcFmaJgB",
+        settings=ElevenLabsTTSService.Settings(
+            voice="pNInz6obpgDQGcFmaJgB",
+        ),
     )
 
     # =====================================================================
@@ -223,13 +225,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize LLM service
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-mini",
-        system_instruction="""You are a personal assistant. You can remember things about the person you are talking to.
+        settings=OpenAILLMService.Settings(
+            model="gpt-4o-mini",
+            system_instruction="""You are a personal assistant. You can remember things about the person you are talking to.
                         Some Guidelines:
                         - Make sure your responses are friendly yet short and concise.
                         - If the user asks you to remember something, make sure to remember it.
                         - Greet the user by their name if you know about it.
                     """,
+        ),
     )
 
     # Set up conversation context and management

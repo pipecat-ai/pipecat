@@ -132,7 +132,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_instruction,
+        settings=GeminiLiveLLMService.Settings(
+            system_instruction=system_instruction,
+        ),
         tools=tools,
     )
 

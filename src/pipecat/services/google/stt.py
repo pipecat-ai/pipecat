@@ -36,7 +36,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -360,7 +360,7 @@ def language_to_google_stt_language(language: Language) -> Optional[str]:
 
 @dataclass
 class GoogleSTTSettings(STTSettings):
-    """Settings for Google Cloud Speech-to-Text V2.
+    """Settings for GoogleSTTService.
 
     Parameters:
         languages: List of ``Language`` enums for recognition
@@ -414,6 +414,7 @@ class GoogleSTTService(STTService):
         ValueError: If project ID is not found in credentials.
     """
 
+    Settings = GoogleSTTSettings
     _settings: GoogleSTTSettings
 
     # Google Cloud's STT service has a connection time limit of 5 minutes per stream.
@@ -424,6 +425,9 @@ class GoogleSTTService(STTService):
 
     class InputParams(BaseModel):
         """Configuration parameters for Google Speech-to-Text.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=GoogleSTTSettings(...)`` instead.
 
         Parameters:
             languages: Single language or list of recognition languages. First language is primary.
@@ -484,6 +488,7 @@ class GoogleSTTService(STTService):
         location: str = "global",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[GoogleSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = GOOGLE_TTFS_P99,
         **kwargs,
     ):
@@ -495,30 +500,61 @@ class GoogleSTTService(STTService):
             location: Google Cloud location (e.g., "global", "us-central1").
             sample_rate: Audio sample rate in Hertz.
             params: Configuration parameters for the service.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleSTTSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                ``params``, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        params = params or GoogleSTTService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = GoogleSTTSettings(
+            language=None,
+            languages=[Language.EN_US],
+            language_codes=None,
+            model="latest_long",
+            use_separate_recognition_per_channel=False,
+            enable_automatic_punctuation=True,
+            enable_spoken_punctuation=False,
+            enable_spoken_emojis=False,
+            profanity_filter=False,
+            enable_word_time_offsets=False,
+            enable_word_confidence=False,
+            enable_interim_results=True,
+            enable_voice_activity_events=False,
+        )
+
+        # 2. No direct init arg overrides
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GoogleSTTSettings)
+            if not settings:
+                default_settings.languages = list(params.language_list)
+                default_settings.model = params.model
+                default_settings.use_separate_recognition_per_channel = (
+                    params.use_separate_recognition_per_channel
+                )
+                default_settings.enable_automatic_punctuation = params.enable_automatic_punctuation
+                default_settings.enable_spoken_punctuation = params.enable_spoken_punctuation
+                default_settings.enable_spoken_emojis = params.enable_spoken_emojis
+                default_settings.profanity_filter = params.profanity_filter
+                default_settings.enable_word_time_offsets = params.enable_word_time_offsets
+                default_settings.enable_word_confidence = params.enable_word_confidence
+                default_settings.enable_interim_results = params.enable_interim_results
+                default_settings.enable_voice_activity_events = params.enable_voice_activity_events
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=GoogleSTTSettings(
-                language=None,
-                languages=list(params.language_list),
-                language_codes=None,
-                model=params.model,
-                use_separate_recognition_per_channel=params.use_separate_recognition_per_channel,
-                enable_automatic_punctuation=params.enable_automatic_punctuation,
-                enable_spoken_punctuation=params.enable_spoken_punctuation,
-                enable_spoken_emojis=params.enable_spoken_emojis,
-                profanity_filter=params.profanity_filter,
-                enable_word_time_offsets=params.enable_word_time_offsets,
-                enable_word_confidence=params.enable_word_confidence,
-                enable_interim_results=params.enable_interim_results,
-                enable_voice_activity_events=params.enable_voice_activity_events,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -618,7 +654,7 @@ class GoogleSTTService(STTService):
     async def set_languages(self, languages: List[Language]):
         """Update the service's recognition languages.
 
-        .. deprecated::
+        .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame`` with ``GoogleSTTSettings(languages=...)``
             instead.
 

@@ -183,12 +183,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="f9836c6e-a0bd-460e-9d3c-f7299fa60f94",  # Southern Lady
+        settings=CartesiaTTSService.Settings(
+            voice="f9836c6e-a0bd-460e-9d3c-f7299fa60f94",  # Southern Lady
+        ),
     )
 
+    system_prompt = """\
+You are a helpful assistant who converses with a user and answers questions.
+
+You have access to the tool, query_knowledge_base, that allows you to query the knowledge base for the answer to the user's question.
+
+Your response will be turned into speech so use only simple words and punctuation.
+"""
+
     llm = GoogleLLMService(
-        model=VOICE_MODEL,
         api_key=os.getenv("GOOGLE_API_KEY"),
+        settings=GoogleLLMService.Settings(
+            model=VOICE_MODEL,
+            system_instruction=system_prompt,
+        ),
     )
     llm.register_function("query_knowledge_base", query_knowledge_base)
 
@@ -205,19 +218,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     tools = ToolsSchema(standard_tools=[query_function])
 
-    system_prompt = """\
-You are a helpful assistant who converses with a user and answers questions.
-
-You have access to the tool, query_knowledge_base, that allows you to query the knowledge base for the answer to the user's question.
-
-Your response will be turned into speech so use only simple words and punctuation.
-"""
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "Greet the user."},
-    ]
-
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -247,6 +248,7 @@ Your response will be turned into speech so use only simple words and punctuatio
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Start conversation - empty prompt to let LLM follow system instructions
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

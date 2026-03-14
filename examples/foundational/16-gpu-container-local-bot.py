@@ -60,7 +60,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = DeepgramTTSService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        voice="aura-asteria-en",
+        settings=DeepgramTTSService.Settings(
+            voice="aura-asteria-en",
+        ),
         base_url="http://0.0.0.0:8080",
     )
 
@@ -68,9 +70,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # To use OpenAI
         # api_key=os.getenv("OPENAI_API_KEY"),
         # Or, to use a local vLLM (or similar) api server
-        model="meta-llama/Meta-Llama-3-8B-Instruct",
+        settings=OpenAILLMService.Settings(
+            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
         base_url="http://0.0.0.0:8000/v1",
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
     )
 
     context = LLMContext()
@@ -105,7 +109,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     # Handle "latency-ping" messages. The client will send app messages that look like

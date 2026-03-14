@@ -124,11 +124,12 @@ AnyMessage = BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMess
 class AssemblyAIConnectionParams(BaseModel):
     """Configuration parameters for AssemblyAI WebSocket connection.
 
+    .. deprecated:: 0.0.105
+        Use ``settings=AssemblyAISTTSettings(foo=...)`` instead.
+
     Parameters:
         sample_rate: Audio sample rate in Hz. Defaults to 16000.
         encoding: Audio encoding format. Defaults to "pcm_s16le".
-        formatted_finals: Whether to enable transcript formatting. Defaults to True.
-        word_finalization_max_wait_time: Maximum time to wait for word finalization in milliseconds.
         end_of_turn_confidence_threshold: Confidence threshold for end-of-turn detection.
         min_turn_silence: Minimum silence duration when confident about end-of-turn.
         min_end_of_turn_silence_when_confident: DEPRECATED. Use min_turn_silence instead.
@@ -139,16 +140,24 @@ class AssemblyAIConnectionParams(BaseModel):
         language_detection: Enable automatic language detection. Only applicable to
             universal-streaming-multilingual. When enabled, Turn messages include
             language_code and language_confidence fields. Defaults to None (not sent).
-        format_turns: Whether to format transcript turns. Defaults to True.
+        format_turns: Whether to format transcript turns. Only applicable to
+            universal-streaming-english and universal-streaming-multilingual models.
+            For u3-rt-pro, formatting is automatic and built-in. Defaults to True.
         speaker_labels: Enable speaker diarization. When enabled, final transcripts
             (end_of_turn=True) include a speaker field identifying the speaker
             (e.g., "Speaker A", "Speaker B"). Defaults to None (not sent).
+        vad_threshold: Voice activity detection confidence threshold. Only applicable to
+            u3-rt-pro. The confidence threshold (0.0 to 1.0) for classifying audio frames
+            as silence. Frames with VAD confidence below this value are considered silent.
+            Increase for noisy environments to reduce false speech detection. Defaults to
+            0.3 (API default). For best performance when using with external VAD (e.g., Silero),
+            align this value with your VAD's activation threshold to avoid the "dead zone"
+            where AssemblyAI transcribes speech that your VAD hasn't detected yet.
+            Defaults to None (not sent).
     """
 
     sample_rate: int = 16000
     encoding: Literal["pcm_s16le", "pcm_mulaw"] = "pcm_s16le"
-    formatted_finals: bool = True
-    word_finalization_max_wait_time: Optional[int] = None
     end_of_turn_confidence_threshold: Optional[float] = None
     min_turn_silence: Optional[int] = None
     min_end_of_turn_silence_when_confident: Optional[int] = None  # Deprecated
@@ -161,6 +170,7 @@ class AssemblyAIConnectionParams(BaseModel):
     language_detection: Optional[bool] = None
     format_turns: bool = True
     speaker_labels: Optional[bool] = None
+    vad_threshold: Optional[float] = None
 
     @model_validator(mode="after")
     def handle_deprecated_param(self):

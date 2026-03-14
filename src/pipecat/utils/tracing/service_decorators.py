@@ -627,7 +627,8 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 # Universal LLMContext - use standard tools format
                                 tools = _get_standard_tools_for_logging(context.tools)
 
-                            # Get settings from the service
+                            # Use given_fields() defensively in case a service doesn't
+                            # initialize all settings.
                             params = {}
                             if hasattr(self, "_settings"):
                                 for key, value in self._settings.given_fields().items():

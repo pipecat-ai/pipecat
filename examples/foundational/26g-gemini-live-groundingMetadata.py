@@ -107,9 +107,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=SYSTEM_INSTRUCTION,
-        voice_id="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
-        transcribe_user_audio=True,
+        settings=GeminiLiveLLMService.Settings(
+            system_instruction=SYSTEM_INSTRUCTION,
+            voice="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
+        ),
         tools=tools,
     )
 

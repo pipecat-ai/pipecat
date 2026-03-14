@@ -73,8 +73,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize the Gemini Multimodal Live model
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
-        system_instruction=system_instruction,
+        settings=GeminiLiveLLMService.Settings(
+            voice="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+            system_instruction=system_instruction,
+        ),
         tools=tools,
     )
 

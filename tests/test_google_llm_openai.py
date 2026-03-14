@@ -15,7 +15,7 @@ import pytest
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 
 try:
-    from pipecat.services.google.llm_openai import GoogleLLMOpenAIBetaService
+    from pipecat.services.google.openai.llm import GoogleLLMOpenAIBetaService
 
     google_available = True
 except Exception:

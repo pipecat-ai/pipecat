@@ -7,7 +7,6 @@
 
 import os
 
-from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -44,12 +43,16 @@ class SwitchLanguage(ParallelPipeline):
 
         english_tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            settings=CartesiaTTSService.Settings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
         )
 
         spanish_tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
+            settings=CartesiaTTSService.Settings(
+                voice="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
+            ),
         )
 
         super().__init__(
@@ -98,14 +101,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"), live_options=LiveOptions(language="multi")
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        settings=DeepgramSTTService.Settings(
+            language="multi",
+        ),
     )
 
     tts = SwitchLanguage()
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities. Respond to what the user said in a creative and helpful way. Your output should not include non-alphanumeric characters. You can speak the following languages: 'English' and 'Spanish'.",
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities. Respond to what the user said in a creative and helpful way. Your output should not include non-alphanumeric characters. You can speak the following languages: 'English' and 'Spanish'.",
+        ),
     )
     llm.register_function("switch_language", tts.switch_language)
 
@@ -154,7 +162,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message(
             {
-                "role": "system",
+                "role": "user",
                 "content": f"Please introduce yourself to the user and let them know the languages you speak. Your initial responses should be in {tts.current_language}.",
             }
         )

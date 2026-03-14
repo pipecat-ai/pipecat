@@ -56,9 +56,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
-        # system_instruction="Talk like a pirate."
-        # inference_on_context_initialization=False,
+        settings=GeminiLiveLLMService.Settings(
+            voice="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
+            # system_instruction="Talk like a pirate."
+            # inference_on_context_initialization=False,
+        ),
     )
 
     context = LLMContext(
@@ -67,16 +69,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "role": "user",
                 "content": "Say hello. Then ask if I want to hear a joke.",
             },
-            #     {"role": "assistant", "content": "Hello! Why don't scientists trust atoms?"},
-            #     {
-            #         "role": "user",
-            #         "content": [
-            #             {
-            #                 "type": "text",
-            #                 "text": "Oh, I know this one: because they make up everything.",
-            #             }
-            #         ],
-            #     },
         ],
     )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(

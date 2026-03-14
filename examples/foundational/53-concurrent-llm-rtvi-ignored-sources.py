@@ -67,40 +67,31 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     # Main LLM — drives the conversation. Its RTVI events reach the client.
-    main_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
-    main_messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
+    main_llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
+    )
 
     # Evaluator LLM — silently grades the user's message in the background.
     # Its RTVI events will be suppressed so the client is unaware of this branch.
     evaluator_llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         name="EvaluatorLLM",
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a silent quality evaluator. When given a user message, respond with a single JSON object: {'score': <1-5>, 'reason': '<brief reason>'}. Do not respond conversationally.",
+        ),
     )
 
-    evaluator_messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a silent quality evaluator. When given a user message, "
-                "respond with a single JSON object: "
-                '{"score": <1-5>, "reason": "<brief reason>"}. '
-                "Do not respond conversationally."
-            ),
-        },
-    ]
-
-    main_context = LLMContext(main_messages)
-    evaluator_context = LLMContext(evaluator_messages)
+    main_context = LLMContext()
+    evaluator_context = LLMContext()
 
     # We use an external VADProcessor because the UserTurnProcessor is shared
     # across multiple parallel aggregators. The VADProcessor emits
@@ -163,10 +154,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        main_messages.append(
-            {"role": "system", "content": "Please introduce yourself to the user."}
+        main_context.add_message(
+            {"role": "user", "content": "Please introduce yourself to the user."}
         )
-        evaluator_messages.append({"role": "system", "content": "Ready to evaluate user messages."})
+        evaluator_context.add_message(
+            {"role": "user", "content": "Ready to evaluate user messages."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

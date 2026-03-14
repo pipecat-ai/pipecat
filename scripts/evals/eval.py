@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 import aiofiles
-from deepgram import LiveOptions
 from loguru import logger
 from PIL.ImageFile import ImageFile
 from utils import (
@@ -244,7 +243,7 @@ async def run_eval_pipeline(
     # 5" (in audio) this can be converted to "32 is 5".
     stt = DeepgramSTTService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        live_options=LiveOptions(
+        settings=DeepgramSTTService.Settings(
             language="multi",
             smart_format=False,
         ),
@@ -252,12 +251,10 @@ async def run_eval_pipeline(
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
+        settings=CartesiaTTSService.Settings(
+            voice="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
+        ),
     )
-
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
-    llm.register_function("eval_function", eval_runner.function_assert_eval)
 
     eval_function = FunctionSchema(
         name="eval_function",
@@ -302,14 +299,16 @@ async def run_eval_pipeline(
     else:
         system_prompt = f"You are an evaluation agent, be extremly brief. First, ask one question: {example_prompt}. {common_system_prompt}"
 
-    messages = [
-        {
-            "role": "system",
-            "content": system_prompt,
-        },
-    ]
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
+            system_instruction=system_prompt,
+        ),
+    )
 
-    context = LLMContext(messages, tools)
+    llm.register_function("eval_function", eval_runner.function_assert_eval)
+
+    context = LLMContext(tools=tools)
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -362,7 +361,7 @@ async def run_eval_pipeline(
         # Default behavior is for the bot to speak first
         # If the eval bot speaks first, we append the prompt to the messages
         if eval_config.eval_speaks_first:
-            messages.append(
+            context.add_message(
                 {"role": "user", "content": f"Start by saying this exactly: '{eval_config.prompt}'"}
             )
             await task.queue_frames([LLMRunFrame()])

@@ -63,12 +63,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="00967b2f-88a6-4a31-8153-110a92134b9f",
+            settings=CartesiaTTSService.Settings(
+                voice="00967b2f-88a6-4a31-8153-110a92134b9f",
+            ),
         )
 
         llm = GoogleLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),
-            system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+            settings=GoogleLLMService.Settings(
+                system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+            ),
         )
 
         heyGen = HeyGenVideoService(
@@ -129,7 +133,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             # Kick off the conversation.
             context.add_message(
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": "Start by saying 'Hello' and then a short greeting.",
                 }
             )

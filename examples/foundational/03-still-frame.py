@@ -45,7 +45,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
         imagegen = FalImageGenService(
-            params=FalImageGenService.InputParams(image_size="square_hd"),
+            settings=FalImageGenService.Settings(
+                image_size="square_hd",
+            ),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )

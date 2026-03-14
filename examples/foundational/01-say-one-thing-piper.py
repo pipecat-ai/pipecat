@@ -39,7 +39,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
         tts = PiperHttpTTSService(
-            base_url=os.getenv("PIPER_BASE_URL"), aiohttp_session=session, sample_rate=24000
+            base_url=os.getenv("PIPER_BASE_URL"),
+            aiohttp_session=session,
+            sample_rate=24000,
         )
 
         task = PipelineTask(

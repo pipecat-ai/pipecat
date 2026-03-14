@@ -12,7 +12,7 @@ the Cartesia Live transcription API for real-time speech recognition.
 
 import json
 import urllib.parse
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import STTSettings, _warn_deprecated_param
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -46,20 +46,17 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class CartesiaSTTSettings(STTSettings):
-    """Settings for the Cartesia STT service.
+    """Settings for CartesiaSTTService."""
 
-    Parameters:
-        encoding: Audio encoding format (e.g. ``"pcm_s16le"``).
-    """
-
-    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
 class CartesiaLiveOptions:
     """Configuration options for Cartesia Live STT service.
 
-    Manages transcription parameters including model selection, language,
-    audio encoding format, and sample rate settings.
+    .. deprecated:: 0.0.105
+        Use ``settings=CartesiaSTTSettings(...)`` for model/language and
+        direct ``__init__`` parameters for encoding/sample_rate instead.
     """
 
     def __init__(
@@ -149,6 +146,7 @@ class CartesiaSTTService(WebsocketSTTService):
     See: https://docs.cartesia.ai/api-reference/stt/stt
     """
 
+    Settings = CartesiaSTTSettings
     _settings: CartesiaSTTSettings
 
     def __init__(
@@ -156,8 +154,10 @@ class CartesiaSTTService(WebsocketSTTService):
         *,
         api_key: str,
         base_url: str = "",
-        sample_rate: int = 16000,
+        encoding: str = "pcm_s16le",
+        sample_rate: Optional[int] = None,
         live_options: Optional[CartesiaLiveOptions] = None,
+        settings: Optional[CartesiaSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = CARTESIA_TTFS_P99,
         **kwargs,
     ):
@@ -166,45 +166,60 @@ class CartesiaSTTService(WebsocketSTTService):
         Args:
             api_key: Authentication key for Cartesia API.
             base_url: Custom API endpoint URL. If empty, uses default.
-            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            encoding: Audio encoding format. Defaults to "pcm_s16le".
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline
+                sample rate.
             live_options: Configuration options for transcription service.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=CartesiaSTTSettings(...)`` for model/language
+                    and direct init parameters for encoding/sample_rate instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
-        sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-
-        default_options = CartesiaLiveOptions(
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = CartesiaSTTSettings(
             model="ink-whisper",
             language=Language.EN.value,
-            encoding="pcm_s16le",
-            sample_rate=sample_rate,
         )
 
-        merged_options = default_options.to_dict()
-        if live_options:
-            merged_options.update(live_options.to_dict())
-            # Filter out "None" string values
-            merged_options = {
-                k: v for k, v in merged_options.items() if not isinstance(v, str) or v != "None"
-            }
+        # 2. Apply live_options overrides — only if settings not provided
+        if live_options is not None:
+            _warn_deprecated_param("live_options", CartesiaSTTSettings)
+            if not settings:
+                if live_options.sample_rate and sample_rate is None:
+                    sample_rate = live_options.sample_rate
+                if live_options.encoding:
+                    encoding = live_options.encoding
+                if live_options.model:
+                    default_settings.model = live_options.model
+                if live_options.language:
+                    lang = live_options.language
+                    default_settings.language = lang.value if isinstance(lang, Language) else lang
+
+        # 3. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=120,
             keepalive_interval=30,
-            settings=CartesiaSTTSettings(
-                model=merged_options["model"],
-                language=merged_options.get("language"),
-                encoding=merged_options.get("encoding", "pcm_s16le"),
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         self._api_key = api_key
         self._base_url = base_url or "api.cartesia.ai"
         self._receive_task = None
+
+        # Init-only audio config (not runtime-updatable).
+        self._encoding = encoding
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -324,7 +339,7 @@ class CartesiaSTTService(WebsocketSTTService):
             params = {
                 "model": self._settings.model,
                 "language": self._settings.language,
-                "encoding": self._settings.encoding,
+                "encoding": self._encoding,
                 "sample_rate": str(self.sample_rate),
             }
             ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"

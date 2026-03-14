@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.lmnt.tts import LmntTTSService, LmntTTSSettings
+from pipecat.services.lmnt.tts import LmntTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -54,12 +54,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = LmntTTSService(
         api_key=os.getenv("LMNT_API_KEY"),
-        voice_id="lily",
+        settings=LmntTTSService.Settings(voice="lily"),
     )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     context = LLMContext()
@@ -92,12 +94,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        context.add_message({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
         logger.info('Updating LMNT TTS settings: voice="tyler"')
-        await task.queue_frame(TTSUpdateSettingsFrame(delta=LmntTTSSettings(voice="tyler")))
+        await task.queue_frame(TTSUpdateSettingsFrame(delta=LmntTTSService.Settings(voice="tyler")))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

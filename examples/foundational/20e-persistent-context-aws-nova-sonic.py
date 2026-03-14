@@ -222,9 +222,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),  # as of 2025-05-06, us-east-1 is the only supported region
-        voice_id="tiffany",  # matthew, tiffany, amy
-        # you could choose to pass instruction here rather than via context
-        # system_instruction=system_instruction,
+        settings=AWSNovaSonicLLMService.Settings(
+            voice="tiffany",  # matthew, tiffany, amy
+            system_instruction=system_instruction,
+        ),
         # you could choose to pass tools here rather than via context
         # tools=tools
     )
@@ -234,13 +235,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = LLMContext(
-        messages=[
-            {"role": "system", "content": f"{system_instruction}"},
-            {"role": "user", "content": "Hello!"},
-        ],
-        tools=tools,
-    )
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
@@ -266,6 +261,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
         # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
         # triggering the first assistant response. Note that this trigger requires a special

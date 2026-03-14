@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -68,14 +68,16 @@ def language_to_gradium_language(language: Language) -> Optional[str]:
 
 @dataclass
 class GradiumSTTSettings(STTSettings):
-    """Settings for the Gradium STT service.
+    """Settings for GradiumSTTService.
 
     Parameters:
         delay_in_frames: Delay in audio frames (80ms each) before text is
             generated. Higher delays allow more context but increase latency.
+            Allowed values: 7, 8, 10, 12, 14, 16, 20, 24, 36, 48.
+            Default is 10 (800ms). Lower values like 7-8 give faster response.
     """
 
-    delay_in_frames: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    delay_in_frames: Optional[int] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GradiumSTTService(WebsocketSTTService):
@@ -86,10 +88,14 @@ class GradiumSTTService(WebsocketSTTService):
     for audio processing and connection management.
     """
 
+    Settings = GradiumSTTSettings
     _settings: GradiumSTTSettings
 
     class InputParams(BaseModel):
         """Configuration parameters for Gradium STT API.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=GradiumSTTSettings(...)`` instead.
 
         Parameters:
             language: Expected language of the audio (e.g., "en", "es", "fr").
@@ -111,6 +117,7 @@ class GradiumSTTService(WebsocketSTTService):
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
         params: Optional[InputParams] = None,
         json_config: Optional[str] = None,
+        settings: Optional[GradiumSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = GRADIUM_TTFS_P99,
         **kwargs,
     ):
@@ -120,11 +127,17 @@ class GradiumSTTService(WebsocketSTTService):
             api_key: Gradium API key for authentication.
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
             params: Configuration parameters for language and delay settings.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GradiumSTTSettings(...)`` instead.
+
             json_config: Optional JSON configuration string for additional model settings.
 
                 .. deprecated:: 0.0.101
                     Use `params` instead for type-safe configuration.
 
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
@@ -138,16 +151,31 @@ class GradiumSTTService(WebsocketSTTService):
                 stacklevel=2,
             )
 
-        params = params or GradiumSTTService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = GradiumSTTSettings(
+            model=None,
+            language=None,
+            delay_in_frames=None,
+        )
+
+        # 2. (No step 2, as there are no deprecated direct args)
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", GradiumSTTSettings)
+            if not settings:
+                default_settings.language = params.language
+                if params.delay_in_frames is not None:
+                    default_settings.delay_in_frames = params.delay_in_frames
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=SAMPLE_RATE,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=GradiumSTTSettings(
-                model=None,
-                language=params.language,
-                delay_in_frames=params.delay_in_frames or None,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -188,8 +216,9 @@ class GradiumSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        await self._disconnect()
-        await self._connect()
+        if self._websocket:
+            await self._disconnect()
+            await self._connect()
         return changed
 
     async def start(self, frame: StartFrame):

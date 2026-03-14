@@ -79,7 +79,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = SambaNovaSTTService(
-        model="Whisper-Large-v3",
+        settings=SambaNovaSTTService.Settings(
+            model="Whisper-Large-v3",
+        ),
         api_key=os.getenv("SAMBANOVA_API_KEY"),
     )
 

@@ -41,8 +41,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -78,10 +76,26 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    system_prompt = """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your
+                    capabilities in a succinct way. Your output will be spoken aloud, so avoid
+                    special characters that can't easily be spoken, such as emojis or bullet points.
+                    Respond to what the user said in a creative and helpful way.
+                    If the user asks you to summarize the conversation, call the
+                    summarize_conversation function. After summarization, briefly acknowledge
+                    that the conversation history has been compressed.
+                    """
+
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
+            system_instruction=system_prompt,
+        ),
+    )
 
     llm.register_function("summarize_conversation", summarize_conversation)
 
@@ -97,22 +111,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     tools = ToolsSchema(standard_tools=[summarize_function])
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your "
-                "capabilities in a succinct way. Your output will be spoken aloud, so avoid "
-                "special characters that can't easily be spoken, such as emojis or bullet points. "
-                "Respond to what the user said in a creative and helpful way. "
-                "If the user asks you to summarize the conversation, call the "
-                "summarize_conversation function. After summarization, briefly acknowledge "
-                "that the conversation history has been compressed."
-            ),
-        },
-    ]
-
-    context = LLMContext(messages, tools=tools)
+    context = LLMContext(tools=tools)
 
     # Automatic summarization is NOT enabled here (enable_auto_context_summarization
     # defaults to False). The summarizer is still created internally so that
@@ -147,7 +146,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info("Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

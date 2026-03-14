@@ -64,13 +64,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     llm = DeepSeekLLMService(
         api_key=os.getenv("DEEPSEEK_API_KEY"),
-        model="deepseek-chat",
-        system_instruction="""You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
+        settings=DeepSeekLLMService.Settings(
+            model="deepseek-chat",
+            system_instruction="""You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
 
 You have one functions available:
 
@@ -81,6 +84,7 @@ Infer whether to use Fahrenheit or Celsius automatically based on the location, 
 Start by asking me for my location. Then, use 'get_weather_current' to give me a forecast.
 
     Respond to what the user said in a creative and helpful way.""",
+        ),
     )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.

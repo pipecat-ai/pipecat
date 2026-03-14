@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -93,14 +93,14 @@ def language_to_nvidia_riva_language(language: Language) -> Optional[str]:
 
 @dataclass
 class NvidiaSTTSettings(STTSettings):
-    """Settings for the NVIDIA Riva streaming STT service."""
+    """Settings for NvidiaSTTService."""
 
     pass
 
 
 @dataclass
 class NvidiaSegmentedSTTSettings(STTSettings):
-    """Settings for the NVIDIA Riva segmented STT service.
+    """Settings for NvidiaSegmentedSTTService.
 
     Parameters:
         profanity_filter: Whether to filter profanity from results.
@@ -113,7 +113,7 @@ class NvidiaSegmentedSTTSettings(STTSettings):
     profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     verbatim_transcripts: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_words: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_words: List[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     boosted_lm_score: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -125,10 +125,14 @@ class NvidiaSTTService(STTService):
     processing for low-latency applications.
     """
 
+    Settings = NvidiaSTTSettings
     _settings: NvidiaSTTSettings
 
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva STT service.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=NvidiaSTTSettings(...)`` instead.
 
         Parameters:
             language: Target language for transcription. Defaults to EN_US.
@@ -148,6 +152,7 @@ class NvidiaSTTService(STTService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         use_ssl: bool = True,
+        settings: Optional[NvidiaSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
         **kwargs,
     ):
@@ -159,20 +164,39 @@ class NvidiaSTTService(STTService):
             model_function_map: Mapping containing 'function_id' and 'model_name' for the ASR model.
             sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
             params: Additional configuration parameters for NVIDIA Riva.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=NvidiaSTTSettings(...)`` instead.
+
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        params = params or NvidiaSTTService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = NvidiaSTTSettings(
+            model=model_function_map.get("model_name"),
+            language=Language.EN_US,
+        )
+
+        # 2. (no deprecated direct args for this service)
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", NvidiaSTTSettings)
+            if not settings:
+                default_settings.language = params.language
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=NvidiaSTTSettings(
-                model=model_function_map.get("model_name"),
-                language=params.language,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -416,10 +440,14 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     audio buffering and speech detection.
     """
 
+    Settings = NvidiaSegmentedSTTSettings
     _settings: NvidiaSegmentedSTTSettings
 
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva segmented STT service.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=NvidiaSegmentedSTTSettings(...)`` instead.
 
         Parameters:
             language: Target language for transcription. Defaults to EN_US.
@@ -449,6 +477,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         use_ssl: bool = True,
+        settings: Optional[NvidiaSegmentedSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
         **kwargs,
     ):
@@ -460,26 +489,51 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             model_function_map: Mapping of model name and its corresponding NVIDIA Cloud Function ID
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate
             params: Additional configuration parameters for NVIDIA Riva
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=NvidiaSegmentedSTTSettings(...)`` instead.
+
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService
         """
-        params = params or NvidiaSegmentedSTTService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = NvidiaSegmentedSTTSettings(
+            model=model_function_map.get("model_name"),
+            language=language_to_nvidia_riva_language(Language.EN_US) or "en-US",
+            profanity_filter=False,
+            automatic_punctuation=True,
+            verbatim_transcripts=False,
+            boosted_lm_words=None,
+            boosted_lm_score=4.0,
+        )
+
+        # 2. (no deprecated direct args for this service)
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            _warn_deprecated_param("params", NvidiaSegmentedSTTSettings)
+            if not settings:
+                default_settings.language = (
+                    language_to_nvidia_riva_language(params.language or Language.EN_US) or "en-US"
+                )
+                default_settings.profanity_filter = params.profanity_filter
+                default_settings.automatic_punctuation = params.automatic_punctuation
+                default_settings.verbatim_transcripts = params.verbatim_transcripts
+                default_settings.boosted_lm_words = params.boosted_lm_words
+                default_settings.boosted_lm_score = params.boosted_lm_score
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=NvidiaSegmentedSTTSettings(
-                model=model_function_map.get("model_name"),
-                language=self.language_to_service_language(params.language or Language.EN_US)
-                or "en-US",
-                profanity_filter=params.profanity_filter,
-                automatic_punctuation=params.automatic_punctuation,
-                verbatim_transcripts=params.verbatim_transcripts,
-                boosted_lm_words=params.boosted_lm_words,
-                boosted_lm_score=params.boosted_lm_score,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -534,19 +588,18 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     def _create_recognition_config(self):
         """Create the NVIDIA Riva ASR recognition configuration."""
         # Create base configuration
+        s = self._settings
         config = riva.client.RecognitionConfig(
             language_code=self._get_language_code(),
             max_alternatives=1,
-            profanity_filter=self._settings.profanity_filter,
-            enable_automatic_punctuation=self._settings.automatic_punctuation,
-            verbatim_transcripts=self._settings.verbatim_transcripts,
+            profanity_filter=s.profanity_filter,
+            enable_automatic_punctuation=s.automatic_punctuation,
+            verbatim_transcripts=s.verbatim_transcripts,
         )
 
         # Add word boosting if specified
-        if self._settings.boosted_lm_words:
-            riva.client.add_word_boosting_to_config(
-                config, self._settings.boosted_lm_words, self._settings.boosted_lm_score
-            )
+        if s.boosted_lm_words:
+            riva.client.add_word_boosting_to_config(config, s.boosted_lm_words, s.boosted_lm_score)
 
         # Add voice activity detection parameters
         riva.client.add_endpoint_parameters_to_config(

@@ -65,22 +65,26 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-transcribe",
-        prompt="Expect words related weather, such as temperature and conditions. And restaurant names.",
+        settings=OpenAISTTService.Settings(
+            model="gpt-4o-transcribe",
+            prompt="Expect words related weather, such as temperature and conditions. And restaurant names.",
+        ),
     )
 
-    # voice choices: ash, ballad, or any other voice available in the OpenAI TTS API
-    # see https://www.openai.fm/
     tts = OpenAITTSService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        voice="ballad",
+        settings=OpenAITTSService.Settings(
+            voice="ballad",
+        ),
         instructions="Please speak clearly and at a moderate pace.",
     )
 
     # model choices: gpt-4o, gpt-4.1, etc.
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     # You can also register a function_name of None to get all functions

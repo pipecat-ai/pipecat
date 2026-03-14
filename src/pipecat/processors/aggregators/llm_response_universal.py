@@ -70,7 +70,10 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
-from pipecat.processors.aggregators.llm_context_summarizer import LLMContextSummarizer
+from pipecat.processors.aggregators.llm_context_summarizer import (
+    LLMContextSummarizer,
+    SummaryAppliedEvent,
+)
 from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -568,9 +571,6 @@ class LLMUserAggregator(LLMContextAggregator):
                 )
             )
 
-            # Auto-inject turn completion instructions into context
-            self._context.add_message({"role": "system", "content": config.completion_instructions})
-
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
         await self._cleanup()
@@ -638,9 +638,6 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
-        if self._params.filter_incomplete_user_turns:
-            config = self._params.user_turn_completion_config or UserTurnCompletionConfig()
-            self._context.add_message({"role": "system", "content": config.completion_instructions})
         if frame.run_llm:
             await self.push_context_frame()
 
@@ -798,6 +795,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
     - on_assistant_turn_started: Called when the assistant turn starts
     - on_assistant_turn_stopped: Called when the assistant turn ends
     - on_assistant_thought: Called when an assistant thought is available
+    - on_summary_applied: Called when a context summarization is applied
 
     Example::
 
@@ -811,6 +809,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         @aggregator.event_handler("on_assistant_thought")
         async def on_assistant_thought(aggregator, message: AssistantThoughtMessage):
+            ...
+
+        @aggregator.event_handler("on_summary_applied")
+        async def on_summary_applied(aggregator, summarizer, event: SummaryAppliedEvent):
             ...
 
     """
@@ -875,10 +877,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._summarizer.add_event_handler(
             "on_request_summarization", self._on_request_summarization
         )
+        self._summarizer.add_event_handler("on_summary_applied", self._on_summary_applied)
 
         self._register_event_handler("on_assistant_turn_started")
         self._register_event_handler("on_assistant_turn_stopped")
         self._register_event_handler("on_assistant_thought")
+        self._register_event_handler("on_summary_applied")
 
     @property
     def has_function_calls_in_progress(self) -> bool:
@@ -1301,6 +1305,19 @@ class LLMAssistantAggregator(LLMContextAggregator):
             frame: The summarization request frame to broadcast.
         """
         await self.push_frame(frame, FrameDirection.UPSTREAM)
+
+    async def _on_summary_applied(
+        self, summarizer: LLMContextSummarizer, event: SummaryAppliedEvent
+    ):
+        """Handle summary applied event from the summarizer.
+
+        Forwards the event to any registered `on_summary_applied` handlers.
+
+        Args:
+            summarizer: The summarizer that applied the summary.
+            event: The summary applied event.
+        """
+        await self._call_event_handler("on_summary_applied", summarizer, event)
 
 
 class LLMContextAggregatorPair:

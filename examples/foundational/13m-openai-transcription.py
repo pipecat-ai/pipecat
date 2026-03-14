@@ -6,7 +6,6 @@
 
 import os
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -53,8 +52,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = OpenAIRealtimeSTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-transcribe",
-        prompt="Expect words related to dogs, such as breed names.",
+        settings=OpenAIRealtimeSTTService.Settings(
+            model="gpt-4o-transcribe",
+            prompt="Expect words related to dogs, such as breed names.",
+        ),
     )
 
     tl = TranscriptionLogger()

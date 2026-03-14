@@ -54,15 +54,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot with Gemini TTS")
 
     stt = GoogleSTTService(
-        params=GoogleSTTService.InputParams(languages=Language.EN_US),
+        settings=GoogleSTTService.Settings(
+            languages=[Language.EN_US],
+        ),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
     tts = GeminiTTSService(
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
-        model="gemini-2.5-flash-tts",
-        voice_id="Charon",
-        params=GeminiTTSService.InputParams(
+        settings=GeminiTTSService.Settings(
+            model="gemini-2.5-flash-tts",
+            voice="Charon",
             language=Language.EN_US,
             prompt="You are a helpful AI assistant. Speak in a natural, conversational tone.",
         ),
@@ -71,7 +73,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         model="gemini-2.5-flash",
-        system_instruction="""You are a helpful AI assistant in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
+        settings=GoogleLLMService.Settings(
+            system_instruction="""You are a helpful AI assistant in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
 
             IMPORTANT: You're using Gemini TTS which supports expressive markup tags. You can use these tags in your responses:
             - [sigh] - Insert a sigh sound
@@ -89,6 +92,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             - "The answer is... [long pause] ...42!"
 
             Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.""",
+        ),
     )
 
     context = LLMContext()
@@ -124,7 +128,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation
         context.add_message(
             {
-                "role": "system",
+                "role": "user",
                 "content": "You are an AI assistant. You can help with a variety of tasks. Introduce yourself and ask the user what they would like to know.",
             }
         )

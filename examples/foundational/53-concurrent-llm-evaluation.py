@@ -62,31 +62,28 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
-    openai_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
-    openai_messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
+    openai_llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
+    )
 
     groq_llm = GroqLLMService(
-        api_key=os.getenv("GROQ_API_KEY"), model="meta-llama/llama-4-maverick-17b-128e-instruct"
+        api_key=os.getenv("GROQ_API_KEY"),
+        settings=GroqLLMService.Settings(
+            model="meta-llama/llama-4-maverick-17b-128e-instruct",
+            system_instruction="You are a very helpful assistant. Your goal is to demonstrate your capabilities in detail in a creative and helpful way.",
+        ),
     )
 
-    groq_messages = [
-        {
-            "role": "system",
-            "content": "You are a very helpful assistant. Your goal is to demonstrate your capabilities in detail in a creative and helpful way.",
-        },
-    ]
-
-    openai_context = LLMContext(openai_messages)
-    groq_context = LLMContext(groq_messages)
+    openai_context = LLMContext()
+    groq_context = LLMContext()
 
     # We use an external VADProcessor because the UserTurnProcessor is shared
     # across multiple parallel aggregators. The VADProcessor emits
@@ -147,11 +144,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        openai_messages.append(
-            {"role": "system", "content": "Please introduce yourself to the user."}
+        openai_context.add_message(
+            {"role": "user", "content": "Please introduce yourself to the user."}
         )
-        groq_messages.append(
-            {"role": "system", "content": "Please introduce yourself to the user."}
+        groq_context.add_message(
+            {"role": "user", "content": "Please introduce yourself to the user."}
         )
         await task.queue_frames([LLMRunFrame()])
 

@@ -1244,7 +1244,7 @@ class LiveKitTransport(BaseTransport):
 
     async def _on_call_state_updated(self, state: str):
         """Handle call state update events."""
-        await self._call_event_handler("on_call_state_updated", self, state)
+        await self._call_event_handler("on_call_state_updated", state)
 
     async def _on_first_participant_joined(self, participant_id: str):
         """Handle first participant joined events."""

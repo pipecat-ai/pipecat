@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.fish.tts import FishAudioTTSService, FishAudioTTSSettings
+from pipecat.services.fish.tts import FishAudioTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -54,12 +54,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = FishAudioTTSService(
         api_key=os.getenv("FISH_API_KEY"),
-        model="4ce7e917cedd4bc2bb2e6ff3a46acaa1",  # Barack Obama
+        settings=FishAudioTTSService.Settings(
+            voice="4ce7e917cedd4bc2bb2e6ff3a46acaa1"
+        ),  # Barack Obama
     )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        ),
     )
 
     context = LLMContext()
@@ -92,13 +96,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        context.add_message({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
         logger.info("Updating Fish Audio TTS settings: prosody_speed=1.5")
         await task.queue_frame(
-            TTSUpdateSettingsFrame(delta=FishAudioTTSSettings(prosody_speed=1.5))
+            TTSUpdateSettingsFrame(delta=FishAudioTTSService.Settings(prosody_speed=1.5))
         )
 
     @transport.event_handler("on_client_disconnected")

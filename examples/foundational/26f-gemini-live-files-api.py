@@ -110,9 +110,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize Gemini service with File API support
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_instruction,
-        voice_id="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
-        transcribe_user_audio=True,
+        settings=GeminiLiveLLMService.Settings(
+            system_instruction=system_instruction,
+            voice="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
+        ),
     )
 
     # Upload the sample file to Gemini File API

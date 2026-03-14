@@ -77,7 +77,11 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = WhisperSTTServiceMLX(model=MLXModel.LARGE_V3_TURBO)
+    stt = WhisperSTTServiceMLX(
+        settings=WhisperSTTServiceMLX.Settings(
+            model=MLXModel.LARGE_V3_TURBO.value,
+        ),
+    )
 
     tl = TranscriptionLogger()
 

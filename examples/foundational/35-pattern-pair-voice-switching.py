@@ -129,12 +129,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize TTS with narrator voice as default
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id=VOICE_IDS["narrator"],
+        settings=CartesiaTTSService.Settings(
+            voice=VOICE_IDS["narrator"],
+        ),
         text_aggregator=pattern_aggregator,
     )
-
-    # Initialize LLM
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     # System prompt for storytelling with voice switching
     system_prompt = """You are an engaging storyteller that uses different voices to bring stories to life.
@@ -184,15 +183,15 @@ FOLLOW THESE RULES:
 
 Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue."""
 
-    # Set up LLM context
-    messages = [
-        {
-            "role": "system",
-            "content": system_prompt,
-        },
-    ]
+    # Initialize LLM
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
+            system_instruction=system_prompt,
+        ),
+    )
 
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
