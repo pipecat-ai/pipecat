@@ -146,90 +146,77 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         )
 
-        try:
-            rijksmuseum_mcp = MCPClient(
+        async with (
+            MCPClient(
                 server_params=StdioServerParameters(
                     command=shutil.which("npx"),
                     # https://github.com/r-huijts/rijksmuseum-mcp
                     args=["-y", "mcp-server-rijksmuseum"],
                     env={"RIJKSMUSEUM_API_KEY": os.getenv("RIJKSMUSEUM_API_KEY")},
                 )
-            )
-        except Exception as e:
-            logger.error(f"error setting up rijksmuseum mcp")
-            logger.exception("error trace:")
-        try:
+            ) as rijksmuseum_mcp,
             # Github MCP docs: https://github.com/github/github-mcp-server
             # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
             # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
             # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
-            github_mcp = MCPClient(
+            MCPClient(
                 server_params=StreamableHttpParameters(
                     url="https://api.githubcopilot.com/mcp/",
                     headers={
                         "Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"
                     },
-                )
-            )
-        except Exception as e:
-            logger.error(f"error setting up mcp.run")
-            logger.exception("error trace:")
-
-        rijksmuseum_tools = {}
-        github_tools = {}
-        try:
+                ),
+            ) as github_mcp,
+        ):
             rijksmuseum_tools = await rijksmuseum_mcp.register_tools(llm)
             github_tools = await github_mcp.register_tools(llm)
-        except Exception as e:
-            logger.error(f"error registering tools")
-            logger.exception("error trace:")
 
-        all_standard_tools = rijksmuseum_tools.standard_tools + github_tools.standard_tools
-        all_tools = ToolsSchema(standard_tools=all_standard_tools)
+            all_standard_tools = rijksmuseum_tools.standard_tools + github_tools.standard_tools
+            all_tools = ToolsSchema(standard_tools=all_standard_tools)
 
-        context = LLMContext(tools=all_tools)
-        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-            context,
-            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-        )
-        mcp_image_processor = UrlToImageProcessor(aiohttp_session=session)
+            context = LLMContext(tools=all_tools)
+            user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+                context,
+                user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+            )
+            mcp_image_processor = UrlToImageProcessor(aiohttp_session=session)
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                stt,
-                user_aggregator,  # User spoken responses
-                llm,  # LLM
-                tts,  # TTS
-                mcp_image_processor,  # URL image -> output
-                transport.output(),  # Transport bot output
-                assistant_aggregator,  # Assistant spoken responses and tool context
-            ]
-        )
+            pipeline = Pipeline(
+                [
+                    transport.input(),  # Transport user input
+                    stt,
+                    user_aggregator,  # User spoken responses
+                    llm,  # LLM
+                    tts,  # TTS
+                    mcp_image_processor,  # URL image -> output
+                    transport.output(),  # Transport bot output
+                    assistant_aggregator,  # Assistant spoken responses and tool context
+                ]
+            )
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
+            task = PipelineTask(
+                pipeline,
+                params=PipelineParams(
+                    enable_metrics=True,
+                    enable_usage_metrics=True,
+                ),
+                idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+            )
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected: {client}")
-            # Kick off the conversation.
-            await task.queue_frames([LLMRunFrame()])
+            @transport.event_handler("on_client_connected")
+            async def on_client_connected(transport, client):
+                logger.info(f"Client connected: {client}")
+                # Kick off the conversation.
+                await task.queue_frames([LLMRunFrame()])
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await task.cancel()
+            @transport.event_handler("on_client_disconnected")
+            async def on_client_disconnected(transport, client):
+                logger.info(f"Client disconnected")
+                await task.cancel()
 
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+            runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-        await runner.run(task)
+            await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):
