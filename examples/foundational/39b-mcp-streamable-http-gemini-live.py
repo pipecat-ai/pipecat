@@ -86,7 +86,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.exception("error trace:")
 
     system = f"""
-    You are a helpful LLM in a WebRTC call.
+    You are a helpful LLM in a voice call.
     Your goal is to answer questions about the user's GitHub repositories and account.
     You have access to a number of tools provided by Github. Use any and all tools to help users.
     Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.

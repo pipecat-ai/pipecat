@@ -64,7 +64,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful voice assistant powered by Camb AI text-to-speech. ",
+            system_instruction="You are a helpful voice assistant powered by Camb AI text-to-speech. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep responses concise.",
         ),
     )
 

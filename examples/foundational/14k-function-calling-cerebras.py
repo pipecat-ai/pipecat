@@ -72,7 +72,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = CerebrasLLMService(
         api_key=os.getenv("CEREBRAS_API_KEY"),
         settings=CerebrasLLMService.Settings(
-            system_instruction="""You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
+            system_instruction="""You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.
 
 You have one functions available:
 

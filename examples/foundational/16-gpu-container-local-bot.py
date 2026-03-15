@@ -72,7 +72,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Or, to use a local vLLM (or similar) api server
         settings=OpenAILLMService.Settings(
             model="meta-llama/Meta-Llama-3-8B-Instruct",
-            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
         base_url="http://0.0.0.0:8000/v1",
     )
