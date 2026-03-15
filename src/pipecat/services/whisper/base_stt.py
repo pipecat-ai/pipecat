@@ -194,7 +194,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             default_settings.model = model
         if language is not None:
             self._warn_init_param_moved_to_settings("language", "language")
-            default_settings.language = self.language_to_service_language(language)
+            default_settings.language = language
         if prompt is not None:
             self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt

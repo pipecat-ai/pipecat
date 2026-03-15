@@ -85,7 +85,7 @@ class GroqSTTService(BaseWhisperSTTService):
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
             model="whisper-large-v3-turbo",
-            language=self.language_to_service_language(Language.EN),
+            language=Language.EN,
             prompt=None,
             temperature=None,
         )
@@ -96,7 +96,7 @@ class GroqSTTService(BaseWhisperSTTService):
             default_settings.model = model
         if language is not None:
             self._warn_init_param_moved_to_settings("language", "language")
-            default_settings.language = self.language_to_service_language(language)
+            default_settings.language = language
         if prompt is not None:
             self._warn_init_param_moved_to_settings("prompt", "prompt")
             default_settings.prompt = prompt

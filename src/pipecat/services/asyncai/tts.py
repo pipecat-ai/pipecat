@@ -171,9 +171,7 @@ class AsyncAITTSService(WebsocketTTSService):
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else None
-                )
+                default_settings.language = params.language
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -565,9 +563,7 @@ class AsyncAIHttpTTSService(TTSService):
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else None
-                )
+                default_settings.language = params.language
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

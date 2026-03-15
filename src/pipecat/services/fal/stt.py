@@ -216,7 +216,7 @@ class FalSTTService(SegmentedSTTService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model=None,
-            language=language_to_fal_language(Language.EN),
+            language=Language.EN,
         )
 
         # 2. (no deprecated direct args for this service)
@@ -226,7 +226,7 @@ class FalSTTService(SegmentedSTTService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = language_to_fal_language(params.language)
+                    default_settings.language = params.language
                 if params.task != "transcribe":
                     task = params.task
                 if params.chunk_level != "segment":

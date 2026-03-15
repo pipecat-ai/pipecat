@@ -302,7 +302,7 @@ class CartesiaTTSService(WebsocketTTSService):
         default_settings = self.Settings(
             model="sonic-3",
             voice=None,
-            language=language_to_cartesia_language(Language.EN),
+            language=Language.EN,
             generation_config=None,
             pronunciation_dict_id=None,
         )
@@ -320,7 +320,7 @@ class CartesiaTTSService(WebsocketTTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.generation_config is not None:
                     default_settings.generation_config = params.generation_config
                 if params.pronunciation_dict_id is not None:
@@ -749,7 +749,7 @@ class CartesiaHttpTTSService(TTSService):
         default_settings = self.Settings(
             model="sonic-3",
             voice=None,
-            language=language_to_cartesia_language(Language.EN),
+            language=Language.EN,
             generation_config=None,
             pronunciation_dict_id=None,
         )
@@ -767,7 +767,7 @@ class CartesiaHttpTTSService(TTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.generation_config is not None:
                     default_settings.generation_config = params.generation_config
                 if params.pronunciation_dict_id is not None:

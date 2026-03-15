@@ -473,9 +473,7 @@ class SarvamHttpTTSService(TTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = (
-                        self.language_to_service_language(params.language) or "en-IN"
-                    )
+                    default_settings.language = params.language
                 if params.enable_preprocessing is not None:
                     default_settings.enable_preprocessing = params.enable_preprocessing
                 if params.pace is not None:
@@ -490,10 +488,6 @@ class SarvamHttpTTSService(TTSService):
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
-
-        # Convert Language enum to service-specific string
-        if isinstance(default_settings.language, Language):
-            default_settings.language = self.language_to_service_language(default_settings.language)
 
         # Get model configuration (validates model exists)
         resolved_model = default_settings.model
@@ -889,9 +883,7 @@ class SarvamTTSService(InterruptibleTTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = (
-                        self.language_to_service_language(params.language) or "en-IN"
-                    )
+                    default_settings.language = params.language
                 if params.enable_preprocessing is not None:
                     default_settings.enable_preprocessing = params.enable_preprocessing
                 if params.min_buffer_size is not None:
@@ -914,10 +906,6 @@ class SarvamTTSService(InterruptibleTTSService):
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
-
-        # Convert Language enum to service-specific string
-        if isinstance(default_settings.language, Language):
-            default_settings.language = self.language_to_service_language(default_settings.language)
 
         # Get model configuration (validates model exists)
         resolved_model = default_settings.model

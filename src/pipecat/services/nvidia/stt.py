@@ -503,7 +503,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model=model_function_map.get("model_name"),
-            language=language_to_nvidia_riva_language(Language.EN_US) or "en-US",
+            language=Language.EN_US,
             profanity_filter=False,
             automatic_punctuation=True,
             verbatim_transcripts=False,
@@ -517,9 +517,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    language_to_nvidia_riva_language(params.language or Language.EN_US) or "en-US"
-                )
+                default_settings.language = params.language or Language.EN_US
                 default_settings.profanity_filter = params.profanity_filter
                 default_settings.automatic_punctuation = params.automatic_punctuation
                 default_settings.verbatim_transcripts = params.verbatim_transcripts

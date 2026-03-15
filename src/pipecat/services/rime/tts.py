@@ -251,9 +251,7 @@ class RimeTTSService(WebsocketTTSService):
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else None
-                )
+                default_settings.language = params.language
                 default_settings.segment = params.segment
                 default_settings.speedAlpha = params.speed_alpha
                 # Arcana params
@@ -754,9 +752,7 @@ class RimeHttpTTSService(TTSService):
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else "eng"
-                )
+                default_settings.language = params.language
                 default_settings.speedAlpha = params.speed_alpha
                 default_settings.reduceLatency = params.reduce_latency
                 default_settings.pauseBetweenBrackets = params.pause_between_brackets
@@ -984,9 +980,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else None
-                )
+                default_settings.language = params.language
                 default_settings.segment = params.segment
                 default_settings.repetition_penalty = params.repetition_penalty
                 default_settings.temperature = params.temperature

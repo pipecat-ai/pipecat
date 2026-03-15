@@ -449,7 +449,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.stability is not None:
                     default_settings.stability = params.stability
                 if params.similarity_boost is not None:
@@ -1014,7 +1014,7 @@ class ElevenLabsHttpTTSService(TTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.optimize_streaming_latency is not None:
                     default_settings.optimize_streaming_latency = params.optimize_streaming_latency
                 if params.stability is not None:

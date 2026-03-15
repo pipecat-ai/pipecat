@@ -312,11 +312,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.emphasis = params.emphasis
-                default_settings.language = (
-                    self.language_to_service_language(params.language)
-                    if params.language
-                    else "en-US"
-                )
+                default_settings.language = params.language if params.language else "en-US"
                 default_settings.pitch = params.pitch
                 default_settings.rate = params.rate
                 default_settings.role = params.role
@@ -809,11 +805,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.emphasis = params.emphasis
-                default_settings.language = (
-                    self.language_to_service_language(params.language)
-                    if params.language
-                    else "en-US"
-                )
+                default_settings.language = params.language if params.language else "en-US"
                 default_settings.pitch = params.pitch
                 default_settings.rate = params.rate
                 default_settings.role = params.role

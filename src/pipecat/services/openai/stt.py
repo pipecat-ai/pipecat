@@ -119,7 +119,7 @@ class OpenAISTTService(BaseWhisperSTTService):
         _language = language or Language.EN
         default_settings = self.Settings(
             model="gpt-4o-transcribe",
-            language=self.language_to_service_language(_language),
+            language=_language,
             prompt=None,
             temperature=None,
         )
