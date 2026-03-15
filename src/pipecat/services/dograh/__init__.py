@@ -11,11 +11,13 @@ Dograh API endpoint, abstracting away provider-specific implementations.
 """
 
 from pipecat.services.dograh.llm import DograhLLMService
-from pipecat.services.dograh.stt import DograhSTTService
-from pipecat.services.dograh.tts import DograhTTSService
+from pipecat.services.dograh.stt import DograhSTTService, DograhSTTSettings
+from pipecat.services.dograh.tts import DograhTTSService, DograhTTSSettings
 
 __all__ = [
     "DograhLLMService",
     "DograhSTTService",
+    "DograhSTTSettings",
     "DograhTTSService",
+    "DograhTTSSettings",
 ]

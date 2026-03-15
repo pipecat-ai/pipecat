@@ -9,6 +9,7 @@
 import asyncio
 import json
 import time
+from dataclasses import dataclass
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -43,6 +44,13 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class DograhSTTSettings(STTSettings):
+    """Settings for DograhSTTService."""
+
+    pass
+
+
 class DograhSTTService(STTService, WebsocketService):
     """Dograh speech-to-text service using WebSocket streaming.
 
@@ -50,18 +58,19 @@ class DograhSTTService(STTService, WebsocketService):
     Supports streaming transcription, interim results, and VAD events.
     """
 
+    Settings = DograhSTTSettings
+
     def __init__(
         self,
         *,
         api_key: str,
         base_url: str = "wss://services.dograh.com",
         ws_path: str = "/api/v1/stt/stream",
-        model: str = "default",
-        language: str = "multi",
         sample_rate: Optional[int] = None,
         interim_results: bool = True,
         vad_events: bool = False,
         keyterms: Optional[list[str]] = None,
+        settings: Optional[DograhSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = DOGRAH_TTFS_P99,
         **kwargs,
     ):
@@ -71,21 +80,23 @@ class DograhSTTService(STTService, WebsocketService):
             api_key: The Dograh API key for authentication.
             base_url: WebSocket base URL for Dograh API. Defaults to "wss://services.dograh.com".
             ws_path: WebSocket path for STT streaming. Defaults to "/api/v1/stt/stream".
-            model: STT model to use. Options include "default", "fast", "accurate".
-                   The actual model used is determined by Dograh backend configuration.
-            language: Language for speech recognition. Defaults to multi.
             sample_rate: Audio sample rate in Hz. Defaults to None.
             interim_results: Whether to receive interim transcription results.
             vad_events: Whether to receive voice activity detection events.
             keyterms: Optional list of keyterms for speech recognition boosting.
+            settings: STT settings including model and language.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent services.
         """
+        default_settings = DograhSTTSettings(model="default", language="multi")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         STTService.__init__(
             self,
             sample_rate=sample_rate,
-            settings=STTSettings(model=model, language=language),
+            settings=default_settings,
             ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )

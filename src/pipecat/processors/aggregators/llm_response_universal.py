@@ -75,6 +75,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     SummaryAppliedEvent,
 )
 from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
+from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
@@ -564,10 +565,10 @@ class LLMUserAggregator(LLMContextAggregator):
             # Enable the feature on the LLM with config
             await self.push_frame(
                 LLMUpdateSettingsFrame(
-                    settings={
-                        "filter_incomplete_user_turns": True,
-                        "user_turn_completion_config": config,
-                    }
+                    delta=LLMSettings(
+                        filter_incomplete_user_turns=True,
+                        user_turn_completion_config=config,
+                    )
                 )
             )
 

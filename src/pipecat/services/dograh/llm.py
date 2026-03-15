@@ -12,7 +12,7 @@ from loguru import logger
 
 from pipecat.frames.frames import ErrorFrame, Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.openai.base_llm import OpenAILLMInvocationParams
+from pipecat.services.openai.base_llm import OpenAILLMInvocationParams, OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 
 
@@ -29,7 +29,7 @@ class DograhLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://services.dograh.com/api/v1/llm",
-        model: str = "default",
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize Dograh LLM service.
@@ -37,11 +37,13 @@ class DograhLLMService(OpenAILLMService):
         Args:
             api_key: The Dograh API key for authentication.
             base_url: The base URL for Dograh API. Defaults to "https://services.dograh.com/api/v1/llm".
-            model: The model identifier to use. Options include "default", "fast", "accurate".
-                   The actual model used is determined by Dograh backend configuration.
+            settings: LLM settings including model, temperature, etc.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        default_settings = OpenAILLMSettings(model="default")
+        if settings is not None:
+            default_settings.apply_update(settings)
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
         self._start_metadata = None
 
     def create_client(self, api_key=None, base_url=None, **kwargs):

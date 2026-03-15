@@ -456,7 +456,15 @@ class BaseOpenAILLMService(LLMService):
                 if len(words) > 120:
                     messages_for_log[i] = " ".join(words[:20] + ["......"] + words[-100:])
 
-        logger.debug(f"{self}: Generating chat from universal context {messages_for_log}")
+        system_instruction_for_log = self._settings.system_instruction
+        if isinstance(system_instruction_for_log, str):
+            words = system_instruction_for_log.split()
+            if len(words) > 120:
+                system_instruction_for_log = " ".join(words[:20] + ["......"] + words[-100:])
+
+        logger.debug(
+            f"{self}: Generating chat from universal context [{system_instruction_for_log}] | {messages_for_log}"
+        )
 
         params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
         chunks = await self.get_chat_completions(params)

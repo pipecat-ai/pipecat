@@ -9,10 +9,10 @@
 import asyncio
 import base64
 import json
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -26,8 +26,8 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import AudioContextTTSService, TextAggregationMode
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.tts_service import TextAggregationMode, WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -65,7 +65,22 @@ def calculate_word_times(
     return word_times
 
 
-class DograhTTSService(AudioContextTTSService):
+@dataclass
+class DograhTTSSettings(TTSSettings):
+    """Settings for DograhTTSService.
+
+    Parameters:
+        speed: Speech speed control (0.5 to 2.0).
+        pitch: Voice pitch control (-1.0 to 1.0).
+        volume: Volume control (0.0 to 1.0).
+    """
+
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+class DograhTTSService(WebsocketTTSService):
     """Dograh WebSocket-based TTS service with word timestamps.
 
     This service provides real-time text-to-speech using Dograh's unified WebSocket API.
@@ -73,68 +88,50 @@ class DograhTTSService(AudioContextTTSService):
     Dograh backend configuration. Supports word-level timestamps and audio streaming.
     """
 
-    class InputParams(BaseModel):
-        """Input parameters for Dograh TTS configuration.
-
-        Parameters:
-            language: Language to use for synthesis.
-            speed: Speech speed control (0.5 to 2.0).
-            pitch: Voice pitch control (-1.0 to 1.0).
-            volume: Volume control (0.0 to 1.0).
-        """
-
-        language: Optional[Language] = None
-        speed: Optional[float] = 1.0
-        pitch: Optional[float] = 0.0
-        volume: Optional[float] = 1.0
+    Settings = DograhTTSSettings
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice: str = "default",
-        model: str = "default",
         base_url: str = "wss://services.dograh.com",
         ws_path: str = "/api/v1/tts/stream",
         sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
+        settings: Optional[DograhTTSSettings] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
-        aggregate_sentences: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize Dograh TTS service.
 
         Args:
             api_key: The Dograh API key for authentication.
-            voice: Voice identifier to use. Options include "default", "premium", "fast".
-                   The actual voice used is determined by Dograh backend configuration.
-            model: TTS model to use. Options include "default", "fast", "premium".
-                   The actual model used is determined by Dograh backend configuration.
             base_url: WebSocket base URL for Dograh API. Defaults to "wss://services.dograh.com".
             ws_path: WebSocket path for TTS streaming. Defaults to "/api/v1/tts/stream".
             sample_rate: Output audio sample rate in Hz. Defaults to None.
-            params: Additional input parameters for voice customization.
+            settings: TTS settings including model, voice, speed, pitch, volume.
             text_aggregation_mode: How to aggregate incoming text before synthesis.
-            aggregate_sentences: Whether to aggregate sentences within the TTSService.
-
-                .. deprecated:: 0.0.104
-                    Use ``text_aggregation_mode`` instead.
-
             **kwargs: Additional arguments passed to the parent service.
         """
-        params = params or DograhTTSService.InputParams()
+        default_settings = DograhTTSSettings(
+            model="default",
+            voice="default",
+            language="en",
+            speed=1.0,
+            pitch=0.0,
+            volume=1.0,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
-        language_str = params.language.value if params.language else "en"
+        language_str = default_settings.language or "en"
 
         super().__init__(
             text_aggregation_mode=text_aggregation_mode,
-            aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            supports_word_timestamps=True,
-            settings=TTSSettings(model=model, voice=voice, language=language_str),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -143,13 +140,12 @@ class DograhTTSService(AudioContextTTSService):
         self._ws_path = ws_path
         self._voice_settings = {
             "language": language_str,
-            "speed": params.speed,
-            "pitch": params.pitch,
-            "volume": params.volume,
+            "speed": default_settings.speed,
+            "pitch": default_settings.pitch,
+            "volume": default_settings.volume,
         }
 
-        # WebSocket connection
-        self._websocket = None
+        # WebSocket tasks
         self._receive_task = None
         self._keepalive_task = None
 
@@ -491,13 +487,18 @@ class DograhTTSService(AudioContextTTSService):
         """Close the Dograh context after all audio has been played."""
         await self._close_context(context_id)
 
-    async def flush_audio(self):
-        """Flush any pending audio and finalize the current context."""
-        context_id = self.get_active_audio_context_id()
-        if not context_id or not self._websocket:
+    async def flush_audio(self, context_id: Optional[str] = None):
+        """Flush any pending audio and finalize the current context.
+
+        Args:
+            context_id: The specific context to flush. If None, falls back to the
+                currently active context.
+        """
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = {"context_id": context_id, "flush": True}
+        msg = {"context_id": flush_id, "flush": True}
         await self._websocket.send(json.dumps(msg))
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):

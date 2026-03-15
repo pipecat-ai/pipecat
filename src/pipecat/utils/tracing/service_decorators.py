@@ -80,7 +80,9 @@ def _noop_decorator(func):
     return func
 
 
-def _sanitize_messages_for_logging(messages: List[Any]) -> List[Dict[str, Any]]:
+def _sanitize_messages_for_logging(
+    messages: List[Any], service: Any = None
+) -> List[Dict[str, Any]]:
     """Sanitize messages for logging by redacting sensitive data.
 
     Creates deep copies and redacts base64-encoded images, audio data,
@@ -88,11 +90,23 @@ def _sanitize_messages_for_logging(messages: List[Any]) -> List[Dict[str, Any]]:
 
     Args:
         messages: List of messages in standard ChatML format.
+        service: Optional LLM service instance. If provided and the service
+            has a ``_system_instruction`` attribute, a system message is
+            prepended to the returned list.
 
     Returns:
         List of sanitized messages safe for logging.
     """
     sanitized = []
+
+    # Prepend system instruction from the service settings if available
+    if service is not None:
+        system_instruction = getattr(
+            getattr(service, "_settings", None), "system_instruction", None
+        )
+        if system_instruction:
+            sanitized.append({"role": "system", "content": system_instruction})
+
     for message in messages:
         # Include LLM-specific messages with a marker so traces show something was there
         if isinstance(message, LLMSpecificMessage):
@@ -613,7 +627,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             elif isinstance(context, LLMContext):
                                 # Universal LLMContext - use standard messages directly
                                 # context.messages returns messages in standard ChatML format
-                                messages = _sanitize_messages_for_logging(context.messages)
+                                messages = _sanitize_messages_for_logging(
+                                    context.messages, service=self
+                                )
 
                             # Get tools in standard format for logging
                             # For OpenAILLMContext: tools property returns provider-specific format
@@ -632,7 +648,10 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             params = {}
                             if hasattr(self, "_settings"):
                                 for key, value in self._settings.given_fields().items():
-                                    if isinstance(value, (int, float, bool, str)):
+                                    if (
+                                        isinstance(value, (int, float, bool, str))
+                                        and key != "system_instruction"
+                                    ):
                                         params[key] = value
                                     elif value is None:
                                         params[key] = "NOT_GIVEN"
