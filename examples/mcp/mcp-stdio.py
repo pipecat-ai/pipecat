@@ -162,73 +162,63 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         )
 
-        try:
-            mcp = MCPClient(
-                server_params=StdioServerParameters(
-                    command=shutil.which("npx"),
-                    # https://github.com/r-huijts/rijksmuseum-mcp
-                    args=["-y", "mcp-server-rijksmuseum"],
-                    env={"RIJKSMUSEUM_API_KEY": os.getenv("RIJKSMUSEUM_API_KEY")},
-                ),
-                # Optional
-                tools_filter=mcp_tools_filter,  # Optional
-                tools_output_filters={"open_image_in_browser": open_image_output_filter},
-            )
-        except Exception as e:
-            logger.error(f"error setting up mcp")
-            logger.exception("error trace:")
-
         mcp_image = UrlToImageProcessor(aiohttp_session=session)
 
-        tools = {}
-        try:
-            tools = await mcp.register_tools(llm)
-        except Exception as e:
-            logger.error(f"error registering tools")
-            logger.exception("error trace:")
-
-        context = LLMContext(tools=tools)
-        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-            context,
-            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-        )
-
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                stt,
-                user_aggregator,  # User spoken responses
-                llm,  # LLM
-                tts,  # TTS
-                mcp_image,  # URL image -> output
-                transport.output(),  # Transport bot output
-                assistant_aggregator,  # Assistant spoken responses and tool context
-            ]
-        )
-
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
+        async with MCPClient(
+            server_params=StdioServerParameters(
+                command=shutil.which("npx"),
+                # https://github.com/r-huijts/rijksmuseum-mcp
+                args=["-y", "mcp-server-rijksmuseum"],
+                env={"RIJKSMUSEUM_API_KEY": os.getenv("RIJKSMUSEUM_API_KEY")},
             ),
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
+            # Optional
+            tools_filter=mcp_tools_filter,  # Optional
+            tools_output_filters={"open_image_in_browser": open_image_output_filter},
+        ) as mcp:
+            tools = await mcp.register_tools(llm)
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected: {client}")
-            # Kick off the conversation.
-            await task.queue_frames([LLMRunFrame()])
+            context = LLMContext(tools=tools)
+            user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+                context,
+                user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+            )
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await task.cancel()
+            pipeline = Pipeline(
+                [
+                    transport.input(),  # Transport user input
+                    stt,
+                    user_aggregator,  # User spoken responses
+                    llm,  # LLM
+                    tts,  # TTS
+                    mcp_image,  # URL image -> output
+                    transport.output(),  # Transport bot output
+                    assistant_aggregator,  # Assistant spoken responses and tool context
+                ]
+            )
 
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+            task = PipelineTask(
+                pipeline,
+                params=PipelineParams(
+                    enable_metrics=True,
+                    enable_usage_metrics=True,
+                ),
+                idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+            )
 
-        await runner.run(task)
+            @transport.event_handler("on_client_connected")
+            async def on_client_connected(transport, client):
+                logger.info(f"Client connected: {client}")
+                # Kick off the conversation.
+                await task.queue_frames([LLMRunFrame()])
+
+            @transport.event_handler("on_client_disconnected")
+            async def on_client_disconnected(transport, client):
+                logger.info(f"Client disconnected")
+                await task.cancel()
+
+            runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+
+            await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):

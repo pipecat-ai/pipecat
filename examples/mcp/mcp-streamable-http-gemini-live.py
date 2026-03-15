@@ -63,28 +63,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    try:
-        # Github MCP docs: https://github.com/github/github-mcp-server
-        # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
-        # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
-        # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
-        mcp = MCPClient(
-            server_params=StreamableHttpParameters(
-                url="https://api.githubcopilot.com/mcp/",
-                headers={"Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"},
-            )
-        )
-    except Exception as e:
-        logger.error(f"error setting up mcp")
-        logger.exception("error trace:")
-
-    tools = {}
-    try:
-        tools = await mcp.get_tools_schema()
-    except Exception as e:
-        logger.error(f"error registering tools")
-        logger.exception("error trace:")
-
     system = f"""
     You are a helpful LLM in a voice call.
     Your goal is to answer questions about the user's GitHub repositories and account.
@@ -94,53 +72,65 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     Just respond with short sentences when you are carrying out tool calls.
     """
 
-    llm = GeminiLiveLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system,
-        tools=tools,
-    )
+    # Github MCP docs: https://github.com/github/github-mcp-server
+    # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
+    # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
+    # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
+    async with MCPClient(
+        server_params=StreamableHttpParameters(
+            url="https://api.githubcopilot.com/mcp/",
+            headers={"Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"},
+        )
+    ) as mcp:
+        tools = await mcp.get_tools_schema()
 
-    await mcp.register_tools_schema(tools, llm)
+        llm = GeminiLiveLLMService(
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            system_instruction=system,
+            tools=tools,
+        )
 
-    context = LLMContext([{"role": "developer", "content": "Please introduce yourself."}])
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-    )
+        await mcp.register_tools_schema(tools, llm)
 
-    pipeline = Pipeline(
-        [
-            transport.input(),  # Transport user input
-            user_aggregator,  # User spoken responses
-            llm,  # LLM
-            transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses and tool context
-        ]
-    )
+        context = LLMContext([{"role": "user", "content": "Please introduce yourself."}])
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        )
 
-    task = PipelineTask(
-        pipeline,
-        params=PipelineParams(
-            enable_metrics=True,
-            enable_usage_metrics=True,
-        ),
-        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-    )
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                user_aggregator,  # User spoken responses
+                llm,  # LLM
+                transport.output(),  # Transport bot output
+                assistant_aggregator,  # Assistant spoken responses and tool context
+            ]
+        )
 
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        logger.info(f"Client connected: {client}")
-        # Kick off the conversation.
-        await task.queue_frames([LLMRunFrame()])
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        )
 
-    @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await task.cancel()
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            logger.info(f"Client connected: {client}")
+            # Kick off the conversation.
+            await task.queue_frames([LLMRunFrame()])
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, client):
+            logger.info(f"Client disconnected")
+            await task.cancel()
 
-    await runner.run(task)
+        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+
+        await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):
