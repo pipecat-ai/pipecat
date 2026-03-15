@@ -52,6 +52,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     TTSUpdateSettingsFrame,
 )
+from pipecat.pipeline.sync_parallel_pipeline import SyncFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import TTSSettings, is_given
@@ -758,7 +759,17 @@ class TTSService(AIService):
             await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
         else:
-            await self.push_frame(frame, direction)
+            # If there's an active audio context, route the frame through it
+            # so it stays ordered with TTS audio frames being pushed by the
+            # background task. Otherwise, push directly.
+            if (
+                self._turn_context_id
+                and self.audio_context_available(self._turn_context_id)
+                and direction == FrameDirection.DOWNSTREAM
+            ):
+                await self.append_to_audio_context(self._turn_context_id, frame)
+            else:
+                await self.push_frame(frame, direction)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream with TTS-specific handling.

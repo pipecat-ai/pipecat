@@ -12,11 +12,17 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     DataFrame,
     Frame,
     LLMContextFrame,
     LLMFullResponseStartFrame,
+    OutputImageRawFrame,
     TextFrame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -30,6 +36,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService
 from pipecat.services.fal.image import FalImageGenService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.tts_service import TextAggregationMode
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
@@ -42,6 +49,73 @@ class MonthFrame(DataFrame):
 
     def __str__(self):
         return f"{self.name}(month: {self.month})"
+
+
+class MarkImageForPlaybackSync(FrameProcessor):
+    """Marks output image frames to be synchronized with audio playback."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, OutputImageRawFrame):
+            frame.sync_with_audio = True
+
+        await self.push_frame(frame, direction)
+
+
+class ImageBeforeAudioReorderer(FrameProcessor):
+    """Ensures each image frame precedes its corresponding TTS audio frames.
+
+    SyncParallelPipeline guarantees that each image is in the same synchronized
+    batch as its audio, but doesn't guarantee which branch's output comes first.
+    This processor detects when TTS frames arrive before their image and holds
+    them until the image arrives.
+
+    All frames pass through immediately unless we detect an ordering problem:
+    TTS frames arrived without a preceding image for the current batch (identified
+    by context_id). In that case, the TTS frames are held until the next image
+    frame, which is pushed first.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._held_tts_frames = []
+        self._seen_image = False
+        self._current_context_id = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, OutputImageRawFrame):
+            self._seen_image = True
+            if self._held_tts_frames:
+                # Image arrived after TTS frames — push image first, then release held frames.
+                logger.debug("ImageBeforeAudioReorderer: reordered — moved image before audio")
+                await self.push_frame(frame, direction)
+                for f in self._held_tts_frames:
+                    await self.push_frame(f, direction)
+                self._held_tts_frames = []
+            else:
+                logger.debug(
+                    "ImageBeforeAudioReorderer: no reorder needed — image was already first"
+                )
+                await self.push_frame(frame, direction)
+        elif isinstance(
+            frame,
+            (AggregatedTextFrame, TTSStartedFrame, TTSAudioRawFrame, TTSStoppedFrame, TTSTextFrame),
+        ):
+            # A new context_id means a new batch — reset image tracking.
+            context_id = frame.context_id
+            if context_id and context_id != self._current_context_id:
+                self._current_context_id = context_id
+                self._seen_image = False
+
+            if self._seen_image:
+                await self.push_frame(frame, direction)
+            else:
+                self._held_tts_frames.append(frame)
+        else:
+            await self.push_frame(frame, direction)
 
 
 class MonthPrepender(FrameProcessor):
@@ -101,6 +175,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             settings=CartesiaHttpTTSService.Settings(
                 voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
             ),
+            # No need to aggregate by sentences (the default), as we already know we're getting full sentences
+            # (Otherwise the service will unnecessarily wait for follow-up input to confirm the sentence is complete,
+            #  which, sadly, actually breaks the synchronization mechanism)
+            text_aggregation_mode=TextAggregationMode.TOKEN,
         )
 
         imagegen = FalImageGenService(
@@ -129,8 +207,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 sentence_aggregator,  # Aggregates LLM output into full sentences
                 SyncParallelPipeline(  # Run pipelines in parallel aggregating the result
                     [month_prepender, tts],  # Create "Month: sentence" and output audio
-                    [imagegen],  # Generate image
+                    [
+                        imagegen,  # Generate image
+                        MarkImageForPlaybackSync(),  # Mark image as needing sync w/audio during playback
+                    ],
                 ),
+                ImageBeforeAudioReorderer(),  # Ensure each image precedes its audio (important for playback)
                 transport.output(),  # Transport output
             ]
         )

@@ -569,7 +569,11 @@ class BaseOutputTransport(FrameProcessor):
             if not self._params.video_out_enabled:
                 return
 
-            if self._params.video_out_is_live and isinstance(frame, OutputImageRawFrame):
+            if isinstance(frame, OutputImageRawFrame) and frame.sync_with_audio:
+                # Route through the audio queue so the image is only
+                # displayed after all preceding audio has been sent.
+                await self._audio_queue.put(frame)
+            elif self._params.video_out_is_live and isinstance(frame, OutputImageRawFrame):
                 await self._video_queue.put(frame)
             elif isinstance(frame, OutputImageRawFrame):
                 await self._set_video_image(frame)

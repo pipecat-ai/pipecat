@@ -184,7 +184,7 @@ class SyncParallelPipeline(BasePipeline):
         Returns:
             The list of entry processors.
         """
-        return self._sources
+        return [s["processor"] for s in self._sources]
 
     def processors_with_metrics(self) -> List[FrameProcessor]:
         """Collect processors that can generate metrics from all parallel pipelines.
@@ -221,11 +221,25 @@ class SyncParallelPipeline(BasePipeline):
         """
         await super().process_frame(frame, direction)
 
+        # SystemFrames (but not EndFrame) are simply passed through all
+        # internal pipelines without draining queued output. This avoids
+        # the race condition where a SystemFrame's wait_for_sync steals
+        # frames from a concurrent non-SystemFrame's wait_for_sync.
+        if isinstance(frame, SystemFrame) and not isinstance(frame, EndFrame):
+            if direction == FrameDirection.UPSTREAM:
+                for s in self._sinks:
+                    await s["processor"].process_frame(frame, direction)
+            elif direction == FrameDirection.DOWNSTREAM:
+                for s in self._sources:
+                    await s["processor"].process_frame(frame, direction)
+            await self.push_frame(frame, direction)
+            return
+
         # The last processor of each pipeline needs to be synchronous otherwise
         # this element won't work. Since, we know it should be synchronous we
         # push a SyncFrame. Since frames are ordered we know this frame will be
         # pushed after the synchronous processor has pushed its data allowing us
-        # to synchrnonize all the internal pipelines by waiting for the
+        # to synchronize all the internal pipelines by waiting for the
         # SyncFrame in all of them.
         async def wait_for_sync(
             obj, main_queue: asyncio.Queue, frame: Frame, direction: FrameDirection
@@ -235,12 +249,12 @@ class SyncParallelPipeline(BasePipeline):
 
             await processor.process_frame(frame, direction)
 
-            if isinstance(frame, (SystemFrame, EndFrame)):
+            if isinstance(frame, EndFrame):
                 new_frame = await queue.get()
-                if isinstance(new_frame, (SystemFrame, EndFrame)):
+                if isinstance(new_frame, EndFrame):
                     await main_queue.put(new_frame)
                 else:
-                    while not isinstance(new_frame, (SystemFrame, EndFrame)):
+                    while not isinstance(new_frame, EndFrame):
                         await main_queue.put(new_frame)
                         queue.task_done()
                         new_frame = await queue.get()
