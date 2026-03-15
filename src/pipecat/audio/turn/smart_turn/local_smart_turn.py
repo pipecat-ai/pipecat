@@ -36,7 +36,7 @@ class LocalSmartTurnAnalyzer(BaseSmartTurn):
     enabling offline operation without network dependencies. Uses
     Wav2Vec2-BERT architecture for audio sequence classification.
 
-    .. deprecated:: 0.98.0
+    .. deprecated:: 0.0.98
         LocalSmartTurnAnalyzer is deprecated and will be removed in a future version.
         Use LocalSmartTurnAnalyzerV3 instead.
     """
