@@ -80,6 +80,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         start_callback=None,
         *,
         cancel_on_interruption: bool = True,
+        timeout_secs: Optional[float] = None,
     ):
         """Register a function handler for LLM function calls, on all LLMs, active or not.
 
@@ -96,6 +97,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
 
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
+            timeout_secs: Optional timeout in seconds for the function call.
         """
         for llm in self.llms:
             llm.register_function(
@@ -103,6 +105,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 handler=handler,
                 start_callback=start_callback,
                 cancel_on_interruption=cancel_on_interruption,
+                timeout_secs=timeout_secs,
             )
 
     def register_direct_function(
@@ -110,6 +113,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         handler: DirectFunction,
         *,
         cancel_on_interruption: bool = True,
+        timeout_secs: Optional[float] = None,
     ):
         """Register a direct function handler for LLM function calls, on all LLMs, active or not.
 
@@ -117,9 +121,11 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
             handler: The direct function to register. Must follow DirectFunction protocol.
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
+            timeout_secs: Optional timeout in seconds for the function call.
         """
         for llm in self.llms:
             llm.register_direct_function(
                 handler=handler,
                 cancel_on_interruption=cancel_on_interruption,
+                timeout_secs=timeout_secs,
             )
