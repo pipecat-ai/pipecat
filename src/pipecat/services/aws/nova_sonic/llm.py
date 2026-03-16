@@ -1266,19 +1266,21 @@ class AWSNovaSonicLLMService(LLMService):
         await self.push_frame(TTSStartedFrame())
 
     async def _report_assistant_speculative_text(self, text):
-        """Push speculative assistant text as LLMTextFrame and AggregatedTextFrame.
+        """Push speculative assistant text as LLMTextFrame and TTSTextFrame.
 
-        The AggregatedTextFrame is pushed for the bot-output event. This allows the client
+        The TTSTextFrame is pushed for the bot-output event. This allows the client
         to display the text as soon as it's generated.
 
         The LLMTextFrame is pushed for the bot-llm-text event and for backwards compatibility.
+        It is not pushed to the bot-output event because it would be redundant.
         """
         llm_text_frame = LLMTextFrame(text)
         llm_text_frame.append_to_context = False
         await self.push_frame(llm_text_frame)
-        aggregated_text_frame = AggregatedTextFrame(text, aggregated_by=AggregationType.SENTENCE)
-        aggregated_text_frame.append_to_context = False
-        await self.push_frame(aggregated_text_frame)
+
+        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame.includes_inter_frame_spaces = True
+        await self.push_frame(tts_text_frame)
 
     async def _report_assistant_response_text_added(self, text):
         if not self._context:  # should never happen
@@ -1333,9 +1335,16 @@ class AWSNovaSonicLLMService(LLMService):
         self._assistant_text_buffer = ""
 
     async def _push_assistant_response_text_frames(self, text: str):
-        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
-        tts_text_frame.includes_inter_frame_spaces = True
-        await self.push_frame(tts_text_frame)
+        """Push assistant response text frames.
+
+        Nothing is pushed in this case because the FINAL text events arrive
+        after the assistant audio response has completed. This results in lagging
+        assistant transcripts, making it difficult to build a UI. Instead, we rely
+        on the SPECULATIVE text frames to be pushed instead, which are pushed before
+        each chunk of audio is played. This creates a more accurate representation
+        of the assistant's response.
+        """
+        pass
 
     #
     # user transcription reporting
