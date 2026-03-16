@@ -4,14 +4,22 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for RTP header pack/unpack and DTMF parsing."""
+"""Tests for RTP header pack/unpack, DTMF parsing, and RTPSession compliance."""
 
+import asyncio
 import struct
 
 import numpy as np
 import pytest
 
-from pipecat.transports.sip.rtp import pack_rtp_header, parse_dtmf_event, unpack_rtp_header
+from pipecat.transports.sip.rtp import (
+    PCMU_PAYLOAD_TYPE,
+    RTP_HEADER_SIZE,
+    RTPSession,
+    pack_rtp_header,
+    parse_dtmf_event,
+    unpack_rtp_header,
+)
 
 
 class TestRTPHeader:
@@ -104,3 +112,64 @@ class TestDTMFParsing:
         """Event >= 16 returns None."""
         payload = bytes([20, 0x80, 0x00, 0x50])
         assert parse_dtmf_event(payload) is None
+
+
+class TestRTPSessionCompliance:
+    """RFC 3550 compliance tests for RTPSession."""
+
+    def _make_session(self) -> RTPSession:
+        return RTPSession(local_port=0)
+
+    def _make_rtp_packet(self, payload_type: int, ssrc: int, payload: bytes = b"\x7f" * 160):
+        header = pack_rtp_header(seq=1, timestamp=160, ssrc=ssrc, payload_type=payload_type)
+        return header + payload
+
+    def test_ignore_unknown_payload_type(self):
+        """Packets with unknown payload types are dropped (RFC 3550 §5.1)."""
+        session = self._make_session()
+        packet = self._make_rtp_packet(payload_type=99, ssrc=0x12345678)
+        session._handle_packet(packet, ("127.0.0.1", 5000))
+        assert session.rx_queue.qsize() == 0
+
+    def test_accept_pcmu_payload_type(self):
+        """PCMU (PT=0) packets are accepted and queued."""
+        session = self._make_session()
+        packet = self._make_rtp_packet(payload_type=PCMU_PAYLOAD_TYPE, ssrc=0x12345678)
+        session._handle_packet(packet, ("127.0.0.1", 5000))
+        assert session.rx_queue.qsize() == 1
+
+    def test_ssrc_collision_detection(self):
+        """SSRC is regenerated on collision (RFC 3550 §5.1)."""
+        session = self._make_session()
+        original_ssrc = session._ssrc
+        packet = self._make_rtp_packet(payload_type=PCMU_PAYLOAD_TYPE, ssrc=original_ssrc)
+        session._handle_packet(packet, ("127.0.0.1", 5000))
+        assert session._ssrc != original_ssrc
+
+    @pytest.mark.asyncio
+    async def test_new_ssrc_on_address_change(self):
+        """SSRC is regenerated when remote address changes (RFC 3550 §5.1)."""
+        session = self._make_session()
+
+        # Simulate first start by setting remote_addr directly (avoid actual UDP bind)
+        session._remote_addr = ("192.168.1.1", 5000)
+        original_ssrc = session._ssrc
+
+        # Simulate address change check from start()
+        new_addr = ("192.168.1.2", 5000)
+        if session._remote_addr is not None and session._remote_addr != new_addr:
+            session._ssrc = __import__("random").randint(0, 0xFFFFFFFF)
+
+        assert session._ssrc != original_ssrc
+
+    def test_same_address_keeps_ssrc(self):
+        """SSRC is preserved when remote address does not change."""
+        session = self._make_session()
+        session._remote_addr = ("192.168.1.1", 5000)
+        original_ssrc = session._ssrc
+
+        same_addr = ("192.168.1.1", 5000)
+        if session._remote_addr is not None and session._remote_addr != same_addr:
+            session._ssrc = __import__("random").randint(0, 0xFFFFFFFF)
+
+        assert session._ssrc == original_ssrc

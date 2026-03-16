@@ -33,6 +33,9 @@ PCM16_FRAME_SIZE = 320  # bytes (160 samples * 2 bytes)
 SILENCE_PCM16 = b"\x00" * PCM16_FRAME_SIZE
 PREBUFFER_FRAMES = 3  # ~60ms
 
+# RFC 3550 payload types
+PCMU_PAYLOAD_TYPE = 0
+
 # RFC 2833 DTMF
 DTMF_PAYLOAD_TYPE = 101
 DTMF_DIGITS = "0123456789*#ABCD"
@@ -97,6 +100,15 @@ def parse_dtmf_event(payload: bytes) -> Tuple[str, bool, int] | None:
 class RTPSession:
     """Manages RTP send/receive over UDP with precise 20ms timing.
 
+    This is a minimal RTP implementation for LAN-only SIP use with FreeSWITCH.
+
+    Known limitations:
+        - No RTCP support (RFC 3550 §6). RTCP circuit breaker (RFC 8083) is not
+          implemented. Safe for LAN/trusted-network deployments where congestion
+          control is handled at the network level.
+        - No NACK, RED, or AVPF feedback (RFC 4585). Packet loss is not recovered.
+        - Timestamp derived from frame counter, not a real sampling clock.
+
     Args:
         local_port: UDP port to bind for RTP media.
         prebuffer_frames: Number of frames to buffer before TX playback.
@@ -148,6 +160,11 @@ class RTPSession:
         Args:
             remote_addr: Remote RTP endpoint (ip, port).
         """
+        # Regenerate SSRC on transport address change (RFC 3550 §5.1)
+        if self._remote_addr is not None and self._remote_addr != remote_addr:
+            self._ssrc = random.randint(0, 0xFFFFFFFF)
+            logger.info("Remote address changed, new SSRC 0x%08X", self._ssrc)
+
         self._remote_addr = remote_addr
         self._running = True
         self._last_rtp_time = time.monotonic()
@@ -201,6 +218,16 @@ class RTPSession:
                     except asyncio.QueueFull:
                         pass
             return
+
+        # Only process known audio payload types (RFC 3550 §5.1)
+        if pt != PCMU_PAYLOAD_TYPE:
+            logger.debug("Ignoring unknown payload type %d", pt)
+            return
+
+        # SSRC collision detection (RFC 3550 §5.1)
+        if ssrc == self._ssrc:
+            logger.warning("SSRC collision detected (0x%08X), regenerating", self._ssrc)
+            self._ssrc = random.randint(0, 0xFFFFFFFF)
 
         # Audio: decode G.711 to PCM16
         ulaw = np.frombuffer(payload, dtype=np.uint8)
