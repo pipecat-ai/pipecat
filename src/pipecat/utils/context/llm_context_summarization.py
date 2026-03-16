@@ -514,6 +514,22 @@ class LLMContextSummarizationUtil:
         if summary_start >= summary_end:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
+        # Ensure we don't split a complete tool call sequence at the boundary.
+        # If the first kept message has role "tool", walk summary_end backwards
+        # to include the preceding assistant message with tool_calls.
+        while summary_end > summary_start and summary_end < len(messages):
+            boundary_msg = messages[summary_end]
+            if isinstance(boundary_msg, LLMSpecificMessage):
+                summary_end -= 1
+                continue
+            if isinstance(boundary_msg, dict) and boundary_msg.get("role") == "tool":
+                summary_end -= 1
+            else:
+                break
+
+        if summary_start >= summary_end:
+            return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
+
         messages_to_summarize = messages[summary_start:summary_end]
         last_summarized_index = summary_end - 1
 
