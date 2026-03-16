@@ -1363,6 +1363,12 @@ class AWSNovaSonicLLMService(LLMService):
         if not self._context:  # should never happen
             return
 
+        # Nothing to report if no user speech was transcribed (e.g. the prompt
+        # was text-only, which is the case on the first user turn when the bot
+        # starts the conversation).
+        if not self._user_text_buffer:
+            return
+
         logger.debug(f"User transcription ended")
 
         # Report to the upstream user context aggregator that some new user
