@@ -25,7 +25,6 @@ from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import _NotGiven, _warn_deprecated_param, is_given
 
-__all__ = ["SarvamLLMService", "SarvamLLMSettings"]
 _T = TypeVar("_T")
 
 
@@ -56,10 +55,10 @@ class SarvamLLMService(OpenAILLMService):
     - raw Sarvam server error passthrough
     """
 
-    SUPPORTED_MODELS = frozenset({"sarvam-30b", "sarvam-30b-16k", "sarvam-105b", "sarvam-105b-32k"})
-    TOOL_CALLING_MODELS = frozenset(
+    _SUPPORTED_MODELS = frozenset(
         {"sarvam-30b", "sarvam-30b-16k", "sarvam-105b", "sarvam-105b-32k"}
     )
+    _TOOL_CALLING_MODELS = _SUPPORTED_MODELS
     Settings = SarvamLLMSettings
     _settings: SarvamLLMSettings
 
@@ -94,6 +93,8 @@ class SarvamLLMService(OpenAILLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
+            # Keep deprecated init arg for backward compatibility while steering callers
+            # to settings=SarvamLLMService.Settings(model=...).
             _warn_deprecated_param("model", SarvamLLMSettings, "model")
             default_settings.model = model
 
@@ -101,8 +102,9 @@ class SarvamLLMService(OpenAILLMService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        # BaseOpenAILLMService stores settings as OpenAILLMSettings, so keep
-        # Sarvam-specific runtime knobs in ``extra``.
+        # BaseOpenAILLMService currently stores settings as OpenAILLMSettings.
+        # Preserve Sarvam-only runtime knobs in ``extra`` so they survive
+        # initialization and future update frames.
         default_settings.extra = dict(default_settings.extra)
         default_settings.extra.update(self._extract_sarvam_extra_from_settings(default_settings))
 
@@ -158,6 +160,7 @@ class SarvamLLMService(OpenAILLMService):
         params.pop("max_completion_tokens", None)
         params.pop("service_tier", None)
 
+        # Sarvam-only fields are bridged through settings.extra (see __init__ and _update_settings).
         extra = self._settings.extra if isinstance(self._settings.extra, dict) else {}
         if "wiki_grounding" in extra and extra["wiki_grounding"] is not None:
             params["wiki_grounding"] = extra["wiki_grounding"]
@@ -168,6 +171,8 @@ class SarvamLLMService(OpenAILLMService):
 
     async def _update_settings(self, delta: OpenAILLMSettings) -> dict[str, Any]:
         """Apply settings updates, preserving Sarvam-specific runtime knobs."""
+        # LLMUpdateSettingsFrame commonly carries OpenAILLMSettings deltas.
+        # Lift Sarvam-only fields into delta.extra before delegating to base.
         sarvam_extra = self._extract_sarvam_extra_from_settings(delta)
         if sarvam_extra:
             delta.extra = dict(delta.extra)
@@ -176,7 +181,13 @@ class SarvamLLMService(OpenAILLMService):
         return await super()._update_settings(delta)
 
     async def _call_with_raw_sarvam_errors(self, awaitable: Awaitable[_T]) -> _T:
-        """Await an OpenAI call while preserving Sarvam raw error payloads."""
+        """Await an OpenAI call while preserving Sarvam raw error payloads.
+
+        BaseOpenAILLMService handles pipeline-frame exceptions via push_error(),
+        but direct helper methods like ``get_chat_completions`` and
+        ``run_inference`` are often consumed directly. We normalize those errors
+        here so applications consistently receive server-provided messages.
+        """
         try:
             return await awaitable
         except (APITimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
@@ -208,8 +219,8 @@ class SarvamLLMService(OpenAILLMService):
         )
 
     def _validate_model(self, model: str):
-        if model not in self.SUPPORTED_MODELS:
-            allowed = ", ".join(sorted(self.SUPPORTED_MODELS))
+        if model not in self._SUPPORTED_MODELS:
+            allowed = ", ".join(sorted(self._SUPPORTED_MODELS))
             raise ValueError(f"Unsupported Sarvam LLM model '{model}'. Allowed values: {allowed}.")
 
     def _extract_sarvam_extra_from_settings(self, settings_obj: Any) -> dict[str, Any]:
@@ -238,8 +249,9 @@ class SarvamLLMService(OpenAILLMService):
         if has_tool_choice and not has_tools:
             raise ValueError("Sarvam requires non-empty `tools` when `tool_choice` is provided.")
 
-        if has_tools and self._settings.model not in self.TOOL_CALLING_MODELS:
-            allowed = ", ".join(sorted(self.TOOL_CALLING_MODELS))
+        # Validate early to provide deterministic errors before network calls.
+        if has_tools and self._settings.model not in self._TOOL_CALLING_MODELS:
+            allowed = ", ".join(sorted(self._TOOL_CALLING_MODELS))
             raise ValueError(
                 f"Model '{self._settings.model}' does not support tools. "
                 f"Supported models: {allowed}."
