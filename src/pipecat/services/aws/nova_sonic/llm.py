@@ -27,7 +27,6 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
 from pipecat.frames.frames import (
-    AggregatedTextFrame,
     AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -425,7 +424,6 @@ class AWSNovaSonicLLMService(LLMService):
         self._input_audio_content_name: Optional[str] = None
         self._content_being_received: Optional[CurrentContent] = None
         self._assistant_is_responding = False
-        self._may_need_repush_assistant_text = False
         self._ready_to_send_context = False
         self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
@@ -434,7 +432,6 @@ class AWSNovaSonicLLMService(LLMService):
         self._connected_time: Optional[float] = None
         self._wants_connection = False
         self._user_text_buffer = ""
-        self._assistant_text_buffer = ""
         self._completed_tool_calls = set()
         self._audio_input_started = False
 
@@ -611,8 +608,7 @@ class AWSNovaSonicLLMService(LLMService):
             await finalize_assistant_response()
 
     async def _handle_interruption_frame(self):
-        if self._assistant_is_responding:
-            self._may_need_repush_assistant_text = True
+        pass
 
     #
     # LLM communication: lifecycle
@@ -772,7 +768,6 @@ class AWSNovaSonicLLMService(LLMService):
             self._input_audio_content_name = None
             self._content_being_received = None
             self._assistant_is_responding = False
-            self._may_need_repush_assistant_text = False
             self._ready_to_send_context = False
             self._handling_bot_stopped_speaking = False
             self._triggering_assistant_response = False
@@ -780,7 +775,6 @@ class AWSNovaSonicLLMService(LLMService):
             self._disconnecting = False
             self._connected_time = None
             self._user_text_buffer = ""
-            self._assistant_text_buffer = ""
             self._completed_tool_calls = set()
             self._audio_input_started = False
 
@@ -1133,7 +1127,7 @@ class AWSNovaSonicLLMService(LLMService):
                 await self.reset_conversation()
 
     async def _handle_completion_start_event(self, event_json):
-        pass
+        await self.push_frame(LLMFullResponseStartFrame())
 
     async def _handle_content_start_event(self, event_json):
         content_start = event_json["contentStart"]
@@ -1236,9 +1230,6 @@ class AWSNovaSonicLLMService(LLMService):
                 if stop_reason != "INTERRUPTED":
                     if content.text_stage == TextStage.SPECULATIVE:
                         await self._report_assistant_speculative_text(content.text_content)
-                    elif content.text_stage == TextStage.FINAL:
-                        if self._assistant_is_responding:
-                            await self._report_assistant_response_text_added(content.text_content)
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
@@ -1259,21 +1250,21 @@ class AWSNovaSonicLLMService(LLMService):
     async def _report_assistant_response_started(self):
         logger.debug("Assistant response started")
 
-        # Report the start of the assistant response.
-        await self.push_frame(LLMFullResponseStartFrame())
-
         # Report that equivalent of TTS (this is a speech-to-speech model) started
         await self.push_frame(TTSStartedFrame())
 
     async def _report_assistant_speculative_text(self, text):
         """Push speculative assistant text as LLMTextFrame and TTSTextFrame.
 
-        The TTSTextFrame is pushed for the bot-output event. This allows the client
-        to display the text as soon as it's generated.
+        Speculative text arrives before each audio chunk, providing real-time
+        text that is synchronized with what the bot is saying. Final text
+        arrives seconds after all audio is done and is not used.
 
-        The LLMTextFrame is pushed for the bot-llm-text event and for backwards compatibility.
-        It is not pushed to the bot-output event because it would be redundant.
+        We also buffer the text here for the interruption re-push safety net
+        (see _report_assistant_response_ended).
         """
+        logger.debug(f"Assistant speculative text: {text}")
+
         llm_text_frame = LLMTextFrame(text)
         llm_text_frame.append_to_context = False
         await self.push_frame(llm_text_frame)
@@ -1282,69 +1273,17 @@ class AWSNovaSonicLLMService(LLMService):
         tts_text_frame.includes_inter_frame_spaces = True
         await self.push_frame(tts_text_frame)
 
-    async def _report_assistant_response_text_added(self, text):
-        if not self._context:  # should never happen
-            return
-
-        logger.debug(f"Assistant response text added: {text}")
-
-        # Report the text of the assistant response.
-        await self._push_assistant_response_text_frames(text)
-
-        # HACK: here we're also buffering the assistant text ourselves as a
-        # backup rather than relying solely on the assistant context aggregator
-        # to do it, because the text arrives from Nova Sonic only after all the
-        # assistant audio frames have been pushed, meaning that if an
-        # interruption frame were to arrive we would lose all of it (the text
-        # frames sitting in the queue would be wiped).
-        self._assistant_text_buffer += text
-
     async def _report_assistant_response_ended(self):
         if not self._context:  # should never happen
             return
 
         logger.debug("Assistant response ended")
 
-        # If an interruption frame arrived while the assistant was responding
-        # we may have lost all of the assistant text (see HACK, above), so
-        # re-push it downstream to the aggregator now.
-        if self._may_need_repush_assistant_text:
-            # Just in case, check that assistant text hasn't already made it
-            # into the context (sometimes it does, despite the interruption).
-            messages = self._context.get_messages()
-            last_message = messages[-1] if messages else None
-            if (
-                not last_message
-                or last_message.get("role") != "assistant"
-                or last_message.get("content") != self._assistant_text_buffer
-            ):
-                # We also need to re-push the LLMFullResponseStartFrame since the
-                # TTSTextFrame would be ignored otherwise (the interruption frame
-                # would have cleared the assistant aggregator state).
-                await self.push_frame(LLMFullResponseStartFrame())
-                await self._push_assistant_response_text_frames(self._assistant_text_buffer)
-            self._may_need_repush_assistant_text = False
-
         # Report the end of the assistant response.
         await self.push_frame(LLMFullResponseEndFrame())
 
         # Report that equivalent of TTS (this is a speech-to-speech model) stopped.
         await self.push_frame(TTSStoppedFrame())
-
-        # Clear out the buffered assistant text
-        self._assistant_text_buffer = ""
-
-    async def _push_assistant_response_text_frames(self, text: str):
-        """Push assistant response text frames.
-
-        Nothing is pushed in this case because the FINAL text events arrive
-        after the assistant audio response has completed. This results in lagging
-        assistant transcripts, making it difficult to build a UI. Instead, we rely
-        on the SPECULATIVE text frames to be pushed instead, which are pushed before
-        each chunk of audio is played. This creates a more accurate representation
-        of the assistant's response.
-        """
-        pass
 
     #
     # user transcription reporting
