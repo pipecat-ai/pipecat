@@ -290,18 +290,16 @@ class TestControllerTimeoutWithInterimDeadlock(unittest.IsolatedAsyncioTestCase)
         await controller.setup(self.task_manager)
         return controller
 
-    async def test_controller_timeout_fires_for_interim_only_turn(self):
-        """Full scenario: Turn 1 completes normally, then a delayed interim
-        starts a ghost turn that the stop strategy can't close.
+    async def test_controller_timeout_fires_when_stt_stops(self):
+        """Controller timeout fires if the STT stops emitting frames entirely.
 
-        The controller's user_turn_stop_timeout should fire as a safety net,
-        ending the stuck turn. This is the fallback Mark described.
+        When a ghost turn starts and the STT goes quiet, the controller's
+        user_turn_stop_timeout fires after CONTROLLER_STOP_TIMEOUT seconds of
+        inactivity. This is the fallback Mark described.
 
-        Sequence:
-        1. Turn 1: S E T → completes normally via stop strategy
-        2. Delayed I arrives → TranscriptionUserTurnStartStrategy fires new turn
-        3. No VAD, no finalized T → stop strategy is stuck
-        4. Controller timeout should fire after CONTROLLER_STOP_TIMEOUT
+        However, this only works if the STT actually stops emitting. See
+        test_controller_timeout_blocked_by_continuous_interims for the
+        realistic scenario where it doesn't help.
         """
         controller = await self._create_controller()
 
@@ -357,12 +355,65 @@ class TestControllerTimeoutWithInterimDeadlock(unittest.IsolatedAsyncioTestCase)
         )
         self.assertEqual(turn_started_count, 2)
 
-        # No VAD start/stop, no finalized transcription — stop strategy is stuck.
-        # The controller timeout (CONTROLLER_STOP_TIMEOUT) should fire.
+        # No more frames at all — controller timeout fires.
         await asyncio.sleep(CONTROLLER_STOP_TIMEOUT + 0.1)
 
         self.assertTrue(timeout_fired, "user_turn_stop_timeout should fire as safety net")
         self.assertEqual(turn_stopped_count, 2, "timeout should end the stuck turn")
+
+    async def test_controller_timeout_blocked_by_continuous_interims(self):
+        """Controller timeout is defeated by continuous InterimTranscriptionFrames.
+
+        In production, some STT services (e.g. Soniox) keep emitting
+        InterimTranscriptionFrames as they refine their hypothesis, even after
+        the user has stopped speaking. Each interim resets the controller's
+        user_turn_stop_timeout via _handle_transcription → event.set().
+
+        This means the 5s timeout never fires as long as the STT keeps
+        emitting interims — which can continue indefinitely.
+        """
+        controller = await self._create_controller()
+
+        turn_started_count = 0
+        timeout_fired = False
+
+        @controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            nonlocal turn_started_count
+            turn_started_count += 1
+
+        @controller.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(controller):
+            nonlocal timeout_fired
+            timeout_fired = True
+
+        # --- Turn 1: normal flow (abbreviated) ---
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await controller.process_frame(
+            TranscriptionFrame(text="I need help.", user_id="user1", timestamp="", finalized=True)
+        )
+        await asyncio.sleep(0.05)
+
+        # --- Ghost turn starts ---
+        await controller.process_frame(
+            InterimTranscriptionFrame(text="Billing", user_id="user1", timestamp="")
+        )
+        self.assertEqual(turn_started_count, 2)
+
+        # STT keeps emitting interims, each one resets the controller timeout.
+        # Simulate interims arriving faster than the timeout period.
+        for _ in range(5):
+            await asyncio.sleep(CONTROLLER_STOP_TIMEOUT * 0.6)
+            await controller.process_frame(
+                InterimTranscriptionFrame(text="Billing", user_id="user1", timestamp="")
+            )
+
+        # The timeout never fired because each interim reset the clock.
+        self.assertFalse(
+            timeout_fired,
+            "user_turn_stop_timeout is defeated by continuous interims (documents the bug)",
+        )
 
 
 # ---------------------------------------------------------------------------
