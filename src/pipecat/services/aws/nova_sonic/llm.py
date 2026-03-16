@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -1232,11 +1233,12 @@ class AWSNovaSonicLLMService(LLMService):
 
         if content.role == Role.ASSISTANT:
             if content.type == ContentType.TEXT:
-                # Ignore non-final text, and the "interrupted" message (which isn't meaningful text)
-                if content.text_stage == TextStage.FINAL and stop_reason != "INTERRUPTED":
-                    if self._assistant_is_responding:
-                        # Text added to the ongoing assistant response
-                        await self._report_assistant_response_text_added(content.text_content)
+                if stop_reason != "INTERRUPTED":
+                    if content.text_stage == TextStage.SPECULATIVE:
+                        await self._report_assistant_speculative_text(content.text_content)
+                    elif content.text_stage == TextStage.FINAL:
+                        if self._assistant_is_responding:
+                            await self._report_assistant_response_text_added(content.text_content)
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
@@ -1262,6 +1264,21 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Report that equivalent of TTS (this is a speech-to-speech model) started
         await self.push_frame(TTSStartedFrame())
+
+    async def _report_assistant_speculative_text(self, text):
+        """Push speculative assistant text as LLMTextFrame and AggregatedTextFrame.
+
+        The AggregatedTextFrame is pushed for the bot-output event. This allows the client
+        to display the text as soon as it's generated.
+
+        The LLMTextFrame is pushed for the bot-llm-text event and for backwards compatibility.
+        """
+        llm_text_frame = LLMTextFrame(text)
+        llm_text_frame.append_to_context = False
+        await self.push_frame(llm_text_frame)
+        aggregated_text_frame = AggregatedTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        aggregated_text_frame.append_to_context = False
+        await self.push_frame(aggregated_text_frame)
 
     async def _report_assistant_response_text_added(self, text):
         if not self._context:  # should never happen
@@ -1316,20 +1333,6 @@ class AWSNovaSonicLLMService(LLMService):
         self._assistant_text_buffer = ""
 
     async def _push_assistant_response_text_frames(self, text: str):
-        # In a typical "cascade" LLM + TTS setup, LLMTextFrames would not
-        # proceed beyond the TTS service. Therefore, since a speech-to-speech
-        # service like Nova Sonic combines both LLM and TTS functionality, you
-        # would think we wouldn't need to push LLMTextFrames at all. However,
-        # RTVI relies on LLMTextFrames being pushed to trigger its
-        # "bot-llm-text" event. So here we push an LLMTextFrame, too, but avoid
-        # appending it to context to avoid context message duplication.
-
-        # Push LLMTextFrame
-        llm_text_frame = LLMTextFrame(text)
-        llm_text_frame.append_to_context = False
-        await self.push_frame(llm_text_frame)
-
-        # Push TTSTextFrame
         tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
         tts_text_frame.includes_inter_frame_spaces = True
         await self.push_frame(tts_text_frame)
