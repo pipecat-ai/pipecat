@@ -65,7 +65,7 @@ async def main():
         tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY", ""),
             settings=ElevenLabsTTSService.Settings(
-                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+                voice="21m00Tcm4TlvDq8ikWAM",  # Public voice ID
             ),
         )
 
@@ -113,6 +113,14 @@ async def main():
         async def on_client_disconnected(transport, participant):
             logger.info("Client disconnected")
             await task.cancel()
+
+        @transport.event_handler("on_avatar_connected")
+        async def on_avatar_connected(transport, participant):
+            logger.info(f"Avatar connected")
+
+        @transport.event_handler("on_avatar_disconnected")
+        async def on_avatar_disconnected(transport, participant):
+            logger.info(f"Avatar disconnected")
 
         runner = PipelineRunner()
 
