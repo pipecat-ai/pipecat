@@ -268,7 +268,6 @@ async def _run_telephony_bot(websocket: WebSocket):
                 "transport_type": transport_type,
                 "agent_id": agent.id if agent else None,
                 "agent": agent,
-                # "twilio_credentials": twilio_credentials,
             }
 
             print("body in run.py file after declaring body ===========", body)
