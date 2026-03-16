@@ -12,21 +12,16 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.frames.frames import (
-    AggregatedTextFrame,
     DataFrame,
     Frame,
     LLMContextFrame,
     LLMFullResponseStartFrame,
     OutputImageRawFrame,
     TextFrame,
-    TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
-    TTSTextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
+from pipecat.pipeline.sync_parallel_pipeline import FrameOrder, SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.sentence import SentenceAggregator
@@ -61,61 +56,6 @@ class MarkImageForPlaybackSync(FrameProcessor):
             frame.sync_with_audio = True
 
         await self.push_frame(frame, direction)
-
-
-class ImageBeforeAudioReorderer(FrameProcessor):
-    """Ensures each image frame precedes its corresponding TTS audio frames.
-
-    SyncParallelPipeline guarantees that each image is in the same synchronized
-    batch as its audio, but doesn't guarantee which branch's output comes first.
-    This processor detects when TTS frames arrive before their image and holds
-    them until the image arrives.
-
-    All frames pass through immediately unless we detect an ordering problem:
-    TTS frames arrived without a preceding image for the current batch (identified
-    by context_id). In that case, the TTS frames are held until the next image
-    frame, which is pushed first.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._held_tts_frames = []
-        self._seen_image = False
-        self._current_context_id = None
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, OutputImageRawFrame):
-            self._seen_image = True
-            if self._held_tts_frames:
-                # Image arrived after TTS frames — push image first, then release held frames.
-                logger.debug("ImageBeforeAudioReorderer: reordered — moved image before audio")
-                await self.push_frame(frame, direction)
-                for f in self._held_tts_frames:
-                    await self.push_frame(f, direction)
-                self._held_tts_frames = []
-            else:
-                logger.debug(
-                    "ImageBeforeAudioReorderer: no reorder needed — image was already first"
-                )
-                await self.push_frame(frame, direction)
-        elif isinstance(
-            frame,
-            (AggregatedTextFrame, TTSStartedFrame, TTSAudioRawFrame, TTSStoppedFrame, TTSTextFrame),
-        ):
-            # A new context_id means a new batch — reset image tracking.
-            context_id = frame.context_id
-            if context_id and context_id != self._current_context_id:
-                self._current_context_id = context_id
-                self._seen_image = False
-
-            if self._seen_image:
-                await self.push_frame(frame, direction)
-            else:
-                self._held_tts_frames.append(frame)
-        else:
-            await self.push_frame(frame, direction)
 
 
 class MonthPrepender(FrameProcessor):
@@ -197,22 +137,27 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # that, each pipeline runs concurrently and `SyncParallelPipeline` will
         # wait for the input frame to be processed.
         #
+        # We use `FrameOrder.PIPELINE` so that each synchronized batch of output
+        # frames is pushed in the order the pipelines are listed: image first,
+        # then audio. This ensures the transport receives the image before the
+        # audio frames it should accompany.
+        #
         # Note that `SyncParallelPipeline` requires the last processor in each
         # of the pipelines to be synchronous. In this case, we use
-        # `CartesiaHttpTTSService` and `FalImageGenService` which make HTTP
+        # `FalImageGenService` and `CartesiaHttpTTSService` which make HTTP
         # requests and wait for the response.
         pipeline = Pipeline(
             [
                 llm,  # LLM
                 sentence_aggregator,  # Aggregates LLM output into full sentences
                 SyncParallelPipeline(  # Run pipelines in parallel aggregating the result
-                    [month_prepender, tts],  # Create "Month: sentence" and output audio
                     [
                         imagegen,  # Generate image
                         MarkImageForPlaybackSync(),  # Mark image as needing sync w/audio during playback
                     ],
+                    [month_prepender, tts],  # Create "Month: sentence" and output audio
+                    frame_order=FrameOrder.PIPELINE,
                 ),
-                ImageBeforeAudioReorderer(),  # Ensure each image precedes its audio (important for playback)
                 transport.output(),  # Transport output
             ]
         )
