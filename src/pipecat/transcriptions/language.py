@@ -631,13 +631,13 @@ def resolve_language(
         return result
 
     # Not in map - fall back with warning
-    lang_str = str(language.value)
+    lang_str = str(language)
 
     if use_base_code:
         # Extract base code (e.g., "en" from "en-US")
         base_code = lang_str.split("-")[0].lower()
-        logger.warning(f"Language {language.value} not verified. Using base code '{base_code}'.")
+        logger.warning(f"Language {language} not verified. Using base code '{base_code}'.")
         return base_code
     else:
-        logger.warning(f"Language {language.value} not verified. Using '{lang_str}'.")
+        logger.warning(f"Language {language} not verified. Using '{lang_str}'.")
         return lang_str
