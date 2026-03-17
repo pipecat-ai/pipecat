@@ -4872,7 +4872,7 @@ requires-dist = [
     { name = "pyaudio", marker = "extra == 'local'", specifier = "~=0.2.14" },
     { name = "pydantic", specifier = ">=2.10.6,<3" },
     { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
-    { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.10.1,<3" },
+    { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.12.0,<3" },
     { name = "pyloudnorm", specifier = "~=0.2.0" },
     { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.1" },
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
