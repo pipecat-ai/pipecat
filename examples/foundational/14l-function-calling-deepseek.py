@@ -73,7 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("DEEPSEEK_API_KEY"),
         settings=DeepSeekLLMService.Settings(
             model="deepseek-chat",
-            system_instruction="""You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
+            system_instruction="""You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.
 
 You have one functions available:
 

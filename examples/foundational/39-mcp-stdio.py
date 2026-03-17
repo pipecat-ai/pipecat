@@ -143,7 +143,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         system_prompt = f"""
-        You are a helpful LLM in a WebRTC call.
+        You are a helpful LLM in a voice call.
         Your goal is to demonstrate your capabilities in a succinct way.
         You have access to tools to search the Rijksmuseum collection.
         Offer, for example, to show a floral still life, use the `search_artwork` tool.

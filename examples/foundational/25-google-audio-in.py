@@ -47,7 +47,7 @@ load_dotenv(override=True)
 # The system prompt for the main conversation.
 #
 conversation_system_message = """
-You are a helpful LLM in a WebRTC call. Your goals are to be helpful and brief in your responses. Respond with one or two sentences at most, unless you are asked to
+You are a helpful LLM in a voice call. Your goals are to be helpful and brief in your responses. Respond with one or two sentences at most, unless you are asked to
 respond at more length. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
 """
 
