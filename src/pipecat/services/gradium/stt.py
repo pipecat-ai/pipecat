@@ -412,19 +412,13 @@ class GradiumSTTService(WebsocketSTTService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _process_messages(self):
+    async def _receive_messages(self):
         async for message in self._get_websocket():
             try:
                 data = json.loads(message)
                 await self._process_response(data)
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message: {message}")
-
-    async def _receive_messages(self):
-        while True:
-            await self._process_messages()
-            logger.debug(f"{self} Gradium connection was disconnected (timeout?), reconnecting")
-            await self._connect_websocket()
 
     async def _process_response(self, msg):
         type_ = msg.get("type", "")
