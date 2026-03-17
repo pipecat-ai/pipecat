@@ -173,6 +173,8 @@ class GradiumSTTService(WebsocketSTTService):
         super().__init__(
             sample_rate=SAMPLE_RATE,
             ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=10,
+            keepalive_interval=5,
             settings=default_settings,
             **kwargs,
         )
@@ -399,6 +401,16 @@ class GradiumSTTService(WebsocketSTTService):
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio to keep the Gradium connection alive.
+
+        Args:
+            silence: Silent PCM audio bytes to send as a keepalive.
+        """
+        chunk = base64.b64encode(silence).decode("utf-8")
+        msg = json.dumps({"type": "audio", "audio": chunk})
+        await self._websocket.send(msg)
 
     def _get_websocket(self):
         if self._websocket:
