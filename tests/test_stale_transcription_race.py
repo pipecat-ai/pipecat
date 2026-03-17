@@ -276,10 +276,10 @@ class TestControllerStaleTextRace(unittest.IsolatedAsyncioTestCase):
 
         # Now the actual TranscriptionFrame arrives — but the turn is already stopped.
         # _turn_complete was cleared by reset(), so this can't trigger another stop.
-        await controller.process_frame(_tf("Kalle Anka"))
-        self.assertEqual(strategy._text, "Kalle Anka")
+        await controller.process_frame(_tf("John Smith"))
+        self.assertEqual(strategy._text, "John Smith")
 
-        # "Kalle Anka" is now stale _text for turn 3 → the cycle continues.
+        # "John Smith" is now stale _text for turn 3 → the cycle continues.
 
     async def test_one_turn_behind_three_turn_sequence(self):
         """Three-turn sequence demonstrating the repeating "one turn behind" pattern.
@@ -309,7 +309,7 @@ class TestControllerStaleTextRace(unittest.IsolatedAsyncioTestCase):
         # --- Late transcript poisons _text ---
         await controller.process_frame(_tf("I'll wait."))
 
-        # --- Turn 2: User says "Kalle Anka" but stale text fires first ---
+        # --- Turn 2: User says "John Smith" but stale text fires first ---
         await controller.process_frame(VADUserStartedSpeakingFrame())
         self.assertEqual(strategy._text, "I'll wait.", "stale _text enters turn 2")
 
@@ -318,11 +318,11 @@ class TestControllerStaleTextRace(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stop_count, 2, "premature stop from stale _text")
 
         # Actual TranscriptionFrame arrives late → poisons _text for turn 3
-        await controller.process_frame(_tf("Kalle Anka"))
+        await controller.process_frame(_tf("John Smith"))
 
         # --- Turn 3: same pattern repeats ---
         await controller.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(strategy._text, "Kalle Anka", "stale _text from turn 2 enters turn 3")
+        self.assertEqual(strategy._text, "John Smith", "stale _text from turn 2 enters turn 3")
 
         await controller.process_frame(VADUserStoppedSpeakingFrame())
         await asyncio.sleep(0.1)
