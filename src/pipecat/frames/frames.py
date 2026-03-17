@@ -1001,7 +1001,8 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
     specify where the DTMF keypress should be sent.
     """
 
-    pass
+    def __str__(self):
+        return f"{self.name}(tone: {self.button})"
 
 
 #
@@ -1658,7 +1659,8 @@ class AssistantImageRawFrame(OutputImageRawFrame):
 class InputDTMFFrame(DTMFFrame, SystemFrame):
     """DTMF keypress input frame from transport."""
 
-    pass
+    def __str__(self):
+        return f"{self.name}(tone: {self.button.value})"
 
 
 @dataclass
