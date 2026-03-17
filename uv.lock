@@ -4743,6 +4743,9 @@ speechmatics = [
 strands = [
     { name = "strands-agents" },
 ]
+together = [
+    { name = "websockets" },
+]
 tracing = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-instrumentation" },
@@ -4868,6 +4871,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'rime'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'sarvam'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'soniox'" },
+    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'together'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'ultravox'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'websocket'" },
     { name = "pipecat-ai-krisp", marker = "extra == 'krisp'", specifier = "~=0.4.0" },
