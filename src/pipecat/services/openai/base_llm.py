@@ -532,7 +532,7 @@ class BaseOpenAILLMService(LLMService):
                     tool_call = chunk.choices[0].delta.tool_calls[0]
                     if tool_call.index != func_idx:
                         functions_list.append(function_name)
-                        arguments_list.append(arguments)
+                        arguments_list.append(arguments or "{}")
                         tool_id_list.append(tool_call_id)
                         function_name = ""
                         arguments = ""
@@ -558,10 +558,10 @@ class BaseOpenAILLMService(LLMService):
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
-        if function_name and arguments:
+        if function_name:
             # added to the list as last function name and arguments not added to the list
             functions_list.append(function_name)
-            arguments_list.append(arguments)
+            arguments_list.append(arguments or "{}")
             tool_id_list.append(tool_call_id)
 
             function_calls = []
