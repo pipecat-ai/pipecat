@@ -8,12 +8,12 @@
 
 import base64
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -26,14 +26,12 @@ except ModuleNotFoundError as e:
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -43,6 +41,9 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 class TogetherTTSSettings(TTSSettings):
     """Settings for the Together AI TTS service.
 
+    ``model``, ``voice``, and ``language`` are inherited from ``TTSSettings`` /
+    ``ServiceSettings``.
+
     Parameters:
         model: Together AI TTS model to use.
         voice: Voice to use for synthesis.
@@ -50,10 +51,7 @@ class TogetherTTSSettings(TTSSettings):
         max_partial_length: Maximum partial text length for streaming.
     """
 
-    model: str = "canopylabs/orpheus-3b-0.1-ft"
-    language: Optional[Language] = Language.EN
-    voice: Optional[str] = "tara"
-    max_partial_length: Optional[int] = None
+    max_partial_length: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class TogetherTTSService(WebsocketTTSService):
@@ -63,45 +61,60 @@ class TogetherTTSService(WebsocketTTSService):
     Supports streaming synthesis with configurable voice and model options.
     """
 
-    _settings: TogetherTTSSettings
+    Settings = TogetherTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: str = "canopylabs/orpheus-3b-0.1-ft",
-        voice: str = "tara",
-        language: Optional[Language] = Language.EN,
-        max_partial_length: Optional[int] = None,
+        output_format: str = "raw",
+        encoding: str = "pcm_s16le",
         url: str = "wss://api.together.ai/v1/audio/speech/websocket",
         sample_rate: Optional[int] = 24000,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Together AI TTS service.
 
         Args:
             api_key: Together AI API key for authentication.
-            model: Together AI TTS model. Defaults to "canopylabs/orpheus-3b-0.1-ft".
-            voice: Voice to use for synthesis. Defaults to "tara".
-            language: Language of the text input. Defaults to English.
-            max_partial_length: Maximum partial text length for streaming.
+            output_format: Audio output container format. Supported values:
+                ``"raw"``, ``"mp3"``, ``"wav"``, ``"opus"``, ``"aac"``,
+                ``"flac"``, ``"pcm"``. Defaults to ``"raw"``.
+            encoding: PCM encoding when ``output_format`` is ``"raw"``.
+                Supported values: ``"pcm_s16le"``, ``"pcm_f32le"``.
+                Defaults to ``"pcm_s16le"``.
             url: WebSocket URL for Together AI TTS API.
             sample_rate: Audio sample rate (default: 24000).
+            settings: Runtime-updatable settings. Allows overriding model, voice,
+                language, and max_partial_length.
             **kwargs: Additional arguments passed to the parent service.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="canopylabs/orpheus-3b-0.1-ft",
+            voice="tara",
+            language=Language.EN,
+            max_partial_length=None,
+        )
+
+        # 2. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
+            push_text_frames=False,
+            push_start_frame=True,
             sample_rate=sample_rate,
-            settings=TogetherTTSSettings(
-                model=model,
-                voice=voice,
-                language=language,
-                max_partial_length=max_partial_length,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         self._api_key = api_key
         self._url = url
+        self._output_format = output_format
+        self._encoding = encoding
         self._session_id = None
         self._receive_task = None
         self._context_id: Optional[str] = None
@@ -116,7 +129,12 @@ class TogetherTTSService(WebsocketTTSService):
 
     def _build_websocket_url(self) -> str:
         """Build the WebSocket URL with query parameters."""
-        url = f"{self._url}?model={self._settings.model}&voice={self._settings.voice}"
+        url = (
+            f"{self._url}?model={self._settings.model}"
+            f"&voice={self._settings.voice}"
+            f"&response_format={self._output_format}"
+            f"&response_encoding={self._encoding}"
+        )
         if self._settings.max_partial_length is not None:
             url += f"&max_partial_length={self._settings.max_partial_length}"
         return url
@@ -211,6 +229,7 @@ class TogetherTTSService(WebsocketTTSService):
                 exception=e,
             )
         finally:
+            await self.remove_active_audio_context()
             self._websocket = None
             self._session_id = None
             await self._call_event_handler("on_disconnected")
@@ -236,8 +255,16 @@ class TogetherTTSService(WebsocketTTSService):
                 exception=e,
             )
 
-    async def flush_audio(self):
-        """Flush any pending audio and finalize the current context."""
+    async def flush_audio(self, context_id: Optional[str] = None):
+        """Flush any pending audio and finalize the current context.
+
+        Args:
+            context_id: The specific context to flush. If None, falls back to the
+                currently active context.
+        """
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
+            return
         logger.trace(f"{self}: flushing audio")
         await self._ws_send({"type": "input_text_buffer.commit"})
 
@@ -252,7 +279,10 @@ class TogetherTTSService(WebsocketTTSService):
         this method with automatic reconnection on connection errors.
         """
         async for message in self._websocket:
+            # Together sends audio as binary WebSocket frames (raw PCM)
+            # and control/status messages as JSON text frames.
             if not isinstance(message, str):
+                await self._handle_audio_binary(message)
                 continue
 
             try:
@@ -268,8 +298,7 @@ class TogetherTTSService(WebsocketTTSService):
             elif evt_type == "session.updated":
                 await self._handle_session_updated(evt)
             elif evt_type == "conversation.item.input_text.received":
-                text = evt.get("text", "")
-                logger.debug(f"{self} text received: {text[:50]}{'...' if len(text) > 50 else ''}")
+                logger.trace(f"{self} text received")
             elif evt_type == "conversation.item.audio_output.delta":
                 await self._handle_audio_delta(evt)
             elif evt_type == "conversation.item.audio_output.done":
@@ -302,26 +331,48 @@ class TogetherTTSService(WebsocketTTSService):
             updated_voice = session.get("voice")
             logger.debug(f"{self} voice updated to: {updated_voice}")
 
+    async def _handle_audio_binary(self, data: bytes):
+        """Handle a binary WebSocket frame containing raw PCM audio.
+
+        Together sends audio as binary frames and control messages as JSON text.
+
+        Args:
+            data: Raw PCM audio bytes.
+        """
+        context_id = self._context_id
+        if not context_id or not self.audio_context_available(context_id):
+            return
+
+        await self.stop_ttfb_metrics()
+        frame = TTSAudioRawFrame(
+            audio=data,
+            sample_rate=self.sample_rate,
+            num_channels=1,
+            context_id=context_id,
+        )
+        await self.append_to_audio_context(context_id, frame)
+
     async def _handle_audio_delta(self, evt: dict):
-        """Handle an audio output delta containing a chunk of synthesized audio.
+        """Handle a JSON audio output delta containing base64-encoded audio.
 
         Args:
             evt: The delta event from the server.
         """
+        context_id = self._context_id
+        if not context_id or not self.audio_context_available(context_id):
+            return
+
         delta = evt.get("delta")
         if delta:
-            try:
-                await self.stop_ttfb_metrics()
-                audio_chunk = base64.b64decode(delta)
-                frame = TTSAudioRawFrame(
-                    audio=audio_chunk,
-                    sample_rate=self.sample_rate,
-                    num_channels=1,
-                    context_id=self._context_id,
-                )
-                await self.push_frame(frame)
-            except Exception as e:
-                logger.error(f"{self} error processing audio delta: {e}")
+            await self.stop_ttfb_metrics()
+            audio_chunk = base64.b64decode(delta)
+            frame = TTSAudioRawFrame(
+                audio=audio_chunk,
+                sample_rate=self.sample_rate,
+                num_channels=1,
+                context_id=context_id,
+            )
+            await self.append_to_audio_context(context_id, frame)
 
     async def _handle_audio_done(self, evt: dict):
         """Handle audio output completion for a speech segment.
@@ -329,9 +380,12 @@ class TogetherTTSService(WebsocketTTSService):
         Args:
             evt: The done event from the server.
         """
+        context_id = self._context_id
         item_id = evt.get("item_id")
         logger.debug(f"{self} audio generation complete for: {item_id}")
-        await self.push_frame(TTSStoppedFrame(context_id=self._context_id))
+        if context_id and self.audio_context_available(context_id):
+            await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], context_id)
+            await self.remove_audio_context(context_id)
 
     async def _handle_tts_failed(self, evt: dict):
         """Handle a TTS failure.
@@ -339,9 +393,12 @@ class TogetherTTSService(WebsocketTTSService):
         Args:
             evt: The failed event containing error details.
         """
+        context_id = self._context_id
         error = evt.get("error", {})
         await self.push_error(error_msg=f"TTS error: {error}")
-        await self.push_frame(TTSStoppedFrame(context_id=self._context_id))
+        await self.push_frame(TTSStoppedFrame(context_id=context_id))
+        await self.stop_all_metrics()
+        self.reset_active_audio_context()
 
     async def _handle_error(self, evt: dict):
         """Handle a fatal error from the TTS session.
@@ -359,19 +416,28 @@ class TogetherTTSService(WebsocketTTSService):
         await self.push_error(error_msg=msg)
 
     # ------------------------------------------------------------------
-    # Interruption handling
+    # Audio context lifecycle
     # ------------------------------------------------------------------
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        """Handle interruption by canceling current generation.
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Cancel the active Together context when the bot is interrupted.
 
         Args:
-            frame: The interruption frame.
-            direction: Frame processing direction.
+            context_id: The context that was interrupted.
         """
-        await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
         await self._ws_send({"type": "input_text_buffer.clear"})
+
+    async def on_audio_context_completed(self, context_id: str):
+        """Handle context completion after all audio has been played.
+
+        No server-side cleanup is needed — the Together AI server considers
+        the context done once it has sent its ``audio_output.done`` message.
+
+        Args:
+            context_id: The context that completed playback.
+        """
+        pass
 
     # ------------------------------------------------------------------
     # TTS generation
@@ -380,6 +446,10 @@ class TogetherTTSService(WebsocketTTSService):
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Together AI's streaming API.
+
+        Audio context creation and ``TTSStartedFrame`` are managed by the base
+        class (``push_start_frame=True``).  This method only sends the text to
+        the WebSocket; audio frames arrive via ``_receive_messages``.
 
         Args:
             text: The text to synthesize into speech.
@@ -390,25 +460,18 @@ class TogetherTTSService(WebsocketTTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
+        self._context_id = context_id
+
         try:
             if not self._websocket or self._websocket.state is not State.OPEN:
                 await self._connect()
-                if not self._websocket or self._websocket.state is not State.OPEN:
-                    logger.error(f"{self} failed to connect to WebSocket")
-                    yield TTSStoppedFrame(context_id=context_id)
-                    return
-
-            self._context_id = context_id
-
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame(context_id=context_id)
 
             try:
                 await self._ws_send({"type": "input_text_buffer.append", "text": text})
                 await self._ws_send({"type": "input_text_buffer.commit"})
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                yield ErrorFrame(error=f"Error sending TTS text: {e}")
                 yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
@@ -417,6 +480,5 @@ class TogetherTTSService(WebsocketTTSService):
             yield None
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)
+            yield ErrorFrame(error=f"Error generating TTS: {e}")
             yield TTSStoppedFrame(context_id=context_id)

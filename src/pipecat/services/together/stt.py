@@ -45,13 +45,15 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 class TogetherSTTSettings(STTSettings):
     """Settings for the Together AI STT service.
 
+    ``model`` and ``language`` are inherited from ``STTSettings`` /
+    ``ServiceSettings``.
+
     Parameters:
         model: Together AI transcription model to use.
         language: Language of the audio input.
     """
 
-    model: str = "openai/whisper-large-v3"
-    language: Language = Language.EN
+    pass
 
 
 class TogetherSTTService(WebsocketSTTService):
@@ -61,38 +63,44 @@ class TogetherSTTService(WebsocketSTTService):
     with OpenAI-compatible speech-to-text endpoints.
     """
 
-    _settings: TogetherSTTSettings
+    Settings = TogetherSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: str = "openai/whisper-large-v3",
-        language: Language = Language.EN,
         sample_rate: int = 16000,
         base_url: str = "wss://api.together.xyz/v1",
         ttfs_p99_latency: float = TOGETHER_TTFS_P99,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Together AI STT service.
 
         Args:
             api_key: Together AI API key for authentication.
-            model: Together AI transcription model. Defaults to "openai/whisper-large-v3".
-            language: Language of the audio input. Defaults to English.
             sample_rate: Audio sample rate (default: 16000). Together AI requires 16kHz input.
             base_url: The URL of the Together AI WebSocket API.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            settings: Runtime-updatable settings. Allows overriding model and language.
             **kwargs: Additional arguments passed to the parent WebsocketSTTService.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="openai/whisper-large-v3",
+            language=Language.EN,
+        )
+
+        # 2. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=TogetherSTTSettings(
-                model=model,
-                language=language,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
