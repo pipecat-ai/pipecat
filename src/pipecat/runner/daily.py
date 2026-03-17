@@ -79,16 +79,16 @@ async def configure(
     aiohttp_session: aiohttp.ClientSession,
     *,
     api_key: Optional[str] = None,
-    room_exp_duration: Optional[float] = 2.0,
-    token_exp_duration: Optional[float] = 2.0,
+    room_exp_duration: float = 2.0,
+    token_exp_duration: float = 2.0,
     sip_caller_phone: Optional[str] = None,
-    sip_enable_video: Optional[bool] = False,
-    sip_num_endpoints: Optional[int] = 1,
+    sip_enable_video: bool = False,
+    sip_num_endpoints: int = 1,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
     sip_provider: Optional[str] = None,
     room_geo: Optional[str] = None,
     room_properties: Optional[DailyRoomProperties] = None,
-    token_properties: Optional["DailyMeetingTokenProperties"] = None,
+    token_properties: Optional[DailyMeetingTokenProperties] = None,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
 
@@ -184,6 +184,8 @@ async def configure(
         aiohttp_session=aiohttp_session,
     )
 
+    token_expiry_seconds: float = token_exp_duration * 60 * 60
+
     # Check for existing room URL (only in standard mode)
     existing_room_url = os.getenv("DAILY_ROOM_URL")
     if existing_room_url and not sip_enabled:
@@ -192,11 +194,12 @@ async def configure(
         room_url = existing_room_url
 
         # Create token and return standard format
-        expiry_time: float = token_exp_duration * 60 * 60
         token_params = None
         if token_properties:
             token_params = DailyMeetingTokenParams(properties=token_properties)
-        token = await daily_rest_helper.get_token(room_url, expiry_time, params=token_params)
+        token = await daily_rest_helper.get_token(
+            room_url, token_expiry_seconds, params=token_params
+        )
         return DailyRoomConfig(room_url=room_url, token=token)
 
     # Create a new room
@@ -229,7 +232,10 @@ async def configure(
                 provider=sip_provider,
             )
             room_properties.sip = sip_params
-            room_properties.enable_dialout = False  # Requires dialout entitlement on Daily plan
+            # Explicitly disable dialout to prevent room creation failures on
+            # accounts where dialout defaults to enabled but the plan lacks the
+            # required dialout entitlement.
+            room_properties.enable_dialout = False
             room_properties.start_video_off = not sip_enable_video  # Voice-only by default
 
     # Create room parameters
@@ -241,7 +247,6 @@ async def configure(
         logger.info(f"Created Daily room: {room_url}")
 
         # Create meeting token
-        token_expiry_seconds = token_exp_duration * 60 * 60
         token_params = None
         if token_properties:
             token_params = DailyMeetingTokenParams(properties=token_properties)
