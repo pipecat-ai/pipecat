@@ -229,7 +229,7 @@ async def configure(
                 provider=sip_provider,
             )
             room_properties.sip = sip_params
-            room_properties.enable_dialout = True  # Enable outbound calls if needed
+            room_properties.enable_dialout = False  # Requires dialout entitlement on Daily plan
             room_properties.start_video_off = not sip_enable_video  # Voice-only by default
 
     # Create room parameters
