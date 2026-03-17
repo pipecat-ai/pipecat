@@ -118,7 +118,9 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
         await super().cleanup()  # type: ignore
         await self._client.cleanup()
 
-    async def push_caption_frame(self, frame: TranscriptionFrame | InterimTranscriptionFrame) -> None:
+    async def push_caption_frame(
+        self, frame: TranscriptionFrame | InterimTranscriptionFrame
+    ) -> None:
         """Push a transcription frame downstream if captions input is enabled.
 
         Args:
