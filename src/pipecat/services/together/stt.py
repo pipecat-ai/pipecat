@@ -362,4 +362,3 @@ class TogetherSTTService(WebsocketSTTService):
         error_code = error_info.get("code", "")
         msg = f"Together AI STT error [{error_code}]: {error_msg}"
         await self.push_error(error_msg=msg)
-        raise Exception(msg)

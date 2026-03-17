@@ -357,7 +357,6 @@ class TogetherTTSService(WebsocketTTSService):
         error_code = error.get("code", "")
         msg = f"Together AI TTS error [{error_code}]: {error_msg}"
         await self.push_error(error_msg=msg)
-        raise Exception(msg)
 
     # ------------------------------------------------------------------
     # Interruption handling
