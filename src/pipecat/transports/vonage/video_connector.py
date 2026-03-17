@@ -14,11 +14,13 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     StartFrame,
     TextFrame,
+    TranscriptionFrame,
     UserImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -125,7 +127,9 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
         if self._connected and self._params.video_in_enabled:
             await self.push_video_frame(video)
 
-    async def _caption_in_cb(self, _subscriber: Subscriber, caption: TextFrame) -> None:
+    async def _caption_in_cb(
+        self, _subscriber: Subscriber, caption: TranscriptionFrame | InterimTranscriptionFrame
+    ) -> None:
         if self._connected and self._params.captions_in_enabled:
             await self.push_caption_frame(caption)
 

@@ -22,10 +22,11 @@ from pydantic import BaseModel
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     StartFrame,
-    TextFrame,
+    TranscriptionFrame,
     UserImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
@@ -38,6 +39,7 @@ from pipecat.transports.vonage.utils import (
     process_audio,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.time import time_now_iso8601
 
 try:
     import vonage_video_connector as vonage_video
@@ -163,7 +165,9 @@ class VonageClientListener:
     on_subscriber_connected: Callable[[Subscriber], Awaitable[None]] = async_noop
     on_subscriber_disconnected: Callable[[Subscriber], Awaitable[None]] = async_noop
     on_video_in: Callable[[Subscriber, UserImageRawFrame], Awaitable[None]] = async_noop
-    on_caption_text_in: Callable[[Subscriber, TextFrame], Awaitable[None]] = async_noop
+    on_caption_text_in: Callable[
+        [Subscriber, TranscriptionFrame | InterimTranscriptionFrame], Awaitable[None]
+    ] = async_noop
 
 
 # the following StrEnum's don't use auto() to use the right capitalization
@@ -1096,8 +1100,18 @@ class VonageClient:
         self, subscriber: Subscriber, caption_data: CaptionsData
     ) -> None:
         async def async_cb() -> None:
-            pipecat_frame = TextFrame(
-                text=caption_data.text,
+            pipecat_frame = (
+                TranscriptionFrame(
+                    text=caption_data.text,
+                    user_id=subscriber.stream.id,
+                    timestamp=time_now_iso8601(),
+                )
+                if caption_data.is_final
+                else InterimTranscriptionFrame(
+                    text=caption_data.text,
+                    user_id=subscriber.stream.id,
+                    timestamp=time_now_iso8601(),
+                )
             )
             await self._notify_listeners(
                 lambda listener: listener.on_caption_text_in(subscriber, pipecat_frame)
