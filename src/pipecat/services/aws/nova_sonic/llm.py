@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -434,6 +435,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._user_text_buffer = ""
         self._completed_tool_calls = set()
         self._audio_input_started = False
+        self._pending_speculative_text: Optional[str] = None
 
         file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
@@ -777,6 +779,7 @@ class AWSNovaSonicLLMService(LLMService):
             self._user_text_buffer = ""
             self._completed_tool_calls = set()
             self._audio_input_started = False
+            self._pending_speculative_text = None
 
             logger.info("Finished disconnecting")
         except Exception as e:
@@ -1229,7 +1232,10 @@ class AWSNovaSonicLLMService(LLMService):
             if content.type == ContentType.TEXT:
                 if stop_reason != "INTERRUPTED":
                     if content.text_stage == TextStage.SPECULATIVE:
-                        await self._report_assistant_speculative_text(content.text_content)
+                        await self._handle_assistant_speculative_text(content.text_content)
+            elif content.type == ContentType.AUDIO:
+                # Emit deferred TTSTextFrame after all audio chunks have been sent
+                await self._flush_pending_speculative_text()
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
@@ -1253,12 +1259,16 @@ class AWSNovaSonicLLMService(LLMService):
         # Report that equivalent of TTS (this is a speech-to-speech model) started
         await self.push_frame(TTSStartedFrame())
 
-    async def _report_assistant_speculative_text(self, text):
-        """Push speculative assistant text as LLMTextFrame and TTSTextFrame.
+    async def _handle_assistant_speculative_text(self, text):
+        """Push speculative assistant text as LLMTextFrame and defer TTSTextFrame.
 
         Speculative text arrives before each audio chunk, providing real-time
         text that is synchronized with what the bot is saying. Final text
         arrives seconds after all audio is done and is not used.
+
+        LLMTextFrame is pushed immediately for real-time text display.
+        TTSTextFrame emission is deferred to the next audio contentStart so
+        it aligns with audio playout timing.
 
         We also buffer the text here for the interruption re-push safety net
         (see _report_assistant_response_ended).
@@ -1269,9 +1279,21 @@ class AWSNovaSonicLLMService(LLMService):
         llm_text_frame.append_to_context = False
         await self.push_frame(llm_text_frame)
 
-        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
-        tts_text_frame.includes_inter_frame_spaces = True
-        await self.push_frame(tts_text_frame)
+        aggregated_text_frame = AggregatedTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        aggregated_text_frame.append_to_context = False
+        await self.push_frame(aggregated_text_frame)
+
+        # Save for deferred TTSTextFrame emission at next audio contentStart
+        self._pending_speculative_text = text
+
+    async def _flush_pending_speculative_text(self):
+        if self._pending_speculative_text:
+            tts_text_frame = TTSTextFrame(
+                self._pending_speculative_text, aggregated_by=AggregationType.SENTENCE
+            )
+            tts_text_frame.includes_inter_frame_spaces = True
+            await self.push_frame(tts_text_frame)
+            self._pending_speculative_text = None
 
     async def _report_assistant_response_ended(self):
         if not self._context:  # should never happen
