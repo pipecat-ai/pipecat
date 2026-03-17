@@ -509,7 +509,7 @@ class AWSNovaSonicLLMService(LLMService):
         and reconnects with the preserved context.
         """
         logger.debug("Resetting conversation")
-        await self._handle_bot_stopped_speaking(delay_to_catch_trailing_assistant_text=False)
+        await self._handle_bot_stopped_speaking()
 
         # Grab context to carry through disconnect/reconnect
         context = self._context
@@ -541,7 +541,7 @@ class AWSNovaSonicLLMService(LLMService):
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._handle_bot_stopped_speaking(delay_to_catch_trailing_assistant_text=True)
+            await self._handle_bot_stopped_speaking()
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption_frame()
 
@@ -569,45 +569,17 @@ class AWSNovaSonicLLMService(LLMService):
 
         await self._send_user_audio_event(frame.audio)
 
-    async def _handle_bot_stopped_speaking(self, delay_to_catch_trailing_assistant_text: bool):
+    async def _handle_bot_stopped_speaking(self):
         # Protect against back-to-back BotStoppedSpeaking calls, which I've observed
         if self._handling_bot_stopped_speaking:
             return
         self._handling_bot_stopped_speaking = True
 
-        async def finalize_assistant_response():
-            if self._assistant_is_responding:
-                # Consider the assistant finished with their response (possibly after a short delay,
-                # to allow for any trailing FINAL assistant text block to come in that need to make
-                # it into context).
-                #
-                # TODO: ideally we could base this solely on the LLM output events, but I couldn't
-                # figure out a reliable way to determine when we've gotten our last FINAL text block
-                # after the LLM is done talking.
-                #
-                # First I looked at stopReason, but it doesn't seem like the last FINAL text block
-                # is reliably marked END_TURN (sometimes the *first* one is, but not the last...
-                # bug?)
-                #
-                # Then I considered schemes where we tally or match up SPECULATIVE text blocks with
-                # FINAL text blocks to know how many or which FINAL blocks to expect, but user
-                # interruptions throw a wrench in these schemes: depending on the exact timing of
-                # the interruption, we should or shouldn't expect some FINAL blocks.
-                if delay_to_catch_trailing_assistant_text:
-                    # This delay length is a balancing act between "catching" trailing assistant
-                    # text that is quite delayed but not waiting so long that user text comes in
-                    # first and results in a bit of context message order scrambling.
-                    await asyncio.sleep(1.25)
-                self._assistant_is_responding = False
-                await self._report_assistant_response_ended()
+        if self._assistant_is_responding:
+            self._assistant_is_responding = False
+            await self._report_assistant_response_ended()
 
-            self._handling_bot_stopped_speaking = False
-
-        # Finalize the assistant response, either now or after a delay
-        if delay_to_catch_trailing_assistant_text:
-            self.create_task(finalize_assistant_response())
-        else:
-            await finalize_assistant_response()
+        self._handling_bot_stopped_speaking = False
 
     async def _handle_interruption_frame(self):
         pass
