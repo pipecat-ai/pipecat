@@ -24,10 +24,8 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
@@ -249,23 +247,17 @@ class GradiumSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with VAD-specific handling.
+    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
+        """Handle VAD user stopped speaking by flushing the transcription.
 
-        When VAD detects the user has stopped speaking, we flush the transcription
-        by sending silence frames. This makes the system more reactive by getting
-        the final transcription faster without closing the connection.
+        Calls the base class handler for TTFB tracking, then sends silence
+        frames to flush remaining audio from the model's buffer.
 
         Args:
-            frame: The frame to process.
-            direction: The direction of frame processing.
+            frame: The VAD user stopped speaking frame.
         """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_processing_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            await self._flush_transcription()
+        await super()._handle_vad_user_stopped_speaking(frame)
+        await self._flush_transcription()
 
     async def _flush_transcription(self):
         """Flush the transcription by sending silence frames.
@@ -309,6 +301,7 @@ class GradiumSTTService(WebsocketSTTService):
         Yields:
             None (processing handled via WebSocket messages).
         """
+        await self.start_processing_metrics()
         self._audio_buffer.extend(audio)
 
         while len(self._audio_buffer) >= self._chunk_size_bytes:
