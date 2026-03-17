@@ -46,7 +46,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     `ProcessFrameResult.CONTINUE`).
 
     After a configurable timeout with no activity, the strategy returns to
-    LISTENING state and the wake phrase must be spoken again.
+    LISTENING state and the wake phrase must be spoken again. Alternatively,
+    ``single_activation=True`` requires the wake phrase before every turn.
 
     This strategy should be placed first in the start strategies list so it can
     gate the other strategies.
@@ -54,13 +55,21 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     Event handlers available:
 
     - on_wake_phrase_detected: Called when a wake phrase is matched.
-    - on_wake_phrase_timeout: Called when the inactivity timeout expires.
+    - on_wake_phrase_timeout: Called when the inactivity timeout expires
+      (timeout mode only).
 
     Example::
 
+        # Timeout mode (default): wake phrase unlocks interaction for 10s
         strategy = WakePhraseUserTurnStartStrategy(
             phrases=["hey pipecat", "ok pipecat"],
             timeout=10.0,
+        )
+
+        # Single activation: wake phrase required before every turn
+        strategy = WakePhraseUserTurnStartStrategy(
+            phrases=["hey pipecat"],
+            single_activation=True,
         )
 
         @strategy.event_handler("on_wake_phrase_detected")
@@ -74,6 +83,9 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     Args:
         phrases: List of wake phrases to detect.
         timeout: Inactivity timeout in seconds before returning to LISTENING.
+            Ignored when ``single_activation=True``.
+        single_activation: If True, the wake phrase is required before every
+            turn. The strategy returns to LISTENING after each turn completes.
         use_interim: Whether interim transcriptions trigger wake detection.
         **kwargs: Additional keyword arguments passed to parent.
     """
@@ -83,6 +95,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         *,
         phrases: List[str],
         timeout: float = 10.0,
+        single_activation: bool = False,
         use_interim: bool = True,
         **kwargs,
     ):
@@ -91,12 +104,16 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         Args:
             phrases: List of wake phrases to detect.
             timeout: Inactivity timeout in seconds before returning to LISTENING.
+                Ignored when ``single_activation=True``.
+            single_activation: If True, the wake phrase is required before every
+                turn. The strategy returns to LISTENING after each turn completes.
             use_interim: Whether interim transcriptions trigger wake detection.
             **kwargs: Additional keyword arguments passed to parent.
         """
         super().__init__(**kwargs)
         self._phrases = phrases
         self._timeout = timeout
+        self._single_activation = single_activation
         self._use_interim = use_interim
 
         self._patterns: List[re.Pattern] = []
@@ -128,7 +145,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             task_manager: The task manager to be associated with this instance.
         """
         await super().setup(task_manager)
-        if not self._timeout_task:
+        if not self._single_activation and not self._timeout_task:
             self._timeout_task = self.task_manager.create_task(
                 self._timeout_task_handler(),
                 f"{self}::_timeout_task_handler",
@@ -144,12 +161,17 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     async def reset(self):
         """Reset the strategy.
 
-        Preserves LISTENING/INACTIVE state. Refreshes timeout if INACTIVE since
-        reset means a turn started which counts as activity.
+        In single activation mode, transitions back to LISTENING so the wake
+        phrase is required again for the next turn. In timeout mode, preserves
+        state and refreshes timeout since reset means a turn started (activity).
         """
         await super().reset()
         if self._state == _WakeState.INACTIVE:
-            self._refresh_timeout()
+            if self._single_activation:
+                self._state = _WakeState.LISTENING
+                self._accumulated_text = ""
+            else:
+                self._refresh_timeout()
 
     async def process_frame(self, frame: Frame) -> Optional[ProcessFrameResult]:
         """Process an incoming frame for wake phrase detection or passthrough.
@@ -189,15 +211,16 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     async def _process_inactive(self, frame: Frame) -> ProcessFrameResult:
         """Process a frame while in INACTIVE state.
 
-        Refreshes the timeout on activity frames. Returns CONTINUE so subsequent
-        strategies can process the frame.
+        Refreshes the timeout on activity frames (timeout mode only). Returns
+        CONTINUE so subsequent strategies can process the frame.
         """
-        if isinstance(frame, (UserSpeakingFrame, BotSpeakingFrame)):
-            self._refresh_timeout()
-        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
-            self._refresh_timeout()
-        elif isinstance(frame, VADUserStartedSpeakingFrame):
-            self._refresh_timeout()
+        if not self._single_activation:
+            if isinstance(frame, (UserSpeakingFrame, BotSpeakingFrame)):
+                self._refresh_timeout()
+            elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
+                self._refresh_timeout()
+            elif isinstance(frame, VADUserStartedSpeakingFrame):
+                self._refresh_timeout()
 
         return ProcessFrameResult.CONTINUE
 
@@ -236,7 +259,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """Transition from LISTENING to INACTIVE state."""
         self._state = _WakeState.INACTIVE
         self._accumulated_text = ""
-        self._refresh_timeout()
+        if not self._single_activation:
+            self._refresh_timeout()
         self.task_manager.create_task(
             self._call_event_handler("on_wake_phrase_detected", phrase),
             f"{self}::on_wake_phrase_detected",

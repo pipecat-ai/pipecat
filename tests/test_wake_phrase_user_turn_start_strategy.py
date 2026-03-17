@@ -362,6 +362,104 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
+    async def test_single_activation_resets_to_listening(self):
+        """In single activation mode, reset() returns to LISTENING."""
+        strategy = self._create_strategy(single_activation=True)
+        await self._setup_strategy(strategy)
+
+        # Trigger wake phrase.
+        result = await strategy.process_frame(
+            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
+        )
+        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+
+        # Simulate turn start (controller calls reset on all start strategies).
+        await strategy.reset()
+        self.assertEqual(strategy.state, _WakeState.LISTENING)
+
+        # Frames should now be blocked again.
+        result = await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertEqual(result, ProcessFrameResult.BREAK)
+
+        await strategy.cleanup()
+
+    async def test_single_activation_requires_wake_phrase_each_turn(self):
+        """Single activation mode requires wake phrase for each new turn."""
+        strategy = self._create_strategy(single_activation=True)
+        await self._setup_strategy(strategy)
+
+        # First turn: wake phrase → INACTIVE → reset → LISTENING.
+        await strategy.process_frame(
+            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
+        )
+        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        await strategy.reset()
+        self.assertEqual(strategy.state, _WakeState.LISTENING)
+
+        # Without wake phrase, frames are blocked.
+        result = await strategy.process_frame(
+            TranscriptionFrame(text="what is the weather", user_id="user1", timestamp="")
+        )
+        self.assertEqual(result, ProcessFrameResult.BREAK)
+
+        # Second turn: wake phrase again.
+        result = await strategy.process_frame(
+            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
+        )
+        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+
+        await strategy.cleanup()
+
+    async def test_single_activation_no_timeout_task(self):
+        """Single activation mode does not start a timeout task."""
+        strategy = self._create_strategy(single_activation=True, timeout=0.1)
+        await self._setup_strategy(strategy)
+
+        # Trigger wake phrase.
+        await strategy.process_frame(
+            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
+        )
+        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+
+        # Wait longer than timeout — should NOT return to LISTENING.
+        await asyncio.sleep(0.3)
+        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+
+        await strategy.cleanup()
+
+    async def test_single_activation_reset_preserves_listening(self):
+        """In single activation mode, reset() while LISTENING stays LISTENING."""
+        strategy = self._create_strategy(single_activation=True)
+        await self._setup_strategy(strategy)
+
+        self.assertEqual(strategy.state, _WakeState.LISTENING)
+        await strategy.reset()
+        self.assertEqual(strategy.state, _WakeState.LISTENING)
+
+        await strategy.cleanup()
+
+    async def test_single_activation_inactive_returns_continue(self):
+        """In single activation mode, INACTIVE frames return CONTINUE."""
+        strategy = self._create_strategy(single_activation=True)
+        await self._setup_strategy(strategy)
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
+        )
+        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+
+        result = await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+
+        result = await strategy.process_frame(
+            TranscriptionFrame(text="what is the weather", user_id="user1", timestamp="")
+        )
+        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+
+        await strategy.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()
