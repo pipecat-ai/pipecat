@@ -1742,7 +1742,7 @@ class ServiceSwitcherRequestMetadataFrame(ControlFrame):
 
 
 @dataclass
-class TaskFrame(SystemFrame):
+class TaskFrame(ControlFrame):
     """Base frame for task frames.
 
     This is a base class for frames that are meant to be sent and handled
@@ -1756,7 +1756,21 @@ class TaskFrame(SystemFrame):
 
 
 @dataclass
-class EndTaskFrame(TaskFrame):
+class TaskSystemFrame(SystemFrame):
+    """Base frame for task system frames.
+
+    This is a base class for frames that are meant to be sent and handled
+    upstream by the pipeline task. This might result in a corresponding frame
+    sent downstream (e.g. `InterruptionTaskFrame` / `InterruptionFrame` or
+    `EndTaskFrame` / `EndFrame`).
+
+    """
+
+    pass
+
+
+@dataclass
+class EndTaskFrame(TaskFrame, UninterruptibleFrame):
     """Frame to request graceful pipeline task closure.
 
     This is used to notify the pipeline task that the pipeline should be
@@ -1774,7 +1788,20 @@ class EndTaskFrame(TaskFrame):
 
 
 @dataclass
-class CancelTaskFrame(TaskFrame):
+class StopTaskFrame(TaskFrame, UninterruptibleFrame):
+    """Frame to request pipeline task stop while keeping processors running.
+
+    This is used to notify the pipeline task that it should be stopped as
+    soon as possible (flushing all the queued frames) but that the pipeline
+    processors should be kept in a running state. This frame should be pushed
+    upstream.
+    """
+
+    pass
+
+
+@dataclass
+class CancelTaskFrame(TaskSystemFrame):
     """Frame to request immediate pipeline task cancellation.
 
     This is used to notify the pipeline task that the pipeline should be
@@ -1792,20 +1819,7 @@ class CancelTaskFrame(TaskFrame):
 
 
 @dataclass
-class StopTaskFrame(TaskFrame):
-    """Frame to request pipeline task stop while keeping processors running.
-
-    This is used to notify the pipeline task that it should be stopped as
-    soon as possible (flushing all the queued frames) but that the pipeline
-    processors should be kept in a running state. This frame should be pushed
-    upstream.
-    """
-
-    pass
-
-
-@dataclass
-class InterruptionTaskFrame(TaskFrame):
+class InterruptionTaskFrame(TaskSystemFrame):
     """Frame indicating the pipeline should be interrupted.
 
     This frame should be pushed upstream to indicate the pipeline should be
