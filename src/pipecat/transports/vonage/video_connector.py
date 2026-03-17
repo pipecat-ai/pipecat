@@ -118,6 +118,15 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
         await super().cleanup()  # type: ignore
         await self._client.cleanup()
 
+    async def push_caption_frame(self, frame: TranscriptionFrame | InterimTranscriptionFrame) -> None:
+        """Push a transcription frame downstream if captions input is enabled.
+
+        Args:
+            frame: The input transcription frame to process.
+        """
+        if self._params.captions_in_enabled and not self._paused:
+            await self.push_frame(frame)
+
     async def _audio_in_cb(self, _session: Session, audio: InputAudioRawFrame) -> None:
         if self._connected and self._params.audio_in_enabled:
             await self.push_audio_frame(audio)
