@@ -113,6 +113,7 @@ class GradiumSTTService(WebsocketSTTService):
         *,
         api_key: str,
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
+        encoding: str = "pcm",
         params: Optional[InputParams] = None,
         json_config: Optional[str] = None,
         settings: Optional[Settings] = None,
@@ -124,6 +125,7 @@ class GradiumSTTService(WebsocketSTTService):
         Args:
             api_key: Gradium API key for authentication.
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
+            encoding: Audio input format. One of "pcm", "wav", or "opus". Defaults to "pcm".
             params: Configuration parameters for language and delay settings.
 
                 .. deprecated:: 0.0.105
@@ -151,7 +153,7 @@ class GradiumSTTService(WebsocketSTTService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model=None,
+            model="default",
             language=None,
             delay_in_frames=None,
         )
@@ -181,6 +183,7 @@ class GradiumSTTService(WebsocketSTTService):
 
         self._api_key = api_key
         self._api_endpoint_base_url = api_endpoint_base_url
+        self._encoding = encoding
         self._websocket = None
         self._json_config = json_config
 
@@ -191,7 +194,7 @@ class GradiumSTTService(WebsocketSTTService):
         self._chunk_size_bytes = 0
 
         # Set from the ready message when connecting to the service.
-        # These values are used for flushing transcription.
+        # These values are used for flushing transcription via silence.
         self._delay_in_frames = 0
         self._frame_size = 0
 
@@ -267,10 +270,6 @@ class GradiumSTTService(WebsocketSTTService):
         When VAD detects the user stopped speaking, we send delay_in_frames
         chunks of silence (zeros) to flush the remaining audio from the model's
         buffer. This allows for faster turn-around without closing the connection.
-
-        From Gradium docs: "feed in delay_in_frames chunks of silence (vectors
-        of zeros). If those are fed in faster than realtime, the API also has
-        a possibility to process them faster."
         """
         if not self._websocket or self._websocket.state is not State.OPEN:
             return
@@ -348,7 +347,8 @@ class GradiumSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             setup_msg = {
                 "type": "setup",
-                "input_format": "pcm",
+                "model_name": self._settings.model,
+                "input_format": self._encoding,
             }
             # Build json_config: start with deprecated json_config, then override with params
             json_config = {}
@@ -420,23 +420,18 @@ class GradiumSTTService(WebsocketSTTService):
     async def _receive_messages(self):
         async for message in self._get_websocket():
             try:
-                data = json.loads(message)
-                await self._process_response(data)
+                msg = json.loads(message)
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message: {message}")
+                continue
 
-    async def _process_response(self, msg):
-        type_ = msg.get("type", "")
-        if type_ == "text":
-            await self._handle_text(msg["text"])
-        elif type_ == "end_of_stream":
-            await self._handle_end_of_stream()
-        elif type_ == "error":
-            await self.push_error(error_msg=f"Error: {msg}")
-
-    async def _handle_end_of_stream(self):
-        """Handle termination message."""
-        logger.debug("Received end_of_stream message from server")
+            type_ = msg.get("type", "")
+            if type_ == "text":
+                await self._handle_text(msg["text"])
+            elif type_ == "end_of_stream":
+                logger.debug("Received end_of_stream message from server")
+            elif type_ == "error":
+                await self.push_error(error_msg=f"Error: {msg}")
 
     async def _handle_text(self, text: str):
         """Handle transcription results."""
