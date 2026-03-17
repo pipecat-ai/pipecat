@@ -19,7 +19,6 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputImageRawFrame,
     StartFrame,
-    TextFrame,
     TranscriptionFrame,
     UserImageRawFrame,
 )
