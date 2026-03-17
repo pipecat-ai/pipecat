@@ -554,7 +554,15 @@ class DeepgramSTTService(STTService):
             value = getattr(s, f.name)
             if not is_given(value) or value is None:
                 continue
-            kwargs[f.name] = str(value).lower() if isinstance(value, bool) else str(value)
+            # Lists (e.g. keyterm, keywords, search, redact, replace) must be
+            # passed through as-is so the SDK's encode_query produces repeated
+            # query params (keyterm=a&keyterm=b) instead of a stringified list.
+            if isinstance(value, list):
+                kwargs[f.name] = value
+            elif isinstance(value, bool):
+                kwargs[f.name] = str(value).lower()
+            else:
+                kwargs[f.name] = str(value)
 
         # model and language
         if is_given(s.model) and s.model is not None:
@@ -580,7 +588,12 @@ class DeepgramSTTService(STTService):
         # Any remaining values in extra (that didn't map to declared fields)
         for key, value in s.extra.items():
             if value is not None:
-                kwargs[key] = str(value).lower() if isinstance(value, bool) else str(value)
+                if isinstance(value, list):
+                    kwargs[key] = value
+                elif isinstance(value, bool):
+                    kwargs[key] = str(value).lower()
+                else:
+                    kwargs[key] = str(value)
 
         if self._addons:
             for key, value in self._addons.items():
