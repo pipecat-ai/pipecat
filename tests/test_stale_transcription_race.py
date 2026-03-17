@@ -4,29 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for stale transcription race condition causing "one turn behind" behavior.
+"""Tests for the fix of the stale transcription race condition ("one turn behind" bug).
 
-Reproduces a bug where the bot responds to the PREVIOUS user utterance instead
-of the current one. Observed in production with Soniox STT + TurnAnalyzer.
+The bug: when a late TranscriptionFrame arrived between turns, strategy._text
+retained stale content into the next turn. With timeout=0 (common when
+stt_p99 <= vad_stop_secs), the timeout fired with stale _text, triggering a
+premature turn stop before the current TranscriptionFrame arrived.
 
-Root cause: a race between the TurnAnalyzerUserTurnStopStrategy's STT timeout
-(which fires with timeout=0 when stt_p99 <= vad_stop_secs) and the arrival of
-the current turn's TranscriptionFrame.
-
-Bug chain:
-1. Turn N ends → push_aggregation → _aggregation cleared
-2. Late TranscriptionFrame from STT arrives → accumulated in _aggregation
-3. Turn N+1 starts → _aggregation is NOT cleared
-4. VAD stop → turn analyzer COMPLETE → timeout(0) fires
-5. Timeout checks strategy._text (stale, not reset on turn start) → non-empty
-6. trigger_user_turn_stopped → push_aggregation pushes stale _aggregation
-7. Strategy reset clears _turn_complete
-8. Current TranscriptionFrame arrives → accumulated but _turn_complete=False → no push
-9. Current text becomes stale for turn N+2 → cycle repeats
-
-Contributing factors:
-- _handle_vad_user_started_speaking does NOT reset self._text
-- timeout = max(0, stt_p99 - vad_stop_secs) = 0 when stop_secs >= stt_p99
+Fix: reset _text in _handle_vad_user_started_speaking so the timeout gate
+sees empty text and waits for the current turn's transcript.
 
 Test naming convention:
   S = VADUserStartedSpeakingFrame
@@ -37,6 +23,8 @@ Test naming convention:
 import asyncio
 import unittest
 from typing import Optional, Tuple
+
+import pytest
 
 from pipecat.audio.turn.base_turn_analyzer import (
     BaseTurnAnalyzer,
@@ -98,12 +86,8 @@ def _tf(text: str) -> TranscriptionFrame:
 # ---------------------------------------------------------------------------
 
 
-class TestStrategyStaleTextNotResetOnTurnStart(unittest.IsolatedAsyncioTestCase):
-    """_handle_vad_user_started_speaking does NOT reset self._text.
-
-    This means _text carries stale content into the new turn, which the
-    timeout(0) uses to trigger a premature turn stop.
-    """
+class TestStrategyTextResetOnTurnStart(unittest.IsolatedAsyncioTestCase):
+    """Verify _text is cleared on VAD start to prevent stale text gating premature stops."""
 
     async def asyncSetUp(self) -> None:
         self.task_manager = TaskManager()
@@ -117,11 +101,11 @@ class TestStrategyStaleTextNotResetOnTurnStart(unittest.IsolatedAsyncioTestCase)
         )
         return strategy
 
-    async def test_text_persists_after_vad_start(self):
-        """_text set by TranscriptionFrame is NOT cleared by VADUserStartedSpeakingFrame.
+    async def test_text_cleared_on_vad_start(self):
+        """_text set by TranscriptionFrame is cleared by VADUserStartedSpeakingFrame.
 
         After a TranscriptionFrame sets _text, starting a new turn via VAD
-        should clear it — but it doesn't. This is the first enabler of the bug.
+        clears it so stale text cannot trigger a premature turn stop.
         """
         strategy = await self._create_strategy()
 
@@ -132,12 +116,29 @@ class TestStrategyStaleTextNotResetOnTurnStart(unittest.IsolatedAsyncioTestCase)
         # New turn starts
         await strategy.process_frame(VADUserStartedSpeakingFrame())
 
-        # BUG: _text still has old content
+        # FIX: _text is cleared on turn start
         self.assertEqual(
             strategy._text,
-            "Previous utterance",
-            "_text should be '' after turn start but retains stale content (this is the bug)",
+            "",
+            "_text should be '' after turn start to prevent stale text triggering premature stop",
         )
+
+    @pytest.mark.xfail(reason="Bug fixed: _text is now cleared on VAD start", strict=True)
+    async def test_stale_text_persists_after_vad_start(self):
+        """REPRODUCTION: _text retains stale content after VADUserStartedSpeakingFrame.
+
+        Before the fix, _text was not cleared on turn start, allowing stale
+        content to gate a premature turn stop via timeout(0).
+        """
+        strategy = await self._create_strategy()
+
+        await strategy.process_frame(_tf("Previous utterance"))
+        self.assertEqual(strategy._text, "Previous utterance")
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+
+        # This assertion passes only with the bug present
+        self.assertEqual(strategy._text, "Previous utterance")
 
     async def test_text_cleared_by_reset_only(self):
         """Only reset() clears _text — but reset() is called AFTER turn stop,
@@ -157,13 +158,11 @@ class TestStrategyStaleTextNotResetOnTurnStart(unittest.IsolatedAsyncioTestCase)
 # ---------------------------------------------------------------------------
 
 
-class TestControllerStaleTextRace(unittest.IsolatedAsyncioTestCase):
-    """Full turn lifecycle with UserTurnController showing the race condition.
+class TestControllerStaleTextRaceFix(unittest.IsolatedAsyncioTestCase):
+    """Full turn lifecycle verifying the stale text race is fixed.
 
-    When a TranscriptionFrame arrives between turns (after turn stop reset
-    but before the next turn start), _text gets set. On the next turn,
-    _text is not reset by VAD start. When the timeout(0) fires, it sees
-    stale _text and triggers a premature turn stop.
+    With the fix, _text is cleared on VAD start, so late TranscriptionFrames
+    arriving between turns cannot gate a premature turn stop via timeout(0).
     """
 
     async def asyncSetUp(self) -> None:
@@ -186,13 +185,13 @@ class TestControllerStaleTextRace(unittest.IsolatedAsyncioTestCase):
         )
         return controller, strategy
 
-    async def test_late_transcript_sets_stale_text_between_turns(self):
-        """A TranscriptionFrame arriving after turn stop sets _text to stale content.
+    async def test_late_transcript_cleared_on_turn_start(self):
+        """A late TranscriptionFrame's _text is cleared when the next turn starts.
 
         Flow:
         1. Turn 1: S E T → turn stops → reset() clears _text
         2. Late TranscriptionFrame arrives → _text = "Late text"
-        3. Turn 2: S → _text still = "Late text" (not reset)
+        3. Turn 2: S → _text cleared to "" (fix prevents stale gate)
         """
         controller, strategy = await self._create_controller()
 
@@ -220,20 +219,19 @@ class TestControllerStaleTextRace(unittest.IsolatedAsyncioTestCase):
         # --- Turn 2 starts ---
         await controller.process_frame(VADUserStartedSpeakingFrame())
 
-        # BUG: _text retains stale content from the late transcript
+        # FIX: _text is cleared on turn start
         self.assertEqual(
             strategy._text,
-            "Late text",
-            "Stale _text persists into turn 2 (root cause of one-turn-behind bug)",
+            "",
+            "_text cleared on turn start prevents stale text from gating premature stop",
         )
 
-    async def test_timeout_fires_before_transcription_arrives(self):
-        """timeout(0) triggers turn stop before the actual TranscriptionFrame arrives.
+    async def test_timeout_waits_for_current_transcription(self):
+        """timeout(0) does NOT trigger premature turn stop when _text is cleared on turn start.
 
-        This is the core reproduction: after a late transcript sets _text,
-        the next turn's VAD stop creates timeout(0), which fires with stale
-        _text and triggers a premature turn stop. The actual TranscriptionFrame
-        for the current turn arrives too late.
+        With the fix, after a late transcript sets _text, the next turn's VAD start
+        clears _text. When timeout(0) fires, _maybe_trigger_user_turn_stopped sees
+        empty _text and waits for the current TranscriptionFrame.
         """
         controller, strategy = await self._create_controller()
 
@@ -256,8 +254,8 @@ class TestControllerStaleTextRace(unittest.IsolatedAsyncioTestCase):
 
         # --- Turn 2: S E (TranscriptionFrame not yet arrived) ---
         await controller.process_frame(VADUserStartedSpeakingFrame())
-        # At this point: _text = "I'll wait on site." (stale, not reset)
-        self.assertEqual(strategy._text, "I'll wait on site.")
+        # FIX: _text is cleared on turn start
+        self.assertEqual(strategy._text, "")
 
         await controller.process_frame(VADUserStoppedSpeakingFrame())
         # analyze_end_of_turn → COMPLETE, timeout(0) created
@@ -265,30 +263,26 @@ class TestControllerStaleTextRace(unittest.IsolatedAsyncioTestCase):
         # Let the timeout fire
         await asyncio.sleep(0.1)
 
-        # BUG: Timeout fires with stale _text → premature turn stop.
-        # In the real pipeline, this pushes the stale _aggregation content
-        # instead of waiting for the current TranscriptionFrame.
+        # FIX: Timeout fires but _text is empty → no premature turn stop
         self.assertEqual(
             stop_count,
-            2,
-            "Timeout fires with stale _text before actual TranscriptionFrame arrives",
+            1,
+            "No premature stop — timeout sees empty _text and waits for current transcript",
         )
 
-        # Now the actual TranscriptionFrame arrives — but the turn is already stopped.
-        # _turn_complete was cleared by reset(), so this can't trigger another stop.
+        # Actual TranscriptionFrame arrives → triggers turn stop with correct content
         await controller.process_frame(_tf("John Smith"))
-        self.assertEqual(strategy._text, "John Smith")
+        await asyncio.sleep(0.05)
+        self.assertEqual(stop_count, 2, "Turn stops with current transcript, not stale")
 
-        # "John Smith" is now stale _text for turn 3 → the cycle continues.
+    async def test_three_turn_sequence_no_longer_one_behind(self):
+        """Three-turn sequence where each turn correctly waits for its own transcript.
 
-    async def test_one_turn_behind_three_turn_sequence(self):
-        """Three-turn sequence demonstrating the repeating "one turn behind" pattern.
-
-        Matches the production log pattern:
+        With the fix, the "one turn behind" pattern is broken:
         - Turn 1: correctly processed
-        - Late transcript: poisons _text
-        - Turn 2: premature stop (stale), actual text becomes stale
-        - Turn 3: premature stop (stale from turn 2), actual text becomes stale
+        - Late transcript: _text set but cleared on next turn start
+        - Turn 2: waits for current transcript → correct
+        - Turn 3: waits for current transcript → correct
         """
         controller, strategy = await self._create_controller()
 
@@ -306,31 +300,34 @@ class TestControllerStaleTextRace(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
         self.assertEqual(stop_count, 1)
 
-        # --- Late transcript poisons _text ---
+        # --- Late transcript arrives between turns ---
         await controller.process_frame(_tf("I'll wait."))
 
-        # --- Turn 2: User says "John Smith" but stale text fires first ---
+        # --- Turn 2: User says "John Smith" ---
         await controller.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(strategy._text, "I'll wait.", "stale _text enters turn 2")
+        self.assertEqual(strategy._text, "", "_text cleared on turn start")
 
         await controller.process_frame(VADUserStoppedSpeakingFrame())
         await asyncio.sleep(0.1)
-        self.assertEqual(stop_count, 2, "premature stop from stale _text")
+        # FIX: no premature stop — timeout sees empty _text
+        self.assertEqual(stop_count, 1, "no premature stop from stale _text")
 
-        # Actual TranscriptionFrame arrives late → poisons _text for turn 3
+        # Actual TranscriptionFrame arrives → correct turn stop
         await controller.process_frame(_tf("John Smith"))
+        await asyncio.sleep(0.05)
+        self.assertEqual(stop_count, 2, "turn 2 stops with correct transcript")
 
-        # --- Turn 3: same pattern repeats ---
+        # --- Turn 3: User says "No thanks" ---
         await controller.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(strategy._text, "John Smith", "stale _text from turn 2 enters turn 3")
+        self.assertEqual(strategy._text, "", "_text cleared on turn 3 start")
 
         await controller.process_frame(VADUserStoppedSpeakingFrame())
         await asyncio.sleep(0.1)
-        self.assertEqual(stop_count, 3, "premature stop repeats — one turn behind continues")
+        self.assertEqual(stop_count, 2, "no premature stop")
 
-        # Actual turn 3 transcript arrives late → becomes stale for turn 4
         await controller.process_frame(_tf("No thanks"))
-        self.assertEqual(strategy._text, "No thanks", "stale for the next turn")
+        await asyncio.sleep(0.05)
+        self.assertEqual(stop_count, 3, "turn 3 stops with correct transcript")
 
 
 if __name__ == "__main__":

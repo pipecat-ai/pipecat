@@ -130,6 +130,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Handle when the VAD indicates the user is speaking."""
         # Sync Smart Turn pre-speech buffering with VAD start delay
         self._turn_analyzer.update_vad_start_secs(frame.start_secs)
+        self._text = ""
         self._turn_complete = False
         self._vad_user_speaking = True
         self._vad_stopped_time = None
