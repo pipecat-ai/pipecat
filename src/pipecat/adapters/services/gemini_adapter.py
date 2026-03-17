@@ -19,12 +19,22 @@ from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
+    LLMContextToolChoice,
     LLMSpecificMessage,
     LLMStandardMessage,
 )
 
 try:
-    from google.genai.types import Blob, Content, FileData, FunctionCall, FunctionResponse, Part
+    from google.genai.types import (
+        Blob,
+        Content,
+        FileData,
+        FunctionCall,
+        FunctionCallingConfig,
+        FunctionResponse,
+        Part,
+        ToolConfig,
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
@@ -37,6 +47,7 @@ class GeminiLLMInvocationParams(TypedDict):
     system_instruction: Optional[str]
     messages: List[Content]
     tools: List[Any] | NotGiven
+    tool_config: Optional[ToolConfig]
 
 
 class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
@@ -68,7 +79,37 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             "messages": messages.messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
+            "tool_config": self._from_standard_tool_choice(context.tool_choice),
         }
+
+    def _from_standard_tool_choice(
+        self, tool_choice: LLMContextToolChoice | NotGiven
+    ) -> Optional[ToolConfig]:
+        """Convert standard tool_choice to Gemini's ToolConfig format.
+
+        Args:
+            tool_choice: The tool choice from the universal LLM context.
+
+        Returns:
+            ToolConfig for Gemini's API, or None if not applicable.
+        """
+        if isinstance(tool_choice, NotGiven):
+            return None
+        if isinstance(tool_choice, str):
+            mode_map = {"auto": "AUTO", "required": "ANY", "none": "NONE"}
+            mode = mode_map.get(tool_choice)
+            if mode:
+                return ToolConfig(function_calling_config=FunctionCallingConfig(mode=mode))
+            return None
+        if isinstance(tool_choice, dict):
+            func_name = tool_choice.get("function", {}).get("name")
+            if func_name:
+                return ToolConfig(
+                    function_calling_config=FunctionCallingConfig(
+                        mode="ANY", allowed_function_names=[func_name]
+                    )
+                )
+        return None
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Dict[str, Any]]:
         """Convert tool schemas to Gemini's function-calling format.
