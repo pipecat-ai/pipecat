@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.smallest.stt import SmallestRealtimeSTTService
+from pipecat.services.smallest.stt import SmallestSTTService
 from pipecat.services.smallest.tts import SmallestTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -50,7 +50,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = SmallestRealtimeSTTService(
+    stt = SmallestSTTService(
         api_key=os.getenv("SMALLEST_API_KEY"),
     )
 

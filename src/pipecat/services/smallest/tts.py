@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Smallest AI text-to-speech service implementations.
+"""Smallest AI text-to-speech service implementation.
 
-This module provides WebSocket-based and HTTP-based integrations with Smallest
-AI's Waves API for real-time text-to-speech synthesis.
+This module provides a WebSocket-based integration with Smallest AI's Waves
+API for real-time text-to-speech synthesis with interruption support.
 """
 
 import base64
@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import InterruptibleTTSService, TTSService
+from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -149,9 +149,7 @@ class SmallestTTSService(InterruptibleTTSService):
         """
         params = params or SmallestTTSService.InputParams()
         model_str = model.value if isinstance(model, Enum) else model
-        lang_str = (
-            language_to_smallest_tts_language(params.language) if params.language else "en"
-        )
+        lang_str = language_to_smallest_tts_language(params.language) if params.language else "en"
 
         super().__init__(
             aggregate_sentences=True,
@@ -271,7 +269,7 @@ class SmallestTTSService(InterruptibleTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
-            logger.debug("Connecting to Smallest")
+            logger.debug("Connecting to Smallest TTS")
 
             self._websocket = await websocket_connect(
                 self._websocket_url,
@@ -280,7 +278,7 @@ class SmallestTTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            await self.push_error(error_msg=f"Smallest connection error: {e}", exception=e)
+            await self.push_error(error_msg=f"Smallest TTS connection error: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -290,7 +288,7 @@ class SmallestTTSService(InterruptibleTTSService):
             await self.stop_all_metrics()
 
             if self._websocket:
-                logger.debug("Disconnecting from Smallest")
+                logger.debug("Disconnecting from Smallest TTS")
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
@@ -389,195 +387,3 @@ class SmallestTTSService(InterruptibleTTSService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             yield ErrorFrame(error=f"Smallest TTS error: {e}")
-
-
-class SmallestHttpTTSService(TTSService):
-    """Smallest AI text-to-speech service using the HTTP API.
-
-    Provides text-to-speech synthesis using Smallest AI's HTTP REST API.
-    Suitable for applications that prefer simpler HTTP-based communication
-    over WebSocket connections.
-
-    Example::
-
-        tts = SmallestHttpTTSService(
-            api_key="your-api-key",
-            voice_id="anushka",
-            params=SmallestHttpTTSService.InputParams(
-                language=Language.HI,
-                speed=1.2,
-            ),
-        )
-    """
-
-    class InputParams(BaseModel):
-        """Configuration parameters for Smallest HTTP TTS service.
-
-        Parameters:
-            language: Language code for synthesis. Defaults to "en".
-            speed: Speech speed multiplier. Defaults to 1.0.
-            consistency: Consistency level for voice generation.
-            similarity: Similarity level for voice generation.
-            enhancement: Enhancement level for voice generation.
-        """
-
-        language: str = "en"
-        speed: float = 1.0
-        consistency: Optional[float] = None
-        similarity: Optional[float] = None
-        enhancement: Optional[float] = None
-
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        voice_id: str = "sophia",
-        model: str = SmallestTTSModel.LIGHTNING_V3_1,
-        base_url: str = "https://waves-api.smallest.ai",
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        **kwargs,
-    ):
-        """Initialize the Smallest AI HTTP TTS service.
-
-        Args:
-            api_key: Smallest AI API key for authentication.
-            voice_id: Voice identifier for synthesis.
-            model: TTS model to use. Defaults to "lightning-v3.1".
-            base_url: Base URL for the Smallest API.
-            sample_rate: Audio sample rate in Hz.
-            params: Configuration parameters for the TTS service.
-            **kwargs: Additional arguments passed to parent TTSService.
-        """
-        params = params or SmallestHttpTTSService.InputParams()
-        model_str = model.value if isinstance(model, Enum) else model
-
-        super().__init__(
-            sample_rate=sample_rate,
-            settings=TTSSettings(model=model_str, voice=voice_id, language=params.language),
-            **kwargs,
-        )
-
-        self._api_key = api_key
-        self._base_url = base_url.rstrip("/")
-        self._model_url = f"{self._base_url}/api/v1/{model_str}/get_speech"
-
-        self._tts_params = {
-            "language": params.language,
-            "speed": params.speed,
-            "consistency": params.consistency,
-            "similarity": params.similarity,
-            "enhancement": params.enhancement,
-        }
-
-        self._session = None
-
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
-
-        Returns:
-            True, as Smallest HTTP service supports metrics generation.
-        """
-        return True
-
-    async def start(self, frame: StartFrame):
-        """Start the Smallest HTTP TTS service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-        try:
-            import aiohttp
-
-            self._session = aiohttp.ClientSession()
-        except ModuleNotFoundError as e:
-            logger.error(f"Exception: {e}")
-            logger.error("In order to use Smallest HTTP TTS, you need to `pip install aiohttp`.")
-            raise Exception(f"Missing module: {e}")
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Smallest HTTP TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        if self._session:
-            await self._session.close()
-            self._session = None
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Smallest HTTP TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        if self._session:
-            await self._session.close()
-            self._session = None
-
-    @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
-        """Generate speech from text using the Smallest HTTP API.
-
-        Args:
-            text: The text to synthesize into speech.
-            context_id: Unique identifier for this TTS context.
-
-        Yields:
-            Frame: TTSStartedFrame, TTSAudioRawFrame chunks, and TTSStoppedFrame.
-        """
-        logger.debug(f"{self}: Generating TTS [{text}]")
-
-        if not self._session:
-            yield ErrorFrame(error="Smallest HTTP TTS session not initialized")
-            return
-
-        try:
-            await self.start_ttfb_metrics()
-
-            payload = {
-                "voice_id": self._settings.voice,
-                "text": text,
-                "sample_rate": self.sample_rate,
-            }
-
-            for key, value in self._tts_params.items():
-                if value is not None:
-                    payload[key] = value
-
-            headers = {
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            }
-
-            yield TTSStartedFrame(context_id=context_id)
-
-            async with self._session.post(
-                self._model_url, json=payload, headers=headers
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"{self} API error: {error_text}")
-                    yield ErrorFrame(error=f"Smallest API error: {error_text}")
-                    return
-
-                result = await response.read()
-
-            await self.stop_ttfb_metrics()
-            await self.start_tts_usage_metrics(text)
-
-            yield TTSAudioRawFrame(
-                audio=result,
-                sample_rate=self.sample_rate,
-                num_channels=1,
-                context_id=context_id,
-            )
-
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"Smallest TTS error: {e}")
-        finally:
-            yield TTSStoppedFrame(context_id=context_id)

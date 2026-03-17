@@ -4,20 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Smallest AI speech-to-text service implementations.
+"""Smallest AI speech-to-text service implementation.
 
-This module provides two STT services using Smallest AI's Waves API:
-
-- ``SmallestSTTService``: HTTP-based segmented STT. Buffers audio during speech,
-  sends as a single request once the user stops speaking (VAD-triggered).
-- ``SmallestRealtimeSTTService``: WebSocket-based real-time STT. Streams audio
-  continuously and receives interim/final transcripts with low latency.
+This module provides a WebSocket-based real-time STT service using Smallest
+AI's Waves API (Pulse model). Audio is streamed continuously over a WebSocket
+connection and interim/final transcription results are received with low
+latency.
 """
 
 import asyncio
-import io
 import json
-from enum import Enum
 from typing import AsyncGenerator, Optional
 from urllib.parse import urlencode
 
@@ -38,31 +34,9 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SMALLEST_TTFS_P99
-from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
-from pipecat.transcriptions.language import Language
+from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-
-try:
-    import httpx
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Smallest, you need to `pip install pipecat-ai[smallest]`.")
-    raise Exception(f"Missing module: {e}")
-
-try:
-    import numpy as np
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Smallest, you need to `pip install pipecat-ai[smallest]`.")
-    raise Exception(f"Missing module: {e}")
-
-try:
-    import soundfile as sf
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Smallest, you need to `pip install pipecat-ai[smallest]`.")
-    raise Exception(f"Missing module: {e}")
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -73,207 +47,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_smallest_language(language: Language) -> Optional[str]:
-    """Convert a Language enum to Smallest's language code format.
-
-    Smallest AI currently supports English and Hindi. Falls back to extracting
-    the base language code if the exact Language enum isn't mapped.
-
-    Args:
-        language: The Language enum value to convert.
-
-    Returns:
-        The Smallest language code string, or None if unsupported.
-    """
-    BASE_LANGUAGES = {
-        Language.EN: "en",
-        Language.HI: "hi",
-    }
-
-    result = BASE_LANGUAGES.get(language)
-
-    if not result:
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
-
-
-class SmallestSTTModel(str, Enum):
-    """Available Smallest AI STT models."""
-
-    PULSE = "pulse"
-
-
-class SmallestSTTService(SegmentedSTTService):
-    """Smallest AI speech-to-text service using the Waves HTTP API.
-
-    This is a segmented STT service that buffers audio while the user speaks
-    (using VAD) and sends the complete audio segment to Smallest AI's HTTP
-    endpoint for transcription once the user stops speaking.
-
-    Requires VAD to be enabled in the pipeline.
-    """
-
-    class InputParams(BaseModel):
-        """Configuration parameters for Smallest STT service.
-
-        Parameters:
-            language: Language code for transcription. Defaults to "en".
-            age_detection: Enable age detection. Defaults to False.
-            emotion_detection: Enable emotion detection. Defaults to False.
-            gender_detection: Enable gender detection. Defaults to False.
-        """
-
-        language: str = "en"
-        age_detection: bool = False
-        emotion_detection: bool = False
-        gender_detection: bool = False
-
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        model: str = SmallestSTTModel.PULSE,
-        url: str = "https://api.smallest.ai/waves/v1/pulse/get_text",
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        ttfs_p99_latency: Optional[float] = SMALLEST_TTFS_P99,
-        **kwargs,
-    ):
-        """Initialize the Smallest AI STT service.
-
-        Args:
-            api_key: Smallest AI API key for authentication.
-            model: Model to use for transcription. Defaults to "pulse".
-            url: API endpoint URL. Defaults to the Smallest Waves API endpoint.
-            sample_rate: Audio sample rate. If None, will be determined from the
-                start frame.
-            params: Configuration parameters for the STT service.
-            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
-                Override for your deployment.
-            **kwargs: Additional arguments passed to the parent SegmentedSTTService.
-        """
-        params = params or SmallestSTTService.InputParams()
-        model_str = model.value if isinstance(model, Enum) else model
-
-        super().__init__(
-            sample_rate=sample_rate,
-            ttfs_p99_latency=ttfs_p99_latency,
-            settings=STTSettings(model=model_str, language=params.language),
-            **kwargs,
-        )
-
-        self._api_key = api_key
-        self._url = url
-        self._language = params.language
-
-        self._client = httpx.AsyncClient()
-        self._headers = {
-            "Authorization": f"Bearer {self._api_key}",
-        }
-        self._payload = {
-            "model": model_str,
-            "age_detection": "true" if params.age_detection else "false",
-            "gender_detection": "true" if params.gender_detection else "false",
-            "emotion_detection": "true" if params.emotion_detection else "false",
-            "language": params.language,
-        }
-
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
-
-        Returns:
-            True, as Smallest STT supports metrics generation.
-        """
-        return True
-
-    @traced_stt
-    async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
-    ):
-        """Handle a transcription result with tracing.
-
-        This method is decorated with @traced_stt for observability.
-        The actual work (pushing frames) is done in run_stt; this method
-        exists solely as a tracing hook.
-        """
-        pass
-
-    def _audio_bytes_to_wav_buffer(self, audio: bytes) -> io.BytesIO:
-        """Convert raw PCM16 audio bytes to a WAV-formatted buffer.
-
-        The Smallest API expects WAV-formatted audio. This converts raw signed
-        16-bit PCM audio bytes into a WAV buffer with proper headers.
-
-        Args:
-            audio: Raw PCM16 audio bytes.
-
-        Returns:
-            A BytesIO buffer containing WAV-formatted audio data.
-        """
-        audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
-        wav_buffer = io.BytesIO()
-        sf.write(wav_buffer, audio_float, self.sample_rate, format="WAV", subtype="PCM_16")
-        wav_buffer.seek(0)
-        return wav_buffer
-
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribe audio using the Smallest AI HTTP API.
-
-        Called by the base SegmentedSTTService when the user stops speaking.
-        The audio parameter contains the complete WAV-encoded speech segment.
-
-        Args:
-            audio: WAV-encoded audio bytes from the speech segment.
-
-        Yields:
-            TranscriptionFrame on success, ErrorFrame on failure.
-        """
-        wav_buffer = self._audio_bytes_to_wav_buffer(audio)
-
-        await self.start_processing_metrics()
-        await self.start_ttfb_metrics()
-
-        try:
-            response = await self._client.post(
-                self._url,
-                headers=self._headers,
-                content=wav_buffer.getvalue(),
-                params=self._payload,
-            )
-            response.raise_for_status()
-            result = response.json()
-            text: str = result.get("transcription", "").strip()
-        except httpx.HTTPStatusError as e:
-            logger.error(f"{self} API error: {e.response.status_code} - {e.response.text}")
-            yield ErrorFrame(error=f"Smallest API error: {e.response.status_code}", exception=e)
-            return
-        except Exception as e:
-            logger.exception(f"{self} transcription error: {type(e).__name__}: {e}")
-            yield ErrorFrame(error=f"Smallest transcription error: {type(e).__name__}: {e}")
-            return
-
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
-
-        if text:
-            logger.debug(f"Transcription: [{text}]")
-            await self._handle_transcription(text, True, self._language)
-            yield TranscriptionFrame(
-                text,
-                self._user_id,
-                time_now_iso8601(),
-            )
-
-    async def cleanup(self):
-        """Clean up resources used by the Smallest STT service."""
-        await super().cleanup()
-        await self._client.aclose()
-
-
-class SmallestRealtimeSTTService(WebsocketSTTService):
+class SmallestSTTService(WebsocketSTTService):
     """Smallest AI real-time speech-to-text service using the Pulse WebSocket API.
 
     Streams audio continuously over a WebSocket connection and receives
@@ -285,9 +59,9 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
 
     Example::
 
-        stt = SmallestRealtimeSTTService(
+        stt = SmallestSTTService(
             api_key="your-api-key",
-            params=SmallestRealtimeSTTService.InputParams(
+            params=SmallestSTTService.InputParams(
                 language="en",
                 word_timestamps=True,
             ),
@@ -295,7 +69,7 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
     """
 
     class InputParams(BaseModel):
-        """Configuration parameters for Smallest Realtime STT service.
+        """Configuration parameters for Smallest STT service.
 
         Parameters:
             language: Language code for transcription. Use "multi" for auto-detection.
@@ -330,7 +104,7 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
         ttfs_p99_latency: Optional[float] = SMALLEST_TTFS_P99,
         **kwargs,
     ):
-        """Initialize the Smallest AI Realtime STT service.
+        """Initialize the Smallest AI STT service.
 
         Args:
             api_key: Smallest AI API key for authentication.
@@ -340,14 +114,14 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
-        self._rt_params = params or SmallestRealtimeSTTService.InputParams()
+        self._stt_params = params or SmallestSTTService.InputParams()
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=10,
             keepalive_interval=5,
-            settings=STTSettings(model="pulse", language=self._rt_params.language),
+            settings=STTSettings(model="pulse", language=self._stt_params.language),
             **kwargs,
         )
 
@@ -407,7 +181,7 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
             try:
                 await self._websocket.send(audio)
             except Exception as e:
-                yield ErrorFrame(error=f"Smallest Realtime STT error: {e}")
+                yield ErrorFrame(error=f"Smallest STT error: {e}")
 
         yield None
 
@@ -439,19 +213,19 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
-            logger.debug("Connecting to Smallest Realtime STT")
+            logger.debug("Connecting to Smallest STT")
 
             query_params = {
-                "language": self._rt_params.language,
-                "encoding": self._rt_params.encoding,
+                "language": self._stt_params.language,
+                "encoding": self._stt_params.encoding,
                 "sample_rate": str(self.sample_rate),
-                "word_timestamps": str(self._rt_params.word_timestamps).lower(),
-                "full_transcript": str(self._rt_params.full_transcript).lower(),
-                "sentence_timestamps": str(self._rt_params.sentence_timestamps).lower(),
-                "redact_pii": str(self._rt_params.redact_pii).lower(),
-                "redact_pci": str(self._rt_params.redact_pci).lower(),
-                "numerals": self._rt_params.numerals,
-                "diarize": str(self._rt_params.diarize).lower(),
+                "word_timestamps": str(self._stt_params.word_timestamps).lower(),
+                "full_transcript": str(self._stt_params.full_transcript).lower(),
+                "sentence_timestamps": str(self._stt_params.sentence_timestamps).lower(),
+                "redact_pii": str(self._stt_params.redact_pii).lower(),
+                "redact_pci": str(self._stt_params.redact_pci).lower(),
+                "numerals": self._stt_params.numerals,
+                "diarize": str(self._stt_params.diarize).lower(),
             }
 
             ws_url = f"{self._base_url}/waves/v1/pulse/get_text?{urlencode(query_params)}"
@@ -461,11 +235,9 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
                 additional_headers={"Authorization": f"Bearer {self._api_key}"},
             )
             await self._call_event_handler("on_connected")
-            logger.debug("Connected to Smallest Realtime STT")
+            logger.debug("Connected to Smallest STT")
         except Exception as e:
-            await self.push_error(
-                error_msg=f"Smallest Realtime STT connection error: {e}", exception=e
-            )
+            await self.push_error(error_msg=f"Smallest STT connection error: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -473,7 +245,7 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
         """Close the WebSocket connection."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
-                logger.debug("Disconnecting from Smallest Realtime STT")
+                logger.debug("Disconnecting from Smallest STT")
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
