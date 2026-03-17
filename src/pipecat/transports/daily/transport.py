@@ -22,6 +22,7 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     BotConnectedFrame,
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputDTMFFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
@@ -394,6 +396,7 @@ class DailyCallbacks(BaseModel):
         on_dialout_stopped: Called when dial-out is stopped.
         on_dialout_error: Called when dial-out encounters an error.
         on_dialout_warning: Called when dial-out has a warning.
+        on_dtmf_event: Called when a DTMF tone happens.
         on_participant_joined: Called when a participant joins.
         on_participant_left: Called when a participant leaves.
         on_participant_updated: Called when participant info is updated.
@@ -424,6 +427,7 @@ class DailyCallbacks(BaseModel):
     on_dialout_stopped: Callable[[Any], Awaitable[None]]
     on_dialout_error: Callable[[Any], Awaitable[None]]
     on_dialout_warning: Callable[[Any], Awaitable[None]]
+    on_dtmf_event: Callable[[Any], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
@@ -1560,6 +1564,14 @@ class DailyTransportClient(EventHandler):
         """
         self._call_event_callback(self._callbacks.on_dialout_warning, data)
 
+    def on_dtmf_event(self, data: Any):
+        """Handle incoming DTMF events.
+
+        Args:
+            data: DTMF data.
+        """
+        self._call_event_callback(self._callbacks.on_dtmf_event, data)
+
     def on_participant_joined(self, participant):
         """Handle participant joined events.
 
@@ -2313,6 +2325,7 @@ class DailyTransport(BaseTransport):
             on_dialout_stopped=self._on_dialout_stopped,
             on_dialout_error=self._on_dialout_error,
             on_dialout_warning=self._on_dialout_warning,
+            on_dtmf_event=self._on_dtmf_event,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
@@ -2354,6 +2367,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_dialout_stopped")
         self._register_event_handler("on_dialout_error")
         self._register_event_handler("on_dialout_warning")
+        self._register_event_handler("on_dtmf_event")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
@@ -2863,6 +2877,15 @@ class DailyTransport(BaseTransport):
         """Handle dial-out warning events."""
         logger.warning(f"{self} dial-out warning: {data}")
         await self._call_event_handler("on_dialout_warning", data)
+
+    async def _on_dtmf_event(self, data):
+        """Handle incoming DTMF events."""
+        logger.debug(f"{self} DTMF event: {data}")
+        await self._call_event_handler("on_dtmf_event", data)
+
+        if self._input:
+            frame = InputDTMFFrame(button=KeypadEntry(data["tone"]))
+            await self._input.push_frame(frame)
 
     async def _on_participant_joined(self, participant):
         """Handle participant joined events."""
