@@ -64,6 +64,9 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = False
         self._transcript_finalized = False
         self._vad_stopped_time = None
+        if self._timeout_task:
+            await self.task_manager.cancel_task(self._timeout_task)
+            self._timeout_task = None
 
     async def setup(self, task_manager: BaseTaskManager):
         """Initialize the strategy with the given task manager.
