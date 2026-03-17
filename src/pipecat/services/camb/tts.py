@@ -260,9 +260,7 @@ class CambTTSService(TTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = (
-                        self.language_to_service_language(params.language) or "en-us"
-                    )
+                    default_settings.language = params.language
                 if params.user_instructions is not None:
                     default_settings.user_instructions = params.user_instructions
 

@@ -653,7 +653,7 @@ class GoogleHttpTTSService(TTSService):
                 if params.emphasis is not None:
                     default_settings.emphasis = params.emphasis
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.gender is not None:
                     default_settings.gender = params.gender
                 if params.google_style is not None:
@@ -1090,7 +1090,7 @@ class GoogleTTSService(GoogleBaseTTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.speaking_rate is not None:
                     default_settings.speaking_rate = params.speaking_rate
 
@@ -1346,7 +1346,7 @@ class GeminiTTSService(GoogleBaseTTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.prompt is not None:
                     default_settings.prompt = params.prompt
                 if params.multi_speaker is not None:

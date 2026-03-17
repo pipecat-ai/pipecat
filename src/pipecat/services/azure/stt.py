@@ -106,13 +106,13 @@ class AzureSTTService(STTService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model=None,
-            language=language_to_azure_language(Language.EN_US),
+            language=Language.EN_US,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if language is not None and language != Language.EN_US:
             self._warn_init_param_moved_to_settings("language", "language")
-            default_settings.language = language_to_azure_language(language)
+            default_settings.language = language
 
         # 3. (No step 3, as there's no params object to apply)
 

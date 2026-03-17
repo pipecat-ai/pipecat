@@ -153,7 +153,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         default_settings = self.Settings(
             model=None,
             voice=None,
-            language=self.language_to_service_language(Language.EN),
+            language=Language.EN,
             speed=1.0,
         )
 
@@ -167,7 +167,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.speed is not None:
                     default_settings.speed = params.speed
 
@@ -487,7 +487,7 @@ class NeuphonicHttpTTSService(TTSService):
         default_settings = self.Settings(
             model=None,
             voice=None,
-            language=self.language_to_service_language(Language.EN),
+            language=Language.EN,
             speed=1.0,
         )
 
@@ -501,7 +501,7 @@ class NeuphonicHttpTTSService(TTSService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.speed is not None:
                     default_settings.speed = params.speed
 

@@ -100,13 +100,13 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model=None,
-            language=self.language_to_service_language(Language.EN),
+            language=Language.EN,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if language is not None:
             self._warn_init_param_moved_to_settings("language", "language")
-            default_settings.language = self.language_to_service_language(language)
+            default_settings.language = language
 
         # 3. (No step 3, as there's no params object to apply)
 

@@ -272,7 +272,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="scribe_v2",
-            language=language_to_elevenlabs_language(Language.EN),
+            language=Language.EN,
             tag_audio_events=None,
         )
 
@@ -286,7 +286,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = language_to_elevenlabs_language(params.language)
+                    default_settings.language = params.language
                 default_settings.tag_audio_events = params.tag_audio_events
 
         # 4. Apply settings delta (canonical API, always wins)
