@@ -4,10 +4,4 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import sys
-
-from pipecat.services import DeprecatedModuleProxy
-
-from .stt import *
-
-sys.modules[__name__] = DeprecatedModuleProxy(globals(), "ultravox", "ultravox.stt")
+from .llm import *  # noqa: F401,F403
