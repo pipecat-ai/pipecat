@@ -84,6 +84,7 @@ async def configure(
     sip_caller_phone: Optional[str] = None,
     sip_enable_video: bool = False,
     sip_num_endpoints: int = 1,
+    enable_dialout: bool = False,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
     sip_provider: Optional[str] = None,
     room_geo: Optional[str] = None,
@@ -105,6 +106,8 @@ async def configure(
             When provided, enables SIP functionality and returns SipRoomConfig.
         sip_enable_video: Whether video is enabled for SIP.
         sip_num_endpoints: Number of allowed SIP endpoints.
+        enable_dialout: Whether to enable outbound dialing (PSTN or SIP) on the room.
+            Requires dial-out entitlement on your Daily account.
         sip_codecs: Codecs to support for audio and video. If None, uses Daily defaults.
             Example: {"audio": ["OPUS"], "video": ["H264"]}
         sip_provider: SIP provider name (e.g., "daily"). Only used when
@@ -159,6 +162,7 @@ async def configure(
                 sip_caller_phone is not None,
                 sip_enable_video is not False,
                 sip_num_endpoints != 1,
+                enable_dialout is not False,
                 sip_codecs is not None,
                 sip_provider is not None,
                 room_geo is not None,
@@ -232,10 +236,7 @@ async def configure(
                 provider=sip_provider,
             )
             room_properties.sip = sip_params
-            # Explicitly disable dialout to prevent room creation failures on
-            # accounts where dialout defaults to enabled but the plan lacks the
-            # required dialout entitlement.
-            room_properties.enable_dialout = False
+            room_properties.enable_dialout = enable_dialout
             room_properties.start_video_off = not sip_enable_video  # Voice-only by default
 
     # Create room parameters
