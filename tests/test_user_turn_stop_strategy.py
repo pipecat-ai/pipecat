@@ -493,6 +493,50 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         # Finalized transcript received after timeout, triggers immediately
         self.assertTrue(should_start)
 
+    async def test_reset_clears_stale_text_no_premature_stop(self):
+        """Test that reset() clears stale text and cancels timeout, preventing premature stop.
+
+        Reproduces the bug from issue #4053: after turn 1 completes and
+        reset() is called, a late transcription sets _text. If reset() is
+        called again at turn 2 start, the stale _text should be cleared
+        so no premature stop occurs on VAD stop.
+        """
+        strategy = await self._create_strategy()
+
+        stop_count = 0
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal stop_count
+            stop_count += 1
+
+        # === Turn 1: S-T-E ===
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertEqual(stop_count, 1)
+
+        # Reset after turn 1 (as controller would do at turn stop)
+        await strategy.reset()
+
+        # === Late transcription arrives between turns ===
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+
+        # Reset at turn 2 start (the fix: controller now resets stop strategies at turn start)
+        await strategy.reset()
+
+        # === Turn 2: S-T-E (transcription arrives during turn) ===
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
+        )
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        # Wait for timeout — should get turn 2 stop with the real transcription
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertEqual(stop_count, 2)
+
 
 class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def test_external_strategy(self):
