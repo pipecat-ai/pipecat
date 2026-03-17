@@ -6,8 +6,13 @@
 
 """User turn start strategy based on VAD events."""
 
+from typing import Optional
+
 from pipecat.frames.frames import Frame, VADUserStartedSpeakingFrame
-from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.turns.user_start.base_user_turn_start_strategy import (
+    BaseUserTurnStartStrategy,
+    ProcessFrameResult,
+)
 
 
 class VADUserTurnStartStrategy(BaseUserTurnStartStrategy):
@@ -18,13 +23,17 @@ class VADUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
     """
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> Optional[ProcessFrameResult]:
         """Process an incoming frame to detect user turn start.
 
         Args:
             frame: The frame to be analyzed.
-        """
-        await super().process_frame(frame)
 
+        Returns:
+            TRIGGERED if the user started speaking, CONTINUE otherwise.
+        """
         if isinstance(frame, VADUserStartedSpeakingFrame):
             await self.trigger_user_turn_started()
+            return ProcessFrameResult.TRIGGERED
+
+        return ProcessFrameResult.CONTINUE

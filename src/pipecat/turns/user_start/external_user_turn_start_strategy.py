@@ -6,8 +6,13 @@
 
 """User turn start strategy triggered by externally emitted frames."""
 
+from typing import Optional
+
 from pipecat.frames.frames import Frame, UserStartedSpeakingFrame
-from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.turns.user_start.base_user_turn_start_strategy import (
+    BaseUserTurnStartStrategy,
+    ProcessFrameResult,
+)
 
 
 class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
@@ -27,13 +32,17 @@ class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         super().__init__(enable_interruptions=False, enable_user_speaking_frames=False, **kwargs)
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> Optional[ProcessFrameResult]:
         """Process an incoming frame to detect user turn start.
 
         Args:
             frame: The frame to be analyzed.
-        """
-        await super().process_frame(frame)
 
+        Returns:
+            TRIGGERED if a user started speaking frame was received, CONTINUE otherwise.
+        """
         if isinstance(frame, UserStartedSpeakingFrame):
             await self.trigger_user_turn_started()
+            return ProcessFrameResult.TRIGGERED
+
+        return ProcessFrameResult.CONTINUE

@@ -6,6 +6,7 @@
 
 """Base turn start strategy for determining when the user starts speaking."""
 
+import enum
 from dataclasses import dataclass
 from typing import Optional, Type
 
@@ -13,6 +14,20 @@ from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+
+
+class ProcessFrameResult(enum.Enum):
+    """Result of processing a frame in a user turn start strategy.
+
+    Attributes:
+        TRIGGERED: The strategy was satisfied and the loop should stop.
+        CONTINUE: The strategy was not satisfied, continue to the next strategy.
+        BREAK: The strategy was not satisfied but the loop should stop.
+    """
+
+    TRIGGERED = "triggered"
+    CONTINUE = "continue"
+    BREAK = "break"
 
 
 @dataclass
@@ -100,7 +115,7 @@ class BaseUserTurnStartStrategy(BaseObject):
         """Reset the strategy to its initial state."""
         pass
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> Optional[ProcessFrameResult]:
         """Process an incoming frame.
 
         Subclasses should override this to implement logic that decides whether
@@ -108,8 +123,13 @@ class BaseUserTurnStartStrategy(BaseObject):
 
         Args:
             frame: The frame to be processed.
+
+        Returns:
+            A ProcessFrameResult indicating the outcome. The base implementation
+            returns CONTINUE. Custom subclasses that return None are treated as
+            CONTINUE for backward compatibility.
         """
-        pass
+        return ProcessFrameResult.CONTINUE
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Emit on_push_frame to push a frame using the user aggreagtor.
