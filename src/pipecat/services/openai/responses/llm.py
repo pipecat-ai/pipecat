@@ -84,6 +84,7 @@ class OpenAIResponsesLLMService(LLMService):
         organization=None,
         project=None,
         default_headers: Optional[Mapping[str, str]] = None,
+        service_tier: Optional[str] = None,
         settings: Optional[Settings] = None,
         **kwargs,
     ):
@@ -96,6 +97,7 @@ class OpenAIResponsesLLMService(LLMService):
             organization: OpenAI organization ID.
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
+            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             settings: Runtime-updatable settings. When provided alongside
                 other parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent LLMService.
@@ -127,6 +129,7 @@ class OpenAIResponsesLLMService(LLMService):
             **kwargs,
         )
 
+        self._service_tier = service_tier
         self._client = self._create_client(
             api_key=api_key,
             base_url=base_url,
@@ -341,6 +344,9 @@ class OpenAIResponsesLLMService(LLMService):
 
         if isinstance(self._settings.max_completion_tokens, int):
             params["max_output_tokens"] = self._settings.max_completion_tokens
+
+        if self._service_tier is not None:
+            params["service_tier"] = self._service_tier
 
         # Tools
         tools = invocation_params.get("tools")
