@@ -45,10 +45,37 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Gradium, you need to `pip install "pipecat-ai[gradium]"`.')
     raise Exception(f"Missing module: {e}")
 
-SAMPLE_RATE = 24000
 # Seconds to wait after a "flushed" message for trailing text tokens to arrive
 # before finalizing the transcription.
 TRANSCRIPT_AGGREGATION_DELAY = 0.1
+
+
+def _input_format_from_encoding(encoding: str, sample_rate: int) -> str:
+    """Build Gradium input_format from encoding type and sample rate.
+
+    For PCM encoding, appends the sample rate (e.g., "pcm_16000").
+    For other encodings (wav, opus), returns the encoding as-is.
+
+    Args:
+        encoding: Base encoding type ("pcm", "wav", or "opus").
+        sample_rate: Audio sample rate in Hz.
+
+    Returns:
+        The full input_format string for the Gradium API.
+    """
+    if encoding == "pcm":
+        match sample_rate:
+            case 8000:
+                return "pcm_8000"
+            case 16000:
+                return "pcm_16000"
+            case 24000:
+                return "pcm_24000"
+        logger.warning(
+            f"GradiumSTTService: unsupported sample rate {sample_rate} for PCM encoding, using pcm_16000"
+        )
+        return "pcm_16000"
+    return encoding
 
 
 def language_to_gradium_language(language: Language) -> Optional[str]:
@@ -120,7 +147,8 @@ class GradiumSTTService(WebsocketSTTService):
         *,
         api_key: str,
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
-        encoding: str = "pcm_16000",
+        encoding: str = "pcm",
+        sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         json_config: Optional[str] = None,
         settings: Optional[Settings] = None,
@@ -132,8 +160,12 @@ class GradiumSTTService(WebsocketSTTService):
         Args:
             api_key: Gradium API key for authentication.
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
-            encoding: Audio input format. One of "pcm", "pcm_16000", "wav", or "opus". Defaults to
-                "pcm_16000".
+            encoding: Base audio encoding type. One of "pcm", "wav", or "opus".
+                For PCM, the sample rate is appended automatically from the
+                pipeline's audio_in_sample_rate (e.g., "pcm" becomes "pcm_16000").
+                Defaults to "pcm".
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline
+                sample rate.
             params: Configuration parameters for language and delay settings.
 
                 .. deprecated:: 0.0.105
@@ -181,7 +213,7 @@ class GradiumSTTService(WebsocketSTTService):
             default_settings.apply_update(settings)
 
         super().__init__(
-            sample_rate=SAMPLE_RATE,
+            sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             settings=default_settings,
             **kwargs,
@@ -194,6 +226,8 @@ class GradiumSTTService(WebsocketSTTService):
         self._json_config = json_config
 
         self._receive_task = None
+
+        self._input_format = ""
 
         self._audio_buffer = bytearray()
         self._chunk_size_ms = 80
@@ -240,6 +274,7 @@ class GradiumSTTService(WebsocketSTTService):
             frame: Start frame to begin processing.
         """
         await super().start(frame)
+        self._input_format = _input_format_from_encoding(self._encoding, self.sample_rate)
         self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
         await self._connect()
 
@@ -351,7 +386,7 @@ class GradiumSTTService(WebsocketSTTService):
             setup_msg = {
                 "type": "setup",
                 "model_name": self._settings.model,
-                "input_format": self._encoding,
+                "input_format": self._input_format,
             }
             # Build json_config: start with deprecated json_config, then override with params
             json_config = {}
