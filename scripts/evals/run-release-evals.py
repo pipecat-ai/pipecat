@@ -147,6 +147,7 @@ TESTS_07 = [
     ("07zi-interruptible-piper.py", EVAL_SIMPLE_MATH),
     ("07zj-interruptible-kokoro.py", EVAL_SIMPLE_MATH),
     ("07zk-interruptible-resembleai.py", EVAL_SIMPLE_MATH),
+    ("07-interruptible-openai-responses.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
 ]
@@ -184,6 +185,8 @@ TESTS_14 = [
     ("14v-function-calling-openai.py", EVAL_WEATHER),
     ("14w-function-calling-mistral.py", EVAL_WEATHER),
     ("14x-function-calling-openpipe.py", EVAL_WEATHER),
+    ("14-function-calling-openai-responses.py", EVAL_WEATHER),
+    ("14-function-calling-openai-responses.py", EVAL_WEATHER_AND_RESTAURANT),
     # Video
     ("14d-function-calling-anthropic-video.py", EVAL_VISION_CAMERA),
     ("14d-function-calling-aws-video.py", EVAL_VISION_CAMERA),
