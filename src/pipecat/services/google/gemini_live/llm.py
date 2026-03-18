@@ -1507,7 +1507,10 @@ class GeminiLiveLLMService(LLMService):
         await self.start_ttfb_metrics()
 
         try:
-            await self._session.send_client_content(turns=messages, turn_complete=False)
+            await self._session.send_client_content(
+                turns=messages, turn_complete=self._inference_on_context_initialization
+            )
+            # Gemini 3.1 wants turn_complete=True, but also won't run inference without a realtime input
             if self._inference_on_context_initialization:
                 await self._session.send_realtime_input(text=" ")
         except Exception as e:
