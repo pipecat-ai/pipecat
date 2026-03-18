@@ -264,9 +264,9 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_single_activation_resets_to_listening(self):
-        """In single activation mode, reset() returns to LISTENING."""
-        strategy = self._create_strategy(single_activation=True)
+    async def test_single_activation_stays_inactive_after_reset(self):
+        """In single activation mode, reset() keeps INACTIVE so the current turn can finish."""
+        strategy = self._create_strategy(single_activation=True, timeout=0.5)
         await self._setup_strategy(strategy)
 
         # Trigger wake phrase.
@@ -278,6 +278,33 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         # Simulate turn start (controller calls reset on all start strategies).
         await strategy.reset()
+        # State remains INACTIVE so frames continue to flow.
+        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+
+        # Subsequent frames should pass through (CONTINUE).
+        result = await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+
+        result = await strategy.process_frame(
+            TranscriptionFrame(text="what is the weather", user_id="user1", timestamp="")
+        )
+        self.assertEqual(result, ProcessFrameResult.CONTINUE)
+
+        await strategy.cleanup()
+
+    async def test_single_activation_timeout_returns_to_listening(self):
+        """In single activation mode, the keepalive timeout returns to LISTENING."""
+        strategy = self._create_strategy(single_activation=True, timeout=0.1)
+        await self._setup_strategy(strategy)
+
+        # Trigger wake phrase.
+        await strategy.process_frame(
+            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
+        )
+        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+
+        # Wait for keepalive timeout to expire.
+        await asyncio.sleep(0.3)
         self.assertEqual(strategy.state, _WakeState.LISTENING)
 
         # Frames should now be blocked again.
@@ -286,17 +313,17 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_single_activation_requires_wake_phrase_each_turn(self):
-        """Single activation mode requires wake phrase for each new turn."""
-        strategy = self._create_strategy(single_activation=True)
+    async def test_single_activation_requires_wake_phrase_after_timeout(self):
+        """Single activation mode requires wake phrase again after keepalive timeout."""
+        strategy = self._create_strategy(single_activation=True, timeout=0.1)
         await self._setup_strategy(strategy)
 
-        # First turn: wake phrase -> INACTIVE -> reset -> LISTENING.
+        # First turn: wake phrase -> INACTIVE -> timeout -> LISTENING.
         await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
-        await strategy.reset()
+        await asyncio.sleep(0.3)
         self.assertEqual(strategy.state, _WakeState.LISTENING)
 
         # Without wake phrase, frames are blocked.
@@ -310,23 +337,6 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        await strategy.cleanup()
-
-    async def test_single_activation_no_timeout_task(self):
-        """Single activation mode does not start a timeout task."""
-        strategy = self._create_strategy(single_activation=True, timeout=0.1)
-        await self._setup_strategy(strategy)
-
-        # Trigger wake phrase.
-        await strategy.process_frame(
-            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
-        )
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        # Wait longer than timeout -- should NOT return to LISTENING.
-        await asyncio.sleep(0.3)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
