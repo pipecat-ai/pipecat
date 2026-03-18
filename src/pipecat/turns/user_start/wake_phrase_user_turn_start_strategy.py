@@ -28,8 +28,8 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 class _WakeState(enum.Enum):
     """Internal state for wake phrase detection."""
 
-    LISTENING = "listening"
-    INACTIVE = "inactive"
+    IDLE = "idle"
+    AWAKE = "awake"
 
 
 class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
@@ -72,13 +72,13 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
     Args:
         phrases: List of wake phrases to detect.
-        timeout: Inactivity timeout in seconds before returning to LISTENING.
+        timeout: Inactivity timeout in seconds before returning to IDLE.
             In timeout mode, the timer resets on activity (user, bot speech).
             In single activation mode, acts as a keepalive window — the strategy
-            stays INACTIVE for this duration after wake phrase detection, allowing
-            the current turn to complete before returning to LISTENING.
+            stays AWAKE for this duration after wake phrase detection, allowing
+            the current turn to complete before returning to IDLE.
         single_activation: If True, the wake phrase is required before every
-            turn. The strategy returns to LISTENING after each turn completes.
+            turn. The strategy returns to IDLE after each turn completes.
         **kwargs: Additional keyword arguments passed to parent.
     """
 
@@ -94,11 +94,11 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         Args:
             phrases: List of wake phrases to detect.
-            timeout: Inactivity timeout in seconds before returning to LISTENING.
+            timeout: Inactivity timeout in seconds before returning to IDLE.
                 In timeout mode, the timer resets on activity. In single activation
                 mode, acts as a keepalive window after wake phrase detection.
             single_activation: If True, the wake phrase is required before every
-                turn. The strategy returns to LISTENING after each turn completes.
+                turn. The strategy returns to IDLE after each turn completes.
             **kwargs: Additional keyword arguments passed to parent.
         """
         super().__init__(**kwargs)
@@ -114,7 +114,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             )
             self._patterns.append(pattern)
 
-        self._state = _WakeState.LISTENING
+        self._state = _WakeState.IDLE
         self._accumulated_text = ""
 
         self._timeout_event = asyncio.Event()
@@ -154,10 +154,10 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         In timeout mode, preserves state and refreshes timeout since reset
         means a turn started (activity). In single activation mode, does
         nothing — the keepalive timeout (started when the wake phrase was
-        detected) handles the transition back to LISTENING.
+        detected) handles the transition back to IDLE.
         """
         await super().reset()
-        if self._state == _WakeState.INACTIVE:
+        if self._state == _WakeState.AWAKE:
             if not self._single_activation:
                 self._refresh_timeout()
 
@@ -168,19 +168,19 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The frame to be processed.
 
         Returns:
-            STOP when the wake phrase is detected or when in LISTENING state
-            (blocks subsequent strategies), CONTINUE when in INACTIVE state
+            STOP when the wake phrase is detected or when in IDLE state
+            (blocks subsequent strategies), CONTINUE when in AWAKE state
             (allows subsequent strategies to proceed).
         """
         await super().process_frame(frame)
 
-        if self._state == _WakeState.LISTENING:
-            return await self._process_listening(frame)
+        if self._state == _WakeState.IDLE:
+            return await self._process_idle(frame)
         else:
-            return await self._process_inactive(frame)
+            return await self._process_awake(frame)
 
-    async def _process_listening(self, frame: Frame) -> ProcessFrameResult:
-        """Process a frame while in LISTENING state.
+    async def _process_idle(self, frame: Frame) -> ProcessFrameResult:
+        """Process a frame while in IDLE state.
 
         Only final ``TranscriptionFrame`` instances are checked for wake phrase
         matches. When a match is found, a user turn start is triggered.
@@ -196,8 +196,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         return ProcessFrameResult.STOP
 
-    async def _process_inactive(self, frame: Frame) -> ProcessFrameResult:
-        """Process a frame while in INACTIVE state.
+    async def _process_awake(self, frame: Frame) -> ProcessFrameResult:
+        """Process a frame while in AWAKE state.
 
         Refreshes the timeout on activity frames (timeout mode only). Returns
         CONTINUE so subsequent strategies can process the frame.
@@ -238,14 +238,14 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             if pattern.search(self._accumulated_text):
                 phrase = self._phrases[i]
                 logger.debug(f"{self} wake phrase detected: {phrase!r}")
-                self._transition_to_inactive(phrase)
+                self._transition_to_awake(phrase)
                 return True
 
         return False
 
-    def _transition_to_inactive(self, phrase: str):
-        """Transition from LISTENING to INACTIVE state."""
-        self._state = _WakeState.INACTIVE
+    def _transition_to_awake(self, phrase: str):
+        """Transition from IDLE to AWAKE state."""
+        self._state = _WakeState.AWAKE
         self._accumulated_text = ""
         self._refresh_timeout()
         self.task_manager.create_task(
@@ -253,10 +253,10 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             f"{self}::on_wake_phrase_detected",
         )
 
-    def _transition_to_listening(self):
-        """Transition from INACTIVE to LISTENING state."""
-        logger.debug(f"{self} wake phrase timeout, returning to LISTENING")
-        self._state = _WakeState.LISTENING
+    def _transition_to_idle(self):
+        """Transition from AWAKE to IDLE state."""
+        logger.debug(f"{self} wake phrase timeout, returning to IDLE")
+        self._state = _WakeState.IDLE
         self._accumulated_text = ""
         self.task_manager.create_task(
             self._call_event_handler("on_wake_phrase_timeout"),
@@ -277,5 +277,5 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 )
                 self._timeout_event.clear()
             except asyncio.TimeoutError:
-                if self._state == _WakeState.INACTIVE:
-                    self._transition_to_listening()
+                if self._state == _WakeState.AWAKE:
+                    self._transition_to_idle()

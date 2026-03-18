@@ -43,7 +43,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.cleanup()
 
@@ -56,7 +56,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             InterimTranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
+        self.assertEqual(strategy.state, _WakeState.IDLE)
 
         await strategy.cleanup()
 
@@ -68,7 +68,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="hello world", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
+        self.assertEqual(strategy.state, _WakeState.IDLE)
 
         await strategy.cleanup()
 
@@ -97,7 +97,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
+        self.assertEqual(strategy.state, _WakeState.IDLE)
 
         await strategy.cleanup()
 
@@ -109,7 +109,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         # Subsequent frames should return CONTINUE.
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
@@ -130,13 +130,13 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="hey", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
+        self.assertEqual(strategy.state, _WakeState.IDLE)
 
         result = await strategy.process_frame(
             TranscriptionFrame(text="pipecat", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.cleanup()
 
@@ -148,7 +148,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="ok computer", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.cleanup()
 
@@ -161,7 +161,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="Hey, Pipecat!", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.cleanup()
 
@@ -172,10 +172,10 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.reset()
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.cleanup()
 
@@ -187,12 +187,12 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         # Wait for timeout to expire.
         await asyncio.sleep(0.3)
 
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
+        self.assertEqual(strategy.state, _WakeState.IDLE)
 
         await strategy.cleanup()
 
@@ -204,21 +204,21 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         # Send activity before timeout.
         await asyncio.sleep(0.1)
         await strategy.process_frame(UserSpeakingFrame())
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         # Send more activity.
         await asyncio.sleep(0.1)
         await strategy.process_frame(BotSpeakingFrame())
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         # Wait for timeout to expire after last activity.
         await asyncio.sleep(0.3)
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
+        self.assertEqual(strategy.state, _WakeState.IDLE)
 
         await strategy.cleanup()
 
@@ -274,12 +274,12 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         # Simulate turn start (controller calls reset on all start strategies).
         await strategy.reset()
         # State remains INACTIVE so frames continue to flow.
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         # Subsequent frames should pass through (CONTINUE).
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
@@ -301,11 +301,11 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         # Wait for keepalive timeout to expire.
         await asyncio.sleep(0.3)
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
+        self.assertEqual(strategy.state, _WakeState.IDLE)
 
         # Frames should now be blocked again.
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
@@ -322,9 +322,9 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
         await asyncio.sleep(0.3)
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
+        self.assertEqual(strategy.state, _WakeState.IDLE)
 
         # Without wake phrase, frames are blocked.
         result = await strategy.process_frame(
@@ -337,7 +337,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.AWAKE)
 
         await strategy.cleanup()
 
