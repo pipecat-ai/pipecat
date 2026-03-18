@@ -1205,10 +1205,10 @@ class AWSNovaSonicLLMService(LLMService):
             if content.type == ContentType.TEXT:
                 if stop_reason != "INTERRUPTED":
                     if content.text_stage == TextStage.SPECULATIVE:
-                        await self._report_llm_text_generated(content.text_content)
+                        await self._report_llm_text(content.text_content)
             elif content.type == ContentType.AUDIO:
                 # Emit deferred TTSTextFrame after all audio chunks have been sent
-                await self._report_tts_text_spoken()
+                await self._report_tts_text()
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
@@ -1233,7 +1233,7 @@ class AWSNovaSonicLLMService(LLMService):
         # Report that equivalent of TTS (this is a speech-to-speech model) started
         await self.push_frame(TTSStartedFrame())
 
-    async def _report_llm_text_generated(self, text):
+    async def _report_llm_text(self, text):
         """Push speculative assistant text and defer TTSTextFrame.
 
         Speculative text arrives before each audio chunk, providing real-time
@@ -1254,7 +1254,7 @@ class AWSNovaSonicLLMService(LLMService):
 
         self._pending_speculative_text = text
 
-    async def _report_tts_text_spoken(self):
+    async def _report_tts_text(self):
         if self._pending_speculative_text:
             tts_text_frame = TTSTextFrame(
                 self._pending_speculative_text, aggregated_by=AggregationType.SENTENCE
