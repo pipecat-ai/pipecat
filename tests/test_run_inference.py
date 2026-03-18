@@ -801,6 +801,7 @@ async def test_openai_responses_run_inference_with_llm_context():
         call_kwargs = service._client.responses.create.call_args.kwargs
         assert call_kwargs["model"] == "gpt-4.1"
         assert call_kwargs["stream"] is False
+        assert call_kwargs["store"] is False
         assert call_kwargs["input"] == [{"role": "user", "content": "Hello, world!"}]
         assert call_kwargs["instructions"] == "You are a helpful assistant"
         assert call_kwargs["temperature"] == 0.7
