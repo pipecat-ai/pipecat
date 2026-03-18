@@ -117,7 +117,7 @@ class GradiumSTTService(WebsocketSTTService):
         *,
         api_key: str,
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
-        encoding: str = "pcm",
+        encoding: str = "pcm_16000",
         params: Optional[InputParams] = None,
         json_config: Optional[str] = None,
         settings: Optional[Settings] = None,
@@ -129,7 +129,8 @@ class GradiumSTTService(WebsocketSTTService):
         Args:
             api_key: Gradium API key for authentication.
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
-            encoding: Audio input format. One of "pcm", "wav", or "opus". Defaults to "pcm".
+            encoding: Audio input format. One of "pcm", "pcm_16000", "wav", or "opus". Defaults to
+                "pcm_16000".
             params: Configuration parameters for language and delay settings.
 
                 .. deprecated:: 0.0.105
