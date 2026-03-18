@@ -29,7 +29,6 @@ from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdap
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregationType,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -426,7 +425,6 @@ class AWSNovaSonicLLMService(LLMService):
         self._content_being_received: Optional[CurrentContent] = None
         self._assistant_is_responding = False
         self._ready_to_send_context = False
-        self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
         self._waiting_for_trigger_transcription = False
         self._disconnecting = False
@@ -505,11 +503,13 @@ class AWSNovaSonicLLMService(LLMService):
     async def reset_conversation(self):
         """Reset the conversation state while preserving context.
 
-        Handles bot stopped speaking event, disconnects from the service,
-        and reconnects with the preserved context.
+        Cleans up any in-progress assistant response, disconnects from the
+        service, and reconnects with the preserved context.
         """
         logger.debug("Resetting conversation")
-        await self._handle_bot_stopped_speaking()
+        if self._assistant_is_responding:
+            self._assistant_is_responding = False
+            await self._report_assistant_response_ended()
 
         # Grab context to carry through disconnect/reconnect
         context = self._context
@@ -540,8 +540,6 @@ class AWSNovaSonicLLMService(LLMService):
             await self._handle_context(context)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._handle_bot_stopped_speaking()
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption_frame()
 
@@ -568,18 +566,6 @@ class AWSNovaSonicLLMService(LLMService):
             return
 
         await self._send_user_audio_event(frame.audio)
-
-    async def _handle_bot_stopped_speaking(self):
-        # Protect against back-to-back BotStoppedSpeaking calls, which I've observed
-        if self._handling_bot_stopped_speaking:
-            return
-        self._handling_bot_stopped_speaking = True
-
-        if self._assistant_is_responding:
-            self._assistant_is_responding = False
-            await self._report_assistant_response_ended()
-
-        self._handling_bot_stopped_speaking = False
 
     async def _handle_interruption_frame(self):
         pass
@@ -743,7 +729,6 @@ class AWSNovaSonicLLMService(LLMService):
             self._content_being_received = None
             self._assistant_is_responding = False
             self._ready_to_send_context = False
-            self._handling_bot_stopped_speaking = False
             self._triggering_assistant_response = False
             self._waiting_for_trigger_transcription = False
             self._disconnecting = False
