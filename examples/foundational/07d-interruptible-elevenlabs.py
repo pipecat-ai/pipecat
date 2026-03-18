@@ -109,7 +109,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
         # Rapid consecutive assistant turns to try to force the ElevenLabs maximum context limit exceeded error.
-        #for idx in range(1, int(10) + 1):
+        # for idx in range(1, int(10) + 1):
         #    await task.queue_frames(
         #        [
         #            LLMFullResponseStartFrame(),
