@@ -51,7 +51,8 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_wake_phrase_in_interim_transcription(self):
+    async def test_interim_transcription_ignored(self):
+        """Interim transcriptions are never used for wake phrase matching."""
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)
 
@@ -59,11 +60,11 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             InterimTranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
+        self.assertEqual(strategy.state, _WakeState.LISTENING)
 
         await strategy.cleanup()
 
-    async def test_no_wake_phrase_returns_break(self):
+    async def test_no_wake_phrase_returns_stop(self):
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)
 
@@ -75,7 +76,18 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_vad_frame_returns_break_in_listening(self):
+    async def test_non_matching_text_cleared(self):
+        """Non-matching transcription text is cleared to prevent LLM context pollution."""
+        strategy = self._create_strategy()
+        await self._setup_strategy(strategy)
+
+        frame = TranscriptionFrame(text="hello world", user_id="user1", timestamp="")
+        await strategy.process_frame(frame)
+        self.assertEqual(frame.text, "")
+
+        await strategy.cleanup()
+
+    async def test_vad_frame_returns_stop_in_listening(self):
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)
 
@@ -118,25 +130,6 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         result = await strategy.process_frame(
             TranscriptionFrame(text="pipecat", user_id="user1", timestamp="")
-        )
-        self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        await strategy.cleanup()
-
-    async def test_use_interim_false_ignores_interim(self):
-        strategy = self._create_strategy(use_interim=False)
-        await self._setup_strategy(strategy)
-
-        result = await strategy.process_frame(
-            InterimTranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
-        )
-        self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
-
-        # Final transcription should still work.
-        result = await strategy.process_frame(
-            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)

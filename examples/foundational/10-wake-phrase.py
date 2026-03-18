@@ -87,7 +87,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     WakePhraseUserTurnStartStrategy(
                         phrases=["pipecat"],
                         # Timeout before wake phrase must be spoken again
-                        timeout=5.0,
+                        timeout=8.0,
                     ),
                     VADUserTurnStartStrategy(),
                     TranscriptionUserTurnStartStrategy(),

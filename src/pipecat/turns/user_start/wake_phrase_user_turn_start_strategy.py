@@ -16,7 +16,6 @@ from loguru import logger
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     Frame,
-    InterimTranscriptionFrame,
     TranscriptionFrame,
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -36,21 +35,14 @@ class _WakeState(enum.Enum):
 
 
 class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
-    """User turn start strategy that gates interaction behind wake phrase detection.
+    """User turn start strategy that requires a wake phrase before interaction.
 
-    When in LISTENING state, this strategy accumulates transcription text and
-    checks for a configured wake phrase. All frames return `ProcessFrameResult.BREAK
-    <` to prevent subsequent strategies from processing. Once the wake phrase is detected,
-    the strategy transitions to INACTIVE state and returns `ProcessFrameResult.TRIGGERED`,
-    allowing subsequent strategies to process frames normally (returning
-    `ProcessFrameResult.CONTINUE`).
+    Blocks subsequent strategies until a wake phrase is detected in a final
+    transcription. After detection, allows interaction for a configurable
+    timeout period before requiring the wake phrase again. Use
+    ``single_activation=True`` to require the wake phrase before every turn.
 
-    After a configurable timeout with no activity, the strategy returns to
-    LISTENING state and the wake phrase must be spoken again. Alternatively,
-    ``single_activation=True`` requires the wake phrase before every turn.
-
-    This strategy should be placed first in the start strategies list so it can
-    gate the other strategies.
+    This strategy should be placed first in the start strategies list.
 
     Event handlers available:
 
@@ -86,7 +78,6 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             Ignored when ``single_activation=True``.
         single_activation: If True, the wake phrase is required before every
             turn. The strategy returns to LISTENING after each turn completes.
-        use_interim: Whether interim transcriptions trigger wake detection.
         **kwargs: Additional keyword arguments passed to parent.
     """
 
@@ -96,7 +87,6 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         phrases: List[str],
         timeout: float = 10.0,
         single_activation: bool = False,
-        use_interim: bool = True,
         **kwargs,
     ):
         """Initialize the wake phrase user turn start strategy.
@@ -107,14 +97,12 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 Ignored when ``single_activation=True``.
             single_activation: If True, the wake phrase is required before every
                 turn. The strategy returns to LISTENING after each turn completes.
-            use_interim: Whether interim transcriptions trigger wake detection.
             **kwargs: Additional keyword arguments passed to parent.
         """
         super().__init__(**kwargs)
         self._phrases = phrases
         self._timeout = timeout
         self._single_activation = single_activation
-        self._use_interim = use_interim
 
         self._patterns: List[re.Pattern] = []
         for phrase in phrases:
@@ -194,20 +182,17 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     async def _process_listening(self, frame: Frame) -> ProcessFrameResult:
         """Process a frame while in LISTENING state.
 
-        Checks transcription frames for wake phrase matches. When a match is
-        found, triggers a user turn start and returns STOP. Transcription frames
-        that don't match have their text cleared so that pre-wake-phrase speech
-        is not added to the LLM context. All frames return STOP to block
-        subsequent strategies.
+        Only final ``TranscriptionFrame`` instances are checked for wake phrase
+        matches. When a match is found, a user turn start is triggered.
+        Transcription frames that don't match have their text cleared so that
+        pre-wake-phrase speech is not added to the LLM context. All frames
+        return STOP to block subsequent strategies.
         """
         if isinstance(frame, TranscriptionFrame):
             if self._check_wake_phrase(frame.text):
                 await self.trigger_user_turn_started()
                 return ProcessFrameResult.STOP
-        elif isinstance(frame, InterimTranscriptionFrame):
-            if self._use_interim and self._check_wake_phrase(frame.text):
-                await self.trigger_user_turn_started()
-                return ProcessFrameResult.STOP
+            frame.text = ""
 
         return ProcessFrameResult.STOP
 
@@ -220,7 +205,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         if not self._single_activation:
             if isinstance(frame, (UserSpeakingFrame, BotSpeakingFrame)):
                 self._refresh_timeout()
-            elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
+            elif isinstance(frame, TranscriptionFrame):
                 self._refresh_timeout()
             elif isinstance(frame, VADUserStartedSpeakingFrame):
                 self._refresh_timeout()

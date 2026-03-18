@@ -126,11 +126,10 @@ class BaseUserTurnStartStrategy(BaseObject):
             frame: The frame to be processed.
 
         Returns:
-            A ProcessFrameResult indicating the outcome. The base implementation
-            returns CONTINUE. Custom subclasses that return None are treated as
-            CONTINUE for backward compatibility.
+            A ProcessFrameResult indicating the outcome. Subclasses that return
+            None are treated as CONTINUE for backward compatibility.
         """
-        return ProcessFrameResult.CONTINUE
+        pass
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Emit on_push_frame to push a frame using the user aggreagtor.
