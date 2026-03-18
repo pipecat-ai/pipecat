@@ -30,10 +30,10 @@ class VADUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The frame to be analyzed.
 
         Returns:
-            TRIGGERED if the user started speaking, CONTINUE otherwise.
+            STOP if the user started speaking, CONTINUE otherwise.
         """
         if isinstance(frame, VADUserStartedSpeakingFrame):
             await self.trigger_user_turn_started()
-            return ProcessFrameResult.TRIGGERED
+            return ProcessFrameResult.STOP
 
         return ProcessFrameResult.CONTINUE

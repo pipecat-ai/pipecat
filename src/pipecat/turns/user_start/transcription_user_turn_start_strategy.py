@@ -37,13 +37,13 @@ class TranscriptionUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The frame to be processed.
 
         Returns:
-            TRIGGERED if a transcription was received, CONTINUE otherwise.
+            STOP if a transcription was received, CONTINUE otherwise.
         """
         if isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
             await self.trigger_user_turn_started()
-            return ProcessFrameResult.TRIGGERED
+            return ProcessFrameResult.STOP
         elif isinstance(frame, TranscriptionFrame):
             await self.trigger_user_turn_started()
-            return ProcessFrameResult.TRIGGERED
+            return ProcessFrameResult.STOP
 
         return ProcessFrameResult.CONTINUE

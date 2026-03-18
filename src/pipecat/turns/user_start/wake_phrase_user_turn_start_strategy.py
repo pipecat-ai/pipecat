@@ -180,8 +180,8 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The frame to be processed.
 
         Returns:
-            TRIGGERED when the wake phrase is detected, BREAK when in LISTENING
-            state (blocks subsequent strategies), CONTINUE when in INACTIVE state
+            STOP when the wake phrase is detected or when in LISTENING state
+            (blocks subsequent strategies), CONTINUE when in INACTIVE state
             (allows subsequent strategies to proceed).
         """
         await super().process_frame(frame)
@@ -194,19 +194,22 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     async def _process_listening(self, frame: Frame) -> ProcessFrameResult:
         """Process a frame while in LISTENING state.
 
-        Checks transcription frames for wake phrase matches. All frames return
-        BREAK to block subsequent strategies.
+        Checks transcription frames for wake phrase matches. When a match is
+        found, triggers a user turn start and returns STOP. Transcription frames
+        that don't match have their text cleared so that pre-wake-phrase speech
+        is not added to the LLM context. All frames return STOP to block
+        subsequent strategies.
         """
         if isinstance(frame, TranscriptionFrame):
-            result = self._check_wake_phrase(frame.text)
-            if result:
-                return result
-        elif isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
-            result = self._check_wake_phrase(frame.text)
-            if result:
-                return result
+            if self._check_wake_phrase(frame.text):
+                await self.trigger_user_turn_started()
+                return ProcessFrameResult.STOP
+        elif isinstance(frame, InterimTranscriptionFrame):
+            if self._use_interim and self._check_wake_phrase(frame.text):
+                await self.trigger_user_turn_started()
+                return ProcessFrameResult.STOP
 
-        return ProcessFrameResult.BREAK
+        return ProcessFrameResult.STOP
 
     async def _process_inactive(self, frame: Frame) -> ProcessFrameResult:
         """Process a frame while in INACTIVE state.
@@ -229,7 +232,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """Strip punctuation from text, keeping only letters, digits, and whitespace."""
         return re.sub(r"[^\w\s]", "", text)
 
-    def _check_wake_phrase(self, text: str) -> Optional[ProcessFrameResult]:
+    def _check_wake_phrase(self, text: str) -> bool:
         """Check if the accumulated text contains a wake phrase.
 
         Punctuation is stripped before matching so that STT output like
@@ -239,7 +242,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             text: New transcription text to append and check.
 
         Returns:
-            TRIGGERED if a wake phrase was found, None otherwise.
+            True if a wake phrase was found, False otherwise.
         """
         self._accumulated_text += " " + self._strip_punctuation(text)
         # Cap accumulated text to prevent unbounded growth.
@@ -251,9 +254,9 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 phrase = self._phrases[i]
                 logger.debug(f"{self} wake phrase detected: {phrase!r}")
                 self._transition_to_inactive(phrase)
-                return ProcessFrameResult.TRIGGERED
+                return True
 
-        return None
+        return False
 
     def _transition_to_inactive(self, phrase: str):
         """Transition from LISTENING to INACTIVE state."""

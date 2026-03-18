@@ -19,15 +19,16 @@ from pipecat.utils.base_object import BaseObject
 class ProcessFrameResult(enum.Enum):
     """Result of processing a frame in a user turn start strategy.
 
+    Controls whether the strategy loop in the controller continues to the
+    next strategy or stops early.
+
     Attributes:
-        TRIGGERED: The strategy was satisfied and the loop should stop.
-        CONTINUE: The strategy was not satisfied, continue to the next strategy.
-        BREAK: The strategy was not satisfied but the loop should stop.
+        CONTINUE: Continue to the next strategy in the loop.
+        STOP: Stop evaluating further strategies for this frame.
     """
 
-    TRIGGERED = "triggered"
     CONTINUE = "continue"
-    BREAK = "break"
+    STOP = "stop"
 
 
 @dataclass

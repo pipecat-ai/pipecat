@@ -39,10 +39,10 @@ class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The frame to be analyzed.
 
         Returns:
-            TRIGGERED if a user started speaking frame was received, CONTINUE otherwise.
+            STOP if a user started speaking frame was received, CONTINUE otherwise.
         """
         if isinstance(frame, UserStartedSpeakingFrame):
             await self.trigger_user_turn_started()
-            return ProcessFrameResult.TRIGGERED
+            return ProcessFrameResult.STOP
 
         return ProcessFrameResult.CONTINUE

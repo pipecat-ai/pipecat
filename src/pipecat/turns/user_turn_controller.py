@@ -166,7 +166,7 @@ class UserTurnController(BaseObject):
 
         for strategy in self._user_turn_strategies.start or []:
             result = await strategy.process_frame(frame)
-            if result in (ProcessFrameResult.TRIGGERED, ProcessFrameResult.BREAK):
+            if result == ProcessFrameResult.STOP:
                 break
 
         for strategy in self._user_turn_strategies.stop or []:

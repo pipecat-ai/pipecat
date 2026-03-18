@@ -62,7 +62,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
             frame: The frame to be analyzed.
 
         Returns:
-            TRIGGERED if the minimum word count was reached, CONTINUE otherwise.
+            STOP if the minimum word count was reached, CONTINUE otherwise.
         """
         if isinstance(frame, BotStartedSpeakingFrame):
             await self._handle_bot_started_speaking(frame)
@@ -70,10 +70,10 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
             await self._handle_bot_stopped_speaking(frame)
         elif isinstance(frame, TranscriptionFrame):
             if await self._handle_transcription(frame):
-                return ProcessFrameResult.TRIGGERED
+                return ProcessFrameResult.STOP
         elif isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
             if await self._handle_transcription(frame):
-                return ProcessFrameResult.TRIGGERED
+                return ProcessFrameResult.STOP
 
         return ProcessFrameResult.CONTINUE
 

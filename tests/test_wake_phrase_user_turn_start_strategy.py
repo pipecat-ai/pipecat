@@ -46,7 +46,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -58,7 +58,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             InterimTranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -70,7 +70,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="hello world", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.BREAK)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.LISTENING)
 
         await strategy.cleanup()
@@ -80,7 +80,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await self._setup_strategy(strategy)
 
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(result, ProcessFrameResult.BREAK)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.LISTENING)
 
         await strategy.cleanup()
@@ -113,13 +113,13 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="hey", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.BREAK)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.LISTENING)
 
         result = await strategy.process_frame(
             TranscriptionFrame(text="pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -131,14 +131,14 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             InterimTranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.BREAK)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.LISTENING)
 
         # Final transcription should still work.
         result = await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -150,7 +150,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="ok computer", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -162,7 +162,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="HEY PIPECAT", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -301,7 +301,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
                 text="I said hey pipecat what time is it", user_id="user1", timestamp=""
             )
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -315,7 +315,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         # Wait for timeout.
@@ -326,7 +326,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -339,7 +339,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="Hey, Pipecat!", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -352,12 +352,12 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="Hey,", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.BREAK)
+        self.assertEqual(result, ProcessFrameResult.STOP)
 
         result = await strategy.process_frame(
             TranscriptionFrame(text="Pipecat!", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
@@ -371,7 +371,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         # Simulate turn start (controller calls reset on all start strategies).
@@ -380,7 +380,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         # Frames should now be blocked again.
         result = await strategy.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(result, ProcessFrameResult.BREAK)
+        self.assertEqual(result, ProcessFrameResult.STOP)
 
         await strategy.cleanup()
 
@@ -401,13 +401,13 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         result = await strategy.process_frame(
             TranscriptionFrame(text="what is the weather", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.BREAK)
+        self.assertEqual(result, ProcessFrameResult.STOP)
 
         # Second turn: wake phrase again.
         result = await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
-        self.assertEqual(result, ProcessFrameResult.TRIGGERED)
+        self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
         await strategy.cleanup()
