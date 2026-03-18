@@ -995,18 +995,20 @@ class GoogleLLMService(LLMService):
 
     def _maybe_unset_thinking_budget(self, generation_params: Dict[str, Any]):
         try:
-            # There's no way to introspect on model capabilities, so
-            # to check for models that we know default to thinkin on
-            # and can be configured to turn it off.
-            if not self._settings.model.startswith("gemini-2.5-flash"):
-                return
-            # If we have an image model, we don't use a budget either.
+            # If we have an image model, we don't apply a thinking default.
             if "image" in self._settings.model:
                 return
             # If thinking_config is already set, don't override it.
             if "thinking_config" in generation_params:
                 return
-            generation_params.setdefault("thinking_config", {})["thinking_budget"] = 0
+            # Apply model-aware low-latency thinking defaults.
+            # Gemini 2.5 Flash: disable thinking via thinking_budget.
+            # Gemini 3+ Flash: use minimal thinking via thinking_level.
+            model = self._settings.model
+            if model.startswith("gemini-2.5-flash"):
+                generation_params["thinking_config"] = {"thinking_budget": 0}
+            elif model.startswith("gemini-3") and "flash" in model:
+                generation_params["thinking_config"] = {"thinking_level": "minimal"}
         except Exception as e:
             logger.error(f"Failed to unset thinking budget: {e}")
 
