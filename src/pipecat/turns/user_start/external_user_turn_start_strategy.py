@@ -9,10 +9,8 @@
 from typing import Optional
 
 from pipecat.frames.frames import Frame, UserStartedSpeakingFrame
-from pipecat.turns.user_start.base_user_turn_start_strategy import (
-    BaseUserTurnStartStrategy,
-    ProcessFrameResult,
-)
+from pipecat.turns.process_frame_result import ProcessFrameResult
+from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
 class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):

@@ -20,10 +20,8 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
-from pipecat.turns.user_start.base_user_turn_start_strategy import (
-    BaseUserTurnStartStrategy,
-    ProcessFrameResult,
-)
+from pipecat.turns.process_frame_result import ProcessFrameResult
+from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 

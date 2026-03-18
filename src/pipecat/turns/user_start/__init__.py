@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+
 from .base_user_turn_start_strategy import (
     BaseUserTurnStartStrategy,
-    ProcessFrameResult,
     UserTurnStartedParams,
 )
 from .external_user_turn_start_strategy import ExternalUserTurnStartStrategy
@@ -19,7 +19,6 @@ __all__ = [
     "BaseUserTurnStartStrategy",
     "ExternalUserTurnStartStrategy",
     "MinWordsUserTurnStartStrategy",
-    "ProcessFrameResult",
     "TranscriptionUserTurnStartStrategy",
     "UserTurnStartedParams",
     "VADUserTurnStartStrategy",

@@ -19,9 +19,9 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.turns.process_frame_result import ProcessFrameResult
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
-    ProcessFrameResult,
     UserTurnStartedParams,
 )
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
@@ -171,7 +171,9 @@ class UserTurnController(BaseObject):
                 break
 
         for strategy in self._user_turn_strategies.stop or []:
-            await strategy.process_frame(frame)
+            result = await strategy.process_frame(frame)
+            if result == ProcessFrameResult.STOP:
+                break
 
     async def _setup_strategies(self):
         for s in self._user_turn_strategies.start or []:

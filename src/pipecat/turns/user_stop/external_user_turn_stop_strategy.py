@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.turns.process_frame_result import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
@@ -69,7 +70,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._task)
             self._task = None
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame to update strategy state.
 
         Updates internal transcription text and VAD state. The user end turn
@@ -78,6 +79,8 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         Args:
             frame: The frame to be analyzed.
 
+        Returns:
+            Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
@@ -87,6 +90,8 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._handle_interim_transcription(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+
+        return ProcessFrameResult.CONTINUE
 
     async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
         """Handle when the external service indicates the user is speaking."""

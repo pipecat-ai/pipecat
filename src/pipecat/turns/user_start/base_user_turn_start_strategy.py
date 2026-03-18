@@ -6,29 +6,14 @@
 
 """Base turn start strategy for determining when the user starts speaking."""
 
-import enum
 from dataclasses import dataclass
 from typing import Optional, Type
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.turns.process_frame_result import ProcessFrameResult
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
-
-
-class ProcessFrameResult(enum.Enum):
-    """Result of processing a frame in a user turn start strategy.
-
-    Controls whether the strategy loop in the controller continues to the
-    next strategy or stops early.
-
-    Attributes:
-        CONTINUE: Continue to the next strategy in the loop.
-        STOP: Stop evaluating further strategies for this frame.
-    """
-
-    CONTINUE = "continue"
-    STOP = "stop"
 
 
 @dataclass
