@@ -10,6 +10,7 @@ This module provides integration with Gradium's real-time speech-to-text
 WebSocket API for streaming audio transcription.
 """
 
+import asyncio
 import base64
 import json
 from dataclasses import dataclass, field
@@ -195,11 +196,13 @@ class GradiumSTTService(WebsocketSTTService):
         self._chunk_size_bytes = 0
 
         # Accumulates text fragments within a turn. Each "text" message
-        # appends to this list. On "flushed" the full text is joined and
-        # pushed as a TranscriptionFrame. Any trailing fragments are
-        # flushed when the user starts speaking again.
+        # appends to this list. On "flushed" a short aggregation delay
+        # allows trailing tokens to arrive before the full text is joined
+        # and pushed as a TranscriptionFrame.
         self._accumulated_text: list[str] = []
         self._flush_counter = 0
+        self._transcript_aggregation_delay = 0.1  # seconds to wait after flushed
+        self._transcript_aggregation_task: Optional[asyncio.Task] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -376,6 +379,10 @@ class GradiumSTTService(WebsocketSTTService):
     async def _disconnect(self):
         await super()._disconnect()
 
+        if self._transcript_aggregation_task:
+            await self.cancel_task(self._transcript_aggregation_task)
+            self._transcript_aggregation_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -435,14 +442,29 @@ class GradiumSTTService(WebsocketSTTService):
         await self.stop_processing_metrics()
 
     async def _handle_flushed(self):
-        """Handle flush completion by pushing the finalized transcription.
+        """Handle flush completion by starting a transcript aggregation timer.
 
-        The "flushed" message confirms that buffered audio has been processed.
-        Any trailing text fragments that arrive after this will be caught by
-        the TTFB timeout handler.
+        The "flushed" message confirms that buffered audio has been processed,
+        but text tokens may still arrive after this point. A short timer allows
+        trailing tokens to accumulate before finalizing the transcription.
         """
+        if self._transcript_aggregation_task:
+            await self.cancel_task(self._transcript_aggregation_task)
+        self._transcript_aggregation_task = self.create_task(
+            self._transcript_aggregation_handler(), "transcript_aggregation"
+        )
+
+    async def _transcript_aggregation_handler(self):
+        """Wait for trailing tokens then finalize the accumulated transcription."""
+        await asyncio.sleep(self._transcript_aggregation_delay)
+        await self._finalize_accumulated_text()
+
+    async def _finalize_accumulated_text(self):
+        """Join accumulated text, push TranscriptionFrame, and clear state."""
         if not self._accumulated_text:
             return
+        self._transcript_aggregation_task = None
+
         text = " ".join(self._accumulated_text)
         self._accumulated_text.clear()
         logger.debug(f"Final transcription: [{text}]")
