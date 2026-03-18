@@ -388,7 +388,16 @@ class LiveKitTransportClient:
             await self._audio_source.capture_frame(audio_frame)
             return True
         except Exception as e:
-            logger.error(f"Error publishing audio: {e}")
+            # When using an audio mixer, the base output transport's
+            # with_mixer() generator continuously yields frames (mixed with
+            # background audio) even when no TTS audio is queued. During
+            # interruptions, the audio task is cancelled and recreated, but
+            # there is a brief window where the native LiveKit AudioSource
+            # rejects capture_frame() with an InvalidState error. This is a
+            # transient condition — the mixer will produce a new frame within
+            # milliseconds, so we silently drop these frames.
+            if "InvalidState" not in str(e):
+                logger.error(f"Error publishing audio: {e}")
             return False
 
     def get_participants(self) -> List[str]:
