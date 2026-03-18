@@ -1102,7 +1102,7 @@ class AWSNovaSonicLLMService(LLMService):
                 await self.reset_conversation()
 
     async def _handle_completion_start_event(self, event_json):
-        await self.push_frame(LLMFullResponseStartFrame())
+        pass
 
     async def _handle_content_start_event(self, event_json):
         content_start = event_json["contentStart"]
@@ -1123,10 +1123,11 @@ class AWSNovaSonicLLMService(LLMService):
         self._content_being_received = content
 
         if content.role == Role.ASSISTANT:
-            if content.type == ContentType.AUDIO:
-                # Note that an assistant response can comprise of multiple audio blocks
-                if not self._assistant_is_responding:
-                    # The assistant has started responding.
+            if content.type == ContentType.TEXT:
+                if (
+                    content.text_stage == TextStage.SPECULATIVE
+                    and not self._assistant_is_responding
+                ):
                     self._assistant_is_responding = True
                     await self._report_user_transcription_ended()  # Consider user turn over
                     await self._report_assistant_response_started()
@@ -1204,10 +1205,10 @@ class AWSNovaSonicLLMService(LLMService):
             if content.type == ContentType.TEXT:
                 if stop_reason != "INTERRUPTED":
                     if content.text_stage == TextStage.SPECULATIVE:
-                        await self._handle_assistant_speculative_text(content.text_content)
+                        await self._report_llm_text_generated(content.text_content)
             elif content.type == ContentType.AUDIO:
                 # Emit deferred TTSTextFrame after all audio chunks have been sent
-                await self._flush_pending_speculative_text()
+                await self._report_tts_text_spoken()
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
@@ -1227,23 +1228,19 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _report_assistant_response_started(self):
         logger.debug("Assistant response started")
+        await self.push_frame(LLMFullResponseStartFrame())
 
         # Report that equivalent of TTS (this is a speech-to-speech model) started
         await self.push_frame(TTSStartedFrame())
 
-    async def _handle_assistant_speculative_text(self, text):
-        """Push speculative assistant text as LLMTextFrame and defer TTSTextFrame.
+    async def _report_llm_text_generated(self, text):
+        """Push speculative assistant text and defer TTSTextFrame.
 
         Speculative text arrives before each audio chunk, providing real-time
-        text that is synchronized with what the bot is saying. Final text
-        arrives seconds after all audio is done and is not used.
-
-        LLMTextFrame is pushed immediately for real-time text display.
-        TTSTextFrame emission is deferred to the next audio contentStart so
-        it aligns with audio playout timing.
-
-        We also buffer the text here for the interruption re-push safety net
-        (see _report_assistant_response_ended).
+        text that is synchronized with what the bot is saying. LLMTextFrame and
+        AggregatedTextFrame are pushed immediately for real-time text display.
+        TTSTextFrame emission is deferred to audio contentEnd so it aligns with
+        audio playout timing.
         """
         logger.debug(f"Assistant speculative text: {text}")
 
@@ -1255,10 +1252,9 @@ class AWSNovaSonicLLMService(LLMService):
         aggregated_text_frame.append_to_context = False
         await self.push_frame(aggregated_text_frame)
 
-        # Save for deferred TTSTextFrame emission at next audio contentStart
         self._pending_speculative_text = text
 
-    async def _flush_pending_speculative_text(self):
+    async def _report_tts_text_spoken(self):
         if self._pending_speculative_text:
             tts_text_frame = TTSTextFrame(
                 self._pending_speculative_text, aggregated_by=AggregationType.SENTENCE
