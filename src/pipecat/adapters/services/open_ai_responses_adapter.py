@@ -79,9 +79,19 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             # message when instructions are provided. Contexts that worked with
             # OpenAILLMService (system_instruction + empty messages) need the
             # instructions converted to an initial developer message.
-            # NOTE: once we support `previous_response_id`, we need to revisit
+            #
+            # NOTE: if/when we support `previous_response_id`, we'll need to revisit
             # this logic, as it'll be legit to provide instructions without input
-            # items if `previous_response_id` is provided.
+            # items if `previous_response_id` is provided. Though...OpenAI's docs +
+            # ChatGPT suggests that `previous_response_id` is primarily for
+            # development convenience, not performance (other than minor bandwidth
+            # savings from not transferring the full context), as the model still
+            # processes the full context from the previous response. The tradeoff
+            # of using `previous_response_id` is that it requires enabling OpenAI-side
+            # 30-day conversation storage (meaning we couldn't do `store=False`
+            # in the API call), which may not be desirable for all users. So,
+            # my guess is we won't need to support `previous_response_id` in the
+            # immediate future.
             if not input_items:
                 params["input"] = [{"role": "developer", "content": system_instruction}]
             else:

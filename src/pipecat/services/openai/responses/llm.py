@@ -324,6 +324,7 @@ class OpenAIResponsesLLMService(LLMService):
         params: Dict[str, Any] = {
             "model": self._settings.model,
             "stream": True,
+            "store": False,
             "input": invocation_params["input"],
         }
 
