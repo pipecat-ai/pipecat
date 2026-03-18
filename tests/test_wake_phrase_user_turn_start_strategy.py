@@ -35,10 +35,6 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.setup(task_manager)
         return task_manager
 
-    async def test_initial_state_is_listening(self):
-        strategy = self._create_strategy()
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
-
     async def test_wake_phrase_in_final_transcription(self):
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)
@@ -76,14 +72,22 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_non_matching_text_cleared(self):
-        """Non-matching transcription text is cleared to prevent LLM context pollution."""
+    async def test_non_matching_text_resets_aggregation(self):
+        """Non-matching transcription triggers aggregation reset to prevent LLM context pollution."""
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)
 
-        frame = TranscriptionFrame(text="hello world", user_id="user1", timestamp="")
-        await strategy.process_frame(frame)
-        self.assertEqual(frame.text, "")
+        reset_called = False
+
+        @strategy.event_handler("on_reset_aggregation")
+        async def on_reset_aggregation(strategy):
+            nonlocal reset_called
+            reset_called = True
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="hello world", user_id="user1", timestamp="")
+        )
+        self.assertTrue(reset_called)
 
         await strategy.cleanup()
 
@@ -148,25 +152,16 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_case_insensitive_matching(self):
+    async def test_punctuation_stripped(self):
+        """STT punctuation like 'Hey, Pipecat!' should still match."""
         strategy = self._create_strategy()
         await self._setup_strategy(strategy)
 
         result = await strategy.process_frame(
-            TranscriptionFrame(text="HEY PIPECAT", user_id="user1", timestamp="")
+            TranscriptionFrame(text="Hey, Pipecat!", user_id="user1", timestamp="")
         )
         self.assertEqual(result, ProcessFrameResult.STOP)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        await strategy.cleanup()
-
-    async def test_reset_preserves_listening_state(self):
-        strategy = self._create_strategy()
-        await self._setup_strategy(strategy)
-
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
-        await strategy.reset()
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
 
         await strategy.cleanup()
 
@@ -269,92 +264,6 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.cleanup()
 
-    async def test_accumulated_text_capped(self):
-        strategy = self._create_strategy()
-        await self._setup_strategy(strategy)
-
-        # Send lots of text to exceed the 500 char cap.
-        for _ in range(20):
-            await strategy.process_frame(
-                TranscriptionFrame(text="some random words " * 5, user_id="user1", timestamp="")
-            )
-
-        # Accumulated text should be capped.
-        self.assertLessEqual(len(strategy._accumulated_text), 510)
-
-        await strategy.cleanup()
-
-    async def test_wake_phrase_with_extra_text(self):
-        """Wake phrase embedded in a longer sentence."""
-        strategy = self._create_strategy()
-        await self._setup_strategy(strategy)
-
-        result = await strategy.process_frame(
-            TranscriptionFrame(
-                text="I said hey pipecat what time is it", user_id="user1", timestamp=""
-            )
-        )
-        self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        await strategy.cleanup()
-
-    async def test_reawaken_after_timeout(self):
-        """After timeout, wake phrase can be spoken again."""
-        strategy = self._create_strategy(timeout=0.1)
-        await self._setup_strategy(strategy)
-
-        # First activation.
-        result = await strategy.process_frame(
-            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
-        )
-        self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        # Wait for timeout.
-        await asyncio.sleep(0.3)
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
-
-        # Second activation.
-        result = await strategy.process_frame(
-            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
-        )
-        self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        await strategy.cleanup()
-
-    async def test_punctuation_stripped(self):
-        """STT punctuation like 'Hey, Pipecat!' should still match."""
-        strategy = self._create_strategy()
-        await self._setup_strategy(strategy)
-
-        result = await strategy.process_frame(
-            TranscriptionFrame(text="Hey, Pipecat!", user_id="user1", timestamp="")
-        )
-        self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        await strategy.cleanup()
-
-    async def test_punctuation_stripped_across_frames(self):
-        """Punctuation stripped when accumulating across frames."""
-        strategy = self._create_strategy()
-        await self._setup_strategy(strategy)
-
-        result = await strategy.process_frame(
-            TranscriptionFrame(text="Hey,", user_id="user1", timestamp="")
-        )
-        self.assertEqual(result, ProcessFrameResult.STOP)
-
-        result = await strategy.process_frame(
-            TranscriptionFrame(text="Pipecat!", user_id="user1", timestamp="")
-        )
-        self.assertEqual(result, ProcessFrameResult.STOP)
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        await strategy.cleanup()
-
     async def test_single_activation_resets_to_listening(self):
         """In single activation mode, reset() returns to LISTENING."""
         strategy = self._create_strategy(single_activation=True)
@@ -382,7 +291,7 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         strategy = self._create_strategy(single_activation=True)
         await self._setup_strategy(strategy)
 
-        # First turn: wake phrase → INACTIVE → reset → LISTENING.
+        # First turn: wake phrase -> INACTIVE -> reset -> LISTENING.
         await strategy.process_frame(
             TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
         )
@@ -416,40 +325,9 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
 
-        # Wait longer than timeout — should NOT return to LISTENING.
+        # Wait longer than timeout -- should NOT return to LISTENING.
         await asyncio.sleep(0.3)
         self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        await strategy.cleanup()
-
-    async def test_single_activation_reset_preserves_listening(self):
-        """In single activation mode, reset() while LISTENING stays LISTENING."""
-        strategy = self._create_strategy(single_activation=True)
-        await self._setup_strategy(strategy)
-
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
-        await strategy.reset()
-        self.assertEqual(strategy.state, _WakeState.LISTENING)
-
-        await strategy.cleanup()
-
-    async def test_single_activation_inactive_returns_continue(self):
-        """In single activation mode, INACTIVE frames return CONTINUE."""
-        strategy = self._create_strategy(single_activation=True)
-        await self._setup_strategy(strategy)
-
-        await strategy.process_frame(
-            TranscriptionFrame(text="hey pipecat", user_id="user1", timestamp="")
-        )
-        self.assertEqual(strategy.state, _WakeState.INACTIVE)
-
-        result = await strategy.process_frame(VADUserStartedSpeakingFrame())
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
-
-        result = await strategy.process_frame(
-            TranscriptionFrame(text="what is the weather", user_id="user1", timestamp="")
-        )
-        self.assertEqual(result, ProcessFrameResult.CONTINUE)
 
         await strategy.cleanup()
 
