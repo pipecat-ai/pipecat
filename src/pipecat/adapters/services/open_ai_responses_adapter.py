@@ -80,18 +80,16 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             # OpenAILLMService (system_instruction + empty messages) need the
             # instructions converted to an initial developer message.
             #
-            # NOTE: if/when we support `previous_response_id`, we'll need to revisit
-            # this logic, as it'll be legit to provide instructions without input
-            # items if `previous_response_id` is provided. Though...OpenAI's docs +
-            # ChatGPT suggests that `previous_response_id` is primarily for
-            # development convenience, not performance (other than minor bandwidth
-            # savings from not transferring the full context), as the model still
-            # processes the full context from the previous response. The tradeoff
-            # of using `previous_response_id` is that it requires enabling OpenAI-side
-            # 30-day conversation storage (meaning we couldn't do `store=False`
-            # in the API call), which may not be desirable for all users. So,
-            # my guess is we won't need to support `previous_response_id` in the
-            # immediate future.
+            # NOTE: if/when we support `previous_response_id` and/or
+            # `conversation_id`, we'll need to revisit this logic, as it'll
+            # be legit to provide instructions without input items. Worth
+            # noting that OpenAI's docs suggest these parameters are primarily
+            # for development convenience rather than performance (the model
+            # still processes the full context), and come with the tradeoff
+            # of requiring OpenAI-side 30-day conversation storage, which may
+            # not be desirable for many users. But it could give folks an easy
+            # way to store/switch between conversations without needing to
+            # manage that storage themselves.
             if not input_items:
                 params["input"] = [{"role": "developer", "content": system_instruction}]
             else:
