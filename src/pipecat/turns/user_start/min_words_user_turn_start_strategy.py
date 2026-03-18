@@ -6,8 +6,6 @@
 
 """User turn start strategy based on a minimum number of words spoken by the user."""
 
-from typing import Optional
-
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -17,7 +15,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     TranscriptionFrame,
 )
-from pipecat.turns.process_frame_result import ProcessFrameResult
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
@@ -50,7 +48,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         await super().reset()
         self._bot_speaking = False
 
-    async def process_frame(self, frame: Frame) -> Optional[ProcessFrameResult]:
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame to detect the start of a user turn.
 
         This method updates internal state based on transcription frames and

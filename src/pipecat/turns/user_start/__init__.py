@@ -4,11 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
-from .base_user_turn_start_strategy import (
-    BaseUserTurnStartStrategy,
-    UserTurnStartedParams,
-)
+from .base_user_turn_start_strategy import BaseUserTurnStartStrategy, UserTurnStartedParams
 from .external_user_turn_start_strategy import ExternalUserTurnStartStrategy
 from .min_words_user_turn_start_strategy import MinWordsUserTurnStartStrategy
 from .transcription_user_turn_start_strategy import TranscriptionUserTurnStartStrategy

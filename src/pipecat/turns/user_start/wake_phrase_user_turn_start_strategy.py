@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
 )
-from pipecat.turns.process_frame_result import ProcessFrameResult
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
@@ -159,7 +159,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             else:
                 self._refresh_timeout()
 
-    async def process_frame(self, frame: Frame) -> Optional[ProcessFrameResult]:
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame for wake phrase detection or passthrough.
 
         Args:

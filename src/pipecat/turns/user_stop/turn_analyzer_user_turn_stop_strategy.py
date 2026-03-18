@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
-from pipecat.turns.process_frame_result import ProcessFrameResult
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 

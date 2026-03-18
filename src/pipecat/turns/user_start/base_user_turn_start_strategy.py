@@ -11,7 +11,7 @@ from typing import Optional, Type
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.turns.process_frame_result import ProcessFrameResult
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
@@ -102,7 +102,7 @@ class BaseUserTurnStartStrategy(BaseObject):
         """Reset the strategy to its initial state."""
         pass
 
-    async def process_frame(self, frame: Frame) -> Optional[ProcessFrameResult]:
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame.
 
         Subclasses should override this to implement logic that decides whether
