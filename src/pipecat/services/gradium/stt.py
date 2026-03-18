@@ -69,8 +69,14 @@ def _input_format_from_encoding(encoding: str, sample_rate: int) -> str:
                 return "pcm_8000"
             case 16000:
                 return "pcm_16000"
+            case 22050:
+                return "pcm_22050"
             case 24000:
                 return "pcm_24000"
+            case 44100:
+                return "pcm_44100"
+            case 48000:
+                return "pcm_48000"
         logger.warning(
             f"GradiumSTTService: unsupported sample rate {sample_rate} for PCM encoding, using pcm_16000"
         )
