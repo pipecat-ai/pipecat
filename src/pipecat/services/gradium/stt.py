@@ -46,6 +46,9 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 SAMPLE_RATE = 24000
+# Seconds to wait after a "flushed" message for trailing text tokens to arrive
+# before finalizing the transcription.
+TRANSCRIPT_AGGREGATION_DELAY = 0.1
 
 
 def language_to_gradium_language(language: Language) -> Optional[str]:
@@ -202,7 +205,6 @@ class GradiumSTTService(WebsocketSTTService):
         # and pushed as a TranscriptionFrame.
         self._accumulated_text: list[str] = []
         self._flush_counter = 0
-        self._transcript_aggregation_delay = 0.1  # seconds to wait after flushed
         self._transcript_aggregation_task: Optional[asyncio.Task] = None
 
     def can_generate_metrics(self) -> bool:
@@ -384,6 +386,9 @@ class GradiumSTTService(WebsocketSTTService):
             await self.cancel_task(self._transcript_aggregation_task)
             self._transcript_aggregation_task = None
 
+        self._accumulated_text.clear()
+        self._flush_counter = 0
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -457,7 +462,7 @@ class GradiumSTTService(WebsocketSTTService):
 
     async def _transcript_aggregation_handler(self):
         """Wait for trailing tokens then finalize the accumulated transcription."""
-        await asyncio.sleep(self._transcript_aggregation_delay)
+        await asyncio.sleep(TRANSCRIPT_AGGREGATION_DELAY)
         await self._finalize_accumulated_text()
 
     async def _finalize_accumulated_text(self):
