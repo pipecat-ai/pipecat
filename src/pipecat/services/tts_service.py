@@ -933,7 +933,9 @@ class TTSService(AIService):
                 # Stop the aggregation metric on the first sentence only.
                 await self.stop_text_aggregation_metrics()
             await self._push_tts_frames(
-                AggregatedTextFrame(aggregate.text, aggregate.type), includes_inter_frame_spaces
+                AggregatedTextFrame(aggregate.text, aggregate.type),
+                includes_inter_frame_spaces,
+                append_tts_text_to_context=frame.append_to_context,
             )
 
     async def _push_tts_frames(
