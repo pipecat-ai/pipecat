@@ -22,10 +22,13 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
@@ -175,8 +178,6 @@ class GradiumSTTService(WebsocketSTTService):
         super().__init__(
             sample_rate=SAMPLE_RATE,
             ttfs_p99_latency=ttfs_p99_latency,
-            keepalive_timeout=10,
-            keepalive_interval=5,
             settings=default_settings,
             **kwargs,
         )
@@ -193,10 +194,12 @@ class GradiumSTTService(WebsocketSTTService):
         self._chunk_size_ms = 80
         self._chunk_size_bytes = 0
 
-        # Set from the ready message when connecting to the service.
-        # These values are used for flushing transcription via silence.
-        self._delay_in_frames = 0
-        self._frame_size = 0
+        # Accumulates text fragments within a turn. Each "text" message
+        # appends to this list. On "flushed" the full text is joined and
+        # pushed as a TranscriptionFrame. Any trailing fragments are
+        # flushed when the user starts speaking again.
+        self._accumulated_text: list[str] = []
+        self._flush_counter = 0
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -252,46 +255,41 @@ class GradiumSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        """Handle VAD user stopped speaking by flushing the transcription.
+    async def _start_metrics(self):
+        """Start performance metrics collection for transcription processing."""
+        await self.start_processing_metrics()
 
-        Calls the base class handler for TTFB tracking, then sends silence
-        frames to flush remaining audio from the model's buffer.
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle speech events.
 
         Args:
-            frame: The VAD user stopped speaking frame.
+            frame: The frame to process.
+            direction: Direction of frame flow in the pipeline.
         """
-        await super()._handle_vad_user_stopped_speaking(frame)
-        await self._flush_transcription()
+        await super().process_frame(frame, direction)
 
-    async def _flush_transcription(self):
-        """Flush the transcription by sending silence frames.
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            await self._start_metrics()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._send_flush()
 
-        When VAD detects the user stopped speaking, we send delay_in_frames
-        chunks of silence (zeros) to flush the remaining audio from the model's
-        buffer. This allows for faster turn-around without closing the connection.
+    async def _send_flush(self):
+        """Send a flush request to process any buffered audio immediately.
+
+        Sends a flush message to tell the server to process buffered audio.
+        The server responds with text fragments followed by a "flushed"
+        acknowledgment, which triggers finalization.
         """
         if not self._websocket or self._websocket.state is not State.OPEN:
             return
 
-        if self._delay_in_frames <= 0:
-            logger.debug("No delay_in_frames set, skipping flush")
-            return
-
-        # Create a silence chunk (zeros) of frame_size samples
-        # Each sample is 2 bytes (16-bit PCM)
-        silence_bytes = bytes(self._frame_size * 2)
-        silence_b64 = base64.b64encode(silence_bytes).decode("utf-8")
-
-        logger.debug(f"Flushing Gradium STT with {self._delay_in_frames} silence frames")
-
-        for _ in range(self._delay_in_frames):
-            msg = {"type": "audio", "audio": silence_b64}
-            try:
-                await self._websocket.send(json.dumps(msg))
-            except Exception as e:
-                logger.warning(f"Failed to send silence frame: {e}")
-                break
+        self._flush_counter += 1
+        flush_id = str(self._flush_counter)
+        msg = {"type": "flush", "flush_id": flush_id}
+        try:
+            await self._websocket.send(json.dumps(msg))
+        except Exception as e:
+            logger.warning(f"Failed to send flush: {e}")
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process audio data for speech-to-text conversion.
@@ -302,7 +300,6 @@ class GradiumSTTService(WebsocketSTTService):
         Yields:
             None (processing handled via WebSocket messages).
         """
-        await self.start_processing_metrics()
         self._audio_buffer.extend(audio)
 
         while len(self._audio_buffer) >= self._chunk_size_bytes:
@@ -370,13 +367,7 @@ class GradiumSTTService(WebsocketSTTService):
             if ready_msg["type"] != "ready":
                 raise Exception(f"unexpected first message type {ready_msg['type']}")
 
-            # Store delay_in_frames and frame_size for silence flushing
-            self._delay_in_frames = ready_msg.get("delay_in_frames", 0)
-            self._frame_size = ready_msg.get("frame_size", 1920)
-            logger.debug(
-                f"Connected to Gradium STT (delay_in_frames={self._delay_in_frames}, "
-                f"frame_size={self._frame_size})"
-            )
+            logger.debug("Connected to Gradium STT")
 
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -402,16 +393,6 @@ class GradiumSTTService(WebsocketSTTService):
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
-    async def _send_keepalive(self, silence: bytes):
-        """Send silent audio to keep the Gradium connection alive.
-
-        Args:
-            silence: Silent PCM audio bytes to send as a keepalive.
-        """
-        chunk = base64.b64encode(silence).decode("utf-8")
-        msg = json.dumps({"type": "audio", "audio": chunk})
-        await self._websocket.send(msg)
-
     def _get_websocket(self):
         if self._websocket:
             return self._websocket
@@ -428,19 +409,49 @@ class GradiumSTTService(WebsocketSTTService):
             type_ = msg.get("type", "")
             if type_ == "text":
                 await self._handle_text(msg["text"])
+            elif type_ == "flushed":
+                await self._handle_flushed()
             elif type_ == "end_of_stream":
                 logger.debug("Received end_of_stream message from server")
             elif type_ == "error":
                 await self.push_error(error_msg=f"Error: {msg}")
 
     async def _handle_text(self, text: str):
-        """Handle transcription results."""
+        """Handle streaming transcription fragment.
+
+        Accumulates text and pushes an InterimTranscriptionFrame with the
+        full accumulated text so far.
+        """
+        self._accumulated_text.append(text)
+        accumulated = " ".join(self._accumulated_text)
+        await self.push_frame(
+            InterimTranscriptionFrame(
+                text=accumulated,
+                user_id=self._user_id,
+                timestamp=time_now_iso8601(),
+                language=self._settings.language,
+            )
+        )
+        await self.stop_processing_metrics()
+
+    async def _handle_flushed(self):
+        """Handle flush completion by pushing the finalized transcription.
+
+        The "flushed" message confirms that buffered audio has been processed.
+        Any trailing text fragments that arrive after this will be caught by
+        the TTFB timeout handler.
+        """
+        if not self._accumulated_text:
+            return
+        text = " ".join(self._accumulated_text)
+        self._accumulated_text.clear()
+        logger.debug(f"Final transcription: [{text}]")
         await self.push_frame(
             TranscriptionFrame(
                 text,
                 self._user_id,
                 time_now_iso8601(),
+                self._settings.language,
             )
         )
-        await self._trace_transcription(text, is_final=True, language=None)
-        await self.stop_processing_metrics()
+        await self._trace_transcription(text, is_final=True, language=self._settings.language)
