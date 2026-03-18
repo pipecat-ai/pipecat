@@ -27,12 +27,11 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_start import (
-    TranscriptionUserTurnStartStrategy,
-    VADUserTurnStartStrategy,
-    WakePhraseUserTurnStartStrategy,
+from pipecat.turns.user_start import WakePhraseUserTurnStartStrategy
+from pipecat.turns.user_turn_strategies import (
+    UserTurnStrategies,
+    default_user_turn_start_strategies,
 )
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -89,8 +88,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                         # Timeout before wake phrase must be spoken again
                         timeout=8.0,
                     ),
-                    VADUserTurnStartStrategy(),
-                    TranscriptionUserTurnStartStrategy(),
+                    *default_user_turn_start_strategies(),
                 ]
             ),
             vad_analyzer=SileroVADAnalyzer(),

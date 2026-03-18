@@ -447,6 +447,9 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_controller.add_event_handler(
             "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
         )
+        self._user_turn_controller.add_event_handler(
+            "on_reset_aggregation", self._on_reset_aggregation
+        )
 
         self._user_idle_controller = UserIdleController(
             user_idle_timeout=self._params.user_idle_timeout
@@ -490,11 +493,6 @@ class LLMUserAggregator(LLMContextAggregator):
         if self._vad_controller:
             await self._vad_controller.process_frame(frame)
 
-        # Run turn controller before handling transcription so that start
-        # strategies can modify frame text (e.g. clear it while listening
-        # for a wake phrase) before the aggregator captures it.
-        await self._user_turn_controller.process_frame(frame)
-
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
             # processed by every processor before any other frame is processed.
@@ -534,6 +532,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._handle_speech_control_params(frame)
         else:
             await self.push_frame(frame, direction)
+
+        await self._user_turn_controller.process_frame(frame)
 
         await self._user_idle_controller.process_frame(frame)
 
@@ -750,6 +750,12 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._maybe_emit_user_turn_stopped(strategy)
+
+    async def _on_reset_aggregation(
+        self, controller: UserTurnController, strategy: BaseUserTurnStartStrategy
+    ):
+        logger.debug(f"{self}: Resetting aggregation (strategy: {strategy})")
+        await self.reset()
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")

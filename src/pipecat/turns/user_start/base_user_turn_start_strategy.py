@@ -92,6 +92,7 @@ class BaseUserTurnStartStrategy(BaseObject):
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_started", sync=True)
+        self._register_event_handler("on_reset_aggregation", sync=True)
 
     @property
     def task_manager(self) -> BaseTaskManager:
@@ -158,3 +159,7 @@ class BaseUserTurnStartStrategy(BaseObject):
                 enable_user_speaking_frames=self._enable_user_speaking_frames,
             ),
         )
+
+    async def trigger_reset_aggregation(self):
+        """Trigger the `on_reset_aggregation` event."""
+        await self._call_event_handler("on_reset_aggregation")

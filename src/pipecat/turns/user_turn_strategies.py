@@ -23,6 +23,16 @@ from pipecat.turns.user_stop import (
 )
 
 
+def default_user_turn_start_strategies() -> List[BaseUserTurnStartStrategy]:
+    """Return the default user turn start strategies."""
+    return [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
+
+
+def default_user_turn_stop_strategies() -> List[BaseUserTurnStopStrategy]:
+    """Return the default user turn stop strategies."""
+    return [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+
+
 @dataclass
 class UserTurnStrategies:
     """Container for user turn start and stop strategies.
@@ -45,9 +55,9 @@ class UserTurnStrategies:
 
     def __post_init__(self):
         if not self.start:
-            self.start = [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
+            self.start = default_user_turn_start_strategies()
         if not self.stop:
-            self.stop = [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            self.stop = default_user_turn_stop_strategies()
 
 
 @dataclass

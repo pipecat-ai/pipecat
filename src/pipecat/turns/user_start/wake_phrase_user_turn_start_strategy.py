@@ -192,7 +192,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
             if self._check_wake_phrase(frame.text):
                 await self.trigger_user_turn_started()
                 return ProcessFrameResult.STOP
-            frame.text = ""
+            await self.trigger_reset_aggregation()
 
         return ProcessFrameResult.STOP
 
