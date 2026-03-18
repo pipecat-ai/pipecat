@@ -1206,16 +1206,27 @@ class AWSNovaSonicLLMService(LLMService):
                 if stop_reason != "INTERRUPTED":
                     if content.text_stage == TextStage.SPECULATIVE:
                         await self._report_llm_text(content.text_content)
+                elif self._assistant_is_responding:
+                    # TEXT INTERRUPTED with no audio means the user interrupted
+                    # before audio started. End the response here since no AUDIO
+                    # contentEnd will arrive.
+                    self._assistant_is_responding = False
+                    await self._report_assistant_response_ended()
             elif content.type == ContentType.AUDIO:
                 # Emit deferred TTSTextFrame after all audio chunks have been sent
                 await self._report_tts_text()
+                if stop_reason in ("END_TURN", "INTERRUPTED"):
+                    # END_TURN: normal completion. INTERRUPTED: user interrupted
+                    # mid-audio. Both mean no more audio for this turn.
+                    self._assistant_is_responding = False
+                    await self._report_assistant_response_ended()
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
                     # User transcription text added
                     await self._report_user_transcription_text_added(content.text_content)
 
-    async def _handle_completion_end_event(self, event_json):
+    async def _handle_completion_end_event(self, _):
         pass
 
     #
