@@ -79,6 +79,9 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             # message when instructions are provided. Contexts that worked with
             # OpenAILLMService (system_instruction + empty messages) need the
             # instructions converted to an initial developer message.
+            # NOTE: once we support `previous_response_id`, we need to revisit
+            # this logic, as it'll be legit to provide instructions without input
+            # items if `previous_response_id` is provided.
             if not input_items:
                 params["input"] = [{"role": "developer", "content": system_instruction}]
             else:
