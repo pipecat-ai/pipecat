@@ -206,13 +206,13 @@ class OpenAIResponsesLLMService(LLMService):
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
-        adapter = self.get_llm_adapter()
+        adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
         logger.debug(
             f"{self}: Generating response from universal context "
             f"{adapter.get_messages_for_logging(context)}"
         )
 
-        invocation_params: OpenAIResponsesLLMInvocationParams = adapter.get_llm_invocation_params(
+        invocation_params = adapter.get_llm_invocation_params(
             context, system_instruction=self._settings.system_instruction
         )
 
@@ -367,7 +367,7 @@ class OpenAIResponsesLLMService(LLMService):
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
-        adapter = self.get_llm_adapter()
+        adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
         effective_instruction = system_instruction or self._settings.system_instruction
         invocation_params = adapter.get_llm_invocation_params(
             context, system_instruction=effective_instruction

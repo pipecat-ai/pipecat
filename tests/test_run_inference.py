@@ -15,11 +15,13 @@ from pipecat.adapters.services.anthropic_adapter import AnthropicLLMInvocationPa
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMInvocationParams
 from pipecat.adapters.services.gemini_adapter import GeminiLLMInvocationParams
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMInvocationParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.aws.llm import AWSBedrockLLMService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 
 
 @pytest.mark.asyncio
@@ -765,3 +767,149 @@ async def test_aws_bedrock_run_inference_system_instruction_none_unchanged():
         assert result == "Response"
         call_kwargs = mock_client.converse.call_args.kwargs
         assert call_kwargs["system"] == [{"text": "Original system"}]
+
+
+# --- OpenAI Responses API tests ---
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_run_inference_with_llm_context():
+    """Test run_inference with LLMContext returns expected response."""
+    with patch.object(OpenAIResponsesLLMService, "_create_client"):
+        service = OpenAIResponsesLLMService(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-4.1",
+                system_instruction="You are a helpful assistant",
+                temperature=0.7,
+                max_completion_tokens=100,
+            ),
+        )
+        service._client = AsyncMock()
+
+        # Setup mocks
+        mock_context = MagicMock(spec=LLMContext)
+        mock_adapter = MagicMock()
+        test_input = [
+            {"role": "developer", "content": "You are a helpful assistant"},
+            {"role": "user", "content": "Hello, world!"},
+        ]
+        mock_adapter.get_llm_invocation_params.return_value = OpenAIResponsesLLMInvocationParams(
+            input=test_input,
+            tools=OPENAI_NOT_GIVEN,
+            instructions="You are a helpful assistant",
+        )
+        service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+        # Mock response
+        mock_response = MagicMock()
+        mock_response.output_text = "Hello! How can I help you today?"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        # Execute
+        result = await service.run_inference(mock_context)
+
+        # Verify
+        assert result == "Hello! How can I help you today?"
+        service.get_llm_adapter.assert_called_once()
+        mock_adapter.get_llm_invocation_params.assert_called_once_with(
+            mock_context, system_instruction="You are a helpful assistant"
+        )
+        service._client.responses.create.assert_called_once_with(
+            model="gpt-4.1",
+            stream=False,
+            input=test_input,
+            instructions="You are a helpful assistant",
+            temperature=0.7,
+            max_output_tokens=100,
+        )
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_run_inference_client_exception():
+    """Test that exceptions from the client are propagated."""
+    with patch.object(OpenAIResponsesLLMService, "_create_client"):
+        service = OpenAIResponsesLLMService()
+        service._client = AsyncMock()
+
+        mock_context = MagicMock(spec=LLMContext)
+        mock_adapter = MagicMock()
+        mock_adapter.get_llm_invocation_params.return_value = OpenAIResponsesLLMInvocationParams(
+            input=[], tools=OPENAI_NOT_GIVEN
+        )
+        service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+        service._client.responses.create = AsyncMock(side_effect=Exception("API Error"))
+
+        with pytest.raises(Exception, match="API Error"):
+            await service.run_inference(mock_context)
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_run_inference_system_instruction_overrides():
+    """Test that system_instruction parameter overrides the settings instruction."""
+    with patch.object(OpenAIResponsesLLMService, "_create_client"):
+        service = OpenAIResponsesLLMService(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-4.1",
+                system_instruction="Original instruction",
+            ),
+        )
+        service._client = AsyncMock()
+
+        mock_context = MagicMock(spec=LLMContext)
+        mock_adapter = MagicMock()
+        test_input = [{"role": "user", "content": "Hello"}]
+        mock_adapter.get_llm_invocation_params.return_value = OpenAIResponsesLLMInvocationParams(
+            input=test_input,
+            tools=OPENAI_NOT_GIVEN,
+            instructions="New system instruction",
+        )
+        service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Response"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        result = await service.run_inference(
+            mock_context, system_instruction="New system instruction"
+        )
+
+        assert result == "Response"
+        # The adapter should have been called with the override instruction
+        mock_adapter.get_llm_invocation_params.assert_called_once_with(
+            mock_context, system_instruction="New system instruction"
+        )
+        # The final API call should have the override instruction
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["instructions"] == "New system instruction"
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_run_inference_max_tokens_override():
+    """Test that max_tokens parameter overrides max_output_tokens."""
+    with patch.object(OpenAIResponsesLLMService, "_create_client"):
+        service = OpenAIResponsesLLMService(
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-4.1",
+                max_completion_tokens=500,
+            ),
+        )
+        service._client = AsyncMock()
+
+        mock_context = MagicMock(spec=LLMContext)
+        mock_adapter = MagicMock()
+        test_input = [{"role": "user", "content": "Summarize this"}]
+        mock_adapter.get_llm_invocation_params.return_value = OpenAIResponsesLLMInvocationParams(
+            input=test_input, tools=OPENAI_NOT_GIVEN
+        )
+        service.get_llm_adapter = MagicMock(return_value=mock_adapter)
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Summary"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        result = await service.run_inference(mock_context, max_tokens=200)
+
+        assert result == "Summary"
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        # max_tokens override should take precedence
+        assert call_kwargs["max_output_tokens"] == 200
