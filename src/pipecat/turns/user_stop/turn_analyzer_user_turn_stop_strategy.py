@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
@@ -88,11 +89,14 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame to update the turn analyzer and strategy state.
 
         Args:
             frame: The frame to be analyzed.
+
+        Returns:
+            Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         await super().process_frame(frame)
 
@@ -108,6 +112,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._handle_input_audio(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+
+        return ProcessFrameResult.CONTINUE
 
     async def _start(self, frame: StartFrame):
         """Process the start frame to configure the turn analyzer."""

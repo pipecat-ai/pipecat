@@ -447,6 +447,9 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_controller.add_event_handler(
             "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
         )
+        self._user_turn_controller.add_event_handler(
+            "on_reset_aggregation", self._on_reset_aggregation
+        )
 
         self._user_idle_controller = UserIdleController(
             user_idle_timeout=self._params.user_idle_timeout
@@ -747,6 +750,12 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._maybe_emit_user_turn_stopped(strategy)
+
+    async def _on_reset_aggregation(
+        self, controller: UserTurnController, strategy: BaseUserTurnStartStrategy
+    ):
+        logger.debug(f"{self}: Resetting aggregation (strategy: {strategy})")
+        await self.reset()
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
