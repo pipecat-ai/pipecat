@@ -1527,6 +1527,14 @@ class GeminiLiveLLMService(LLMService):
         if self._disconnecting or not self._session:
             return
 
+        model = self._settings.model or ""
+        if "gemini-3" in model:
+            await self.push_error(
+                f"LLMMessagesAppendFrame is not supported with model '{model}'. "
+                "This model does not support send_client_content."
+            )
+            return
+
         # Create a throwaway context just for the purpose of getting messages
         # in the right format
         context = LLMContext(messages=messages_list)
