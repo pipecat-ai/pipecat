@@ -607,13 +607,12 @@ class RTVIProcessor(FrameProcessor):
                 file_path = os.path.join(self._folder, file.source.id.removeprefix("pipecat:"))
                 with open(file_path, "rb") as f:
                     raw_bytes = f.read()
-                    encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
-                    source = f"data:{file.format};base64,{encoded_image}"
+                    encoded_file = base64.b64encode(raw_bytes).decode("utf-8")
+                    source = f"data:{file.format};base64,{encoded_file}"
                 try:
                     os.remove(file_path)
                 except OSError as e:
                     logger.warning(f"Failed to remove uploaded file {file_path}: {e}")
-                source = file.source.id
             case _:
                 logger.warning(f"Unsupported file source type: {type}")
                 return

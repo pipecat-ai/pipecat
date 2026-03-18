@@ -618,6 +618,7 @@ class BaseOpenAILLMService(LLMService):
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
             except Exception as e:
                 await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
+                context.maybe_remove_invalid_message(e)
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())

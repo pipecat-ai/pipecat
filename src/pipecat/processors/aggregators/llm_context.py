@@ -414,9 +414,8 @@ class LLMContext:
         bytes = file
         is_image = format.startswith("image/")
         if not is_image and format != "application/pdf":
-            # TODO how to send error back?
             logger.warning(f"Unsupported file format for LLM context: {format}")
-            return
+            raise ValueError(f"Unsupported file format for LLM context: {format}")
         if type == "url":
             async with aiohttp.ClientSession() as session:
                 async with session.get(file) as response:
@@ -466,6 +465,33 @@ class LLMContext:
         """
         message = await LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
         self.add_message(message)
+
+    def maybe_remove_invalid_message(self, exception: Exception):
+        """Remove messages from context if an exception indicates they were invalid.
+
+        This is a best-effort method to handle cases where an LLM service returns
+        an error indicating that a particular message in the context was invalid
+        (e.g., due to unsupported content). The method inspects the exception,
+        and if it can identify a specific message that caused the issue, it removes
+        that message from the context.
+
+        Args:
+            exception: The exception raised during LLM processing, which may contain
+                information about invalid messages.
+        """
+        # Check for OpenAI-specific error indicating an invalid file message, and remove it if found.
+        if exception.type == "invalid_request_error" and exception.param == "file_id":
+            for i in range(len(self._messages) - 1, -1, -1):
+                message = self._messages[i]
+                content = message.get("content", [])
+                if isinstance(content, list) and any(
+                    item.get("type") == "file" for item in content
+                ):
+                    logger.warning(
+                        "Removing message with file content from context due to invalid response."
+                    )
+                    self._messages.pop(i)
+                    break
 
     @staticmethod
     def _normalize_and_validate_tools(tools: ToolsSchema | NotGiven) -> ToolsSchema | NotGiven:

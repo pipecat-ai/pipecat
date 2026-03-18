@@ -217,6 +217,9 @@ def _create_server_app(args: argparse.Namespace):
     else:
         logger.warning(f"Unknown transport type: {args.transport}")
 
+    if args.uploads_folder:
+        _setup_file_uploads_route(app, args)
+
     return app
 
 
@@ -283,37 +286,6 @@ def _setup_webrtc_routes(app: FastAPI, args: argparse.Namespace):
         media_type, _ = mimetypes.guess_type(file_path)
 
         return FileResponse(path=file_path, media_type=media_type, filename=safe_name)
-
-    @app.post("/files")
-    async def upload_file(file: UploadFile = File(...)):
-        """Handle file uploads from clients. Requires --uploads-folder to be set."""
-        if not args.uploads_folder:
-            raise HTTPException(
-                503,
-                "File upload is disabled: start the runner with -u/--uploads-folder to set the uploads directory.",
-            )
-        folder = Path(args.uploads_folder)
-        folder.mkdir(parents=True, exist_ok=True)
-        # Always save as UUID so uploads are not discoverable by guessing filenames
-        safe_name = uuid.uuid4().hex
-        file_path = folder / safe_name
-        try:
-            contents = await file.read()
-            file_path.write_bytes(contents)
-            logger.debug(f"Uploaded file to {file_path}")
-        except OSError as e:
-            logger.error(f"Failed to save upload: {e}")
-            raise HTTPException(500, "Failed to save file") from e
-        _trim_uploads_folder(folder, args.uploads_folder_max_files)
-        # Use original filename only for format/mime in response
-        original_name = Path(file.filename or "").name
-        media_type, _ = mimetypes.guess_type(original_name, strict=False)
-        # Return the file as a URL that can be used in the client, matching the format of RTVIFile
-        return {
-            "name": original_name,
-            "source": {"type": "id", "id": f"pipecat:{safe_name}"},
-            "format": media_type,
-        }
 
     # Initialize the SmallWebRTC request handler
     small_webrtc_handler: SmallWebRTCRequestHandler = SmallWebRTCRequestHandler(
@@ -867,6 +839,39 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
     async def start_agent():
         """Simple status endpoint for telephony transports."""
         return {"status": f"Bot started with {args.transport}"}
+
+
+def _setup_file_uploads_route(app: FastAPI, args: argparse.Namespace):
+    @app.post("/files")
+    async def upload_file(file: UploadFile = File(...)):
+        """Handle file uploads from clients. Requires --uploads-folder to be set."""
+        if not args.uploads_folder:
+            raise HTTPException(
+                503,
+                "File upload is disabled: start the runner with -u/--uploads-folder to set the uploads directory.",
+            )
+        folder = Path(args.uploads_folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        # Always save as UUID so uploads are not discoverable by guessing filenames
+        safe_name = uuid.uuid4().hex
+        file_path = folder / safe_name
+        try:
+            contents = await file.read()
+            file_path.write_bytes(contents)
+            logger.debug(f"Uploaded file to {file_path}")
+        except OSError as e:
+            logger.error(f"Failed to save upload: {e}")
+            raise HTTPException(500, "Failed to save file") from e
+        _trim_uploads_folder(folder, args.uploads_folder_max_files)
+        # Use original filename only for format/mime in response
+        original_name = Path(file.filename or "").name
+        media_type, _ = mimetypes.guess_type(original_name, strict=False)
+        # Return the file as a URL that can be used in the client, matching the format of RTVIFile
+        return {
+            "name": original_name,
+            "source": {"type": "id", "id": f"pipecat:{safe_name}"},
+            "format": media_type,
+        }
 
 
 async def _run_daily_direct(args: argparse.Namespace):

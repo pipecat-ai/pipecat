@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
 )
 
 # -- Constants --
-RTVI_PROTOCOL_VERSION = "1.3.0"
+PROTOCOL_VERSION = "1.3.0"
 
 MESSAGE_LABEL = "rtvi-ai"
 MessageLiteral = Literal["rtvi-ai"]
