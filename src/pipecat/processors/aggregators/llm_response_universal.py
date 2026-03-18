@@ -76,6 +76,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
 )
 from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings
+from pipecat.turns.user_filter import BaseUserFrameFilter
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
@@ -98,6 +99,10 @@ class LLMUserAggregatorParams:
     Parameters:
         user_turn_strategies: User turn start and stop strategies.
         user_mute_strategies: List of user mute strategies.
+        user_frame_filters: List of user frame filters. Filters run after mute
+            check and before VAD processing. Each filter's ``process_frame``
+            returns True (pass) or False (block). If any filter blocks, the
+            frame is dropped.
         user_turn_stop_timeout: Time in seconds to wait before considering the
             user's turn finished.
         user_idle_timeout: Timeout in seconds for detecting user idle state.
@@ -116,6 +121,7 @@ class LLMUserAggregatorParams:
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
+    user_frame_filters: List[BaseUserFrameFilter] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
     vad_analyzer: Optional[VADAnalyzer] = None
@@ -426,6 +432,8 @@ class LLMUserAggregator(LLMContextAggregator):
         self._register_event_handler("on_user_turn_idle")
         self._register_event_handler("on_user_mute_started")
         self._register_event_handler("on_user_mute_stopped")
+        self._register_event_handler("on_user_frame_filter_started")
+        self._register_event_handler("on_user_frame_filter_stopped")
 
         user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
 
@@ -485,6 +493,9 @@ class LLMUserAggregator(LLMContextAggregator):
         await super().process_frame(frame, direction)
 
         if await self._maybe_mute_frame(frame):
+            return
+
+        if await self._maybe_filter_frame(frame):
             return
 
         if self._vad_controller:
@@ -554,6 +565,9 @@ class LLMUserAggregator(LLMContextAggregator):
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
 
+        for f in self._params.user_frame_filters:
+            await f.setup(self.task_manager)
+
         # Enable incomplete turn filtering on the LLM if configured
         if self._params.filter_incomplete_user_turns:
             # Get config or use defaults
@@ -583,6 +597,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         for s in self._params.user_mute_strategies:
             await s.cleanup()
+
+        for f in self._params.user_frame_filters:
+            await f.cleanup()
 
     async def _maybe_mute_frame(self, frame: Frame):
         # Lifecycle frames should never be muted and should not trigger mute
@@ -626,6 +643,35 @@ class LLMUserAggregator(LLMContextAggregator):
                 await self.broadcast_frame(UserMuteStoppedFrame)
 
         return should_mute_frame
+
+    async def _maybe_filter_frame(self, frame: Frame) -> bool:
+        """Check if the frame should be filtered by any user frame filter.
+
+        Lifecycle frames are never filtered. All filters see every frame so
+        they can maintain internal state, but if any filter returns False
+        (block) the frame is dropped.
+
+        Args:
+            frame: The frame to check.
+
+        Returns:
+            True if the frame should be filtered (dropped), False otherwise.
+        """
+        if not self._params.user_frame_filters:
+            return False
+
+        if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
+            return False
+
+        should_filter = False
+        for f in self._params.user_frame_filters:
+            if not await f.process_frame(frame):
+                should_filter = True
+
+        if should_filter:
+            logger.trace(f"{frame.name} suppressed - blocked by user frame filter")
+
+        return should_filter
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame()
@@ -747,6 +793,10 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._maybe_emit_user_turn_stopped(strategy)
+
+        # Reset filters after turn stop (for single_activation mode).
+        for f in self._params.user_frame_filters:
+            await f.reset()
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")

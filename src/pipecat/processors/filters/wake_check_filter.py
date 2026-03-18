@@ -6,6 +6,11 @@
 
 """Wake phrase detection filter for Pipecat transcription processing.
 
+.. deprecated::
+    Use :class:`~pipecat.turns.user_filter.WakePhraseUserFrameFilter` instead.
+    ``WakePhraseUserFrameFilter`` runs inside the aggregator and blocks both
+    transcriptions and VAD events, providing more reliable wake phrase gating.
+
 This module provides a frame processor that filters transcription frames,
 only allowing them through after wake phrases have been detected. Includes
 keepalive functionality to maintain conversation flow after wake detection.
@@ -13,6 +18,7 @@ keepalive functionality to maintain conversation flow after wake detection.
 
 import re
 import time
+import warnings
 from enum import Enum
 from typing import List
 
@@ -24,6 +30,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 class WakeCheckFilter(FrameProcessor):
     """Frame processor that filters transcription frames based on wake phrase detection.
+
+    .. deprecated::
+        Use :class:`~pipecat.turns.user_filter.WakePhraseUserFrameFilter` instead.
 
     This filter monitors transcription frames for configured wake phrases and only
     passes frames through after a wake phrase has been detected. Maintains a
@@ -71,6 +80,13 @@ class WakeCheckFilter(FrameProcessor):
                 wake detection. Defaults to 3 seconds.
         """
         super().__init__()
+        warnings.warn(
+            "WakeCheckFilter is deprecated. Use WakePhraseUserFrameFilter from "
+            "pipecat.turns.user_filter instead, which runs inside the aggregator "
+            "and blocks both transcriptions and VAD events.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._participant_states = {}
         self._keepalive_timeout = keepalive_timeout
         self._wake_patterns = []
