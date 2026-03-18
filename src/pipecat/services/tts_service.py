@@ -720,17 +720,17 @@ class TTSService(AIService):
             self._turn_context_id = self.create_context_id()
             await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
-            # We pause processing incoming frames if the LLM response included
-            # text (it might be that it's only a function calling response). We
-            # pause to avoid audio overlapping.
-            await self._maybe_pause_frame_processing()
-
             # Flush any remaining text (including text waiting for lookahead)
             remaining = await self._text_aggregator.flush()
             # Stop the aggregation metric (no-op if already stopped on first sentence).
             await self.stop_text_aggregation_metrics()
             if remaining:
                 await self._push_tts_frames(AggregatedTextFrame(remaining.text, remaining.type))
+
+            # We pause processing incoming frames if the LLM response included
+            # text (it might be that it's only a function calling response). We
+            # pause to avoid audio overlapping.
+            await self._maybe_pause_frame_processing()
 
             # Log accumulated streamed text and emit aggregated usage metric.
             if self._streamed_text:
