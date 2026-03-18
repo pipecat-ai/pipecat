@@ -67,11 +67,9 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking(frame)
         elif isinstance(frame, TranscriptionFrame):
-            if await self._handle_transcription(frame):
-                return ProcessFrameResult.STOP
+            return await self._handle_transcription(frame)
         elif isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
-            if await self._handle_transcription(frame):
-                return ProcessFrameResult.STOP
+            return await self._handle_transcription(frame)
 
         return ProcessFrameResult.CONTINUE
 
@@ -97,14 +95,14 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
     async def _handle_transcription(
         self, frame: TranscriptionFrame | InterimTranscriptionFrame
-    ) -> bool:
-        """Handle a completed transcription frame and check word count.
+    ) -> ProcessFrameResult:
+        """Handle a transcription frame and check word count.
 
         Args:
             frame: The transcription frame to be processed.
 
         Returns:
-            True if the user turn was triggered, False otherwise.
+            STOP if the minimum word count was reached, CONTINUE otherwise.
         """
         min_words = self._min_words if self._bot_speaking else 1
 
@@ -119,6 +117,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         if should_trigger:
             await self.trigger_user_turn_started()
-            return True
+            return ProcessFrameResult.STOP
+        await self.trigger_reset_aggregation()
 
-        return False
+        return ProcessFrameResult.CONTINUE
