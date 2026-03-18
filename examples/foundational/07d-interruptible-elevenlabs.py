@@ -5,13 +5,19 @@
 #
 
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMRunFrame,
+    TextFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -102,6 +108,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
+        # Rapid consecutive assistant turns to try to force the ElevenLabs maximum context limit exceeded error.
+        #for idx in range(1, int(10) + 1):
+        #    await task.queue_frames(
+        #        [
+        #            LLMFullResponseStartFrame(),
+        #            TextFrame(f"✓ [{idx}] test"),
+        #            LLMFullResponseEndFrame(),
+        #        ],
+        #    )
+        #    await asyncio.sleep(0)
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
