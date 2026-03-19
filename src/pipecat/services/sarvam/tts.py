@@ -1156,9 +1156,7 @@ class SarvamTTSService(InterruptibleTTSService):
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
-                    frame = TTSAudioRawFrame(
-                        audio, self.sample_rate, 1, context_id=context_id
-                    )
+                    frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
                     await self.append_to_audio_context(context_id, frame)
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
@@ -1167,7 +1165,9 @@ class SarvamTTSService(InterruptibleTTSService):
                     # If it's a timeout error, the connection might need to be reset
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
-                    await self.append_to_audio_context(context_id, ErrorFrame(error=f"TTS Error: {error_msg}"))
+                    await self.append_to_audio_context(
+                        context_id, ErrorFrame(error=f"TTS Error: {error_msg}")
+                    )
 
     async def _keepalive_task_handler(self):
         """Handle keepalive messages to maintain WebSocket connection."""
