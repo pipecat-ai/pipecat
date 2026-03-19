@@ -180,7 +180,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
             text_aggregation_mode=text_aggregation_mode,
             push_stop_frames=True,
             push_start_frame=True,
-            stop_frame_timeout_s=2.0,
             sample_rate=sample_rate,
             settings=default_settings,
             **kwargs,
