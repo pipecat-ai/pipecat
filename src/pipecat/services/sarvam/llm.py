@@ -23,7 +23,7 @@ from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import _NotGiven, _warn_deprecated_param, is_given
+from pipecat.services.settings import _NotGiven, is_given
 
 _T = TypeVar("_T")
 
@@ -60,15 +60,14 @@ class SarvamLLMService(OpenAILLMService):
     )
     _TOOL_CALLING_MODELS = _SUPPORTED_MODELS
     Settings = SarvamLLMSettings
-    _settings: SarvamLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
         base_url: str = "https://api.sarvam.ai/v1",
-        model: Optional[str] = None,
-        settings: Optional[SarvamLLMSettings] = None,
+        settings: Optional[Settings] = None,
         default_headers: Optional[Mapping[str, str]] = None,
         **kwargs,
     ):
@@ -77,36 +76,16 @@ class SarvamLLMService(OpenAILLMService):
         Args:
             api_key: Sarvam API key used for both OpenAI auth and Sarvam subscription header.
             base_url: Sarvam OpenAI-compatible base URL.
-            model: Sarvam model identifier. Supported values: ``sarvam-30b``,
-                ``sarvam-30b-16k``, ``sarvam-105b``, ``sarvam-105b-32k``.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=SarvamLLMSettings(model=...)`` instead.
-
-            settings: Runtime-updatable settings. When provided alongside deprecated
-                parameters, ``settings`` values take precedence.
+            settings: Runtime-updatable settings.
             default_headers: Additional HTTP headers to include in requests.
             **kwargs: Additional keyword arguments passed to ``OpenAILLMService``.
         """
-        # 1. Initialize default_settings with hardcoded defaults
-        default_settings = SarvamLLMSettings(model="sarvam-30b")
+        # Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(model="sarvam-30b")
 
-        # 2. Apply direct init arg overrides (deprecated)
-        if model is not None:
-            # Keep deprecated init arg for backward compatibility while steering callers
-            # to settings=SarvamLLMService.Settings(model=...).
-            _warn_deprecated_param("model", SarvamLLMSettings, "model")
-            default_settings.model = model
-
-        # 3. Apply settings delta (canonical API, always wins)
+        # Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
-
-        # BaseOpenAILLMService currently stores settings as OpenAILLMSettings.
-        # Preserve Sarvam-only runtime knobs in ``extra`` so they survive
-        # initialization and future update frames.
-        default_settings.extra = dict(default_settings.extra)
-        default_settings.extra.update(self._extract_sarvam_extra_from_settings(default_settings))
 
         self._validate_model(default_settings.model)
 
@@ -160,25 +139,15 @@ class SarvamLLMService(OpenAILLMService):
         params.pop("max_completion_tokens", None)
         params.pop("service_tier", None)
 
-        # Sarvam-only fields are bridged through settings.extra (see __init__ and _update_settings).
-        extra = self._settings.extra if isinstance(self._settings.extra, dict) else {}
-        if "wiki_grounding" in extra and extra["wiki_grounding"] is not None:
-            params["wiki_grounding"] = extra["wiki_grounding"]
-        if "reasoning_effort" in extra and extra["reasoning_effort"] is not None:
-            params["reasoning_effort"] = extra["reasoning_effort"]
+        if is_given(self._settings.wiki_grounding) and self._settings.wiki_grounding is not None:
+            params["wiki_grounding"] = self._settings.wiki_grounding
+        if (
+            is_given(self._settings.reasoning_effort)
+            and self._settings.reasoning_effort is not None
+        ):
+            params["reasoning_effort"] = self._settings.reasoning_effort
 
         return params
-
-    async def _update_settings(self, delta: OpenAILLMSettings) -> dict[str, Any]:
-        """Apply settings updates, preserving Sarvam-specific runtime knobs."""
-        # LLMUpdateSettingsFrame commonly carries OpenAILLMSettings deltas.
-        # Lift Sarvam-only fields into delta.extra before delegating to base.
-        sarvam_extra = self._extract_sarvam_extra_from_settings(delta)
-        if sarvam_extra:
-            delta.extra = dict(delta.extra)
-            delta.extra.update(sarvam_extra)
-
-        return await super()._update_settings(delta)
 
     async def _call_with_raw_sarvam_errors(self, awaitable: Awaitable[_T]) -> _T:
         """Await an OpenAI call while preserving Sarvam raw error payloads.
@@ -222,18 +191,6 @@ class SarvamLLMService(OpenAILLMService):
         if model not in self._SUPPORTED_MODELS:
             allowed = ", ".join(sorted(self._SUPPORTED_MODELS))
             raise ValueError(f"Unsupported Sarvam LLM model '{model}'. Allowed values: {allowed}.")
-
-    def _extract_sarvam_extra_from_settings(self, settings_obj: Any) -> dict[str, Any]:
-        updates: dict[str, Any] = {}
-        wiki_grounding = getattr(settings_obj, "wiki_grounding", _NOT_GIVEN)
-        if is_given(wiki_grounding):
-            updates["wiki_grounding"] = wiki_grounding
-
-        reasoning_effort = getattr(settings_obj, "reasoning_effort", _NOT_GIVEN)
-        if is_given(reasoning_effort):
-            updates["reasoning_effort"] = reasoning_effort
-
-        return updates
 
     def _validate_tool_parameters(self, params_from_context: OpenAILLMInvocationParams):
         tools = params_from_context.get("tools", NOT_GIVEN)
