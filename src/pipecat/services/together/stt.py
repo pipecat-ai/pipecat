@@ -296,7 +296,7 @@ class TogetherSTTService(WebsocketSTTService):
         Args:
             evt: The delta event from the server.
         """
-        delta = evt.get("transcript", "")
+        delta = evt.get("delta", "")
         if delta.strip():
             await self.push_frame(
                 InterimTranscriptionFrame(
@@ -321,6 +321,7 @@ class TogetherSTTService(WebsocketSTTService):
                     self._user_id,
                     time_now_iso8601(),
                     result=evt,
+                    finalized=True,
                 )
             )
             await self._handle_transcription_trace(transcript, True, self._settings.language)
