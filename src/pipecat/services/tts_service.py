@@ -1006,7 +1006,12 @@ class TTSService(AIService):
         # Route AggregatedTextFrame through the serialization queue so it is emitted
         # immediately before the TTSStartedFrame of the audio context it describes,
         # rather than racing ahead of audio frames from a previous context.
-        await self._serialization_queue.put(src_frame)
+        if not self.audio_context_available(context_id):
+            await self._serialization_queue.put(src_frame)
+        # Otherwise, if the context already exists, we append the AggregatedTextFrame
+        # to the existing context queue.
+        else:
+            await self.append_to_audio_context(context_id, src_frame)
 
         # Note: Text transformations are meant to only affect the text sent to the TTS for
         # TTS-specific purposes. This allows for explicit TTS modifications (e.g., inserting
