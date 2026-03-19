@@ -201,9 +201,8 @@ class UserIdleProcessor(FrameProcessor):
         while running:
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
+                self._idle_event.clear()
             except asyncio.TimeoutError:
                 if not self._interrupted:
                     self._retry_count += 1
                     running = await self._callback(self, self._retry_count)
-            finally:
-                self._idle_event.clear()
