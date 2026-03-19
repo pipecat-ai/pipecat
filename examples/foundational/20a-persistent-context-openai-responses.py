@@ -116,7 +116,7 @@ weather_function = FunctionSchema(
 
 save_conversation_function = FunctionSchema(
     name="save_conversation",
-    description="Save the current conversatione. Use this function to persist the current conversation to external storage.",
+    description="Save the current conversation. Use this function to persist the current conversation to external storage.",
     properties={},
     required=[],
 )
