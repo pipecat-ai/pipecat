@@ -79,7 +79,6 @@ class OpenAIResponsesLLMService(LLMService):
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
         api_key=None,
         base_url=None,
         organization=None,
@@ -92,15 +91,13 @@ class OpenAIResponsesLLMService(LLMService):
         """Initialize the OpenAI Responses API LLM service.
 
         Args:
-            model: The OpenAI model name to use. Defaults to "gpt-4.1".
             api_key: OpenAI API key. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
             organization: OpenAI organization ID.
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             service_tier: Service tier to use (e.g., "auto", "flex", "priority").
-            settings: Runtime-updatable settings. When provided alongside
-                other parameters, ``settings`` values take precedence.
+            settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         default_settings = self.Settings(
@@ -118,9 +115,6 @@ class OpenAIResponsesLLMService(LLMService):
             user_turn_completion_config=None,
             extra={},
         )
-
-        if model is not None:
-            default_settings.model = model
 
         if settings is not None:
             default_settings.apply_update(settings)
