@@ -385,10 +385,6 @@ class OpenAIResponsesLLMService(LLMService):
         # Override for non-streaming
         params["stream"] = False
 
-        # Override instructions if caller provided one explicitly
-        if system_instruction is not None:
-            params["instructions"] = system_instruction
-
         if max_tokens is not None:
             params["max_output_tokens"] = max_tokens
 
