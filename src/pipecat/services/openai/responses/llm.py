@@ -287,6 +287,8 @@ class OpenAIResponsesLLMService(LLMService):
                             prompt_tokens=response.usage.input_tokens,
                             completion_tokens=response.usage.output_tokens,
                             total_tokens=response.usage.total_tokens,
+                            cache_read_input_tokens=response.usage.input_tokens_details.cached_tokens,
+                            reasoning_tokens=response.usage.output_tokens_details.reasoning_tokens,
                         )
                         await self.start_llm_usage_metrics(tokens)
 
