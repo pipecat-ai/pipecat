@@ -238,6 +238,9 @@ async def _run_telephony_bot(websocket: WebSocket):
     core.services.bot_runner_service, then invokes the bot with pre-parsed
     call_data and agent in runner_args.body. If the service is unavailable,
     falls back to calling the bot directly (bot will parse the websocket).
+
+    When USE_SUBPROCESS_BOT=true, spawns the bot in a separate OS process
+    for fault isolation and proxies WebSocket frames to it.
     """
     bot_module = _get_bot_module()
 
@@ -252,8 +255,10 @@ async def _run_telephony_bot(websocket: WebSocket):
 
     body = {}
     if get_db_context is not None and BotRunnerService is not None:
+        print("into try block in _run_telephony_bot function")
         try:
             with get_db_context() as db:
+                print("into with block in _run_telephony_bot function")
                 agent, transport_type, call_data = await BotRunnerService(
                     db
                 ).get_bot_for_incoming_call(websocket)
@@ -262,6 +267,31 @@ async def _run_telephony_bot(websocket: WebSocket):
             print("transport_type in run.py file ===========", transport_type)
             print("agent_id in run.py file ===========", agent.id if agent else None)
             print("agent in run.py file before return ===========", agent.id)
+
+            # Check if subprocess mode is enabled
+            print("use_subprocess", os.environ.get("USE_SUBPROCESS_BOT", "false").lower())
+            use_subprocess = os.environ.get("USE_SUBPROCESS_BOT", "false").lower() == "true"
+            print("into use_subprocess")
+            if use_subprocess and agent is not None:
+                print("into if block in use_subprocess")
+                logger.info(
+                    "Subprocess mode enabled — launching bot worker for agent_id=%s",
+                    agent.id,
+                )
+                try:
+                    from core.services.subprocess_bot_manager import SubprocessBotManager
+
+                    await SubprocessBotManager.launch(
+                        websocket=websocket,
+                        agent_id=str(agent.id),
+                        transport_type=transport_type,
+                        call_data=call_data,
+                    )
+                    return
+                except Exception as e:
+                    logger.error(
+                        "Subprocess bot launch failed, falling back to in-process: %s", e
+                    )
 
             body = {
                 "call_data": call_data,
