@@ -230,14 +230,22 @@ class OpenAIResponsesLLMService(LLMService):
         function_calls: Dict[str, Dict[str, str]] = {}  # item_id -> {name, call_id, arguments}
         current_arguments: Dict[str, str] = {}  # item_id -> accumulated arguments
 
+        # Ensure stream and its async iterator are closed on cancellation/exception
+        # to prevent socket leaks and uvloop crashes. Closing the iterator first
+        # cascades cleanup through nested async generators (httpx/httpcore internals),
+        # preventing uvloop's broken asyncgen finalizer from firing on Python 3.12+
+        # (MagicStack/uvloop#699).
         @asynccontextmanager
         async def _closing(stream):
             chunk_iter = stream.__aiter__()
             try:
                 yield chunk_iter
             finally:
+                # Close the iterator first to cascade cleanup through
+                # nested async generators (httpx/httpcore internals).
                 if hasattr(chunk_iter, "aclose"):
                     await chunk_iter.aclose()
+                # Then close the stream to release HTTP resources.
                 if hasattr(stream, "close"):
                     await stream.close()
                 elif hasattr(stream, "aclose"):
