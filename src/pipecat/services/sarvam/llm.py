@@ -81,7 +81,11 @@ class SarvamLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to ``OpenAILLMService``.
         """
         # Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="sarvam-30b")
+        default_settings = self.Settings(
+            model="sarvam-30b",
+            wiki_grounding=None,
+            reasoning_effort=None,
+        )
 
         # Apply settings delta (canonical API, always wins)
         if settings is not None:
