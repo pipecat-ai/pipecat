@@ -51,8 +51,10 @@ def _get_model_name(service) -> str:
     check all the places we used to store it.
     """
     return (
-        getattr(getattr(service, "_settings", None), "model", None)
-        or getattr(service, "_full_model_name", None)
+        # Some services store an API-response-provided detailed "full" name,
+        # which is distinct from the user-provided model name
+        getattr(service, "_full_model_name", None)
+        or getattr(getattr(service, "_settings", None), "model", None)
         or getattr(service, "model_name", None)
         or getattr(service, "_model_name", None)
         or "unknown"
