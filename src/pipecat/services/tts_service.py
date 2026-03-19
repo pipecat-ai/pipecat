@@ -1060,11 +1060,8 @@ class TTSService(AIService):
             # Only override append_to_context if explicitly set
             if append_tts_text_to_context is not None:
                 frame.append_to_context = append_tts_text_to_context
-            # For services using the audio context we are appending to the context, so it preserves the ordering.
-            if self.audio_context_available(context_id):
-                await self.append_to_audio_context(context_id, frame)
-            else:
-                await self.push_frame(frame)
+            # Appending to the context, so it preserves the ordering.
+            await self.append_to_audio_context(context_id, frame)
 
     async def tts_process_generator(
         self, context_id: str, generator: AsyncGenerator[Frame | None, None]
