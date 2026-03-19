@@ -246,6 +246,9 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                     }
                 )
             else:
-                # Pass through unknown types as-is
+                # Pass through other types as-is. Note: "input_audio" is not
+                # yet supported by the Responses API (coming soon per OpenAI
+                # docs) but the LLMContext format already matches the expected
+                # shape, so it should work once support is enabled.
                 result.append(part)
         return result
