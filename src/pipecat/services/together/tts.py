@@ -225,20 +225,17 @@ class TogetherTTSService(WebsocketTTSService):
         Args:
             message: The message dict to serialize and send.
         """
-        try:
-            if not self._disconnecting and self._websocket:
-                await self._websocket.send(json.dumps(message))
-        except Exception as e:
-            if self._disconnecting or not self._websocket:
-                return
-            await self.push_error(
-                error_msg=f"Error sending message: {e}",
-                exception=e,
-            )
+        if not self._disconnecting:
+            await self.send_with_retry(json.dumps(message), self._report_error)
 
-    async def flush_audio(self):
-        """Flush any pending audio and finalize the current context."""
-        logger.trace(f"{self}: flushing audio")
+    async def flush_audio(self, context_id: Optional[str] = None):
+        """Flush any pending audio and finalize the current context.
+
+        Args:
+            context_id: Pipecat TTS context (unused for Together; required for
+                compatibility with :meth:`TTSService.on_turn_context_completed`).
+        """
+        logger.trace(f"{self}: flushing audio (context_id={context_id})")
         await self._ws_send({"type": "input_text_buffer.commit"})
 
     # ------------------------------------------------------------------
@@ -252,7 +249,9 @@ class TogetherTTSService(WebsocketTTSService):
         this method with automatic reconnection on connection errors.
         """
         async for message in self._websocket:
-            if not isinstance(message, str):
+            if isinstance(message, bytes):
+                message = message.decode("utf-8")
+            elif not isinstance(message, str):
                 continue
 
             try:
