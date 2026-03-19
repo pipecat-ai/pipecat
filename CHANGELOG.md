@@ -7,6 +7,218 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
+## [0.0.106] - 2026-03-18
+
+### Added
+
+- Added optional `service` field to `ServiceUpdateSettingsFrame` (and its
+  subclasses `LLMUpdateSettingsFrame`, `TTSUpdateSettingsFrame`,
+  `STTUpdateSettingsFrame`) to target a specific service instance. When
+  `service` is set, only the matching service applies the settings; others
+  forward the frame unchanged. This enables updating a single service when
+  multiple services of the same type exist in the pipeline.
+  (PR [#4004](https://github.com/pipecat-ai/pipecat/pull/4004))
+
+- Added `sip_provider` and `room_geo` parameters to `configure()` in the Daily
+  runner. These convenience parameters let callers specify a SIP provider name
+  and geographic region directly without manually constructing
+  `DailyRoomProperties` and `DailyRoomSipParams`.
+  (PR [#4005](https://github.com/pipecat-ai/pipecat/pull/4005))
+
+- Added `PerplexityLLMAdapter` that automatically transforms conversation
+  messages to satisfy Perplexity's stricter API constraints (strict role
+  alternation, no non-initial system messages, last message must be user/tool).
+  Previously, certain conversation histories could cause Perplexity API errors
+  that didn't occur with OpenAI (`PerplexityLLMService` subclasses
+  `OpenAILLMService` since Perplexity uses an OpenAI-compatible API).
+  (PR [#4009](https://github.com/pipecat-ai/pipecat/pull/4009))
+
+- Added DTMF input event support to the Daily transport. Incoming DTMF tones
+  are now received via Daily's `on_dtmf_event` callback and pushed into the
+  pipeline as `InputDTMFFrame`, enabling bots to react to keypad presses from
+  phone callers.
+  (PR [#4047](https://github.com/pipecat-ai/pipecat/pull/4047))
+
+- Added `WakePhraseUserTurnStartStrategy` for triggering user turns based on
+  wake phrases, with support for `single_activation` mode. Deprecates
+  `WakeCheckFilter`.
+  (PR [#4064](https://github.com/pipecat-ai/pipecat/pull/4064))
+
+- Added `default_user_turn_start_strategies()` and
+  `default_user_turn_stop_strategies()` helper functions for composing custom
+  strategy lists.
+  (PR [#4064](https://github.com/pipecat-ai/pipecat/pull/4064))
+
+### Changed
+
+- Changed tool result JSON serialization to use `ensure_ascii=False`,
+  preserving UTF-8 characters instead of escaping them. This reduces context
+  size and token usage for non-English languages.
+  (PR [#3457](https://github.com/pipecat-ai/pipecat/pull/3457))
+
+- `OpenAIRealtimeSTTService`'s `noise_reduction` parameter is now part of
+  `OpenAIRealtimeSTTSettings`, making it runtime-updatable via
+  `STTUpdateSettingsFrame`. The direct `noise_reduction` init argument is
+  deprecated as of 0.0.106.
+  (PR [#3991](https://github.com/pipecat-ai/pipecat/pull/3991))
+
+- Updated `sarvamai` dependency from `0.1.26a2` (alpha) to `0.1.26` (stable
+  release).
+  (PR [#3997](https://github.com/pipecat-ai/pipecat/pull/3997))
+
+- `SimliVideoService` now extends `AIService` instead of `FrameProcessor`,
+  aligning it with the HeyGen and Tavus video services. It supports
+  `SimliVideoService.Settings(...)` for configuration and uses
+  `start()`/`stop()`/`cancel()` lifecycle methods. Existing constructor usage
+  (`api_key`, `face_id`, etc.) remains unchanged.
+  (PR [#4001](https://github.com/pipecat-ai/pipecat/pull/4001))
+
+- Update `pipecat-ai-small-webrtc-prebuilt` to `2.4.0`.
+  (PR [#4023](https://github.com/pipecat-ai/pipecat/pull/4023))
+
+- Nova Sonic assistant text transcripts are now delivered in real-time using
+  speculative text events instead of delayed final text events. Previously,
+  assistant text only arrived after all audio had finished playing, causing
+  laggy transcripts in client UIs. Speculative text arrives before each audio
+  chunk, providing text synchronized with what the bot is saying. This also
+  simplifies the internal text handling by removing the interruption re-push
+  hack and assistant text buffer.
+  (PR [#4042](https://github.com/pipecat-ai/pipecat/pull/4042))
+
+- Updated `daily-python` dependency to 0.25.0.
+  (PR [#4047](https://github.com/pipecat-ai/pipecat/pull/4047))
+
+- Added `enable_dialout` parameter to `configure()` in `pipecat.runner.daily`
+  to support dial-out rooms. Also narrowed misleading `Optional` type hints and
+  deduplicated token expiry calculation.
+  (PR [#4048](https://github.com/pipecat-ai/pipecat/pull/4048))
+
+- Extended `ProcessFrameResult` to stop strategies, allowing a stop strategy to
+  short-circuit evaluation of subsequent strategies by returning `STOP`.
+  (PR [#4064](https://github.com/pipecat-ai/pipecat/pull/4064))
+
+- `GradiumSTTService` now takes both an `encoding` and `sample_rate`
+  constructor argument which is assmebled in the class to form the
+  `input_format`. PCM accepts `8000`, `16000`, and `24000` Hz sample rates.
+  (PR [#4066](https://github.com/pipecat-ai/pipecat/pull/4066))
+
+- Improved `GradiumSTTService` transcription accuracy by reworking how text
+  fragments are accumulated and finalized. Previously, trailing words could be
+  dropped when the server's `flushed` response arrived before all text tokens
+  were delivered. The service now uses a short aggregation delay after flush to
+  capture trailing tokens, producing complete utterances.
+  (PR [#4066](https://github.com/pipecat-ai/pipecat/pull/4066))
+
+### Deprecated
+
+- `SimliVideoService.InputParams` is deprecated. Use the direct constructor
+  parameters `max_session_length`, `max_idle_time`, and `enable_logging`
+  instead.
+  (PR [#4001](https://github.com/pipecat-ai/pipecat/pull/4001))
+
+- Deprecated `LocalSmartTurnAnalyzerV2` and `LocalCoreMLSmartTurnAnalyzer`. Use
+  `LocalSmartTurnAnalyzerV3` instead. Instantiating these analyzers will now
+  emit a `DeprecationWarning`.
+  (PR [#4012](https://github.com/pipecat-ai/pipecat/pull/4012))
+
+- Deprecated `WakeCheckFilter` in favor of `WakePhraseUserTurnStartStrategy`.
+  (PR [#4064](https://github.com/pipecat-ai/pipecat/pull/4064))
+
+### Fixed
+
+- Fixed an issue where the default model for `OpenAILLMService` and
+  `AzureLLMService` was mistakenly reverted to `gpt-4o`. The defaults are now
+  restored to `gpt-4.1`.
+  (PR [#4000](https://github.com/pipecat-ai/pipecat/pull/4000))
+
+- Fixed a race condition where `EndTaskFrame` could cause the pipeline to shut
+  down before in-flight frames (e.g. LLM function call responses) finished
+  processing. `EndTaskFrame` and `StopTaskFrame` now flow through the pipeline
+  as `ControlFrame`s, ensuring all pending work is flushed before shutdown
+  begins. `CancelTaskFrame` and `InterruptionTaskFrame` remain immediate
+  (`SystemFrame`).
+  (PR [#4006](https://github.com/pipecat-ai/pipecat/pull/4006))
+
+- Fixed `ParallelPipeline` dropping or misordering frames during lifecycle
+  synchronization. Buffered frames are now flushed in the correct order
+  relative to synchronization frames (`StartFrame` goes first,
+  `EndFrame`/`CancelFrame` go after), and frames added to the buffer during
+  flush are also drained.
+  (PR [#4007](https://github.com/pipecat-ai/pipecat/pull/4007))
+
+- Fixed `TTSService` potentially canceling in-flight audio during shutdown. The
+  stop sequence now waits for all queued audio contexts to finish processing
+  before canceling the stop frame task.
+  (PR [#4007](https://github.com/pipecat-ai/pipecat/pull/4007))
+
+- Fixed `Language` enum values (e.g. `Language.ES`) not being converted to
+  service-specific codes when passed via
+  `settings=Service.Settings(language=Language.ES)` at init time. This caused
+  API errors (e.g. 400 from Rime) because the raw enum was sent instead of the
+  expected language code (e.g. `"spa"`). Runtime updates via
+  `UpdateSettingsFrame` were unaffected. The fix centralizes conversion in the
+  base `TTSService` and `STTService` classes so all services handle this
+  consistently.
+  (PR [#4024](https://github.com/pipecat-ai/pipecat/pull/4024))
+
+- Fixed `DeepgramSTTService` ignoring the `base_url` scheme when using `ws://`
+  or `http://`. Previously these were silently overwritten with `wss://` /
+  `https://`, breaking air-gapped or private deployments that don't use TLS.
+  All scheme choices (`wss://`, `https://`, `ws://`, `http://`, or bare
+  hostname) are now respected.
+  (PR [#4026](https://github.com/pipecat-ai/pipecat/pull/4026))
+
+- Fixed `LLMSwitcher.register_function()` and `register_direct_function()` not
+  accepting or forwarding the `timeout_secs` parameter.
+  (PR [#4037](https://github.com/pipecat-ai/pipecat/pull/4037))
+
+- Fixed empty user transcriptions in Nova Sonic causing spurious interruptions.
+  Previously, an empty transcription could trigger an interruption of the
+  assistant's response even though the user hadn't actually spoken.
+  (PR [#4042](https://github.com/pipecat-ai/pipecat/pull/4042))
+
+- Fixed `SonioxSTTService` and `OpenAIRealtimeSTTService` crash when language
+  parameters contain plain strings instead of `Language` enum values.
+  (PR [#4046](https://github.com/pipecat-ai/pipecat/pull/4046))
+
+- Fixed premature user turn stops caused by late transcriptions arriving
+  between turns. A stale transcript from the previous turn could persist into
+  the next turn and trigger a stop before the current turn's real transcript
+  arrived. Stop strategies are now reset at both turn start and turn stop to
+  prevent state from leaking across turn boundaries.
+  (PR [#4057](https://github.com/pipecat-ai/pipecat/pull/4057))
+
+- Fixed raw language strings like `"de-DE"` silently failing when passed to
+  TTS/STT services (e.g. ElevenLabs producing no audio). Raw strings now go
+  through the same `Language` enum resolution as enum values, so regional codes
+  like `"de-DE"` are properly converted to service-expected formats like
+  `"de"`. Unrecognized strings log a warning instead of failing silently.
+  (PR [#4058](https://github.com/pipecat-ai/pipecat/pull/4058))
+
+- Fixed Deepgram STT list-type settings (`keyterm`, `keywords`, `search`,
+  `redact`, `replace`) being stringified instead of passed as lists to the SDK,
+  which caused them to be sent as literal strings (e.g. `"['pipecat']"`) in the
+  WebSocket query params.
+  (PR [#4063](https://github.com/pipecat-ai/pipecat/pull/4063))
+
+- Fixed `MinWordsUserTurnStartStrategy` including text below the word threshold
+  in the output by resetting aggregation when the minimum word count is not
+  met.
+  (PR [#4064](https://github.com/pipecat-ai/pipecat/pull/4064))
+
+- Fixed audio overlap and potential dropped TTS content when multiple assistant
+  turns occur in quick succession. `TTSService` now flushes remaining text
+  before pausing frame processing on `LLMFullResponseEndFrame`/`EndFrame`,
+  instead of pausing first.
+  (PR [#4071](https://github.com/pipecat-ai/pipecat/pull/4071))
+
+### Security
+
+- Bumped PyJWT minimum version from 2.10.1 to 2.12.0 in the `livekit` extra to
+  address CVE-2026-32597 (GHSA-752w-5fwx-jx9f), where PyJWT <= 2.11.0 accepted
+  unknown `crit` header extensions.
+  (PR [#4035](https://github.com/pipecat-ai/pipecat/pull/4035))
+
 ## [0.0.105] - 2026-03-10
 
 ### Added
