@@ -281,13 +281,14 @@ class DeepgramSageMakerTTSService(TTSService):
                         except (UnicodeDecodeError, json.JSONDecodeError):
                             # Not JSON — treat as raw audio bytes
                             await self.stop_ttfb_metrics()
+                            context_id = self.get_active_audio_context_id()
                             frame = TTSAudioRawFrame(
                                 payload,
                                 self.sample_rate,
                                 1,
-                                context_id=self.get_active_audio_context_id(),
+                                context_id=context_id,
                             )
-                            await self.push_frame(frame)
+                            await self.append_to_audio_context(context_id, frame)
 
         except asyncio.CancelledError:
             logger.debug("TTS response processor cancelled")
