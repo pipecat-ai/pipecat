@@ -902,3 +902,36 @@ async def test_openai_responses_run_inference_max_tokens_override():
         assert result == "Summary"
         call_kwargs = service._client.responses.create.call_args.kwargs
         assert call_kwargs["max_output_tokens"] == 200
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_run_inference_system_instruction_param_with_empty_context():
+    """Test that system_instruction param becomes a developer message when context is empty.
+
+    The Responses API rejects requests with instructions but no input items.
+    When run_inference is called with an explicit system_instruction and an
+    empty context, the instruction must become a developer message — not be
+    sent as the instructions parameter.
+    """
+    with patch.object(OpenAIResponsesLLMService, "_create_client"):
+        service = OpenAIResponsesLLMService(
+            settings=OpenAIResponsesLLMService.Settings(model="gpt-4.1"),
+        )
+        service._client = AsyncMock()
+
+        context = LLMContext(messages=[])
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Response"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        result = await service.run_inference(
+            context, system_instruction="Summarize the conversation"
+        )
+
+        assert result == "Response"
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["input"] == [
+            {"role": "developer", "content": "Summarize the conversation"}
+        ]
+        assert "instructions" not in call_kwargs
