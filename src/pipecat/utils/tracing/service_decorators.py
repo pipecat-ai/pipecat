@@ -52,7 +52,6 @@ def _get_model_name(service) -> str:
     """
     return (
         getattr(getattr(service, "_settings", None), "model", None)
-        or getattr(service, "_full_model_name", None)
         or getattr(service, "model_name", None)
         or getattr(service, "_model_name", None)
         or "unknown"
@@ -524,6 +523,10 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 "stream": True,  # Most LLM services use streaming
                                 "parameters": params,
                             }
+
+                            full_model_name = getattr(self, "_full_model_name", None)
+                            if full_model_name:
+                                attribute_kwargs["response_model"] = full_model_name
 
                             # Add optional attributes only if they exist
                             if serialized_messages:
