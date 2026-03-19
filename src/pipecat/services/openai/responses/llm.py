@@ -18,6 +18,7 @@ from openai.types.responses import (
     ResponseCompletedEvent,
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionCallArgumentsDoneEvent,
+    ResponseFunctionToolCall,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
     ResponseStreamEvent,
@@ -251,11 +252,11 @@ class OpenAIResponsesLLMService(LLMService):
                 elif isinstance(event, ResponseOutputItemAddedEvent):
                     await self.stop_ttfb_metrics()
                     item = event.item
-                    if getattr(item, "type", None) == "function_call":
-                        item_id = getattr(item, "id", "") or ""
+                    if isinstance(item, ResponseFunctionToolCall):
+                        item_id = item.id or ""
                         function_calls[item_id] = {
-                            "name": getattr(item, "name", ""),
-                            "call_id": getattr(item, "call_id", ""),
+                            "name": item.name,
+                            "call_id": item.call_id,
                             "arguments": "",
                         }
                         current_arguments[item_id] = ""
@@ -272,29 +273,26 @@ class OpenAIResponsesLLMService(LLMService):
 
                 elif isinstance(event, ResponseOutputItemDoneEvent):
                     item = event.item
-                    if getattr(item, "type", None) == "function_call":
-                        item_id = getattr(item, "id", "") or ""
+                    if isinstance(item, ResponseFunctionToolCall):
+                        item_id = item.id or ""
                         if item_id in function_calls:
-                            function_calls[item_id]["name"] = getattr(item, "name", "")
-                            function_calls[item_id]["call_id"] = getattr(item, "call_id", "")
-                            function_calls[item_id]["arguments"] = getattr(item, "arguments", "")
+                            function_calls[item_id]["name"] = item.name
+                            function_calls[item_id]["call_id"] = item.call_id
+                            function_calls[item_id]["arguments"] = item.arguments
 
                 elif isinstance(event, ResponseCompletedEvent):
                     response = event.response
-                    usage = getattr(response, "usage", None)
-                    if usage:
+                    if response.usage:
                         tokens = LLMTokenUsage(
-                            prompt_tokens=getattr(usage, "input_tokens", 0),
-                            completion_tokens=getattr(usage, "output_tokens", 0),
-                            total_tokens=getattr(usage, "total_tokens", 0),
+                            prompt_tokens=response.usage.input_tokens,
+                            completion_tokens=response.usage.output_tokens,
+                            total_tokens=response.usage.total_tokens,
                         )
                         await self.start_llm_usage_metrics(tokens)
 
-                    model = getattr(response, "model", None)
-                    if model:
-                        # This field is used by @traced_llm for more detailed
-                        # model name in tracing spans
-                        self._full_model_name = model
+                    # This field is used by @traced_llm for more detailed
+                    # model name in tracing spans
+                    self._full_model_name = response.model
 
         # Process any function calls
         if function_calls:
