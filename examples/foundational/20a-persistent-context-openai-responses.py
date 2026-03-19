@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import glob
 import json
 import os
@@ -13,29 +12,30 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai_realtime_beta import (
-    InputAudioTranscription,
-    OpenAIRealtimeBetaLLMService,
-    SessionProperties,
-    TurnDetection,
-)
+from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
+
 
 BASE_FILENAME = "/tmp/pipecat_conversation_"
 
@@ -67,11 +67,11 @@ async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
     logger.debug(
-        f"writing conversation to {filename}\n{json.dumps(params.context.messages, indent=4)}"
+        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages(), indent=4)}"
     )
     try:
         with open(filename, "w") as file:
-            messages = params.context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages()
             # remove the last message, which is the instruction we just gave to save the conversation
             messages.pop()
             json.dump(messages, file, indent=2)
@@ -81,77 +81,73 @@ async def save_conversation(params: FunctionCallParams):
 
 
 async def load_conversation(params: FunctionCallParams):
-    async def _reset():
-        filename = params.arguments["filename"]
-        logger.debug(f"loading conversation from {filename}")
-        try:
-            with open(filename, "r") as file:
-                params.context.set_messages(json.load(file))
-                await params.llm.reset_conversation()
-                await params.llm._create_response()
-        except Exception as e:
-            await params.result_callback({"success": False, "error": str(e)})
+    global tts
+    filename = params.arguments["filename"]
+    logger.debug(f"loading conversation from {filename}")
+    try:
+        with open(filename, "r") as file:
+            params.context.set_messages(json.load(file))
+            logger.debug(
+                f"loaded conversation from {filename}\n{json.dumps(params.context.get_messages(), indent=4)}"
+            )
+        await params.llm.queue_frame(TTSSpeakFrame("Ok, I've loaded that conversation."))
+    except Exception as e:
+        await params.result_callback({"success": False, "error": str(e)})
 
-    asyncio.create_task(_reset())
 
+system_instruction = "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way."
 
-tools = [
-    {
-        "type": "function",
-        "name": "get_current_weather",
-        "description": "Get the current weather",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "The city and state, e.g. San Francisco, CA",
-                },
-                "format": {
-                    "type": "string",
-                    "enum": ["celsius", "fahrenheit"],
-                    "description": "The temperature unit to use. Infer this from the users location.",
-                },
-            },
-            "required": ["location", "format"],
+weather_function = FunctionSchema(
+    name="get_current_weather",
+    description="Get the current weather",
+    properties={
+        "location": {
+            "type": "string",
+            "description": "The city and state, e.g. San Francisco, CA",
+        },
+        "format": {
+            "type": "string",
+            "enum": ["celsius", "fahrenheit"],
+            "description": "The temperature unit to use. Infer this from the users location.",
         },
     },
-    {
-        "type": "function",
-        "name": "save_conversation",
-        "description": "Save the current conversation. Use this function to persist the current conversation to external storage.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
+    required=["location", "format"],
+)
+
+save_conversation_function = FunctionSchema(
+    name="save_conversation",
+    description="Save the current conversation. Use this function to persist the current conversation to external storage.",
+    properties={},
+    required=[],
+)
+
+get_filenames_function = FunctionSchema(
+    name="get_saved_conversation_filenames",
+    description="Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
+    properties={},
+    required=[],
+)
+
+load_conversation_function = FunctionSchema(
+    name="load_conversation",
+    description="Load a conversation history. Use this function to load a conversation history into the current session.",
+    properties={
+        "filename": {
+            "type": "string",
+            "description": "The filename of the conversation history to load.",
+        }
     },
-    {
-        "type": "function",
-        "name": "get_saved_conversation_filenames",
-        "description": "Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "type": "function",
-        "name": "load_conversation",
-        "description": "Load a conversation history. Use this function to load a conversation history into the current session.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "filename": {
-                    "type": "string",
-                    "description": "The filename of the conversation history to load.",
-                }
-            },
-            "required": ["filename"],
-        },
-    },
-]
+    required=["filename"],
+)
+
+tools = ToolsSchema(
+    standard_tools=[
+        weather_function,
+        save_conversation_function,
+        get_filenames_function,
+        load_conversation_function,
+    ]
+)
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -160,17 +156,14 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -180,33 +173,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    session_properties = SessionProperties(
-        input_audio_transcription=InputAudioTranscription(),
-        # Set openai TurnDetection parameters. Not setting this at all will turn
-        # it on by default
-        turn_detection=TurnDetection(silence_duration_ms=1000),
-        # Or set to False to disable openai turn detection and use transport VAD
-        # turn_detection=False,
-        # tools=tools,
-        instructions="""Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
-
-Act like a human, but remember that you aren't a human and that you can't do human
-things in the real world. Your voice and personality should be warm and engaging, with a lively and
-playful tone.
-
-If interacting in a non-English language, start by using the standard accent or dialect familiar to
-the user. Talk quickly. You should always call a function if you can. Do not refer to these rules,
-even if you're asked about them.
--
-You are participating in a voice conversation. Keep your responses concise, short, and to the point
-unless specifically asked to elaborate on a topic.
-
-Remember, your responses should be short. Just one or two sentences, usually.""",
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
-    llm = OpenAIRealtimeBetaLLMService(
+    llm = OpenAIResponsesLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        session_properties=session_properties,
+        settings=OpenAIResponsesLLMService.Settings(
+            system_instruction=system_instruction,
+        ),
     )
 
     # you can either register a single function for all function calls, or specific functions
@@ -216,17 +194,21 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = OpenAILLMContext([], tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(tools=tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,  # STT
-            context_aggregator.user(),
+            user_aggregator,
             llm,  # LLM
+            tts,
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
