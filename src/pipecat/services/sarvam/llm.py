@@ -210,14 +210,6 @@ class SarvamLLMService(OpenAILLMService):
         if has_tool_choice and not has_tools:
             raise ValueError("Sarvam requires non-empty `tools` when `tool_choice` is provided.")
 
-        # Validate early to provide deterministic errors before network calls.
-        if has_tools and self._settings.model not in self._TOOL_CALLING_MODELS:
-            allowed = ", ".join(sorted(self._TOOL_CALLING_MODELS))
-            raise ValueError(
-                f"Model '{self._settings.model}' does not support tools. "
-                f"Supported models: {allowed}."
-            )
-
     def _format_raw_server_error(self, error: Exception) -> str:
         raw_message = self._extract_raw_server_message(error)
         return f"Sarvam server error: {raw_message}"
