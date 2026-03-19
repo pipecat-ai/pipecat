@@ -292,6 +292,8 @@ class OpenAIResponsesLLMService(LLMService):
 
                     model = getattr(response, "model", None)
                     if model:
+                        # This field is used by @traced_llm for more detailed
+                        # model name in tracing spans
                         self._full_model_name = model
 
         # Process any function calls
