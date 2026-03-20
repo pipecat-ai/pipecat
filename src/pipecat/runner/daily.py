@@ -225,6 +225,9 @@ async def configure(
         if room_geo:
             room_properties.geo = room_geo
 
+        if enable_dialout:
+            room_properties.enable_dialout = True
+
         # Add SIP configuration if enabled
         if sip_enabled:
             sip_params = DailyRoomSipParams(
@@ -236,7 +239,6 @@ async def configure(
                 provider=sip_provider,
             )
             room_properties.sip = sip_params
-            room_properties.enable_dialout = enable_dialout
             room_properties.start_video_off = not sip_enable_video  # Voice-only by default
 
     # Create room parameters
