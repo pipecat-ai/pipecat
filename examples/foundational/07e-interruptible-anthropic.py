@@ -98,7 +98,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "system", "content": "You're a pirate."})
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
