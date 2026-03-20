@@ -109,6 +109,12 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
 
         messages = copy.deepcopy(messages)
 
+        # Step 0: Convert "developer" messages to "user".
+        # Perplexity doesn't support the "developer" role.
+        for msg in messages:
+            if msg.get("role") == "developer":
+                msg["role"] = "user"
+
         # Step 1: Convert non-initial system messages to "user".
         # Perplexity allows system messages at the start, but rejects them
         # after any non-system message.

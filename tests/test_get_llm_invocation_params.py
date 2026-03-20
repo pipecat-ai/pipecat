@@ -1585,6 +1585,41 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["content"], "Sunny, 72F")
         self.assertEqual(params["messages"][3]["role"], "user")
 
+    def test_developer_message_converted_to_user(self):
+        """Developer messages are converted to user role."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "developer", "content": "Extra context."},
+            {"role": "assistant", "content": "Hi"},
+            {"role": "user", "content": "Hello"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["content"], "Extra context.")
+
+    def test_developer_message_merged_with_adjacent_user(self):
+        """Developer→user conversion merges with adjacent user messages."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "developer", "content": "Be concise."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+            {"role": "user", "content": "Bye"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # developer→user merged with following user
+        self.assertEqual(len(params["messages"]), 3)
+        merged = params["messages"][0]
+        self.assertEqual(merged["role"], "user")
+        self.assertIsInstance(merged["content"], list)
+        self.assertEqual(len(merged["content"]), 2)
+        self.assertEqual(merged["content"][0]["text"], "Be concise.")
+        self.assertEqual(merged["content"][1]["text"], "Hello")
+
     def test_empty_messages(self):
         """Test that empty messages list returns empty."""
         context = LLMContext(messages=[])
