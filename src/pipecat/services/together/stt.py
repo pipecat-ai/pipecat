@@ -197,7 +197,6 @@ class TogetherSTTService(WebsocketSTTService):
             }
 
             self._websocket = await websocket_connect(url, additional_headers=headers)
-            await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(
                 error_msg=f"Error connecting to Together AI STT: {e}",
@@ -276,7 +275,7 @@ class TogetherSTTService(WebsocketSTTService):
             evt_type = evt.get("type", "")
 
             if evt_type == "session.created":
-                logger.debug(f"{self} session created")
+                await self._handle_session_created(evt)
             elif evt_type == "conversation.item.input_audio_transcription.delta":
                 await self._handle_transcription_delta(evt)
             elif evt_type == "conversation.item.input_audio_transcription.completed":
@@ -289,6 +288,34 @@ class TogetherSTTService(WebsocketSTTService):
                 await self._handle_error(evt)
             else:
                 logger.trace(f"{self} unhandled event: {evt_type}")
+
+    async def _handle_session_created(self, evt: dict):
+        """Handle ``session.created`` event.
+
+        Args:
+            evt: The session created event from the server.
+        """
+        session = evt.get("session", {})
+        self._session_id = session.get("id")
+        logger.debug(f"{self} session created: {self._session_id}")
+
+        upgrade_session_message = {
+            "type": "transcription_session.update",
+            "session": {
+                "input_audio_format": "pcm_s16le_16000",
+                "input_audio_transcription": {
+                    "model": self._settings.model,
+                    "language": self._settings.language,
+                    "prompt": "Transcribe the incoming audio in real time.",
+                },
+                "turn_detection": {
+                    "type": "none",
+                },
+            },
+        }
+
+        await self._websocket.send(json.dumps(upgrade_session_message))
+        await self._call_event_handler("on_connected")
 
     async def _handle_transcription_delta(self, evt: dict):
         """Handle incremental transcription text.
