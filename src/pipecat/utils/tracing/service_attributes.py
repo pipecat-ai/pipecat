@@ -193,7 +193,7 @@ def add_llm_span_attributes(
     tools: Optional[str] = None,
     tool_count: Optional[int] = None,
     tool_choice: Optional[str] = None,
-    system: Optional[str] = None,
+    system_instructions: Optional[str] = None,
     parameters: Optional[Dict[str, Any]] = None,
     extra_parameters: Optional[Dict[str, Any]] = None,
     ttfb: Optional[float] = None,
@@ -211,7 +211,7 @@ def add_llm_span_attributes(
         tools: JSON-serialized tools configuration.
         tool_count: Number of tools available.
         tool_choice: Tool selection configuration.
-        system: System message.
+        system_instructions: System instructions.
         parameters: Service parameters.
         extra_parameters: Additional parameters.
         ttfb: Time to first byte in seconds.
@@ -240,8 +240,8 @@ def add_llm_span_attributes(
     if tool_choice:
         span.set_attribute("tool_choice", tool_choice)
 
-    if system:
-        span.set_attribute("system", system)
+    if system_instructions:
+        span.set_attribute("system_instructions", system_instructions)
 
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
