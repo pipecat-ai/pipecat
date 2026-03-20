@@ -127,7 +127,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
-    context = LLMContext([{"role": "user", "content": "Say hello."}])
+    context = LLMContext([{"role": "developer", "content": "Say hello."}])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(

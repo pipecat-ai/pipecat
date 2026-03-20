@@ -143,7 +143,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("end_conversation", end_conversation)
 
     context = LLMContext(
-        [{"role": "user", "content": "Say hello."}],
+        [{"role": "developer", "content": "Say hello."}],
     )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

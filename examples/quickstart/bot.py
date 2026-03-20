@@ -106,7 +106,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         # Kick off the conversation.
         context.add_message(
-            {"role": "user", "content": "Say hello and briefly introduce yourself."}
+            {"role": "developer", "content": "Say hello and briefly introduce yourself."}
         )
         await task.queue_frames([LLMRunFrame()])
 

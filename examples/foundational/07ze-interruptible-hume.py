@@ -113,7 +113,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             "💡 Word timestamps are enabled! Watch the console for TTSTextFrame logs showing each word with its PTS."
         )
         # Kick off the conversation.
-        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
