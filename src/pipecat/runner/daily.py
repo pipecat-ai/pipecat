@@ -207,7 +207,7 @@ async def configure(
         return DailyRoomConfig(room_url=room_url, token=token)
 
     # Create a new room
-    room_prefix = "pipecat-sip" if (sip_enabled or enable_dialout) else "pipecat"
+    room_prefix = "pipecat-telephony" if (sip_enabled or enable_dialout) else "pipecat"
     room_name = f"{room_prefix}-{uuid.uuid4().hex[:8]}"
     logger.info(f"Creating new Daily room: {room_name}")
 
