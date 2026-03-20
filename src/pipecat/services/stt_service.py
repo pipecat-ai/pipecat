@@ -120,6 +120,27 @@ class STTService(AIService):
             or STTSettings(),
             **kwargs,
         )
+
+        # Convert Language enum to service-specific format at init time.
+        # Runtime updates are handled by _update_settings(), but init-time
+        # settings bypass that path and need explicit conversion.
+        # Raw strings (e.g. "de-DE") are first converted to Language enums
+        # so they go through the same resolution logic.
+        if isinstance(self._settings.language, str) and not isinstance(
+            self._settings.language, Language
+        ):
+            try:
+                self._settings.language = Language(self._settings.language)
+            except ValueError:
+                logger.warning(
+                    f"Language string '{self._settings.language}' is not a recognized "
+                    f"Language code. It will be passed to the service as-is."
+                )
+        if isinstance(self._settings.language, Language):
+            converted = self.language_to_service_language(self._settings.language)
+            if converted is not None:
+                self._settings.language = converted
+
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
@@ -285,7 +306,20 @@ class STTService(AIService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        # Translate language *before* applying so the stored value is canonical
+        # Translate language *before* applying so the stored value is canonical.
+        # Raw strings are first converted to Language enums for proper resolution.
+        if (
+            is_given(delta.language)
+            and isinstance(delta.language, str)
+            and not isinstance(delta.language, Language)
+        ):
+            try:
+                delta.language = Language(delta.language)
+            except ValueError:
+                logger.warning(
+                    f"Language string '{delta.language}' is not a recognized "
+                    f"Language code. It will be passed to the service as-is."
+                )
         if is_given(delta.language) and isinstance(delta.language, Language):
             converted = self.language_to_service_language(delta.language)
             if converted is not None:
@@ -357,7 +391,9 @@ class STTService(AIService):
             await self._handle_vad_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
-            if frame.delta is not None:
+            if frame.service is not None and frame.service is not self:
+                await self.push_frame(frame, direction)
+            elif frame.delta is not None:
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.

@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import TTSSettings, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -86,13 +86,13 @@ class AsyncAITTSService(WebsocketTTSService):
     """
 
     Settings = AsyncAITTSSettings
-    _settings: AsyncAITTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Async TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``AsyncAITTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``AsyncAITTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             language: Language to use for synthesis.
@@ -112,7 +112,7 @@ class AsyncAITTSService(WebsocketTTSService):
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
-        settings: Optional[AsyncAITTSSettings] = None,
+        settings: Optional[Settings] = None,
         aggregate_sentences: Optional[bool] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
@@ -125,14 +125,14 @@ class AsyncAITTSService(WebsocketTTSService):
                 https://docs.async.com/list-voices-16699698e0
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AsyncAITTSSettings(voice=...)`` instead.
+                    Use ``settings=AsyncAITTSService.Settings(voice=...)`` instead.
 
             version: Async API version.
             url: WebSocket URL for Async TTS API.
             model: TTS model to use (e.g., "async_flash_v1.0").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AsyncAITTSSettings(model=...)`` instead.
+                    Use ``settings=AsyncAITTSService.Settings(model=...)`` instead.
 
             sample_rate: Audio sample rate.
             encoding: Audio encoding format.
@@ -140,7 +140,7 @@ class AsyncAITTSService(WebsocketTTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AsyncAITTSSettings(...)`` instead.
+                    Use ``settings=AsyncAITTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -153,7 +153,7 @@ class AsyncAITTSService(WebsocketTTSService):
             **kwargs: Additional arguments passed to the parent service.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AsyncAITTSSettings(
+        default_settings = self.Settings(
             model="async_flash_v1.0",
             voice=None,
             language=None,
@@ -161,19 +161,17 @@ class AsyncAITTSService(WebsocketTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", AsyncAITTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", AsyncAITTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", AsyncAITTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else None
-                )
+                default_settings.language = params.language
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -487,13 +485,13 @@ class AsyncAIHttpTTSService(TTSService):
     """
 
     Settings = AsyncAITTSSettings
-    _settings: AsyncAITTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Async API.
 
         .. deprecated:: 0.0.105
-            Use ``AsyncAITTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``AsyncAIHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             language: Language to use for synthesis.
@@ -514,7 +512,7 @@ class AsyncAIHttpTTSService(TTSService):
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
-        settings: Optional[AsyncAITTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Async TTS service.
@@ -524,13 +522,13 @@ class AsyncAIHttpTTSService(TTSService):
             voice_id: ID of the voice to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AsyncAITTSSettings(voice=...)`` instead.
+                    Use ``settings=AsyncAIHttpTTSService.Settings(voice=...)`` instead.
 
             aiohttp_session: An aiohttp session for making HTTP requests.
             model: TTS model to use (e.g., "async_flash_v1.0").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AsyncAITTSSettings(model=...)`` instead.
+                    Use ``settings=AsyncAIHttpTTSService.Settings(model=...)`` instead.
 
             url: Base URL for Async API.
             version: API version string for Async API.
@@ -540,14 +538,14 @@ class AsyncAIHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AsyncAITTSSettings(...)`` instead.
+                    Use ``settings=AsyncAIHttpTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AsyncAITTSSettings(
+        default_settings = self.Settings(
             model="async_flash_v1.0",
             voice=None,
             language=None,
@@ -555,19 +553,17 @@ class AsyncAIHttpTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", AsyncAITTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", AsyncAITTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", AsyncAITTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else None
-                )
+                default_settings.language = params.language
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:

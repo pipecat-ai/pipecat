@@ -37,7 +37,6 @@ Key helpers:
 from __future__ import annotations
 
 import copy
-import warnings
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Optional, Type, TypeVar
 
@@ -47,45 +46,6 @@ from pipecat.transcriptions.language import Language
 
 if TYPE_CHECKING:
     from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
-
-
-# ---------------------------------------------------------------------------
-# Deprecation helper
-# ---------------------------------------------------------------------------
-
-
-def _warn_deprecated_param(
-    param_name: str,
-    settings_class: type,
-    settings_field: str | None = None,
-    stacklevel: int = 3,
-):
-    """Emit DeprecationWarning for a deprecated init parameter.
-
-    Args:
-        param_name: Name of the deprecated parameter.
-        settings_class: The settings class to use instead.
-        settings_field: Specific field on the settings class, if different
-            from *param_name*.
-        stacklevel: Stack depth for the warning.  Default ``3`` targets
-            the caller's caller (i.e. user code that instantiated the service).
-    """
-    settings_class_name = settings_class.__name__
-    if settings_field:
-        msg = (
-            f"The `{param_name}` parameter is deprecated. "
-            f"Use `settings={settings_class_name}({settings_field}=...)` instead. "
-            f"If both are provided, `settings` takes precedence."
-        )
-    else:
-        msg = (
-            f"The `{param_name}` parameter is deprecated. "
-            f"Use `settings={settings_class_name}(...)` instead. "
-            f"If both are provided, `settings` takes precedence."
-        )
-    with warnings.catch_warnings():
-        warnings.simplefilter("always")
-        warnings.warn(msg, DeprecationWarning, stacklevel=stacklevel)
 
 
 # ---------------------------------------------------------------------------

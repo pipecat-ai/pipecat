@@ -17,7 +17,7 @@ from pipecat.frames.frames import LLMRunFrame, ManuallySwitchServiceFrame
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.service_switcher import ServiceSwitcher, ServiceSwitcherStrategyManual
+from pipecat.pipeline.service_switcher import ServiceSwitcher
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -96,9 +96,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt_cartesia = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
     stt_deepgram = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-    stt_switcher = ServiceSwitcher(
-        services=[stt_cartesia, stt_deepgram], strategy_type=ServiceSwitcherStrategyManual
-    )
+    # Uses ServiceSwitcherStrategyManual by default
+    stt_switcher = ServiceSwitcher(services=[stt_cartesia, stt_deepgram])
 
     tts_cartesia = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -112,11 +111,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             voice="aura-2-helena-en",
         ),
     )
-    tts_switcher = ServiceSwitcher(
-        services=[tts_cartesia, tts_deepgram], strategy_type=ServiceSwitcherStrategyManual
-    )
+    # Uses ServiceSwitcherStrategyManual by default
+    tts_switcher = ServiceSwitcher(services=[tts_cartesia, tts_deepgram])
 
-    system_prompt = "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
+    system_prompt = "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way."
 
     llm_openai = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
@@ -126,9 +124,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GoogleLLMService.Settings(system_instruction=system_prompt),
     )
-    llm_switcher = LLMSwitcher(
-        llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
-    )
+    # Uses ServiceSwitcherStrategyManual by default
+    llm_switcher = LLMSwitcher(llms=[llm_openai, llm_google])
     # Register a "classic" function
     llm_switcher.register_function("get_current_weather", fetch_weather_from_api)
     # Register a "direct" function

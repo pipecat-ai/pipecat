@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import (
     InterruptibleTTSService,
     TextAggregationMode,
@@ -132,13 +132,13 @@ class RimeTTSService(WebsocketTTSService):
     """
 
     Settings = RimeTTSSettings
-    _settings: RimeTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Rime TTS service.
 
         .. deprecated:: 0.0.105
-            Use ``settings=RimeTTSSettings(...)`` instead.
+            Use ``settings=RimeTTSService.Settings(...)`` instead.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -177,7 +177,7 @@ class RimeTTSService(WebsocketTTSService):
         model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[RimeTTSSettings] = None,
+        settings: Optional[Settings] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         aggregate_sentences: Optional[bool] = None,
@@ -190,19 +190,19 @@ class RimeTTSService(WebsocketTTSService):
             voice_id: ID of the voice to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=RimeTTSSettings(voice=...)`` instead.
+                    Use ``settings=RimeTTSService.Settings(voice=...)`` instead.
 
             url: Rime websocket API endpoint.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=RimeTTSSettings(model=...)`` instead.
+                    Use ``settings=RimeTTSService.Settings(model=...)`` instead.
 
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=RimeTTSSettings(...)`` instead.
+                    Use ``settings=RimeTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -220,7 +220,7 @@ class RimeTTSService(WebsocketTTSService):
             **kwargs: Additional arguments passed to parent class.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = RimeTTSSettings(
+        default_settings = self.Settings(
             model="arcana",
             voice=None,
             language=None,
@@ -241,19 +241,17 @@ class RimeTTSService(WebsocketTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", RimeTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", RimeTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", RimeTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else None
-                )
+                default_settings.language = params.language
                 default_settings.segment = params.segment
                 default_settings.speedAlpha = params.speed_alpha
                 # Arcana params
@@ -663,13 +661,13 @@ class RimeHttpTTSService(TTSService):
     """
 
     Settings = RimeTTSSettings
-    _settings: RimeTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Rime HTTP TTS service.
 
         .. deprecated:: 0.0.105
-            Use ``settings=RimeTTSSettings(...)`` instead.
+            Use ``settings=RimeHttpTTSService.Settings(...)`` instead.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -696,7 +694,7 @@ class RimeHttpTTSService(TTSService):
         model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[RimeTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize Rime HTTP TTS service.
@@ -706,26 +704,26 @@ class RimeHttpTTSService(TTSService):
             voice_id: ID of the voice to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=RimeTTSSettings(voice=...)`` instead.
+                    Use ``settings=RimeHttpTTSService.Settings(voice=...)`` instead.
 
             aiohttp_session: Shared aiohttp session for HTTP requests.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=RimeTTSSettings(model=...)`` instead.
+                    Use ``settings=RimeHttpTTSService.Settings(model=...)`` instead.
 
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=RimeTTSSettings(...)`` instead.
+                    Use ``settings=RimeHttpTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = RimeTTSSettings(
+        default_settings = self.Settings(
             model="mistv2",
             voice=None,
             language="eng",
@@ -744,19 +742,17 @@ class RimeHttpTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", RimeTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", RimeTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", RimeTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else "eng"
-                )
+                default_settings.language = params.language
                 default_settings.speedAlpha = params.speed_alpha
                 default_settings.reduceLatency = params.reduce_latency
                 default_settings.pauseBetweenBrackets = params.pause_between_brackets
@@ -888,13 +884,13 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
     """
 
     Settings = RimeNonJsonTTSSettings
-    _settings: RimeNonJsonTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Rime Non-JSON WebSocket TTS service.
 
         .. deprecated:: 0.0.105
-            Use ``settings=RimeNonJsonTTSSettings(...)`` instead.
+            Use ``settings=RimeNonJsonTTSService.Settings(...)`` instead.
 
         Args:
             language: Language for synthesis. Defaults to English.
@@ -922,7 +918,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         audio_format: str = "pcm",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[RimeNonJsonTTSSettings] = None,
+        settings: Optional[Settings] = None,
         aggregate_sentences: Optional[bool] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
@@ -934,20 +930,20 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             voice_id: ID of the voice to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=RimeNonJsonTTSSettings(voice=...)`` instead.
+                    Use ``settings=RimeNonJsonTTSService.Settings(voice=...)`` instead.
 
             url: Rime websocket API endpoint.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=RimeNonJsonTTSSettings(model=...)`` instead.
+                    Use ``settings=RimeNonJsonTTSService.Settings(model=...)`` instead.
 
             audio_format: Audio format to use.
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=RimeNonJsonTTSSettings(...)`` instead.
+                    Use ``settings=RimeNonJsonTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -962,7 +958,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             **kwargs: Additional arguments passed to parent class.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = RimeNonJsonTTSSettings(
+        default_settings = self.Settings(
             voice=None,
             model="arcana",
             language=None,
@@ -974,19 +970,17 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", RimeNonJsonTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", RimeNonJsonTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", RimeNonJsonTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
-                default_settings.language = (
-                    self.language_to_service_language(params.language) if params.language else None
-                )
+                default_settings.language = params.language
                 default_settings.segment = params.segment
                 default_settings.repetition_penalty = params.repetition_penalty
                 default_settings.temperature = params.temperature

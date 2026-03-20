@@ -23,13 +23,12 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAILLMService,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
@@ -71,7 +70,7 @@ class GrokContextAggregatorPair:
 
 
 @dataclass
-class GrokLLMSettings(OpenAILLMSettings):
+class GrokLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for GrokLLMService."""
 
     pass
@@ -87,7 +86,7 @@ class GrokLLMService(OpenAILLMService):
     """
 
     Settings = GrokLLMSettings
-    _settings: GrokLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -95,7 +94,7 @@ class GrokLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.x.ai/v1",
         model: Optional[str] = None,
-        settings: Optional[GrokLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the GrokLLMService with API key and model.
@@ -106,18 +105,18 @@ class GrokLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "grok-3-beta".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=GrokLLMService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GrokLLMSettings(model="grok-3-beta")
+        default_settings = self.Settings(model="grok-3-beta")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GrokLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

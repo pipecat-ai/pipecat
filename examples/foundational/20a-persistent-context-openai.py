@@ -95,7 +95,7 @@ async def load_conversation(params: FunctionCallParams):
         await params.result_callback({"success": False, "error": str(e)})
 
 
-system_instruction = "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
+system_instruction = "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way."
 
 weather_function = FunctionSchema(
     name="get_current_weather",
@@ -116,7 +116,7 @@ weather_function = FunctionSchema(
 
 save_conversation_function = FunctionSchema(
     name="save_conversation",
-    description="Save the current conversatione. Use this function to persist the current conversation to external storage.",
+    description="Save the current conversation. Use this function to persist the current conversation to external storage.",
     properties={},
     required=[],
 )

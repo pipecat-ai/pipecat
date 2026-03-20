@@ -60,7 +60,7 @@ class TavusVideoService(AIService):
     """
 
     Settings = TavusVideoSettings
-    _settings: TavusVideoSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -69,7 +69,7 @@ class TavusVideoService(AIService):
         replica_id: str,
         persona_id: str = "pipecat-stream",
         session: aiohttp.ClientSession,
-        settings: Optional[TavusVideoSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ) -> None:
         """Initialize the Tavus video service.

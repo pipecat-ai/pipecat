@@ -10,6 +10,7 @@ This module provides a smart turn analyzer that uses CoreML models for
 local end-of-turn detection without requiring network connectivity.
 """
 
+import warnings
 from typing import Any, Dict
 
 import numpy as np
@@ -35,6 +36,10 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
     Provides end-of-turn detection using locally-stored CoreML models,
     enabling offline operation without network dependencies. Optimized
     for Apple Silicon and other CoreML-compatible hardware.
+
+    .. deprecated:: 0.0.106
+        LocalCoreMLSmartTurnAnalyzer is deprecated and will be removed in a future version.
+        Use LocalSmartTurnAnalyzerV3 instead.
     """
 
     def __init__(self, *, smart_turn_model_path: str, **kwargs):
@@ -49,6 +54,15 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
             Exception: If smart_turn_model_path is not provided or model loading fails.
         """
         super().__init__(**kwargs)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LocalCoreMLSmartTurnAnalyzer is deprecated and will be removed in a future "
+                "version. Use LocalSmartTurnAnalyzerV3 instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         if not smart_turn_model_path:
             logger.error("smart_turn_model_path is not set.")

@@ -74,7 +74,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("GOOGLE_API_KEY"),
         model="gemini-2.5-flash",
         settings=GoogleLLMService.Settings(
-            system_instruction="""You are a helpful AI assistant in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
+            system_instruction="""You are a helpful assistant in a voice conversation.
 
             IMPORTANT: You're using Gemini TTS which supports expressive markup tags. You can use these tags in your responses:
             - [sigh] - Insert a sigh sound
@@ -91,7 +91,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             - "[whispering] Let me tell you a secret."
             - "The answer is... [long pause] ...42!"
 
-            Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.""",
+            Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep responses concise. Respond to what the user said in a creative and helpful way.""",
         ),
     )
 

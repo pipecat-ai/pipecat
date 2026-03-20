@@ -69,13 +69,13 @@ class BaseOpenAILLMService(LLMService):
     """
 
     Settings = OpenAILLMSettings
-    _settings: OpenAILLMSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=OpenAILLMSettings(...)`` instead of
+            Use ``settings=BaseOpenAILLMService.Settings(...)`` instead of
             ``params=InputParams(...)``.
 
         Parameters:
@@ -119,7 +119,7 @@ class BaseOpenAILLMService(LLMService):
         default_headers: Optional[Mapping[str, str]] = None,
         service_tier: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[Settings] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
         **kwargs,
@@ -130,7 +130,7 @@ class BaseOpenAILLMService(LLMService):
             model: The OpenAI model name to use (e.g., "gpt-4.1", "gpt-4o").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=BaseOpenAILLMService.Settings(model=...)`` instead.
 
             api_key: OpenAI API key. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
@@ -141,7 +141,7 @@ class BaseOpenAILLMService(LLMService):
             params: Input parameters for model configuration and behavior.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(...)`` instead.
+                    Use ``settings=BaseOpenAILLMService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -150,8 +150,8 @@ class BaseOpenAILLMService(LLMService):
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(
-            model="gpt-4o",
+        default_settings = self.Settings(
+            model="gpt-4.1",
             system_instruction=None,
             frequency_penalty=NOT_GIVEN,
             presence_penalty=NOT_GIVEN,
@@ -327,13 +327,12 @@ class BaseOpenAILLMService(LLMService):
 
         params.update(self._settings.extra)
 
-        # Prepend system instruction from constructor, replacing any context system message
+        # Prepend system instruction from constructor
         if self._settings.system_instruction:
             messages = params.get("messages", [])
             if messages and messages[0].get("role") == "system":
                 logger.warning(
-                    f"{self}: Both system_instruction and a system message in context are set."
-                    " Using system_instruction."
+                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
                 )
             params["messages"] = [
                 {"role": "system", "content": self._settings.system_instruction}
@@ -342,7 +341,10 @@ class BaseOpenAILLMService(LLMService):
         return params
 
     async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+        self,
+        context: LLMContext | OpenAILLMContext,
+        max_tokens: Optional[int] = None,
+        system_instruction: Optional[str] = None,
     ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -350,6 +352,8 @@ class BaseOpenAILLMService(LLMService):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate. If provided,
                 overrides the service's default max_tokens/max_completion_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -370,6 +374,15 @@ class BaseOpenAILLMService(LLMService):
         # Override for non-streaming
         params["stream"] = False
         params.pop("stream_options", None)
+
+        # Prepend system instruction if provided
+        if system_instruction is not None:
+            messages = params.get("messages", [])
+            if messages and messages[0].get("role") == "system":
+                logger.warning(
+                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
+                )
+            params["messages"] = [{"role": "system", "content": system_instruction}] + messages
 
         # Override max_tokens if provided
         if max_tokens is not None:

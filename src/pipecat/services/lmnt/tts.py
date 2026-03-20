@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import TTSSettings, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -89,7 +89,7 @@ class LmntTTSService(InterruptibleTTSService):
     """
 
     Settings = LmntTTSSettings
-    _settings: LmntTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -100,7 +100,7 @@ class LmntTTSService(InterruptibleTTSService):
         language: Language = Language.EN,
         output_format: str = "pcm_s16le",
         model: Optional[str] = None,
-        settings: Optional[LmntTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the LMNT TTS service.
@@ -110,34 +110,41 @@ class LmntTTSService(InterruptibleTTSService):
             voice_id: ID of the voice to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=LmntTTSSettings(voice=...)`` instead.
+                    Use ``settings=LmntTTSService.Settings(voice=...)`` instead.
 
             sample_rate: Audio sample rate. If None, uses default.
             language: Language for synthesis. Defaults to English.
+
+                .. deprecated:: 0.0.106
+                    Use ``settings=LmntTTSService.Settings(language=...)`` instead.
+
             output_format: Audio output format. One of "pcm_s16le", "pcm_f32le",
                 "mp3", "ulaw", "webm". Defaults to "pcm_s16le".
             model: TTS model to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=LmntTTSSettings(model=...)`` instead.
+                    Use ``settings=LmntTTSService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = LmntTTSSettings(
+        default_settings = self.Settings(
             model="aurora",
             voice=None,
-            language=self.language_to_service_language(language),
+            language=Language.EN,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", LmntTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
+        if language is not None:
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
         if model is not None:
-            _warn_deprecated_param("model", LmntTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)
@@ -237,7 +244,7 @@ class LmntTTSService(InterruptibleTTSService):
         """Apply a settings delta.
 
         Args:
-            delta: A :class:`TTSSettings` (or ``LmntTTSSettings``) delta.
+            delta: A :class:`TTSSettings` (or ``LmntTTSService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.

@@ -11,6 +11,7 @@ from typing import Optional, Type
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
@@ -76,6 +77,7 @@ class BaseUserTurnStartStrategy(BaseObject):
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_started", sync=True)
+        self._register_event_handler("on_reset_aggregation", sync=True)
 
     @property
     def task_manager(self) -> BaseTaskManager:
@@ -100,7 +102,7 @@ class BaseUserTurnStartStrategy(BaseObject):
         """Reset the strategy to its initial state."""
         pass
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame.
 
         Subclasses should override this to implement logic that decides whether
@@ -108,6 +110,10 @@ class BaseUserTurnStartStrategy(BaseObject):
 
         Args:
             frame: The frame to be processed.
+
+        Returns:
+            A ProcessFrameResult indicating the outcome. Subclasses that return
+            None are treated as CONTINUE for backward compatibility.
         """
         pass
 
@@ -138,3 +144,7 @@ class BaseUserTurnStartStrategy(BaseObject):
                 enable_user_speaking_frames=self._enable_user_speaking_frames,
             ),
         )
+
+    async def trigger_reset_aggregation(self):
+        """Trigger the `on_reset_aggregation` event."""
+        await self._call_event_handler("on_reset_aggregation")
