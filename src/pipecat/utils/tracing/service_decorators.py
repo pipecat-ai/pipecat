@@ -137,14 +137,14 @@ def _add_token_usage_to_span(span, token_usage):
             and token_usage["cache_read_input_tokens"] is not None
         ):
             span.set_attribute(
-                "gen_ai.usage.cache_read_input_tokens", token_usage["cache_read_input_tokens"]
+                "gen_ai.usage.cache_read.input_tokens", token_usage["cache_read_input_tokens"]
             )
         if (
             "cache_creation_input_tokens" in token_usage
             and token_usage["cache_creation_input_tokens"] is not None
         ):
             span.set_attribute(
-                "gen_ai.usage.cache_creation_input_tokens",
+                "gen_ai.usage.cache_creation.input_tokens",
                 token_usage["cache_creation_input_tokens"],
             )
         if "reasoning_tokens" in token_usage and token_usage["reasoning_tokens"] is not None:
@@ -159,11 +159,11 @@ def _add_token_usage_to_span(span, token_usage):
         # Add cached token metrics for LLMTokenUsage object
         cache_read_tokens = getattr(token_usage, "cache_read_input_tokens", None)
         if cache_read_tokens is not None:
-            span.set_attribute("gen_ai.usage.cache_read_input_tokens", cache_read_tokens)
+            span.set_attribute("gen_ai.usage.cache_read.input_tokens", cache_read_tokens)
 
         cache_creation_tokens = getattr(token_usage, "cache_creation_input_tokens", None)
         if cache_creation_tokens is not None:
-            span.set_attribute("gen_ai.usage.cache_creation_input_tokens", cache_creation_tokens)
+            span.set_attribute("gen_ai.usage.cache_creation.input_tokens", cache_creation_tokens)
 
         reasoning_tokens = getattr(token_usage, "reasoning_tokens", None)
         if reasoning_tokens is not None:
