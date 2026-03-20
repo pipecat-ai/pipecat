@@ -63,7 +63,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(
         [
             {
-                "role": "user",
+                "role": "developer",
                 "content": "Say hello.",
             },
         ],

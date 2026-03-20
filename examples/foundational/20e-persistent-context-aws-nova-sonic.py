@@ -112,7 +112,7 @@ async def load_conversation(params: FunctionCallParams):
                 # commented out below, is part of this.
                 # messages.append(
                 #     {
-                #         "role": "user",
+                #         "role": "developer",
                 #         "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
                 #     }
                 # )

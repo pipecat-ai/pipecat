@@ -152,10 +152,10 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     # openai WebSocket API can understand.
     context = OpenAILLMContext(
         [{"role": "developer", "content": "Say hello!"}],
-        # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
+        # [{"role": "developer", "content": [{"type": "text", "text": "Say hello!"}]}],
         #     [
         #         {
-        #             "role": "user",
+        #             "role": "developer",
         #             "content": [
         #                 {"type": "text", "text": "Say"},
         #                 {"type": "text", "text": "yo what's up!"},

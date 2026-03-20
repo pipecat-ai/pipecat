@@ -179,7 +179,7 @@ class InputTranscriptionContextFilter(FrameProcessor):
                 }
             )
             new_message_content.append(last_part)
-            msg = {"role": "user", "content": new_message_content}
+            msg = {"role": "developer", "content": new_message_content}
             ctx = LLMContext([{"role": "system", "content": transcriber_system_message}, msg])
 
             await self.push_frame(LLMContextFrame(context=ctx))
@@ -318,7 +318,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     messages = [
         {
-            "role": "user",
+            "role": "developer",
             "content": "Start by saying hello.",
         },
     ]
