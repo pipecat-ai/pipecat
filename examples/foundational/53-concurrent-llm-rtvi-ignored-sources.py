@@ -158,7 +158,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         evaluator_context.add_message(
-            {"role": "user", "content": "Ready to evaluate user messages."}
+            {"role": "developer", "content": "Ready to evaluate user messages."}
         )
         await task.queue_frames([LLMRunFrame()])
 

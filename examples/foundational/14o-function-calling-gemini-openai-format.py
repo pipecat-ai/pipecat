@@ -102,7 +102,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tools = ToolsSchema(standard_tools=[weather_function])
     messages = [
         {
-            "role": "user",
+            "role": "developer",
             "content": "Start a conversation with 'Hey there' to get the current weather.",
         },
     ]

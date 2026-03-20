@@ -60,14 +60,14 @@ class IdleHandler:
         if self._retry_count == 1:
             # First attempt: Add a gentle prompt to the conversation
             message = {
-                "role": "user",
+                "role": "developer",
                 "content": "The user has been quiet. Politely and briefly ask if they're still there.",
             }
             await aggregator.push_frame(LLMMessagesAppendFrame([message], run_llm=True))
         elif self._retry_count == 2:
             # Second attempt: More direct prompt
             message = {
-                "role": "user",
+                "role": "developer",
                 "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
             }
             await aggregator.push_frame(LLMMessagesAppendFrame([message], run_llm=True))
