@@ -11,7 +11,7 @@ adapters that handle tool format conversion and standardization.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from loguru import logger
 
@@ -135,60 +135,46 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         # Fallback to return the same tools in case they are not in a standard format
         return tools
 
-    def _extract_initial_system_or_developer(
+    def _extract_initial_system(
         self,
         messages: list,
         *,
-        system_instruction: Optional[str],
-    ) -> Tuple[Optional[str], Optional[str]]:
-        """Extract an initial system/developer message for use as a system instruction.
+        system_instruction: Optional[str] = None,
+    ) -> Optional[str]:
+        """Extract an initial ``"system"`` message for use as a system instruction.
 
         Only useful for services that expect the system instruction as a
         separate parameter, not inline in conversation history (today, all
-        non-OpenAI services).
+        non-OpenAI services). Does not extract ``"developer"`` messages —
+        those are converted to ``"user"`` by the adapter's subsequent message
+        loop, like any other non-system role the provider doesn't support.
 
-        Checks ``messages[0]``. Behavior:
-
-        - ``"system"`` role: assumed to be intended as the system instruction.
-          Extract (pop from messages).
-        - ``"developer"`` role **without** ``system_instruction``: also assumed
-          to be intended as the system instruction. Extract (pop).
-        - ``"developer"`` role **with** ``system_instruction``: assumed to be
-          intended as a conversation-history message (since a system instruction
-          is already provided). Don't extract; convert to ``"user"`` in-place.
-        - Any other role: no-op.
-
-        If extracting would leave the messages list empty
-        (``len(messages) == 1``), the message is converted to ``"user"`` role
-        instead of being extracted. This prevents sending an empty conversation
-        history to providers that require at least one non-system message.
+        Checks ``messages[0]``. If the role is ``"system"``, pops and returns
+        its content. If extracting would leave the messages list empty
+        (``len(messages) == 1``), the message is converted to ``"user"``
+        role instead of being extracted, to prevent sending an empty
+        conversation history to providers that require at least one
+        non-system message.
 
         Args:
             messages: Message list in standard format (mutated in-place).
             system_instruction: The system instruction from service settings
-                or ``run_inference``, used to decide whether to extract a
-                ``"developer"`` message.
+                or ``run_inference``. Only used to decide whether to warn
+                about a conflict in the single-message case.
 
         Returns:
-            ``(extracted_content, original_role)`` where *original_role* is
-            ``"system"`` or ``"developer"``, or ``(None, None)`` if nothing
+            The extracted system message content, or ``None`` if nothing
             was extracted.
         """
         if not messages:
-            return None, None
+            return None
 
-        role = messages[0].get("role")
-        if role not in ("system", "developer"):
-            return None, None
-
-        # "developer" + system_instruction present → keep in messages as "user"
-        if role == "developer" and system_instruction:
-            messages[0]["role"] = "user"
-            return None, None
+        if messages[0].get("role") != "system":
+            return None
 
         # Would extracting empty the list? Convert to "user" instead.
         if len(messages) == 1:
-            if role == "system" and system_instruction:
+            if system_instruction:
                 if not self._warned_system_instruction:
                     self._warned_system_instruction = True
                     logger.warning(
@@ -198,7 +184,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                         " history."
                     )
             messages[0]["role"] = "user"
-            return None, None
+            return None
 
         # Extract
         content = messages[0].get("content", "")
@@ -208,28 +194,21 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                 part.get("text", "") for part in content if part.get("type") == "text"
             )
         messages.pop(0)
-        return content, role
+        return content
 
     def _resolve_system_instruction(
         self,
-        initial_context_message: Optional[str],
-        initial_context_message_role: Optional[str],
+        system_from_context: Optional[str],
         system_instruction: Optional[str],
         *,
         discard_context_system: bool,
     ) -> Optional[str]:
-        """Resolve conflict between ``system_instruction`` and an initial context message.
-
-        Only warns when *initial_context_message_role* is ``"system"`` (not
-        ``"developer"``), since a developer message coexisting with
-        ``system_instruction`` is expected and handled elsewhere.
+        """Resolve conflict between ``system_instruction`` and an extracted context system message.
 
         Args:
-            initial_context_message: Content extracted from ``messages[0]``
-                by :meth:`_extract_initial_system_or_developer`, or detected
+            system_from_context: Content extracted from an initial ``"system"``
+                message by :meth:`_extract_initial_system`, or detected
                 inline (OpenAI adapters).
-            initial_context_message_role: ``"system"`` or ``"developer"`` —
-                the original role before extraction/detection.
             system_instruction: From service settings or ``run_inference`` param.
             discard_context_system: If ``True`` (non-OpenAI adapters), the
                 context system message is discarded when ``system_instruction``
@@ -239,10 +218,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             The effective system instruction to use, or ``None`` if the system
             instruction is already represented in the messages (OpenAI path).
         """
-        both_present = initial_context_message and system_instruction
-        from_system_role = initial_context_message_role == "system"
-
-        if both_present and from_system_role:
+        if system_from_context and system_instruction:
             if not self._warned_system_instruction:
                 self._warned_system_instruction = True
                 if discard_context_system:
@@ -257,15 +233,11 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                     )
 
         if system_instruction:
-            if discard_context_system:
-                return system_instruction
-            else:
-                # OpenAI path: caller prepends; return the instruction for prepending
-                return system_instruction
+            return system_instruction
 
-        if initial_context_message:
+        if system_from_context:
             if discard_context_system:
-                return initial_context_message
+                return system_from_context
             else:
                 # Content is already in messages; nothing to prepend
                 return None

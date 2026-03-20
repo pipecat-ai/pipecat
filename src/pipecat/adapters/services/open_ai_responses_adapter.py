@@ -68,7 +68,6 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             if first_msg and first_msg.get("role") == "system":
                 self._resolve_system_instruction(
                     first_msg.get("content", ""),
-                    "system",
                     system_instruction,
                     discard_context_system=False,
                 )
