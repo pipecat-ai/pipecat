@@ -161,8 +161,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         If extracting would leave the messages list empty
         (``len(messages) == 1``), the message is converted to ``"user"`` role
         instead of being extracted. This prevents sending an empty conversation
-        history to providers that require at least one non-system message
-        (e.g. Anthropic, Bedrock).
+        history to providers that require at least one non-system message.
 
         Args:
             messages: Message list in standard format (mutated in-place).
