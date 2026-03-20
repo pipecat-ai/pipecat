@@ -188,6 +188,15 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
 
         # Would extracting empty the list? Convert to "user" instead.
         if len(messages) == 1:
+            if role == "system" and system_instruction:
+                if not self._warned_system_instruction:
+                    self._warned_system_instruction = True
+                    logger.warning(
+                        "Both system_instruction and a system message in context are set."
+                        " Using system_instruction. The system message in context is being"
+                        " converted to a user message to avoid sending an empty conversation"
+                        " history."
+                    )
             messages[0]["role"] = "user"
             return None, None
 

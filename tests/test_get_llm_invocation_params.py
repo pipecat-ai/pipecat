@@ -2002,6 +2002,23 @@ class TestBaseLLMAdapterHelpers(unittest.TestCase):
         self.assertEqual(len(messages), 1)  # not popped
         self.assertEqual(messages[0]["role"], "user")
 
+    def test_single_system_message_with_system_instruction_warns(self):
+        """Single system message + system_instruction still warns even though content isn't extracted."""
+        messages = [
+            {"role": "system", "content": "Be helpful."},
+        ]
+
+        adapter = OpenAILLMAdapter()
+        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+            content, role = adapter._extract_initial_system_or_developer(
+                messages, system_instruction="Be concise."
+            )
+            mock_logger.warning.assert_called_once()
+
+        self.assertIsNone(content)
+        self.assertIsNone(role)
+        self.assertEqual(messages[0]["role"], "user")
+
     def test_non_system_message_ignored(self):
         """Non-system/developer first message is ignored."""
         messages = [
