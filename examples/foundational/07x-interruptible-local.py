@@ -82,7 +82,7 @@ async def main():
         ),
     )
 
-    context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
+    context.add_message({"role": "developer", "content": "Please introduce yourself to the user."})
     await task.queue_frames([LLMRunFrame()])
 
     runner = PipelineRunner()

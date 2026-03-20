@@ -213,7 +213,7 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = LLMContext([{"role": "user", "content": "Say hello!"}], tools)
+    context = LLMContext([{"role": "developer", "content": "Say hello!"}], tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

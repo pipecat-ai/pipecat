@@ -211,7 +211,7 @@ Always be helpful and proactive in offering assistance.""",
 
     # Create context with initial message and tools
     context = LLMContext(
-        [{"role": "user", "content": "Say hello and introduce yourself!"}],
+        [{"role": "developer", "content": "Say hello and introduce yourself!"}],
         tools,
     )
 

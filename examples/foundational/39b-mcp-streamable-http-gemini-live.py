@@ -102,7 +102,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     await mcp.register_tools_schema(tools, llm)
 
-    context = LLMContext([{"role": "user", "content": "Please introduce yourself."}])
+    context = LLMContext([{"role": "developer", "content": "Please introduce yourself."}])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
