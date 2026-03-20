@@ -125,7 +125,8 @@ class AWSNovaSonicLLMAdapter(BaseLLMAdapter[AWSNovaSonicLLMInvocationParams]):
 
         universal_context_messages = copy.deepcopy(universal_context_messages)
 
-        # If we have a "system" message as our first message, let's pull that out into "instruction"
+        # If we have a "system" message as our first message,
+        # pull that out into "instruction"
         if universal_context_messages[0].get("role") == "system":
             system = universal_context_messages.pop(0)
             content = system.get("content")
@@ -136,8 +137,13 @@ class AWSNovaSonicLLMAdapter(BaseLLMAdapter[AWSNovaSonicLLMInvocationParams]):
             if system_instruction:
                 self._system_instruction = system_instruction
 
+        # Convert any remaining "system"/"developer" messages to "user",
+        # as Nova Sonic only supports "user" and "assistant" in history.
+        for msg in universal_context_messages:
+            if msg.get("role") in ("system", "developer"):
+                msg["role"] = "user"
+
         # Process remaining messages to fill out conversation history.
-        # Nova Sonic supports "user" and "assistant" messages in history.
         for universal_context_message in universal_context_messages:
             message = self._from_universal_context_message(universal_context_message)
             if message:
