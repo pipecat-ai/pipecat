@@ -71,7 +71,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         )
         effective_system = self._resolve_system_instruction(
             converted.system_instruction,
-            converted.system_instruction_role,
             system_instruction,
             discard_context_system=True,
         )
@@ -176,7 +175,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         messages: List[Content]
         system_instruction: Optional[str] = None
-        system_instruction_role: Optional[str] = None  # "system" or "developer"
 
     @dataclass
     class MessageConversionResult:
@@ -220,12 +218,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         # We work on a mutable copy so we can pop messages[0] if needed.
         remaining_messages = list(universal_context_messages)
         extracted_system = None
-        extracted_role = None
 
-        # Extract initial system/developer from universal messages BEFORE conversion,
+        # Extract initial system message from universal messages BEFORE conversion,
         # so the helper works with standard message format.
         if remaining_messages and not isinstance(remaining_messages[0], LLMSpecificMessage):
-            extracted_system, extracted_role = self._extract_initial_system_or_developer(
+            extracted_system = self._extract_initial_system(
                 remaining_messages, system_instruction=system_instruction
             )
 
@@ -294,7 +291,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         return self.ConvertedMessages(
             messages=messages,
             system_instruction=extracted_system,
-            system_instruction_role=extracted_role,
         )
 
     def _from_standard_message(

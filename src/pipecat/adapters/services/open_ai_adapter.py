@@ -68,11 +68,13 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
 
         if system_instruction:
             # Detect initial system message for warning purposes (don't extract)
-            initial_role = messages[0].get("role") if messages else None
-            initial_content = messages[0].get("content", "") if initial_role == "system" else None
+            initial_content = (
+                messages[0].get("content", "")
+                if messages and messages[0].get("role") == "system"
+                else None
+            )
             self._resolve_system_instruction(
                 initial_content,
-                initial_role if initial_role == "system" else None,
                 system_instruction,
                 discard_context_system=False,
             )

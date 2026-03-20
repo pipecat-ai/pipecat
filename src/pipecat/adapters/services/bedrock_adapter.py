@@ -65,7 +65,6 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         )
         effective_system = self._resolve_system_instruction(
             converted.system,
-            converted.system_role,
             system_instruction,
             discard_context_system=True,
         )
@@ -112,7 +111,6 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
 
         messages: List[dict[str, Any]]
         system: Optional[str]
-        system_role: Optional[str] = None  # "system" or "developer" — origin of extracted system
 
     def _from_universal_context_messages(
         self,
@@ -121,18 +119,12 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         system_instruction: Optional[str] = None,
     ) -> ConvertedMessages:
         system = None
-        system_role = None
 
-        # Extract initial system/developer from universal messages BEFORE conversion,
+        # Extract initial system message from universal messages BEFORE conversion,
         # so the helper works with standard message format (not provider-specific).
         remaining = list(universal_context_messages)
         if remaining and not isinstance(remaining[0], LLMSpecificMessage):
-            extracted_content, extracted_role = self._extract_initial_system_or_developer(
-                remaining, system_instruction=system_instruction
-            )
-            if extracted_content is not None:
-                system = extracted_content
-                system_role = extracted_role
+            system = self._extract_initial_system(remaining, system_instruction=system_instruction)
 
         # Convert remaining messages to Bedrock format
         messages = []
@@ -174,7 +166,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             elif isinstance(message["content"], list) and len(message["content"]) == 0:
                 message["content"] = [{"type": "text", "text": "(empty)"}]
 
-        return self.ConvertedMessages(messages=messages, system=system, system_role=system_role)
+        return self.ConvertedMessages(messages=messages, system=system)
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> dict[str, Any]:
         if isinstance(message, LLMSpecificMessage):
