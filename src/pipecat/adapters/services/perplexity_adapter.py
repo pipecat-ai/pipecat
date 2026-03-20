@@ -28,7 +28,7 @@ the messages are sent to Perplexity's API.
 """
 
 import copy
-from typing import List
+from typing import List, Optional
 
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -49,17 +49,21 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
     ``build_chat_completion_params`` prepends ``system_instruction``.
     """
 
-    def get_llm_invocation_params(self, context: LLMContext) -> OpenAILLMInvocationParams:
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, system_instruction: Optional[str] = None
+    ) -> OpenAILLMInvocationParams:
         """Get OpenAI-compatible invocation parameters with Perplexity message fixes applied.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings
+                or ``run_inference``. Forwarded to the parent adapter.
 
         Returns:
             Dictionary of parameters for Perplexity's ChatCompletion API, with
             messages transformed to satisfy Perplexity's constraints.
         """
-        params = super().get_llm_invocation_params(context)
+        params = super().get_llm_invocation_params(context, system_instruction=system_instruction)
         params["messages"] = self._transform_messages(list(params["messages"]))
         return params
 

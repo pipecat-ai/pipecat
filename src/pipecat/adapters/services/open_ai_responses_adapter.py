@@ -9,7 +9,6 @@
 import copy
 from typing import Any, Dict, List, Optional, TypedDict
 
-from loguru import logger
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import FunctionToolParam, ResponseInputItemParam
 
@@ -41,11 +40,6 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
     - Extracting and sanitizing messages from the LLM context for logging
     """
 
-    def __init__(self):
-        """Initialize the adapter."""
-        super().__init__()
-        self._warned_system_instruction = False
-
     @property
     def id_for_llm_specific_messages(self) -> str:
         """Get the identifier used in LLMSpecificMessage instances."""
@@ -67,6 +61,18 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             Dictionary of parameters for the Responses API.
         """
         messages = self.get_messages(context)
+
+        # Check for conflict: system_instruction + initial system message
+        if system_instruction and messages:
+            first_msg = messages[0] if not isinstance(messages[0], LLMSpecificMessage) else None
+            if first_msg and first_msg.get("role") == "system":
+                self._resolve_system_instruction(
+                    first_msg.get("content", ""),
+                    "system",
+                    system_instruction,
+                    discard_context_system=False,
+                )
+
         input_items = self._convert_messages_to_input(messages)
 
         params: OpenAIResponsesLLMInvocationParams = {
@@ -158,24 +164,15 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             List of Responses API input items.
         """
         result: List[ResponseInputItemParam] = []
-        is_first = True
 
         for message in messages:
             if isinstance(message, LLMSpecificMessage):
                 result.append(message.message)
-                is_first = False
                 continue
 
             role = message.get("role")
 
-            if role == "system":
-                if is_first and not self._warned_system_instruction:
-                    logger.warning(
-                        "System messages in LLMContext are converted to 'developer' role for the "
-                        "Responses API. Consider using settings.system_instruction instead, which "
-                        "maps to the 'instructions' parameter."
-                    )
-                    self._warned_system_instruction = True
+            if role in ("system", "developer"):
                 content = message.get("content", "")
                 if isinstance(content, list):
                     content = self._convert_multimodal_content(content)
@@ -217,8 +214,6 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                         "output": content,
                     }
                 )
-
-            is_first = False
 
         return result
 
