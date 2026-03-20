@@ -70,9 +70,12 @@ from google.genai.types import Content, Part
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.processors.aggregators.llm_context import (
@@ -1948,6 +1951,151 @@ class TestOpenAIResponsesGetLLMInvocationParams(unittest.TestCase):
         params = self.adapter.get_llm_invocation_params(context)
 
         self.assertNotIn("instructions", params)
+
+
+class TestOpenAIRealtimeGetLLMInvocationParams(unittest.TestCase):
+    def setUp(self) -> None:
+        self.adapter = OpenAIRealtimeLLMAdapter()
+
+    def test_system_message_extracted_as_instruction(self):
+        """Initial system message is extracted as system_instruction."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello"},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["system_instruction"], "You are helpful.")
+        self.assertEqual(len(params["messages"]), 1)
+
+    def test_developer_message_becomes_user(self):
+        """Developer message is converted to user, not extracted as system instruction."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "developer", "content": "Extra context."},
+            {"role": "user", "content": "Hello"},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertIsNone(params["system_instruction"])
+        # Developer converted to user, then packed with the other user message
+        self.assertEqual(len(params["messages"]), 1)
+
+    def test_subsequent_developer_message_becomes_user(self):
+        """Non-initial developer message is converted to user."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "developer", "content": "Extra context."},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["system_instruction"], "You are helpful.")
+        # Developer message converted to user
+        self.assertEqual(len(params["messages"]), 1)
+
+    def test_empty_messages(self):
+        """Empty messages list returns empty."""
+        context = LLMContext(messages=[])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"], [])
+        self.assertIsNone(params["system_instruction"])
+
+
+class TestGrokRealtimeGetLLMInvocationParams(unittest.TestCase):
+    def setUp(self) -> None:
+        self.adapter = GrokRealtimeLLMAdapter()
+
+    def test_system_message_extracted_as_instruction(self):
+        """Initial system message is extracted as system_instruction."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello"},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["system_instruction"], "You are helpful.")
+        self.assertEqual(len(params["messages"]), 1)
+
+    def test_developer_message_becomes_user(self):
+        """Developer message is converted to user, not extracted as system instruction."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "developer", "content": "Extra context."},
+            {"role": "user", "content": "Hello"},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertIsNone(params["system_instruction"])
+        # Developer converted to user, then packed with the other user message
+        self.assertEqual(len(params["messages"]), 1)
+
+    def test_subsequent_developer_message_becomes_user(self):
+        """Non-initial developer message is converted to user."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "developer", "content": "Extra context."},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["system_instruction"], "You are helpful.")
+        self.assertEqual(len(params["messages"]), 1)
+
+    def test_empty_messages(self):
+        """Empty messages list returns empty."""
+        context = LLMContext(messages=[])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"], [])
+        self.assertIsNone(params["system_instruction"])
+
+
+class TestAWSNovaSonicGetLLMInvocationParams(unittest.TestCase):
+    def setUp(self) -> None:
+        self.adapter = AWSNovaSonicLLMAdapter()
+
+    def test_system_message_extracted_as_instruction(self):
+        """Initial system message is extracted as system_instruction."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello"},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["system_instruction"], "You are helpful.")
+        self.assertEqual(len(params["messages"]), 1)
+
+    def test_developer_message_becomes_user(self):
+        """Developer message is converted to user, not extracted as system instruction."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "developer", "content": "Extra context."},
+            {"role": "user", "content": "Hello"},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertIsNone(params["system_instruction"])
+        # Both messages should be present (developer as user, plus the real user)
+        self.assertEqual(len(params["messages"]), 2)
+
+    def test_subsequent_developer_message_becomes_user(self):
+        """Non-initial developer message is converted to user."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "developer", "content": "Extra context."},
+            {"role": "assistant", "content": "Hi"},
+        ]
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["system_instruction"], "You are helpful.")
+        # Developer becomes user, plus assistant
+        self.assertEqual(len(params["messages"]), 2)
 
 
 class TestBaseLLMAdapterHelpers(unittest.TestCase):
