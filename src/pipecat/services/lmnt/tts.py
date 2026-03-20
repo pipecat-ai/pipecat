@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -212,15 +211,6 @@ class LmntTTSService(InterruptibleTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push a frame downstream with special handling for stop conditions.
-
-        Args:
-            frame: The frame to push.
-            direction: The direction to push the frame.
-        """
-        await super().push_frame(frame, direction)
-
     async def _connect(self):
         """Connect to LMNT WebSocket and start receive task."""
         await super()._connect()
@@ -322,18 +312,22 @@ class LmntTTSService(InterruptibleTTSService):
             if isinstance(message, bytes):
                 # Raw audio data
                 await self.stop_ttfb_metrics()
+                context_id = self.get_active_audio_context_id()
                 frame = TTSAudioRawFrame(
                     audio=message,
                     sample_rate=self.sample_rate,
                     num_channels=1,
-                    context_id=self.get_active_audio_context_id(),
+                    context_id=context_id,
                 )
-                await self.push_frame(frame)
+                await self.append_to_audio_context(context_id, frame)
             else:
                 try:
                     msg = json.loads(message)
                     if "error" in msg:
-                        await self.push_frame(TTSStoppedFrame())
+                        context_id = self.get_active_audio_context_id()
+                        await self.append_to_audio_context(
+                            context_id, TTSStoppedFrame(context_id=context_id)
+                        )
                         await self.stop_all_metrics()
                         await self.push_error(error_msg=f"Error: {msg['error']}")
                         return

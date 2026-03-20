@@ -1054,15 +1054,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push a frame downstream with special handling for stop conditions.
-
-        Args:
-            frame: The frame to push.
-            direction: The direction to push the frame.
-        """
-        await super().push_frame(frame, direction)
-
     async def _connect(self):
         """Establish WebSocket connection and start receive task."""
         await super()._connect()
@@ -1153,13 +1144,14 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                 if isinstance(message, bytes):
                     await self.stop_ttfb_metrics()
 
+                    context_id = self.get_active_audio_context_id()
                     frame = TTSAudioRawFrame(
                         audio=message,
                         sample_rate=self.sample_rate,
                         num_channels=1,
-                        context_id=self.get_active_audio_context_id(),
+                        context_id=context_id,
                     )
-                    await self.push_frame(frame)
+                    await self.append_to_audio_context(context_id, frame)
             except Exception as e:
                 await self.push_error(error_msg=f"Error: {e}", exception=e)
 
