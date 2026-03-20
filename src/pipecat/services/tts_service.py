@@ -760,6 +760,7 @@ class WordTTSService(TTSService):
         super().__init__(**kwargs)
         self._initial_word_timestamp = -1
         self._initial_word_times = []
+        self._words_queue = asyncio.Queue()
         self._words_task = None
         self._llm_response_started: bool = False
 

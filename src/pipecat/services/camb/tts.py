@@ -18,8 +18,8 @@ Features:
 
 from typing import Any, AsyncGenerator, Dict, Optional
 
-# from camb import StreamTtsOutputConfiguration
-# from camb.client import AsyncCambAI
+from camb import StreamTtsOutputConfiguration
+from camb.client import AsyncCambAI
 from loguru import logger
 from pydantic import BaseModel, Field
 
