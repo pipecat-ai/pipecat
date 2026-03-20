@@ -942,24 +942,18 @@ class AWSBedrockLLMService(LLMService):
         """
         messages = []
         system = []
+        effective_instruction = system_instruction or self._settings.system_instruction
         if isinstance(context, LLMContext):
             adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
-            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
+                context, system_instruction=effective_instruction
+            )
             messages = params["messages"]
-            system = params["system"]  # [{"text": "system message"}]
+            system = params["system"]  # [{"text": "system message"}] or None
         else:
             context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
             messages = context.messages
             system = getattr(context, "system", None)  # [{"text": "system message"}]
-
-        # Override system instruction if provided
-        if system_instruction is not None:
-            if system:
-                logger.warning(
-                    f"{self}: Both system_instruction and a system message in context are set."
-                    " Using system_instruction."
-                )
-            system = [{"text": system_instruction}]
 
         # Prepare request parameters using the same method as streaming
         inference_config = self._build_inference_config()
@@ -1086,14 +1080,9 @@ class AWSBedrockLLMService(LLMService):
         # Universal LLMContext
         if isinstance(context, LLMContext):
             adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
-            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
-            if self._settings.system_instruction:
-                if params["system"]:
-                    logger.warning(
-                        f"{self}: Both system_instruction and a system message in context are"
-                        " set. Using system_instruction."
-                    )
-                params["system"] = [{"text": self._settings.system_instruction}]
+            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
+                context, system_instruction=self._settings.system_instruction
+            )
             return params
 
         # AWS Bedrock-specific context

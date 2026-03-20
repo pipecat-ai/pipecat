@@ -47,19 +47,31 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for AWS Bedrock."""
         return "aws"
 
-    def get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, system_instruction: Optional[str] = None
+    ) -> AWSBedrockLLMInvocationParams:
         """Get AWS Bedrock-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings
+                or ``run_inference``.
 
         Returns:
             Dictionary of parameters for invoking AWS Bedrock's LLM API.
         """
-        messages = self._from_universal_context_messages(self.get_messages(context))
+        converted = self._from_universal_context_messages(
+            self.get_messages(context), system_instruction=system_instruction
+        )
+        effective_system = self._resolve_system_instruction(
+            converted.system,
+            converted.system_role,
+            system_instruction,
+            discard_context_system=True,
+        )
         return {
-            "system": messages.system,
-            "messages": messages.messages,
+            "system": [{"text": effective_system}] if effective_system else None,
+            "messages": converted.messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
             # To avoid refactoring in AWSBedrockLLMService, we just pass through tool_choice.
@@ -96,32 +108,43 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
 
     @dataclass
     class ConvertedMessages:
-        """Container for Anthropic-formatted messages converted from universal context."""
+        """Container for Bedrock-formatted messages converted from universal context."""
 
         messages: List[dict[str, Any]]
         system: Optional[str]
+        system_role: Optional[str] = None  # "system" or "developer" — origin of extracted system
 
     def _from_universal_context_messages(
-        self, universal_context_messages: List[LLMContextMessage]
+        self,
+        universal_context_messages: List[LLMContextMessage],
+        *,
+        system_instruction: Optional[str] = None,
     ) -> ConvertedMessages:
         system = None
-        messages = []
+        system_role = None
 
-        # First, map messages using self._from_universal_context_message(m)
+        # Extract initial system/developer from universal messages BEFORE conversion,
+        # so the helper works with standard message format (not provider-specific).
+        remaining = list(universal_context_messages)
+        if remaining and not isinstance(remaining[0], LLMSpecificMessage):
+            extracted_content, extracted_role = self._extract_initial_system_or_developer(
+                remaining, system_instruction=system_instruction
+            )
+            if extracted_content is not None:
+                system = extracted_content
+                system_role = extracted_role
+
+        # Convert remaining messages to Bedrock format
+        messages = []
         try:
-            messages = [self._from_universal_context_message(m) for m in universal_context_messages]
+            messages = [self._from_universal_context_message(m) for m in remaining]
         except Exception as e:
             logger.error(f"Error mapping messages: {e}")
 
-        # See if we should pull the system message out of our messages list
-        if messages and messages[0]["role"] == "system":
-            system = messages[0]["content"]
-            messages.pop(0)
-
-        # Convert any subsequent "system"-role messages to "user"-role
-        # messages, as AWS Bedrock doesn't support system input messages.
+        # Convert any subsequent "system"/"developer"-role messages to "user"-role
+        # messages, as AWS Bedrock doesn't support system or developer input messages.
         for message in messages:
-            if message["role"] == "system":
+            if message["role"] in ("system", "developer"):
                 message["role"] = "user"
 
         # Merge consecutive messages with the same role.
@@ -151,7 +174,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             elif isinstance(message["content"], list) and len(message["content"]) == 0:
                 message["content"] = [{"type": "text", "text": "(empty)"}]
 
-        return self.ConvertedMessages(messages=messages, system=system)
+        return self.ConvertedMessages(messages=messages, system=system, system_role=system_role)
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> dict[str, Any]:
         if isinstance(message, LLMSpecificMessage):

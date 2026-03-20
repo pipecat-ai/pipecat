@@ -424,10 +424,11 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
         params = self.adapter.get_llm_invocation_params(context)
 
-        # System instruction should be extracted
-        self.assertEqual(params["system_instruction"], "You are a helpful assistant.")
+        # When there's only one message, it's converted to user in-place (not extracted)
+        # so system_instruction is None
+        self.assertIsNone(params["system_instruction"])
 
-        # But since there are no other messages, it should also be added back as a user message
+        # The system message should be converted to a user message
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0].role, "user")
         self.assertEqual(params["messages"][0].parts[0].text, "You are a helpful assistant.")
@@ -973,7 +974,7 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["messages"][2]["content"][0]["text"], "Remember to be concise.")
 
     def test_single_system_message_handling(self):
-        """Test that a single system message is extracted as system parameter and no messages remain."""
+        """Test that a single system message is converted to user role when no other messages exist."""
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
         ]
@@ -984,13 +985,16 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         # Get invocation params
         params = self.adapter.get_llm_invocation_params(context)
 
-        # System should be extracted (in AWS Bedrock format)
-        self.assertIsInstance(params["system"], list)
-        self.assertEqual(len(params["system"]), 1)
-        self.assertEqual(params["system"][0]["text"], "You are a helpful assistant.")
+        # When there's only one message, it's converted to user in-place (not extracted)
+        # so system is None
+        self.assertIsNone(params["system"])
 
-        # No messages should remain after system extraction
-        self.assertEqual(len(params["messages"]), 0)
+        # Single system message should be converted to user role
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(
+            params["messages"][0]["content"][0]["text"], "You are a helpful assistant."
+        )
 
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):

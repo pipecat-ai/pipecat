@@ -11,7 +11,7 @@ adapters that handle tool format conversion and standardization.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, List, TypeVar
+from typing import Any, Dict, Generic, List, Optional, Tuple, TypeVar
 
 from loguru import logger
 
@@ -39,9 +39,15 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     - Converting standardized tools schema to provider-specific tool formats.
     - Extracting messages from the LLM context for the purposes of logging
       about the specific provider.
+    - Resolving conflicts between ``system_instruction`` and initial
+      system/developer messages in the conversation context.
 
     Subclasses must implement provider-specific conversion logic.
     """
+
+    def __init__(self):
+        """Initialize the adapter."""
+        self._warned_system_instruction = False
 
     @property
     @abstractmethod
@@ -129,4 +135,123 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         # Fallback to return the same tools in case they are not in a standard format
         return tools
 
-    # TODO: we can move the logic to also handle the Messages here
+    def _extract_initial_system_or_developer(
+        self,
+        messages: list,
+        *,
+        system_instruction: Optional[str],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Extract an initial system/developer message from messages, if appropriate.
+
+        Checks ``messages[0]``. Behavior:
+
+        - ``"system"`` role: always extract (pop from messages).
+        - ``"developer"`` role **without** ``system_instruction``: extract (pop).
+        - ``"developer"`` role **with** ``system_instruction``: don't extract;
+          convert to ``"user"`` in-place.
+        - Any other role: no-op.
+
+        If extracting would leave the messages list empty (``len(messages) == 1``),
+        the message is converted to ``"user"`` role instead of being extracted.
+        This prevents sending an empty conversation history to providers that
+        require at least one non-system message (e.g. Anthropic, Bedrock).
+
+        Args:
+            messages: Provider-formatted message list (mutated in-place).
+            system_instruction: The system instruction from service settings or
+                ``run_inference``, used to decide whether to extract a
+                ``"developer"`` message.
+
+        Returns:
+            ``(extracted_content, original_role)`` where *original_role* is
+            ``"system"`` or ``"developer"``, or ``(None, None)`` if nothing
+            was extracted.
+        """
+        if not messages:
+            return None, None
+
+        role = messages[0].get("role")
+        if role not in ("system", "developer"):
+            return None, None
+
+        # "developer" + system_instruction present → keep in messages as "user"
+        if role == "developer" and system_instruction:
+            messages[0]["role"] = "user"
+            return None, None
+
+        # Would extracting empty the list? Convert to "user" instead.
+        if len(messages) == 1:
+            messages[0]["role"] = "user"
+            return None, None
+
+        # Extract
+        content = messages[0].get("content", "")
+        if isinstance(content, list):
+            # Join text parts for providers that expect a string system instruction
+            content = " ".join(
+                part.get("text", "") for part in content if part.get("type") == "text"
+            )
+        messages.pop(0)
+        return content, role
+
+    def _resolve_system_instruction(
+        self,
+        initial_context_message: Optional[str],
+        initial_context_message_role: Optional[str],
+        system_instruction: Optional[str],
+        *,
+        discard_context_system: bool,
+    ) -> Optional[str]:
+        """Resolve conflict between ``system_instruction`` and an initial context message.
+
+        Only warns when *initial_context_message_role* is ``"system"`` (not
+        ``"developer"``), since a developer message coexisting with
+        ``system_instruction`` is expected and handled elsewhere.
+
+        Args:
+            initial_context_message: Content extracted from ``messages[0]``
+                by :meth:`_extract_initial_system_or_developer`, or detected
+                inline (OpenAI adapters).
+            initial_context_message_role: ``"system"`` or ``"developer"`` —
+                the original role before extraction/detection.
+            system_instruction: From service settings or ``run_inference`` param.
+            discard_context_system: If ``True`` (non-OpenAI adapters), the
+                context system message is discarded when ``system_instruction``
+                is also present. If ``False`` (OpenAI adapters), both are kept.
+
+        Returns:
+            The effective system instruction to use, or ``None`` if the system
+            instruction is already represented in the messages (OpenAI path).
+        """
+        both_present = initial_context_message and system_instruction
+        from_system_role = initial_context_message_role == "system"
+
+        if both_present and from_system_role:
+            if not self._warned_system_instruction:
+                self._warned_system_instruction = True
+                if discard_context_system:
+                    logger.warning(
+                        "Both system_instruction and a system message in context are set."
+                        " Using system_instruction."
+                    )
+                else:
+                    logger.warning(
+                        "Both system_instruction and an initial system message in context"
+                        " are set, which may be unintended. Prefer system_instruction."
+                    )
+
+        if system_instruction:
+            if discard_context_system:
+                return system_instruction
+            else:
+                # OpenAI path: caller prepends; return the instruction for prepending
+                return system_instruction
+
+        if initial_context_message:
+            if discard_context_system:
+                return initial_context_message
+            else:
+                # Content is already in messages; nothing to prepend
+                return None
+
+        return None

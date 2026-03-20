@@ -370,10 +370,13 @@ class AnthropicLLMService(LLMService):
         messages = []
         system = NOT_GIVEN
         tools = []
+        effective_instruction = system_instruction or self._settings.system_instruction
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
             invocation_params = adapter.get_llm_invocation_params(
-                context, enable_prompt_caching=self._settings.enable_prompt_caching
+                context,
+                enable_prompt_caching=self._settings.enable_prompt_caching,
+                system_instruction=effective_instruction,
             )
             messages = invocation_params["messages"]
             system = invocation_params["system"]
@@ -383,15 +386,6 @@ class AnthropicLLMService(LLMService):
             messages = context.messages
             system = getattr(context, "system", NOT_GIVEN)
             tools = context.tools or []
-
-        # Override system instruction if provided
-        if system_instruction is not None:
-            if system and system is not NOT_GIVEN:
-                logger.warning(
-                    f"{self}: Both system_instruction and a system message in context are set."
-                    " Using system_instruction."
-                )
-            system = system_instruction
 
         # Build params using the same method as streaming completions
         params = {
@@ -460,15 +454,10 @@ class AnthropicLLMService(LLMService):
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
             params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(
-                context, enable_prompt_caching=self._settings.enable_prompt_caching
+                context,
+                enable_prompt_caching=self._settings.enable_prompt_caching,
+                system_instruction=self._settings.system_instruction,
             )
-            if self._settings.system_instruction:
-                if params["system"] is not NOT_GIVEN:
-                    logger.warning(
-                        f"{self}: Both system_instruction and a system message in context are"
-                        " set. Using system_instruction."
-                    )
-                params["system"] = self._settings.system_instruction
             return params
 
         # Anthropic-specific context

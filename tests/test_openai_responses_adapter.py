@@ -58,9 +58,8 @@ class TestOpenAIResponsesAdapter(unittest.TestCase):
         self.assertEqual(params["input"][0]["role"], "developer")
         self.assertEqual(params["input"][0]["content"], "You are helpful.")
 
-    def test_first_system_message_triggers_warning(self):
-        """First system message triggers a warning about using system_instruction."""
-        # Use a fresh adapter so the warning hasn't been emitted yet
+    def test_system_message_without_system_instruction_no_warning(self):
+        """System message without system_instruction does not trigger a warning."""
         adapter = OpenAIResponsesLLMAdapter()
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
@@ -68,8 +67,21 @@ class TestOpenAIResponsesAdapter(unittest.TestCase):
         ]
         context = LLMContext(messages=messages)
 
-        with patch("pipecat.adapters.services.open_ai_responses_adapter.logger") as mock_logger:
+        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
             adapter.get_llm_invocation_params(context)
+            mock_logger.warning.assert_not_called()
+
+    def test_system_message_with_system_instruction_triggers_warning(self):
+        """System message + system_instruction triggers a conflict warning."""
+        adapter = OpenAIResponsesLLMAdapter()
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello"},
+        ]
+        context = LLMContext(messages=messages)
+
+        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+            adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
             mock_logger.warning.assert_called_once()
             warning_msg = mock_logger.warning.call_args[0][0]
             self.assertIn("system_instruction", warning_msg)
@@ -83,15 +95,15 @@ class TestOpenAIResponsesAdapter(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         adapter = OpenAIResponsesLLMAdapter()
-        with patch("pipecat.adapters.services.open_ai_responses_adapter.logger") as mock_logger:
-            params = adapter.get_llm_invocation_params(context)
+        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+            params = adapter.get_llm_invocation_params(context, system_instruction="Be helpful.")
             mock_logger.warning.assert_not_called()
 
         self.assertEqual(params["input"][1]["role"], "developer")
         self.assertEqual(params["input"][1]["content"], "New instruction")
 
-    def test_first_system_message_warning_fires_only_once(self):
-        """The first-system-message warning fires only once per adapter instance."""
+    def test_conflict_warning_fires_only_once(self):
+        """The conflict warning fires only once per adapter instance."""
         messages: list[LLMStandardMessage] = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hello"},
@@ -99,9 +111,9 @@ class TestOpenAIResponsesAdapter(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         adapter = OpenAIResponsesLLMAdapter()
-        with patch("pipecat.adapters.services.open_ai_responses_adapter.logger") as mock_logger:
-            adapter.get_llm_invocation_params(context)
-            adapter.get_llm_invocation_params(context)
+        with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
+            adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
+            adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
             # Warning should have been emitted exactly once, not twice
             mock_logger.warning.assert_called_once()
 
