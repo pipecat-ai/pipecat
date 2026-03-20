@@ -538,7 +538,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             if hasattr(self, "_settings"):
                                 for key, value in self._settings.given_fields().items():
                                     # system_instruction is already captured as the
-                                    # "system" span attribute above.
+                                    # "system_instructions" span attribute above.
                                     if key == "system_instruction":
                                         continue
                                     if isinstance(value, (int, float, bool, str)):
@@ -561,7 +561,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 attribute_kwargs["tools"] = serialized_tools
                                 attribute_kwargs["tool_count"] = tool_count
                             if system_message:
-                                attribute_kwargs["system"] = system_message
+                                attribute_kwargs["system_instructions"] = system_message
 
                             # Add all gathered attributes to the span
                             add_llm_span_attributes(span=current_span, **attribute_kwargs)
