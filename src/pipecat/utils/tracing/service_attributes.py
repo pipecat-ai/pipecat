@@ -25,20 +25,20 @@ if is_tracing_available():
     from opentelemetry.trace import Span
 
 
-def _get_gen_ai_system_from_service_name(service_name: str) -> str:
-    """Extract the standardized gen_ai.system value from a service class name.
+def _get_provider_name_from_service_name(service_name: str) -> str:
+    """Extract the standardized gen_ai.provider.name value from a service class name.
 
     Source:
-    https://opentelemetry.io/docs/specs/semconv/attributes-registry/gen-ai/#gen-ai-system
+    https://opentelemetry.io/docs/specs/semconv/attributes-registry/gen-ai/
 
     Uses standard OTel names where possible, with special case mappings for
     service names that don't follow the pattern.
 
     Args:
-        service_name: The service class name to extract system name from.
+        service_name: The service class name to extract provider name from.
 
     Returns:
-        The standardized gen_ai.system value.
+        The standardized gen_ai.provider.name value.
     """
     SPECIAL_CASE_MAPPINGS = {
         # AWS
@@ -91,7 +91,7 @@ def add_tts_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", service_name.replace("TTSService", "").lower())
+    span.set_attribute("gen_ai.provider.name", service_name.replace("TTSService", "").lower())
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("gen_ai.output.type", "speech")
@@ -150,7 +150,7 @@ def add_stt_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", service_name.replace("STTService", "").lower())
+    span.set_attribute("gen_ai.provider.name", service_name.replace("STTService", "").lower())
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("vad_enabled", vad_enabled)
@@ -218,7 +218,7 @@ def add_llm_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", _get_gen_ai_system_from_service_name(service_name))
+    span.set_attribute("gen_ai.provider.name", _get_provider_name_from_service_name(service_name))
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", "chat")
     span.set_attribute("gen_ai.output.type", "text")
@@ -241,7 +241,7 @@ def add_llm_span_attributes(
         span.set_attribute("tool_choice", tool_choice)
 
     if system_instructions:
-        span.set_attribute("system_instructions", system_instructions)
+        span.set_attribute("gen_ai.system_instructions", system_instructions)
 
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
@@ -313,7 +313,7 @@ def add_gemini_live_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", "gcp.gemini")
+    span.set_attribute("gen_ai.provider.name", "gcp.gemini")
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("service.operation", operation_name)
@@ -414,7 +414,7 @@ def add_openai_realtime_span_attributes(
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
-    span.set_attribute("gen_ai.system", "openai")
+    span.set_attribute("gen_ai.provider.name", "openai")
     span.set_attribute("gen_ai.request.model", model)
     span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("service.operation", operation_name)
