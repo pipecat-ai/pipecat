@@ -26,10 +26,11 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     AggregationType,
+    FileSourceType,
 )
 
 # -- Constants --
-PROTOCOL_VERSION = "1.2.0"
+PROTOCOL_VERSION = "1.3.0"
 
 MESSAGE_LABEL = "rtvi-ai"
 MessageLiteral = Literal["rtvi-ai"]
@@ -227,6 +228,66 @@ class SendTextData(BaseModel):
 
     content: str
     options: Optional[SendTextOptions] = None
+
+
+class FileSource(BaseModel):
+    """Base class for RTVI file sources."""
+
+    type: FileSourceType
+
+
+class FileBytes(FileSource):
+    """File source as base64-encoded bytes."""
+
+    type: FileSourceType = "bytes"
+    bytes: str  # base64-encoded string
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class FileUrl(FileSource):
+    """File source as a URL."""
+
+    type: FileSourceType = "url"
+    url: str
+    public: bool = True
+
+
+class FileId(FileSource):
+    """File source as a file ID."""
+
+    type: FileSourceType = "id"
+    id: str
+
+
+class File(BaseModel):
+    """File data structure for RTVI file sending."""
+
+    format: str  # Mime format of the file, e.g., 'application/pdf'
+    name: Optional[str] = None
+    source: FileBytes | FileUrl | FileId
+
+
+class SendFileOptions(BaseModel):
+    """Options for sending text input to the LLM.
+
+    Contains options for how the pipeline should process the text input.
+    """
+
+    run_immediately: bool = True
+    audio_response: bool = True
+    custom_options: Optional[dict] = None  # ex. 'detail' in openAI or 'citations' in Bedrock
+
+
+class SendFileData(BaseModel):
+    """Data format for sending a file to the LLM.
+
+    Contains the information of the file to send and any options for how the pipeline should process it.
+    """
+
+    content: str  # Text to accompany the file
+    file: File
+    options: Optional[SendFileOptions] = None
 
 
 class AppendToContextData(BaseModel):

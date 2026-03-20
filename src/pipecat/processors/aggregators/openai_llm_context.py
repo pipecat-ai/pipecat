@@ -233,6 +233,9 @@ class OpenAILLMContext:
                         if item["type"] == "image_url":
                             if item["image_url"]["url"].startswith("data:image/"):
                                 item["image_url"]["url"] = "data:image/..."
+                        if item["type"] == "file":
+                            if item["file"]["file_data"].startswith("data:"):
+                                item["file"]["file_data"] = "data:..."
             if "mime_type" in msg and msg["mime_type"].startswith("image/"):
                 msg["data"] = "..."
             msgs.append(msg)

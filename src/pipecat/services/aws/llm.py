@@ -607,6 +607,8 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                     for item in msg["content"]:
                         if item.get("image"):
                             item["image"]["source"]["bytes"] = "..."
+                        if item.get("type") == "file":
+                            item["file"]["file_data"] = "data:..."
             msgs.append(msg)
         return msgs
 
