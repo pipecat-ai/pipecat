@@ -98,6 +98,7 @@ try:
         FunctionResponse,
         GenerationConfig,
         GroundingMetadata,
+        HistoryConfig,
         HttpOptions,
         LiveConnectConfig,
         LiveServerMessage,
@@ -1204,6 +1205,7 @@ class GeminiLiveLLMService(LLMService):
                 input_audio_transcription=AudioTranscriptionConfig(),
                 output_audio_transcription=AudioTranscriptionConfig(),
                 session_resumption=SessionResumptionConfig(handle=session_resumption_handle),
+                history_config=HistoryConfig(initial_history_in_client_content=True),
             )
 
             # Add context window compression to configuration, if enabled
@@ -1508,6 +1510,9 @@ class GeminiLiveLLMService(LLMService):
             await self._session.send_client_content(
                 turns=messages, turn_complete=self._inference_on_context_initialization
             )
+            # Gemini 3.1 wants turn_complete=True, but also won't run inference without a realtime input
+            if self._inference_on_context_initialization:
+                await self._session.send_realtime_input(text=" ")
         except Exception as e:
             await self._handle_send_error(e)
 
@@ -1520,6 +1525,14 @@ class GeminiLiveLLMService(LLMService):
     async def _create_single_response(self, messages_list):
         """Create a single response from a list of messages."""
         if self._disconnecting or not self._session:
+            return
+
+        model = self._settings.model or ""
+        if "gemini-3" in model:
+            await self.push_error(
+                f"LLMMessagesAppendFrame is not supported with model '{model}'. "
+                "This model does not support send_client_content."
+            )
             return
 
         # Create a throwaway context just for the purpose of getting messages
