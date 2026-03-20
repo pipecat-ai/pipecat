@@ -45,8 +45,8 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
     no non-initial system messages, last message must be user/tool).
 
     The transformations are applied in ``get_llm_invocation_params`` after the
-    parent adapter extracts messages from the LLM context, and before
-    ``build_chat_completion_params`` prepends ``system_instruction``.
+    parent adapter extracts messages from the LLM context (including any
+    ``system_instruction`` prepend).
     """
 
     def get_llm_invocation_params(
