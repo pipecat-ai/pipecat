@@ -141,25 +141,33 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         *,
         system_instruction: Optional[str],
     ) -> Tuple[Optional[str], Optional[str]]:
-        """Extract an initial system/developer message from messages, if appropriate.
+        """Extract an initial system/developer message for use as a system instruction.
+
+        Only useful for services that expect the system instruction as a
+        separate parameter, not inline in conversation history (today, all
+        non-OpenAI services).
 
         Checks ``messages[0]``. Behavior:
 
-        - ``"system"`` role: always extract (pop from messages).
-        - ``"developer"`` role **without** ``system_instruction``: extract (pop).
-        - ``"developer"`` role **with** ``system_instruction``: don't extract;
-          convert to ``"user"`` in-place.
+        - ``"system"`` role: assumed to be intended as the system instruction.
+          Extract (pop from messages).
+        - ``"developer"`` role **without** ``system_instruction``: also assumed
+          to be intended as the system instruction. Extract (pop).
+        - ``"developer"`` role **with** ``system_instruction``: assumed to be
+          intended as a conversation-history message (since a system instruction
+          is already provided). Don't extract; convert to ``"user"`` in-place.
         - Any other role: no-op.
 
-        If extracting would leave the messages list empty (``len(messages) == 1``),
-        the message is converted to ``"user"`` role instead of being extracted.
-        This prevents sending an empty conversation history to providers that
-        require at least one non-system message (e.g. Anthropic, Bedrock).
+        If extracting would leave the messages list empty
+        (``len(messages) == 1``), the message is converted to ``"user"`` role
+        instead of being extracted. This prevents sending an empty conversation
+        history to providers that require at least one non-system message
+        (e.g. Anthropic, Bedrock).
 
         Args:
-            messages: Provider-formatted message list (mutated in-place).
-            system_instruction: The system instruction from service settings or
-                ``run_inference``, used to decide whether to extract a
+            messages: Message list in standard format (mutated in-place).
+            system_instruction: The system instruction from service settings
+                or ``run_inference``, used to decide whether to extract a
                 ``"developer"`` message.
 
         Returns:
