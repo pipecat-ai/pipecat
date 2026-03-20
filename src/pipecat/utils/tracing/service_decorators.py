@@ -502,35 +502,45 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                             # Handle system message for different services
                             system_message = None
-                            # Handle system message for different services
                             if isinstance(context, LLMContext):
-                                # Universal LLMContext - use adapter to convert and get system message
-                                if hasattr(self, "get_llm_adapter"):
-                                    adapter = self.get_llm_adapter()
-                                    try:
-                                        # Get LLM invocation params which includes system_instruction
-                                        params = adapter.get_llm_invocation_params(context)
+                                # settings.system_instruction takes priority (matches service behavior)
+                                if hasattr(self, "_settings") and getattr(
+                                    self._settings, "system_instruction", None
+                                ):
+                                    system_message = self._settings.system_instruction
+                                else:
+                                    # Fall back to extracting from context messages
+                                    ctx_messages = context.get_messages()
+                                    if ctx_messages:
+                                        first = ctx_messages[0]
                                         if (
-                                            isinstance(params, dict)
-                                            and "system_instruction" in params
+                                            isinstance(first, dict)
+                                            and first.get("role") == "system"
                                         ):
-                                            system_message = params["system_instruction"]
-                                    except Exception as e:
-                                        logging.debug(
-                                            f"Could not extract system instruction from adapter: {e}"
-                                        )
+                                            content = first.get("content")
+                                            if isinstance(content, str):
+                                                system_message = content
+                                            elif isinstance(content, list):
+                                                system_message = " ".join(
+                                                    part.get("text", "")
+                                                    for part in content
+                                                    if isinstance(part, dict)
+                                                    and part.get("type") == "text"
+                                                )
                             elif hasattr(context, "system"):
                                 system_message = context.system
                             elif hasattr(context, "system_message"):
                                 system_message = context.system_message
-                            elif hasattr(self, "_system_instruction"):
-                                system_message = self._system_instruction
 
                             # Use given_fields() defensively in case a service doesn't
                             # initialize all settings.
                             params = {}
                             if hasattr(self, "_settings"):
                                 for key, value in self._settings.given_fields().items():
+                                    # system_instruction is already captured as the
+                                    # "system" span attribute above.
+                                    if key == "system_instruction":
+                                        continue
                                     if isinstance(value, (int, float, bool, str)):
                                         params[key] = value
                                     elif value is None:
