@@ -178,10 +178,10 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                 if not self._warned_system_instruction:
                     self._warned_system_instruction = True
                     logger.warning(
-                        "Both system_instruction and a system message in context are set."
-                        " Using system_instruction. The system message in context is being"
-                        " converted to a user message to avoid sending an empty conversation"
-                        " history."
+                        "Both system_instruction and an initial system message in"
+                        " context are set. Using system_instruction. The context"
+                        " system message is being converted to a user message to"
+                        " avoid sending an empty conversation history."
                     )
             messages[0]["role"] = "user"
             return None
@@ -223,13 +223,16 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
                 self._warned_system_instruction = True
                 if discard_context_system:
                     logger.warning(
-                        "Both system_instruction and a system message in context are set."
-                        " Using system_instruction."
+                        "Both system_instruction and an initial system message"
+                        " in context are set. Using system_instruction."
                     )
                 else:
                     logger.warning(
-                        "Both system_instruction and an initial system message in context"
-                        " are set, which may be unintended. Prefer system_instruction."
+                        "Both system_instruction and an initial system message"
+                        " in context are set, which may be unintended. Keeping"
+                        " both, but consider using system_instruction for"
+                        " system-level instructions and developer messages in"
+                        " context for supplementary guidance."
                     )
 
         if system_instruction:
