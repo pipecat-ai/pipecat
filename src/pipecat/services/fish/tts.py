@@ -21,12 +21,10 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
@@ -362,8 +360,8 @@ class FishAudioTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Stop all metrics when audio context is interrupted."""
         await self.stop_all_metrics()
 
     async def _receive_messages(self):
@@ -377,8 +375,14 @@ class FishAudioTTSService(InterruptibleTTSService):
                             audio_data = msg.get("audio")
                             # Only process larger chunks to remove msgpack overhead
                             if audio_data and len(audio_data) > 1024:
-                                frame = TTSAudioRawFrame(audio_data, self.sample_rate, 1)
-                                await self.push_frame(frame)
+                                context_id = self.get_active_audio_context_id()
+                                frame = TTSAudioRawFrame(
+                                    audio_data,
+                                    self.sample_rate,
+                                    1,
+                                    context_id=context_id,
+                                )
+                                await self.append_to_audio_context(context_id, frame)
                                 await self.stop_ttfb_metrics()
                         elif event == "finish":
                             reason = msg.get("reason", "unknown")

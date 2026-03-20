@@ -21,18 +21,14 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -180,6 +176,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             text_aggregation_mode=text_aggregation_mode,
             push_stop_frames=True,
             push_start_frame=True,
+            pause_frame_processing=True,
             stop_frame_timeout_s=2.0,
             sample_rate=sample_rate,
             settings=default_settings,
@@ -253,34 +250,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         if self._websocket:
             msg = {"text": "<STOP>"}
             await self._websocket.send(json.dumps(msg))
-
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push a frame downstream with special handling for stop conditions.
-
-        Args:
-            frame: The frame to push.
-            direction: The direction to push the frame.
-        """
-        await super().push_frame(frame, direction)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with special handling for speech control.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame processing.
-        """
-        await super().process_frame(frame, direction)
-
-        # If we received a TTSSpeakFrame and the LLM response included text (it
-        # might be that it's only a function calling response) we pause
-        # processing more frames until we receive a BotStoppedSpeakingFrame.
-        if isinstance(frame, TTSSpeakFrame):
-            await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            await self.pause_processing_frames()
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.resume_processing_frames()
 
     async def _connect(self):
         """Connect to Neuphonic WebSocket and start background tasks."""
@@ -366,10 +335,14 @@ class NeuphonicTTSService(InterruptibleTTSService):
                     await self.stop_ttfb_metrics()
 
                     audio = base64.b64decode(msg["data"]["audio"])
+                    context_id = self.get_active_audio_context_id()
                     frame = TTSAudioRawFrame(
-                        audio, self.sample_rate, 1, context_id=self.get_active_audio_context_id()
+                        audio,
+                        self.sample_rate,
+                        1,
+                        context_id=context_id,
                     )
-                    await self.push_frame(frame)
+                    await self.append_to_audio_context(context_id, frame)
 
     async def _keepalive_task_handler(self):
         """Handle keepalive messages to maintain WebSocket connection."""
