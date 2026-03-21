@@ -145,10 +145,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         # Kick off the conversation.
         openai_context.add_message(
-            {"role": "user", "content": "Please introduce yourself to the user."}
+            {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         groq_context.add_message(
-            {"role": "user", "content": "Please introduce yourself to the user."}
+            {"role": "developer", "content": "Please introduce yourself to the user."}
         )
         await task.queue_frames([LLMRunFrame()])
 

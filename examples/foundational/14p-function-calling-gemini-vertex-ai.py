@@ -105,7 +105,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     messages = [
         {
-            "role": "user",
+            "role": "developer",
             "content": "Start a conversation with 'Hey there' to get the current weather.",
         },
     ]

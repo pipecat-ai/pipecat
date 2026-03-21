@@ -88,7 +88,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     messages = [
         {
-            "role": "user",
+            "role": "developer",
             "content": 'Start by saying "Hello, I\'m Gemini".',
         },
     ]

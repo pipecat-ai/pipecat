@@ -129,7 +129,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "user", "content": "Say hello briefly."})
+        context.add_message({"role": "developer", "content": "Say hello briefly."})
         # Here is an example prompt conducive to demonstrating thinking and
         # function calling.
         # This example comes from Gemini docs.

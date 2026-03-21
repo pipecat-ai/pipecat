@@ -161,7 +161,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
     context = OpenAILLMContext(
-        [{"role": "user", "content": "Say hello!"}],
+        [{"role": "developer", "content": "Say hello!"}],
         tools,
     )
 

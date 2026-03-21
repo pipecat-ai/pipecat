@@ -7,7 +7,7 @@
 """OpenAI LLM adapter for Pipecat."""
 
 import copy
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
@@ -51,17 +51,37 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for OpenAI."""
         return "openai"
 
-    def get_llm_invocation_params(self, context: LLMContext) -> OpenAILLMInvocationParams:
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, system_instruction: Optional[str] = None
+    ) -> OpenAILLMInvocationParams:
         """Get OpenAI-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings
+                or ``run_inference``. If provided, prepended as a system message.
 
         Returns:
             Dictionary of parameters for OpenAI's ChatCompletion API.
         """
+        messages = self._from_universal_context_messages(self.get_messages(context))
+
+        if system_instruction:
+            # Detect initial system message for warning purposes (don't extract)
+            initial_content = (
+                messages[0].get("content", "")
+                if messages and messages[0].get("role") == "system"
+                else None
+            )
+            self._resolve_system_instruction(
+                initial_content,
+                system_instruction,
+                discard_context_system=False,
+            )
+            messages = [{"role": "system", "content": system_instruction}] + messages
+
         return {
-            "messages": self._from_universal_context_messages(self.get_messages(context)),
+            "messages": messages,
             # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
             "tool_choice": context.tool_choice,

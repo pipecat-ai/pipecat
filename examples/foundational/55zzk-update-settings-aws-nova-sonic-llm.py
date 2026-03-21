@@ -85,7 +85,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        context.add_message({"role": "user", "content": "Tell me a fun fact."})
+        context.add_message({"role": "developer", "content": "Tell me a fun fact."})
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)

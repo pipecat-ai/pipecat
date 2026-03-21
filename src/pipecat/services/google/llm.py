@@ -904,9 +904,12 @@ class GoogleLLMService(LLMService):
         messages = []
         system = []
         tools = []
+        effective_instruction = system_instruction or self._settings.system_instruction
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
-            params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
+                context, system_instruction=effective_instruction
+            )
             messages = params["messages"]
             system = params["system_instruction"]
             tools = params["tools"]
@@ -915,15 +918,6 @@ class GoogleLLMService(LLMService):
             messages = context.messages
             system = getattr(context, "system_message", None)
             tools = context.tools or []
-
-        # Override system instruction if provided
-        if system_instruction is not None:
-            if system:
-                logger.warning(
-                    f"{self}: Both system_instruction and a system message in context are set."
-                    " Using system_instruction."
-                )
-            system = system_instruction
 
         # Build generation config using the same method as streaming
         generation_params = self._build_generation_params(
@@ -1015,15 +1009,8 @@ class GoogleLLMService(LLMService):
     ) -> AsyncIterator[GenerateContentResponse]:
         messages = params_from_context["messages"]
 
-        # Constructor/settings system instruction takes priority over context.
-        if self._settings.system_instruction and params_from_context["system_instruction"]:
-            logger.warning(
-                f"{self}: Both system_instruction and a system message in context are"
-                " set. Using system_instruction."
-            )
-        system_instruction = (
-            self._settings.system_instruction or params_from_context["system_instruction"]
-        )
+        # The adapter already resolved system_instruction vs context system message.
+        system_instruction = params_from_context["system_instruction"]
 
         tools = []
         if params_from_context["tools"]:
@@ -1072,7 +1059,9 @@ class GoogleLLMService(LLMService):
         self, context: LLMContext
     ) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
-        params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
+        params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
+            context, system_instruction=self._settings.system_instruction
+        )
 
         logger.debug(
             f"{self}: Generating chat from universal context [{params['system_instruction']}] | {adapter.get_messages_for_logging(context)}"

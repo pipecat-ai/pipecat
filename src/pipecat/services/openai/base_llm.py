@@ -327,17 +327,6 @@ class BaseOpenAILLMService(LLMService):
 
         params.update(self._settings.extra)
 
-        # Prepend system instruction from constructor
-        if self._settings.system_instruction:
-            messages = params.get("messages", [])
-            if messages and messages[0].get("role") == "system":
-                logger.warning(
-                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
-                )
-            params["messages"] = [
-                {"role": "system", "content": self._settings.system_instruction}
-            ] + messages
-
         return params
 
     async def run_inference(
@@ -358,10 +347,11 @@ class BaseOpenAILLMService(LLMService):
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
+        effective_instruction = system_instruction or self._settings.system_instruction
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
             invocation_params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
-                context
+                context, system_instruction=effective_instruction
             )
         else:
             invocation_params = OpenAILLMInvocationParams(
@@ -374,15 +364,6 @@ class BaseOpenAILLMService(LLMService):
         # Override for non-streaming
         params["stream"] = False
         params.pop("stream_options", None)
-
-        # Prepend system instruction if provided
-        if system_instruction is not None:
-            messages = params.get("messages", [])
-            if messages and messages[0].get("role") == "system":
-                logger.warning(
-                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
-                )
-            params["messages"] = [{"role": "system", "content": system_instruction}] + messages
 
         # Override max_tokens if provided
         if max_tokens is not None:
@@ -439,7 +420,9 @@ class BaseOpenAILLMService(LLMService):
             f"{self}: Generating chat from universal context {adapter.get_messages_for_logging(context)}"
         )
 
-        params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
+        params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
+            context, system_instruction=self._settings.system_instruction
+        )
         chunks = await self.get_chat_completions(params)
 
         return chunks

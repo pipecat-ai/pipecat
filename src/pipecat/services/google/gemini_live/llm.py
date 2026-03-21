@@ -788,7 +788,7 @@ class GeminiLiveLLMService(LLMService):
         self._last_sent_time = 0
         self._base_url = base_url
 
-        self._system_instruction_from_init = system_instruction
+        self._system_instruction_from_init = self._settings.system_instruction
         self._tools_from_init = tools
         self._inference_on_context_initialization = inference_on_context_initialization
         self._needs_turn_complete_message = False
