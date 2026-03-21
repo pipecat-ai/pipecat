@@ -362,6 +362,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Stop all metrics when audio context is interrupted."""
+        await super().on_audio_context_interrupted(context_id)
         await self.stop_all_metrics()
 
     async def _receive_messages(self):
