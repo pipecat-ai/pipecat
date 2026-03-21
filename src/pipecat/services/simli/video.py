@@ -261,8 +261,9 @@ class SimliVideoService(AIService):
             resampled_frames = self._pipecat_resampler.resample(audio_frame)
             for resampled_frame in resampled_frames:
                 audio_array = resampled_frame.to_ndarray()
-                # Only push frame is there is audio (e.g. not silence)
-                if audio_array.any():
+                # Simli pushes very low volume (total silence for practical purposes) frames when the avatar is not speaking, so we can skip otherwise BotStoppedSpeaking will never trigger.
+                rms = np.sqrt(np.mean(audio_array.astype(np.float32) ** 2))
+                if rms >= 1.0:
                     await self.push_frame(
                         TTSAudioRawFrame(
                             audio=audio_array.tobytes(),
