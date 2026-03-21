@@ -7,6 +7,7 @@
 import asyncio
 import unittest
 
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, BaseTurnParams, EndOfTurnState
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     STTMetadataFrame,
@@ -16,7 +17,11 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_stop import (
+    ExternalUserTurnStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
+    TurnAnalyzerUserTurnStopStrategy,
+)
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
@@ -536,6 +541,154 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         # Wait for timeout — should get turn 2 stop with the real transcription
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertEqual(stop_count, 2)
+
+
+class MockAlwaysCompleteTurnAnalyzer(BaseTurnAnalyzer):
+    """Turn analyzer that always returns COMPLETE for analyze_end_of_turn."""
+
+    def __init__(self):
+        super().__init__(sample_rate=16000)
+        self._params = BaseTurnParams()
+
+    @property
+    def speech_triggered(self) -> bool:
+        return False
+
+    @property
+    def params(self) -> BaseTurnParams:
+        return self._params
+
+    def append_audio(self, buffer, is_speech):
+        return EndOfTurnState.INCOMPLETE
+
+    async def analyze_end_of_turn(self):
+        return EndOfTurnState.COMPLETE, None
+
+    def clear(self):
+        pass
+
+
+class TestTurnAnalyzerUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.task_manager = TaskManager()
+        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def _create_strategy(self, stt_timeout=STT_TIMEOUT):
+        strategy = TurnAnalyzerUserTurnStopStrategy(turn_analyzer=MockAlwaysCompleteTurnAnalyzer())
+        await strategy.setup(self.task_manager)
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
+        )
+        return strategy
+
+    async def test_set_finalized(self):
+        """Finalized transcript after VAD stop triggers immediately."""
+        strategy = await self._create_strategy()
+        triggered = False
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_stopped(strategy, params):
+            nonlocal triggered
+            triggered = True
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        await strategy.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="", finalized=True)
+        )
+        self.assertTrue(triggered)
+
+    async def test_set_non_finalized_triggers_after_timeout(self):
+        """Non-finalized transcript before timeout expires waits for timeout."""
+        strategy = await self._create_strategy(stt_timeout=0.15)
+        triggered = False
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_stopped(strategy, params):
+            nonlocal triggered
+            triggered = True
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp=""))
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertFalse(triggered)
+
+        await asyncio.sleep(0.25)
+        self.assertTrue(triggered)
+
+    async def test_transcript_after_expired_timeout_triggers_immediately(self):
+        """Non-finalized transcript arriving after the STT timeout has expired
+        triggers the turn stop immediately.
+
+        Reproduces a race condition where Deepgram's aggressive endpointing
+        (default 10ms) flushes the final transcript before the external VAD
+        fires stop_secs later. By the time VAD stop arrives, Deepgram already
+        delivered the is_final transcript. The strategy's internal timeout
+        (stt_timeout - stop_secs) can be 0.0s, firing instantly before the
+        TranscriptionFrame is processed. The late-arriving transcript then
+        has no code path to re-check _maybe_trigger_user_turn_stopped,
+        leaving the turn stuck until the 5s safety-net timeout.
+        """
+        strategy = await self._create_strategy(stt_timeout=STT_TIMEOUT)
+        triggered = False
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_stopped(strategy, params):
+            nonlocal triggered
+            triggered = True
+
+        # S - user starts speaking
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        # E - VAD stop fires; turn analyzer returns COMPLETE;
+        # timeout = max(0, 0.0 - 0.0) = 0.0s → fires instantly
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        # Let the 0.0s timeout task complete
+        await asyncio.sleep(0.05)
+        self.assertFalse(triggered)
+
+        # T - non-finalized transcript arrives after timeout expired
+        await strategy.process_frame(
+            TranscriptionFrame(text="Hi, Sarah.", user_id="", timestamp="")
+        )
+
+        # Turn should stop immediately — not wait for a 5s safety-net timeout
+        self.assertTrue(triggered)
+
+    async def test_transcript_while_speaking_does_not_trigger(self):
+        """Transcript during active speech must not trigger turn stop."""
+        strategy = await self._create_strategy()
+        triggered = False
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_stopped(strategy, params):
+            nonlocal triggered
+            triggered = True
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp=""))
+        self.assertFalse(triggered)
+
+    async def test_transcript_before_vad_stop_waits_for_timeout(self):
+        """Transcript arriving before VAD stop doesn't trigger prematurely."""
+        strategy = await self._create_strategy(stt_timeout=0.15)
+        triggered = False
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_stopped(strategy, params):
+            nonlocal triggered
+            triggered = True
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp=""))
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        # Turn complete is set, text is set, but timeout is still running
+        self.assertFalse(triggered)
+
+        # After timeout expires, should trigger
+        await asyncio.sleep(0.25)
+        self.assertTrue(triggered)
 
 
 class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):

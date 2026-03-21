@@ -169,12 +169,10 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
-        # We don't really care about the content.
         self._text = frame.text
         if frame.finalized:
             self._transcript_finalized = True
-            # For finalized transcripts, trigger immediately if turn is complete
-            await self._maybe_trigger_user_turn_stopped()
+        await self._maybe_trigger_user_turn_stopped()
 
         # Fallback: handle transcripts when no VAD stop was received.
         # This handles edge cases where transcripts arrive without VAD firing.
