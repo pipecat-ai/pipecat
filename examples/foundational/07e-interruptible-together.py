@@ -21,7 +21,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.together.llm import TogetherLLMService
 from pipecat.services.together.stt import TogetherSTTService
 from pipecat.services.together.tts import TogetherTTSService
@@ -55,12 +54,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = TogetherSTTService(api_key=os.getenv("TOGETHER_API_KEY"))
 
-    tts = TogetherTTSService(api_key=os.getenv("TOGETHER_API_KEY"))
+    tts = TogetherTTSService(
+        api_key=os.getenv("TOGETHER_API_KEY"),
+        settings=TogetherTTSService.Settings(
+            voice="tara",
+        ),
+    )
 
     llm = TogetherLLMService(
         api_key=os.getenv("TOGETHER_API_KEY"),
         settings=TogetherLLMService.Settings(
-            model="Qwen/Qwen3.5-9B",
+            model="openai/gpt-oss-120b",
             system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         ),
     )

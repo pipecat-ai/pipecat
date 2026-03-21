@@ -9,7 +9,7 @@
 import base64
 import json
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -27,13 +27,10 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -44,15 +41,9 @@ class TogetherTTSSettings(TTSSettings):
     """Settings for the Together AI TTS service.
 
     Parameters:
-        model: Together AI TTS model to use.
-        voice: Voice to use for synthesis.
-        language: Language of the text input.
         max_partial_length: Maximum partial text length for streaming.
     """
 
-    model: str = "canopylabs/orpheus-3b-0.1-ft"
-    language: Optional[Language] = Language.EN
-    voice: Optional[str] = "tara"
     max_partial_length: Optional[int] = None
 
 
@@ -63,40 +54,42 @@ class TogetherTTSService(WebsocketTTSService):
     Supports streaming synthesis with configurable voice and model options.
     """
 
-    _settings: TogetherTTSSettings
+    Settings = TogetherTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: str = "canopylabs/orpheus-3b-0.1-ft",
-        voice: str = "tara",
-        language: Optional[Language] = Language.EN,
-        max_partial_length: Optional[int] = None,
         url: str = "wss://api.together.ai/v1/audio/speech/websocket",
-        sample_rate: Optional[int] = 24000,
+        sample_rate: Optional[int] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Together AI TTS service.
 
         Args:
             api_key: Together AI API key for authentication.
-            model: Together AI TTS model. Defaults to "canopylabs/orpheus-3b-0.1-ft".
-            voice: Voice to use for synthesis. Defaults to "tara".
-            language: Language of the text input. Defaults to English.
-            max_partial_length: Maximum partial text length for streaming.
             url: WebSocket URL for Together AI TTS API.
             sample_rate: Audio sample rate (default: 24000).
+            settings: Runtime-updatable settings for model, voice, and language configuration.
             **kwargs: Additional arguments passed to the parent service.
         """
+        # Hardcoded defaults
+        default_settings = self.Settings(
+            model="canopylabs/orpheus-3b-0.1-ft",
+            voice="tara",
+            language=Language.EN,
+        )
+
+        # Apply settings delta
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
-            settings=TogetherTTSSettings(
-                model=model,
-                voice=voice,
-                language=language,
-                max_partial_length=max_partial_length,
-            ),
+            push_start_frame=True,
+            settings=default_settings,
             **kwargs,
         )
 
@@ -105,6 +98,8 @@ class TogetherTTSService(WebsocketTTSService):
         self._session_id = None
         self._receive_task = None
         self._context_id: Optional[str] = None
+        self._pending_commits = 0
+        self._flush_context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -113,6 +108,29 @@ class TogetherTTSService(WebsocketTTSService):
             True, as Together TTS service supports metrics generation.
         """
         return True
+
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect to apply changes.
+
+        Together passes model/voice as URL query params, so a reconnect
+        is needed to apply changes.
+
+        Args:
+            delta: A settings delta with updated values.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+
+        if not changed:
+            return changed
+
+        # Reconnect to apply updated settings (they become WS URL params)
+        await self._disconnect()
+        await self._connect()
+
+        return changed
 
     def _build_websocket_url(self) -> str:
         """Build the WebSocket URL with query parameters."""
@@ -153,7 +171,7 @@ class TogetherTTSService(WebsocketTTSService):
     # ------------------------------------------------------------------
 
     async def _connect(self):
-        """Connect to the transcription endpoint and start receiving."""
+        """Connect to the TTS endpoint and start receiving."""
         await super()._connect()
         await self._connect_websocket()
         if self._websocket and not self._receive_task:
@@ -231,12 +249,22 @@ class TogetherTTSService(WebsocketTTSService):
     async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio and finalize the current context.
 
+        If all server-side commits have been completed, closes the audio context
+        immediately. Otherwise, marks the context for deferred closure so
+        ``_handle_audio_done`` can close it when the last commit finishes.
+
         Args:
-            context_id: Pipecat TTS context (unused for Together; required for
-                compatibility with :meth:`TTSService.on_turn_context_completed`).
+            context_id: Pipecat TTS context to flush.
         """
-        logger.trace(f"{self}: flushing audio (context_id={context_id})")
-        await self._ws_send({"type": "input_text_buffer.commit"})
+        ctx_id = context_id or self._context_id
+        if not ctx_id or not self.audio_context_available(ctx_id):
+            return
+        logger.trace(f"{self}: flushing audio (context_id={ctx_id})")
+        if self._pending_commits == 0:
+            await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
+            await self.remove_audio_context(ctx_id)
+        else:
+            self._flush_context_id = ctx_id
 
     # ------------------------------------------------------------------
     # Server event handling
@@ -307,10 +335,11 @@ class TogetherTTSService(WebsocketTTSService):
         Args:
             evt: The delta event from the server.
         """
+        if not self._context_id or not self.audio_context_available(self._context_id):
+            return
         delta = evt.get("delta")
         if delta:
             try:
-                await self.stop_ttfb_metrics()
                 audio_chunk = base64.b64decode(delta)
                 frame = TTSAudioRawFrame(
                     audio=audio_chunk,
@@ -318,19 +347,25 @@ class TogetherTTSService(WebsocketTTSService):
                     num_channels=1,
                     context_id=self._context_id,
                 )
-                await self.push_frame(frame)
+                await self.append_to_audio_context(self._context_id, frame)
             except Exception as e:
                 logger.error(f"{self} error processing audio delta: {e}")
 
     async def _handle_audio_done(self, evt: dict):
         """Handle audio output completion for a speech segment.
 
+        Decrements the pending commit counter and closes the audio context
+        if a flush was requested and this was the last pending commit.
+
         Args:
             evt: The done event from the server.
         """
+        if not self._context_id or not self.audio_context_available(self._context_id):
+            return
         item_id = evt.get("item_id")
         logger.debug(f"{self} audio generation complete for: {item_id}")
-        await self.push_frame(TTSStoppedFrame(context_id=self._context_id))
+        self._pending_commits = max(0, self._pending_commits - 1)
+        await self._maybe_close_context()
 
     async def _handle_tts_failed(self, evt: dict):
         """Handle a TTS failure.
@@ -339,8 +374,9 @@ class TogetherTTSService(WebsocketTTSService):
             evt: The failed event containing error details.
         """
         error = evt.get("error", {})
+        self._pending_commits = max(0, self._pending_commits - 1)
         await self.push_error(error_msg=f"TTS error: {error}")
-        await self.push_frame(TTSStoppedFrame(context_id=self._context_id))
+        await self._maybe_close_context()
 
     async def _handle_error(self, evt: dict):
         """Handle a fatal error from the TTS session.
@@ -358,19 +394,27 @@ class TogetherTTSService(WebsocketTTSService):
         await self.push_error(error_msg=msg)
         raise Exception(msg)
 
+    async def _maybe_close_context(self):
+        """Close the audio context if a flush was requested and no commits remain."""
+        if self._pending_commits == 0 and self._flush_context_id:
+            ctx_id = self._flush_context_id
+            self._flush_context_id = None
+            await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
+            await self.remove_audio_context(ctx_id)
+
     # ------------------------------------------------------------------
     # Interruption handling
     # ------------------------------------------------------------------
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        """Handle interruption by canceling current generation.
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Cancel current generation when the bot is interrupted.
 
         Args:
-            frame: The interruption frame.
-            direction: Frame processing direction.
+            context_id: The ID of the audio context that was interrupted.
         """
-        await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
+        self._pending_commits = 0
+        self._flush_context_id = None
         await self._ws_send({"type": "input_text_buffer.clear"})
 
     # ------------------------------------------------------------------
@@ -381,12 +425,15 @@ class TogetherTTSService(WebsocketTTSService):
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Together AI's streaming API.
 
+        Audio frames are delivered asynchronously via the WebSocket receive
+        loop and routed through the audio context managed by the base class.
+
         Args:
             text: The text to synthesize into speech.
             context_id: The context ID for tracking audio frames.
 
         Yields:
-            Frame: Audio frames containing the synthesized speech.
+            Frame: None (audio arrives via WebSocket callbacks).
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -399,9 +446,7 @@ class TogetherTTSService(WebsocketTTSService):
                     return
 
             self._context_id = context_id
-
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame(context_id=context_id)
+            self._pending_commits += 1
 
             try:
                 await self._ws_send({"type": "input_text_buffer.append", "text": text})
@@ -409,6 +454,7 @@ class TogetherTTSService(WebsocketTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
+                self._pending_commits -= 1
                 yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
