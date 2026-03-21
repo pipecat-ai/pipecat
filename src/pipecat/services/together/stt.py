@@ -9,10 +9,11 @@
 import base64
 import json
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import TOGETHER_TTFS_P99
 
@@ -40,6 +41,9 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
+# Together requires 16 kHz 16-bit mono PCM input.
+_TOGETHER_SAMPLE_RATE = 16000
+
 
 @dataclass
 class TogetherSTTSettings(STTSettings):
@@ -50,8 +54,7 @@ class TogetherSTTSettings(STTSettings):
         language: Language of the audio input.
     """
 
-    model: str = "openai/whisper-large-v3"
-    language: Language = Language.EN
+    pass
 
 
 class TogetherSTTService(WebsocketSTTService):
@@ -59,18 +62,26 @@ class TogetherSTTService(WebsocketSTTService):
 
     Provides real-time speech recognition using Together AI's WebSocket API
     with OpenAI-compatible speech-to-text endpoints.
+
+    Example::
+
+        stt = TogetherSTTService(
+            api_key="...",
+            settings=TogetherSTTService.Settings(
+                model="openai/whisper-large-v3",
+            ),
+        )
     """
 
-    _settings: TogetherSTTSettings
+    Settings = TogetherSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: str = "openai/whisper-large-v3",
-        language: Language = Language.EN,
-        sample_rate: int = 16000,
-        base_url: str = "wss://api.together.xyz/v1",
+        base_url: str = "wss://api.together.ai/v1",
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: float = TOGETHER_TTFS_P99,
         **kwargs,
     ):
@@ -78,27 +89,34 @@ class TogetherSTTService(WebsocketSTTService):
 
         Args:
             api_key: Together AI API key for authentication.
-            model: Together AI transcription model. Defaults to "openai/whisper-large-v3".
-            language: Language of the audio input. Defaults to English.
-            sample_rate: Audio sample rate (default: 16000). Together AI requires 16kHz input.
             base_url: The URL of the Together AI WebSocket API.
+            settings: Runtime-updatable settings for model and language configuration.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent WebsocketSTTService.
         """
+        # Hardcoded defaults
+        default_settings = self.Settings(
+            model="openai/whisper-large-v3",
+            language=Language.EN,
+        )
+
+        # Apply settings delta
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
-            sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=TogetherSTTSettings(
-                model=model,
-                language=language,
-            ),
+            keepalive_timeout=20,
+            keepalive_interval=5,
+            settings=default_settings,
             **kwargs,
         )
 
         self._api_key = api_key
         self._base_url = base_url
         self._receive_task = None
+        self._resampler = create_stream_resampler()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -107,6 +125,39 @@ class TogetherSTTService(WebsocketSTTService):
             True, as Together STT service supports metrics generation.
         """
         return True
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect to apply changes.
+
+        Together passes model/language as URL query params, so a reconnect
+        is needed to apply changes.
+
+        Args:
+            delta: A settings delta with updated values.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+
+        if not changed:
+            return changed
+
+        # Reconnect to apply updated settings (they become WS URL params)
+        await self._disconnect()
+        await self._connect()
+
+        return changed
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio to keep the Together AI connection alive.
+
+        Wraps silence in the ``input_audio_buffer.append`` JSON protocol.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        await self._send_audio(silence)
 
     async def start(self, frame: StartFrame):
         """Start the Together AI STT service.
@@ -193,7 +244,6 @@ class TogetherSTTService(WebsocketSTTService):
             )
             headers = {
                 "Authorization": f"Bearer {self._api_key}",
-                "OpenAI-Beta": "realtime=v1",
             }
 
             self._websocket = await websocket_connect(url, additional_headers=headers)
@@ -225,11 +275,18 @@ class TogetherSTTService(WebsocketSTTService):
     async def _send_audio(self, audio: bytes):
         """Send audio data via ``input_audio_buffer.append``.
 
+        Resamples from the pipeline sample rate to 16 kHz if needed.
+
         Args:
             audio: Raw audio bytes at the pipeline sample rate.
         """
         try:
             if not self._disconnecting and self._websocket:
+                audio = await self._resampler.resample(
+                    audio, self.sample_rate, _TOGETHER_SAMPLE_RATE
+                )
+                if not audio:
+                    return
                 payload = base64.b64encode(audio).decode("utf-8")
                 await self._websocket.send(
                     json.dumps({"type": "input_audio_buffer.append", "audio": payload})
@@ -330,6 +387,7 @@ class TogetherSTTService(WebsocketSTTService):
                     delta,
                     self._user_id,
                     time_now_iso8601(),
+                    self._settings.language,
                     result=evt,
                 )
             )
@@ -347,6 +405,7 @@ class TogetherSTTService(WebsocketSTTService):
                     transcript,
                     self._user_id,
                     time_now_iso8601(),
+                    self._settings.language,
                     result=evt,
                     finalized=True,
                 )
