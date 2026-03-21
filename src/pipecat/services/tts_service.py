@@ -47,6 +47,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    TTSErrorFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -1041,7 +1042,7 @@ class TTSService(AIService):
             await self.start_ttfb_metrics()
             await self.append_to_audio_context(context_id, TTSStartedFrame(context_id=context_id))
 
-        await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
+        await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id), text)
 
         if not self._is_streaming_tokens:
             await self.stop_processing_metrics()
@@ -1064,7 +1065,10 @@ class TTSService(AIService):
             await self.append_to_audio_context(context_id, frame)
 
     async def tts_process_generator(
-        self, context_id: str, generator: AsyncGenerator[Frame | None, None]
+        self,
+        context_id: str,
+        generator: AsyncGenerator[Frame | None, None],
+        original_text: str = "",
     ) -> bool:
         """Process frames from an async generator, routing them through the audio context.
 
@@ -1078,14 +1082,32 @@ class TTSService(AIService):
         remove_audio_context in run_tts — the caller (_synthesize_text) closes the context
         after appending any remaining frames (e.g. TTSTextFrame).
 
+        When ``original_text`` is provided and the generator yields an
+        ``ErrorFrame``, it is promoted to a ``TTSErrorFrame`` carrying the
+        original text so that an upstream ``ServiceSwitcher`` with a failover
+        strategy can retry the synthesis.
+
         Args:
             context_id: The audio context to route frames to.
             generator: An async generator yielding Frame objects or None.
+            original_text: The original (pre-transform) text sent to TTS.
+                Used to populate ``TTSErrorFrame.text`` on errors.
 
         """
         is_yielding_frames = False
         async for frame in generator:
             if frame:
+                # Promote plain ErrorFrame to TTSErrorFrame so the service
+                # switcher has enough information to retry.
+                if isinstance(frame, ErrorFrame) and not isinstance(frame, TTSErrorFrame):
+                    frame = TTSErrorFrame(
+                        error=frame.error,
+                        fatal=frame.fatal,
+                        processor=frame.processor,
+                        exception=frame.exception,
+                        text=original_text,
+                        tts_context_id=context_id,
+                    )
                 await self.append_to_audio_context(context_id, frame)
                 if isinstance(frame, TTSAudioRawFrame):
                     is_yielding_frames = True

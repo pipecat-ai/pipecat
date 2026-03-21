@@ -6,7 +6,8 @@
 
 """Service switcher for switching between different services at runtime, with different switching strategies."""
 
-from typing import Any, Generic, List, Optional, Type, TypeVar
+from abc import abstractmethod
+from typing import Any, Dict, Generic, List, Optional, Set, Tuple, Type, TypeVar
 
 from loguru import logger
 
@@ -17,6 +18,8 @@ from pipecat.frames.frames import (
     ServiceMetadataFrame,
     ServiceSwitcherFrame,
     ServiceSwitcherRequestMetadataFrame,
+    TTSErrorFrame,
+    TTSSpeakFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.filters.function_filter import FunctionFilter
@@ -156,52 +159,106 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
 
 
 class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategyManual):
-    """A strategy that automatically switches to a backup service on failure.
+    """A strategy that retries the active service and fails over to the next on repeated errors.
 
-    When the active service produces a non-fatal error, this strategy switches
-    to the next available service in the list. Recovery and fallback policies
-    are left to application code via the ``on_service_switched`` event.
+    When a ``TTSErrorFrame`` is received, the strategy retries the current
+    service up to ``max_retries`` times. Once the retry budget for a service
+    is exhausted, it switches to the next service in the list and resets the
+    per-service retry counter. If all services have been exhausted, the error
+    is propagated upstream.
 
-    Event handlers available:
-
-    - on_service_switched: Called when the active service changes.
+    The retry counter is tracked **per service** and is **not** reset on
+    success — once a service has failed enough times, the switch is permanent.
 
     Example::
 
-        switcher = ServiceSwitcher(
-            services=[primary_stt, backup_stt],
+        tts_switcher = ServiceSwitcher(
+            services=[tts_primary, tts_fallback],
             strategy_type=ServiceSwitcherStrategyFailover,
+            strategy_kwargs={"max_retries": 3},
         )
-
-        @switcher.strategy.event_handler("on_service_switched")
-        async def on_switched(strategy, service):
-            # App decides when/how to recover the failed service
-            ...
     """
 
-    async def handle_error(self, error: ErrorFrame) -> Optional[FrameProcessor]:
-        """Handle an error from the active service by failing over.
-
-        Switches to the next service in the list. The failed service remains
-        in the list and can be switched back to manually or via application
-        logic in the ``on_service_switched`` event handler.
+    def __init__(self, services: List[FrameProcessor], *, max_retries: int = 2):
+        """Initialize the failover strategy.
 
         Args:
-            error: The error frame pushed by the active service.
+            services: List of frame processors to switch between.
+            max_retries: Number of retries on the current service before switching.
+        """
+        super().__init__(services)
+        self._max_retries = max_retries
+        self._retry_count = 0
+        self._failed_services: Set[FrameProcessor] = set()
+
+    async def handle_frame(
+        self, frame: ServiceSwitcherFrame, direction: FrameDirection
+    ) -> Optional[FrameProcessor]:
+        """Handle manual switch frames (pass-through to allow composition).
+
+        Args:
+            frame: The frame to handle.
+            direction: The direction of the frame.
 
         Returns:
-            The newly active service if a switch occurred, or None if no
-            other service is available.
+            The newly active service if a switch occurred, or None otherwise.
         """
-        logger.warning(f"Service {self._active_service.name} reported an error: {error.error}")
+        if isinstance(frame, ManuallySwitchServiceFrame):
+            if frame.service in self.services:
+                self._active_service = frame.service
+                self._retry_count = 0
+                await self._call_event_handler("on_service_switched", frame.service)
+                return frame.service
+        return None
 
-        if len(self._services) <= 1:
-            logger.error("No other service available to switch to")
-            return None
+    async def handle_error(
+        self, error_frame: TTSErrorFrame
+    ) -> Tuple[bool, Optional[FrameProcessor]]:
+        """Decide whether to retry or fail over based on the error.
 
-        current_idx = self._services.index(self._active_service)
-        next_idx = (current_idx + 1) % len(self._services)
-        return await self._set_active_if_available(self._services[next_idx])
+        Args:
+            error_frame: The TTS error frame containing the failed text.
+
+        Returns:
+            A tuple of (should_retry, switched_service). If should_retry is True,
+            the caller should re-send the text to the active service.
+            switched_service is the new service if a switch occurred, or None.
+        """
+        self._retry_count += 1
+
+        if self._retry_count <= self._max_retries:
+            logger.warning(
+                f"TTS error on {self._active_service.name}, "
+                f"retry {self._retry_count}/{self._max_retries}"
+            )
+            return (True, None)
+
+        # Current service exhausted — mark as failed and try the next one.
+        self._failed_services.add(self._active_service)
+        logger.warning(
+            f"TTS retries exhausted on {self._active_service.name}, switching to next service"
+        )
+
+        next_service = self._find_next_service()
+        if next_service is None:
+            logger.error("All TTS services have been exhausted")
+            return (False, None)
+
+        self._active_service = next_service
+        self._retry_count = 1  # First attempt on the new service counts
+        await self._call_event_handler("on_service_switched", next_service)
+        return (True, next_service)
+
+    def _find_next_service(self) -> Optional[FrameProcessor]:
+        """Find the next service that hasn't been marked as failed.
+
+        Returns:
+            The next available service, or None if all have failed.
+        """
+        for service in self._services:
+            if service not in self._failed_services:
+                return service
+        return None
 
 
 StrategyType = TypeVar("StrategyType", bound=ServiceSwitcherStrategy)
@@ -224,6 +281,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         self,
         services: List[FrameProcessor],
         strategy_type: Type[StrategyType] = ServiceSwitcherStrategyManual,
+        strategy_kwargs: Optional[Dict[str, Any]] = None,
     ):
         """Initialize the service switcher with a list of services and a switching strategy.
 
@@ -231,8 +289,9 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             services: List of frame processors to switch between.
             strategy_type: The strategy class to use for switching between services.
                 Defaults to ``ServiceSwitcherStrategyManual``.
+            strategy_kwargs: Extra keyword arguments forwarded to the strategy constructor.
         """
-        _strategy = strategy_type(services)
+        _strategy = strategy_type(services, **(strategy_kwargs or {}))
         super().__init__(*self._make_pipeline_definitions(services, _strategy))
         self._services = services
         self._strategy = _strategy
@@ -298,8 +357,8 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
         Non-fatal ``ErrorFrame`` instances are forwarded to the strategy via
         ``handle_error`` so strategies like ``ServiceSwitcherStrategyFailover``
-        can perform failover. The error frame is still propagated upstream so
-        that application-level error handlers can observe it.
+        can perform failover. For ``TTSErrorFrame`` frames, the failover
+        strategy can retry the failed text on the same or next service.
         """
         # Consume ServiceSwitcherRequestMetadataFrame once the targeted service
         # has handled it (i.e. the active service).
@@ -314,7 +373,19 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
         # Let the strategy react to non-fatal errors from the active service.
         if isinstance(frame, ErrorFrame) and not frame.fatal:
-            await self.strategy.handle_error(frame)
+            result = await self.strategy.handle_error(frame)
+            # If handle_error returned a (should_retry, switched_service) tuple
+            # (e.g. from ServiceSwitcherStrategyFailover with TTS retry), handle retry.
+            if isinstance(result, tuple):
+                should_retry, switched_service = result
+                if should_retry and isinstance(frame, TTSErrorFrame):
+                    if switched_service:
+                        await switched_service.queue_frame(
+                            ServiceSwitcherRequestMetadataFrame(service=switched_service)
+                        )
+                    retry_frame = TTSSpeakFrame(text=frame.text)
+                    await self._strategy.active_service.queue_frame(retry_frame)
+                    return
 
         await super().push_frame(frame, direction)
 

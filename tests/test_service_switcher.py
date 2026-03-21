@@ -19,6 +19,8 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
     TextFrame,
+    TTSErrorFrame,
+    TTSSpeakFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.service_switcher import (
@@ -522,6 +524,40 @@ class TestServiceSwitcherMetadata(unittest.IsolatedAsyncioTestCase):
         # Only one MockMetadataFrame should have left (from service1)
 
 
+class MockFailingTTSService(FrameProcessor):
+    """A mock TTS service that pushes TTSErrorFrame upstream on receiving TTSSpeakFrame.
+
+    After ``fail_count`` failures it starts succeeding (pushing frames downstream).
+    """
+
+    def __init__(self, test_name: str, fail_count: int = 999, **kwargs):
+        super().__init__(name=test_name, **kwargs)
+        self.test_name = test_name
+        self.processed_frames = []
+        self.speak_attempts = 0
+        self._fail_count = fail_count
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        self.processed_frames.append(frame)
+
+        if isinstance(frame, TTSSpeakFrame):
+            self.speak_attempts += 1
+            if self.speak_attempts <= self._fail_count:
+                error = TTSErrorFrame(
+                    error=f"{self.test_name} failed (attempt {self.speak_attempts})",
+                    text=frame.text,
+                    tts_context_id="ctx-test",
+                )
+                await self.push_frame(error, FrameDirection.UPSTREAM)
+            else:
+                # Simulate success — just push downstream
+                await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
+
+
+
 class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
     """Test cases for ServiceSwitcherStrategyFailover."""
 
@@ -533,42 +569,68 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
         self.services = [self.service1, self.service2, self.service3]
 
     def test_init_defaults(self):
-        """Test that default values are set correctly."""
+        """Test initialization with default max_retries."""
         strategy = ServiceSwitcherStrategyFailover(self.services)
         self.assertEqual(strategy.active_service, self.service1)
+        self.assertEqual(strategy._max_retries, 2)
 
-    async def test_error_switches_to_next_service(self):
-        """Test that an error on the active service switches to the next one."""
-        strategy = ServiceSwitcherStrategyFailover(self.services)
+    def test_init_custom_max_retries(self):
+        """Test initialization with custom max_retries."""
+        strategy = ServiceSwitcherStrategyFailover(self.services, max_retries=5)
+        self.assertEqual(strategy._max_retries, 5)
 
-        error = ErrorFrame(error="connection lost")
-        result = await strategy.handle_error(error)
+    async def test_retry_on_same_service(self):
+        """Test that errors trigger retries on the same service before switching."""
+        strategy = ServiceSwitcherStrategyFailover(self.services, max_retries=2)
+        error = TTSErrorFrame(error="fail", text="hello")
 
-        self.assertEqual(result, self.service2)
-        self.assertEqual(strategy.active_service, self.service2)
-
-    async def test_consecutive_errors_cycle_through_services(self):
-        """Test that repeated errors cycle through all services."""
-        strategy = ServiceSwitcherStrategyFailover(self.services)
-
-        # First error: service1 -> service2
-        await strategy.handle_error(ErrorFrame(error="error 1"))
-        self.assertEqual(strategy.active_service, self.service2)
-
-        # Second error: service2 -> service3
-        await strategy.handle_error(ErrorFrame(error="error 2"))
-        self.assertEqual(strategy.active_service, self.service3)
-
-        # Third error: service3 -> service1 (wraps around)
-        await strategy.handle_error(ErrorFrame(error="error 3"))
+        # First error: retry on same service
+        should_retry, switched = await strategy.handle_error(error)
+        self.assertTrue(should_retry)
+        self.assertIsNone(switched)
         self.assertEqual(strategy.active_service, self.service1)
 
-    async def test_single_service_returns_none(self):
-        """Test that handle_error returns None with only one service."""
-        strategy = ServiceSwitcherStrategyFailover([self.service1])
+        # Second error: retry on same service
+        should_retry, switched = await strategy.handle_error(error)
+        self.assertTrue(should_retry)
+        self.assertIsNone(switched)
+        self.assertEqual(strategy.active_service, self.service1)
 
-        result = await strategy.handle_error(ErrorFrame(error="error"))
-        self.assertIsNone(result)
+    async def test_switch_after_retries_exhausted(self):
+        """Test that service switches after max_retries is exceeded."""
+        strategy = ServiceSwitcherStrategyFailover(self.services, max_retries=1)
+        error = TTSErrorFrame(error="fail", text="hello")
+
+        # First error: retry
+        should_retry, switched = await strategy.handle_error(error)
+        self.assertTrue(should_retry)
+        self.assertIsNone(switched)
+
+        # Second error: switch to service2
+        should_retry, switched = await strategy.handle_error(error)
+        self.assertTrue(should_retry)
+        self.assertEqual(switched, self.service2)
+        self.assertEqual(strategy.active_service, self.service2)
+
+    async def test_all_services_exhausted(self):
+        """Test that all services failing returns should_retry=False."""
+        strategy = ServiceSwitcherStrategyFailover(self.services, max_retries=0)
+        error = TTSErrorFrame(error="fail", text="hello")
+
+        # First error: switch to service2 (service1 exhausted with 0 retries)
+        should_retry, switched = await strategy.handle_error(error)
+        self.assertTrue(should_retry)
+        self.assertEqual(switched, self.service2)
+
+        # Second error: switch to service3
+        should_retry, switched = await strategy.handle_error(error)
+        self.assertTrue(should_retry)
+        self.assertEqual(switched, self.service3)
+
+        # Third error: all exhausted
+        should_retry, switched = await strategy.handle_error(error)
+        self.assertFalse(should_retry)
+        self.assertIsNone(switched)
 
     async def test_manual_switch_still_works(self):
         """Test that ManuallySwitchServiceFrame is still handled."""
@@ -580,21 +642,148 @@ class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, self.service3)
         self.assertEqual(strategy.active_service, self.service3)
 
-    async def test_on_service_switched_event_fires_on_error(self):
-        """Test that on_service_switched event fires when an error triggers a switch."""
-        strategy = ServiceSwitcherStrategyFailover(self.services)
+    async def test_on_service_switched_event(self):
+        """Test that on_service_switched fires when failover switches services."""
+        strategy = ServiceSwitcherStrategyFailover(self.services, max_retries=0)
+        error = TTSErrorFrame(error="fail", text="hello")
 
         switched_events = []
 
         @strategy.event_handler("on_service_switched")
-        async def on_service_switched(strategy, service):
+        async def on_switched(strategy, service):
             switched_events.append(service)
 
-        await strategy.handle_error(ErrorFrame(error="error"))
+        await strategy.handle_error(error)
         await asyncio.sleep(0)
 
         self.assertEqual(len(switched_events), 1)
         self.assertEqual(switched_events[0], self.service2)
+
+
+class TestServiceSwitcherFailoverIntegration(unittest.IsolatedAsyncioTestCase):
+    """Integration tests for ServiceSwitcher with failover strategy."""
+
+    async def test_retry_then_succeed(self):
+        """Test that a service retries and eventually succeeds."""
+        # Service fails twice then succeeds
+        service1 = MockFailingTTSService("tts1", fail_count=2)
+        service2 = MockFailingTTSService("tts2", fail_count=0)
+
+        switcher = ServiceSwitcher(
+            [service1, service2],
+            ServiceSwitcherStrategyFailover,
+            strategy_kwargs={"max_retries": 3},
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TTSSpeakFrame(text="hello")],
+            expected_down_frames=[TTSSpeakFrame],
+            expected_up_frames=[],
+        )
+
+        # service1 should have been tried 3 times (2 failures + 1 success)
+        self.assertEqual(service1.speak_attempts, 3)
+        # service2 should not have been tried
+        self.assertEqual(service2.speak_attempts, 0)
+
+    async def test_failover_to_second_service(self):
+        """Test that after exhausting retries on the first service, it switches to the second."""
+        # Service1 always fails, service2 succeeds immediately
+        service1 = MockFailingTTSService("tts1", fail_count=999)
+        service2 = MockFailingTTSService("tts2", fail_count=0)
+
+        switcher = ServiceSwitcher(
+            [service1, service2],
+            ServiceSwitcherStrategyFailover,
+            strategy_kwargs={"max_retries": 2},
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TTSSpeakFrame(text="hello")],
+            expected_down_frames=[TTSSpeakFrame],
+            expected_up_frames=[],
+        )
+
+        # service1 should have been tried max_retries + 1 times (the +1 triggers the switch)
+        self.assertEqual(service1.speak_attempts, 3)
+        # service2 should have succeeded on first try
+        self.assertEqual(service2.speak_attempts, 1)
+
+    async def test_all_services_fail_propagates_error(self):
+        """Test that when all services fail, the error propagates upstream."""
+        service1 = MockFailingTTSService("tts1", fail_count=999)
+        service2 = MockFailingTTSService("tts2", fail_count=999)
+
+        switcher = ServiceSwitcher(
+            [service1, service2],
+            ServiceSwitcherStrategyFailover,
+            strategy_kwargs={"max_retries": 1},
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TTSSpeakFrame(text="hello")],
+            expected_down_frames=[],
+            expected_up_frames=[TTSErrorFrame],
+        )
+
+    async def test_retry_preserves_text(self):
+        """Test that the retried TTSSpeakFrame contains the original text."""
+        service1 = MockFailingTTSService("tts1", fail_count=1)
+        service2 = MockFailingTTSService("tts2", fail_count=0)
+
+        switcher = ServiceSwitcher(
+            [service1, service2],
+            ServiceSwitcherStrategyFailover,
+            strategy_kwargs={"max_retries": 2},
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TTSSpeakFrame(text="important text")],
+            expected_down_frames=[TTSSpeakFrame],
+            expected_up_frames=[],
+        )
+
+        # The retry should use the same text
+        speak_frames = [f for f in service1.processed_frames if isinstance(f, TTSSpeakFrame)]
+        self.assertEqual(len(speak_frames), 2)
+        self.assertEqual(speak_frames[0].text, "important text")
+        self.assertEqual(speak_frames[1].text, "important text")
+
+    async def test_non_tts_error_passes_through(self):
+        """Test that regular ErrorFrame (not TTSErrorFrame) is not intercepted."""
+
+        class ErrorPushingService(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(name="error_service", **kwargs)
+
+            async def process_frame(self, frame, direction):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    # Push a plain ErrorFrame upstream
+                    await self.push_frame(
+                        ErrorFrame(error="generic error"), FrameDirection.UPSTREAM
+                    )
+                await self.push_frame(frame, direction)
+
+        service1 = ErrorPushingService()
+        service2 = MockFrameProcessor("service2")
+
+        switcher = ServiceSwitcher(
+            [service1, service2],
+            ServiceSwitcherStrategyFailover,
+            strategy_kwargs={"max_retries": 2},
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[TextFrame(text="test")],
+            expected_down_frames=[TextFrame],
+            expected_up_frames=[ErrorFrame],
+        )
 
 
 if __name__ == "__main__":
