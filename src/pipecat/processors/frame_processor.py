@@ -900,6 +900,10 @@ class FrameProcessor(BaseObject):
                 # Cancel and re-create the process task.
                 await self.__cancel_process_task()
                 self.__create_process_task()
+        except asyncio.CancelledError:
+            logger.warning(f"{self}: CancelledError during _start_interruption, recovering")
+            self.__process_frame_task = None
+            self.__create_process_task()
         except Exception as e:
             await self.push_error(
                 error_msg=f"Uncaught exception handling _start_interruption: {e}",
@@ -1014,8 +1018,15 @@ class FrameProcessor(BaseObject):
     async def __cancel_process_task(self):
         """Cancel the non-system frame processing task."""
         if self.__process_frame_task:
+            old_task = self.__process_frame_task
             await self.cancel_task(self.__process_frame_task)
             self.__process_frame_task = None
+            if not old_task.done():
+                logger.warning(
+                    f"{self}: process task still alive after cancel timeout, "
+                    "replacing process queue to prevent frame theft"
+                )
+                self.__process_queue = asyncio.Queue()
 
     async def __process_frame(
         self, frame: Frame, direction: FrameDirection, callback: Optional[FrameCallback]
@@ -1050,13 +1061,21 @@ class FrameProcessor(BaseObject):
                 self.__should_block_system_frames = False
                 logger.trace(f"{self}: system frame processing resumed")
 
-            if isinstance(frame, SystemFrame):
-                await self.__process_frame(frame, direction, callback)
-            elif self.__process_queue:
-                await self.__process_queue.put((frame, direction, callback))
-            else:
-                raise RuntimeError(
-                    f"{self}: __process_queue is None when processing frame {frame.name}"
+            try:
+                if isinstance(frame, SystemFrame):
+                    await self.__process_frame(frame, direction, callback)
+                elif self.__process_queue:
+                    await self.__process_queue.put((frame, direction, callback))
+                else:
+                    raise RuntimeError(
+                        f"{self}: __process_queue is None when processing frame {frame.name}"
+                    )
+            except asyncio.CancelledError:
+                if self._cancelling:
+                    raise
+                logger.error(
+                    f"{self}: CancelledError escaped while processing "
+                    f"{frame.name}, input handler recovered"
                 )
 
             self.__input_queue.task_done()
