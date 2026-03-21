@@ -31,7 +31,6 @@ from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregationType,
-    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -1478,42 +1477,15 @@ class WebsocketTTSService(TTSService, WebsocketService):
 class InterruptibleTTSService(WebsocketTTSService):
     """Websocket-based TTS service that handles interruptions without word timestamps.
 
-    Designed for TTS services that don't support word timestamps. Handles interruptions
-    by reconnecting the websocket when the bot is speaking and gets interrupted.
+    Designed for TTS services that don't support word timestamps or native cancel
+    APIs. Handles interruptions by reconnecting the websocket when an active audio
+    context gets interrupted.
     """
 
-    def __init__(self, **kwargs):
-        """Initialize the Interruptible TTS service.
-
-        Args:
-            **kwargs: Additional arguments passed to the parent WebsocketTTSService.
-        """
-        super().__init__(**kwargs)
-
-        # Indicates if the bot is speaking. If the bot is not speaking we don't
-        # need to reconnect when the user speaks. If the bot is speaking and the
-        # user interrupts we need to reconnect.
-        self._bot_speaking = False
-
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
-        if self._bot_speaking:
-            await self._disconnect()
-            await self._connect()
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with bot speaking state tracking.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame processing.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
+    async def on_audio_context_interrupted(self, context_id: str):
+        """Disconnect and reconnect the websocket to stop server-side synthesis."""
+        await self._disconnect()
+        await self._connect()
 
 
 class WebsocketWordTTSService(WebsocketTTSService):
