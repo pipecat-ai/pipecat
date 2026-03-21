@@ -137,7 +137,7 @@ class MiniMaxHttpTTSService(TTSService):
     Supports real-time audio streaming with configurable voice parameters.
 
     Platform documentation:
-    https://www.minimax.io/platform/document/T2A%20V2?key=66719005a427f0c8a5701643
+    https://platform.minimax.io/docs/api-reference/speech-t2a-http
     """
 
     Settings = MiniMaxTTSSettings
