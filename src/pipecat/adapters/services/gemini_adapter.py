@@ -12,19 +12,30 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, TypedDict
 
 from loguru import logger
-from openai import NotGiven
+from openai import NOT_GIVEN, NotGiven
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
+    LLMContextToolChoice,
     LLMSpecificMessage,
     LLMStandardMessage,
 )
 
 try:
-    from google.genai.types import Blob, Content, FileData, FunctionCall, FunctionResponse, Part
+    from google.genai.types import (
+        Blob,
+        Content,
+        FileData,
+        FunctionCall,
+        FunctionCallingConfig,
+        FunctionCallingConfigMode,
+        FunctionResponse,
+        Part,
+        ToolConfig,
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
@@ -37,6 +48,7 @@ class GeminiLLMInvocationParams(TypedDict):
     system_instruction: Optional[str]
     messages: List[Content]
     tools: List[Any] | NotGiven
+    tool_config: Dict[str, Any] | NotGiven
 
 
 class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
@@ -68,6 +80,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             "messages": messages.messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
+            "tool_config": self.to_provider_tool_choice_format(context.tool_choice),
         }
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Dict[str, Any]]:
@@ -127,6 +140,53 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             custom_gemini_tools = tools_schema.custom_tools.get(AdapterType.GEMINI, [])
 
         return formatted_standard_tools + custom_gemini_tools
+
+    def to_provider_tool_choice_format(
+        self, tool_choice: LLMContextToolChoice | NotGiven
+    ) -> ToolConfig | NotGiven:
+        """Convert standard tool choice to Gemini tool config.
+
+        Args:
+            tool_choice: The tool choice value from the LLM context, which can be
+                "auto", "none", "required", a dict with a "function" key with a "name" key, or NotGiven.
+
+        Returns:
+            ToolConfig instance configured for Gemini's function calling mode, or
+            NOT_GIVEN if the tool_choice is not recognized or is NotGiven.
+        """
+
+        def _create_tool_config(
+            mode: FunctionCallingConfigMode, allowed_function_names: List[str] = []
+        ) -> ToolConfig:
+            return ToolConfig(
+                function_calling_config=FunctionCallingConfig(
+                    mode=mode, allowed_function_names=allowed_function_names or None
+                )
+            )
+
+        if tool_choice is NOT_GIVEN:
+            return NOT_GIVEN
+
+        if tool_choice == "auto":
+            return _create_tool_config(FunctionCallingConfigMode.AUTO)
+
+        if tool_choice == "none":
+            return _create_tool_config(FunctionCallingConfigMode.NONE)
+
+        if tool_choice == "required":
+            return _create_tool_config(FunctionCallingConfigMode.ANY)
+
+        if (
+            isinstance(tool_choice, dict)
+            and isinstance(tool_choice.get("function"), dict)
+            and tool_choice["function"].get("name")
+        ):
+            return _create_tool_config(
+                FunctionCallingConfigMode.ANY, [tool_choice["function"]["name"]]
+            )
+
+        logger.warning(f"Unsupported tool choice format: {tool_choice}. Returning NOT_GIVEN.")
+        return NOT_GIVEN
 
     def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about Gemini.

@@ -904,17 +904,23 @@ class GoogleLLMService(LLMService):
         messages = []
         system = []
         tools = []
+        tool_config = None
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
             params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
             messages = params["messages"]
             system = params["system_instruction"]
             tools = params["tools"]
+            tool_config = params["tool_config"]
         else:
             context = GoogleLLMContext.upgrade_to_google(context)
             messages = context.messages
             system = getattr(context, "system_message", None)
             tools = context.tools or []
+            if hasattr(context, "tool_choice") and context.tool_choice:
+                logger.warning(
+                    f"Tool choice for Google LLM service is only supported for LLMContext"
+                )
 
         # Override system instruction if provided
         if system_instruction is not None:
@@ -1031,7 +1037,9 @@ class GoogleLLMService(LLMService):
         elif self._tools:
             tools = self._tools
         tool_config = None
-        if self._tool_config:
+        if params_from_context["tool_config"]:
+            tool_config = params_from_context["tool_config"]
+        elif self._tool_config:
             tool_config = self._tool_config
 
         # Build generation parameters
@@ -1064,6 +1072,7 @@ class GoogleLLMService(LLMService):
             messages=context.messages,
             system_instruction=context.system_message,
             tools=context.tools,
+            tool_config=context.tool_config,
         )
 
         return await self._stream_content(params)
