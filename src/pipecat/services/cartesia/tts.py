@@ -334,7 +334,7 @@ class CartesiaTTSService(WebsocketTTSService):
             text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
-            pause_frame_processing=False,
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             push_start_frame=True,
             text_aggregator=text_aggregator,
