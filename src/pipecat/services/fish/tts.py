@@ -392,6 +392,9 @@ class FishAudioTTSService(InterruptibleTTSService):
                                 )
                             else:
                                 logger.debug(f"Fish Audio session finished: {reason}")
+                            context_id = self.get_active_audio_context_id()
+                            if context_id:
+                                await self.remove_audio_context(context_id)
 
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
