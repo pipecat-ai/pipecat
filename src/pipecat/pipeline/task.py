@@ -854,13 +854,21 @@ class PipelineTask(BasePipelineTask):
         running = True
         cleanup_pipeline = True
         while running:
-            frame = await self._push_queue.get()
-            await self._pipeline.queue_frame(frame)
-            if isinstance(frame, (CancelFrame, EndFrame, StopFrame)):
-                await self._wait_for_pipeline_end(frame)
-            running = not isinstance(frame, (CancelFrame, EndFrame, StopFrame))
-            cleanup_pipeline = not isinstance(frame, StopFrame)
-            self._push_queue.task_done()
+            try:
+                frame = await self._push_queue.get()
+                await self._pipeline.queue_frame(frame)
+                if isinstance(frame, (CancelFrame, EndFrame, StopFrame)):
+                    await self._wait_for_pipeline_end(frame)
+                running = not isinstance(frame, (CancelFrame, EndFrame, StopFrame))
+                cleanup_pipeline = not isinstance(frame, StopFrame)
+                self._push_queue.task_done()
+            except asyncio.CancelledError:
+                logger.debug(f"{self}: _process_push_queue cancelled")
+                # FIXME: this leaves lots of dangling tasks...
+                self._pipeline_end_event.set()
+                self._pipeline_finished_event.set()
+                await self._cleanup(True)
+                raise
         await self._cleanup(cleanup_pipeline)
 
     async def _source_push_frame(self, frame: Frame, direction: FrameDirection):
