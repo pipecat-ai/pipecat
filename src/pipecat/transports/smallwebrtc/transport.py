@@ -126,7 +126,8 @@ class RawAudioTrack(AudioStreamTrack):
         """Return the next audio frame for WebRTC transmission.
 
         Returns:
-            An AudioFrame containing the next audio data or silence.
+            An AudioFrame containing the next audio data, or silence if the queue is empty
+            and ``insert_silence`` is True.
         """
         # Compute required wait time for synchronization
         if self._timestamp > 0:

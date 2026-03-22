@@ -676,15 +676,19 @@ class DailyTransportClient(EventHandler):
             await asyncio.sleep(0.01)
             return None
 
-    async def register_audio_destination(self, destination: str):
+    async def register_audio_destination(
+        self, destination: str, auto_silence: Optional[bool] = True
+    ):
         """Register a custom audio destination for multi-track output.
 
         Args:
             destination: The destination identifier to register.
+            auto_silence: If True, the audio source inserts silence when no audio is available.
+                If False, the source waits for audio data. Defaults to True.
         """
         params = (self._params.custom_audio_track_params or {}).get(destination)
         self._custom_audio_tracks[destination] = await self.add_custom_audio_track(
-            destination, params=params
+            destination, params=params, auto_silence=auto_silence
         )
         publishing: Dict[str, Any] = {"customAudio": {destination: True}}
         if params and params.send_settings:
@@ -831,7 +835,14 @@ class DailyTransportClient(EventHandler):
             self._camera_track = DailyVideoTrack(source=video_source, track=video_track)
 
         if self._params.audio_out_enabled and not self._microphone_track:
-            audio_source = CustomAudioSource(self._out_sample_rate, self._params.audio_out_channels)
+            logger.debug(
+                f"Creating custom audio source, auto silence {self._params.audio_out_insert_silence}"
+            )
+            audio_source = CustomAudioSource(
+                self._out_sample_rate,
+                self._params.audio_out_channels,
+                self._params.audio_out_insert_silence,
+            )
             audio_track = CustomAudioTrack(audio_source)
             self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
 
@@ -1269,12 +1280,15 @@ class DailyTransportClient(EventHandler):
         self,
         track_name: str,
         params: Optional[DailyCustomAudioTrackParams] = None,
+        auto_silence: Optional[bool] = True,
     ) -> DailyAudioTrack:
         """Add a custom audio track for multi-stream output.
 
         Args:
             track_name: Name for the custom audio track.
             params: Optional per-track configuration for sample rate, channels, and sendSettings.
+            auto_silence: If True, the audio source inserts silence when no audio is available.
+                If False, the source waits for audio data. Defaults to True.
 
         Returns:
             The created DailyAudioTrack instance.
@@ -1284,7 +1298,7 @@ class DailyTransportClient(EventHandler):
         sample_rate = params.sample_rate if params and params.sample_rate else self._out_sample_rate
         channels = params.channels if params else 1
 
-        audio_source = CustomAudioSource(sample_rate, channels)
+        audio_source = CustomAudioSource(sample_rate, channels, auto_silence)
 
         audio_track = CustomAudioTrack(audio_source)
 
