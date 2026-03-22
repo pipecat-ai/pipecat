@@ -1044,14 +1044,19 @@ class TTSService(AIService):
 
         await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id), text)
 
-        # If the generator yielded no audio frames (e.g. an error occurred),
-        # close the audio context immediately so the audio context task does not
-        # block waiting for more frames.  Without this, a retry triggered by
-        # ServiceSwitcher would create a new context that sits behind the stale
-        # one in the queue, causing a multi-second delay (the 3 s timeout in
-        # _handle_audio_context).
+        # If the generator yielded an error, close the audio context immediately
+        # so the audio context task does not block waiting for more frames.
+        # Without this, a retry triggered by ServiceSwitcher would create a new
+        # context that sits behind the stale one in the queue, causing a
+        # multi-second delay (the 3 s timeout in _handle_audio_context).
+        #
+        # Note: we check _tts_generator_had_error rather than
+        # _is_yielding_frames_synchronously because WebSocket TTS services
+        # (e.g. Fish Audio) yield None from run_tts — audio arrives via a
+        # separate receive loop — so _is_yielding_frames_synchronously is
+        # False even on success.
         if (
-            not self._is_yielding_frames_synchronously
+            self._tts_generator_had_error
             and self._push_start_frame
             and self.audio_context_available(context_id)
         ):
@@ -1108,6 +1113,7 @@ class TTSService(AIService):
 
         """
         is_yielding_frames = False
+        self._tts_generator_had_error = False
         async for frame in generator:
             if frame:
                 # Promote plain ErrorFrame to TTSErrorFrame so the service
@@ -1121,6 +1127,8 @@ class TTSService(AIService):
                         text=original_text,
                         tts_context_id=context_id,
                     )
+                if isinstance(frame, ErrorFrame):
+                    self._tts_generator_had_error = True
                 await self.append_to_audio_context(context_id, frame)
                 if isinstance(frame, TTSAudioRawFrame):
                     is_yielding_frames = True
