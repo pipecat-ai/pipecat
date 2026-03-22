@@ -417,16 +417,20 @@ class TavusTransportClient:
             return False
         return await self._client.write_audio_frame(frame)
 
-    async def register_audio_destination(self, destination: str):
+    async def register_audio_destination(
+        self, destination: str, auto_silence: Optional[bool] = True
+    ):
         """Register an audio destination for output.
 
         Args:
             destination: The destination identifier to register.
+            auto_silence: If True, the audio source inserts silence when no audio is available.
+                If False, the source waits for audio data. Defaults to True.
         """
         if not self._client:
             return
 
-        await self._client.register_audio_destination(destination)
+        await self._client.register_audio_destination(destination, auto_silence=auto_silence)
 
 
 class TavusInputTransport(BaseInputTransport):

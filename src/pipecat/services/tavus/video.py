@@ -214,7 +214,9 @@ class TavusVideoService(AIService):
         await super().start(frame)
         await self._client.start(frame)
         if self._transport_destination:
-            await self._client.register_audio_destination(self._transport_destination)
+            await self._client.register_audio_destination(
+                self._transport_destination, auto_silence=False
+            )
         await self._create_send_task()
 
     async def stop(self, frame: EndFrame):
