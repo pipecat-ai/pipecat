@@ -912,6 +912,9 @@ class TTSService(AIService):
         self._streamed_text = ""
         self._text_aggregation_metrics_started = False
         await self.reset_word_timestamps()
+        # Discard any pre-audio word timestamps from the interrupted turn so they
+        # cannot be flushed into the next context after the audio baseline resets.
+        self._initial_word_times = []
 
         await self._stop_audio_context_task()
         audio_contexts = self.get_audio_contexts()
@@ -1149,17 +1152,22 @@ class TTSService(AIService):
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
             context_id: Unique identifier for the TTS context.
         """
-        if context_id and self.audio_context_available(context_id):
-            for word, timestamp in word_times:
-                await self._audio_contexts[context_id].put(
-                    _WordTimestampEntry(
-                        word=word,
-                        timestamp=timestamp,
-                        context_id=context_id,
+        if context_id:
+            if self.audio_context_available(context_id):
+                for word, timestamp in word_times:
+                    await self._audio_contexts[context_id].put(
+                        _WordTimestampEntry(
+                            word=word,
+                            timestamp=timestamp,
+                            context_id=context_id,
+                        )
                     )
-                )
-        else:
-            await self._add_word_timestamps(word_times=word_times, context_id=context_id)
+                return
+
+            logger.debug(f"{self}: dropping word timestamps for stale audio context {context_id}")
+            return
+
+        await self._add_word_timestamps(word_times=word_times, context_id=context_id)
 
     async def _add_word_timestamps(
         self, word_times: List[Tuple[str, float]], context_id: Optional[str] = None
@@ -1200,7 +1208,14 @@ class TTSService(AIService):
                     # Assumption: word-by-word text frames don't include spaces, so
                     # we can rely on the default includes_inter_frame_spaces=False
                     frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
-                    frame.pts = self._initial_word_timestamp + ts_ns
+                    computed_pts = self._initial_word_timestamp + ts_ns
+                    if computed_pts < self._word_last_pts:
+                        logger.warning(
+                            f"{self}: clamping non-monotonic word timestamp for {word!r} "
+                            f"from {computed_pts} to {self._word_last_pts + 1}"
+                        )
+                        computed_pts = self._word_last_pts + 1
+                    frame.pts = computed_pts
                     frame.context_id = context_id
                     if context_id in self._tts_contexts:
                         frame.append_to_context = self._tts_contexts[context_id].append_to_context
