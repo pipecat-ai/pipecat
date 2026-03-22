@@ -9,8 +9,10 @@
 import asyncio
 import unittest
 from dataclasses import dataclass
+from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     ErrorFrame,
     Frame,
     ManuallySwitchServiceFrame,
@@ -19,8 +21,11 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
     TextFrame,
+    TTSAudioRawFrame,
     TTSErrorFrame,
     TTSSpeakFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.service_switcher import (
@@ -30,7 +35,8 @@ from pipecat.pipeline.service_switcher import (
     ServiceSwitcherStrategyManual,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.tests.utils import run_test
+from pipecat.services.tts_service import TTSService
+from pipecat.tests.utils import SleepFrame, run_test
 
 
 class MockFrameProcessor(FrameProcessor):
@@ -784,6 +790,121 @@ class TestServiceSwitcherFailoverIntegration(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=[TextFrame],
             expected_up_frames=[ErrorFrame],
         )
+
+
+class MockRealTTSService(TTSService):
+    """A mock TTSService subclass that uses the real audio context machinery.
+
+    When ``fail_until`` > 0, the first ``fail_until`` calls to ``run_tts``
+    yield an ``ErrorFrame``.  Subsequent calls yield audio frames.
+    """
+
+    def __init__(self, test_name: str, *, fail_until: int = 0, **kwargs):
+        super().__init__(
+            name=test_name,
+            push_start_frame=True,
+            push_stop_frames=True,
+            stop_frame_timeout_s=0.5,
+            sample_rate=16000,
+            **kwargs,
+        )
+        self.test_name = test_name
+        self._fail_until = fail_until
+        self._call_count = 0
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        self._call_count += 1
+        if self._call_count <= self._fail_until:
+            yield ErrorFrame(error=f"{self.test_name} synthesis failed (call {self._call_count})")
+        else:
+            # Yield a small audio frame to simulate success.
+            yield TTSAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1)
+
+
+class TestTTSServiceAudioContextCleanupOnError(unittest.IsolatedAsyncioTestCase):
+    """Tests that TTSService properly cleans up audio contexts when run_tts fails."""
+
+    async def test_audio_context_closed_on_error(self):
+        """After an error in run_tts, the audio context should be removed so
+        subsequent contexts are not blocked.
+        """
+        tts = MockRealTTSService("tts_fail", fail_until=999)
+
+        # Run one TTS request that will fail.
+        # TTSService pushes AggregatedTextFrame and TTSStartedFrame downstream
+        # before the error occurs.
+        await run_test(
+            tts,
+            frames_to_send=[TTSSpeakFrame(text="hello")],
+            expected_down_frames=[AggregatedTextFrame, TTSStartedFrame],
+            expected_up_frames=[TTSErrorFrame],
+        )
+
+        # After the pipeline finishes, the TTS should have no leftover audio
+        # contexts.
+        self.assertEqual(tts.get_audio_contexts(), [])
+
+    async def test_retry_succeeds_after_error_context_cleanup(self):
+        """When ServiceSwitcher retries after an error, the new request should
+        not be blocked by the old (failed) audio context.
+        """
+        # tts1 fails once then succeeds; tts2 is backup.
+        tts1 = MockRealTTSService("tts1", fail_until=1)
+        tts2 = MockRealTTSService("tts2", fail_until=0)
+
+        switcher = ServiceSwitcher(
+            [tts1, tts2],
+            ServiceSwitcherStrategyFailover,
+            strategy_kwargs={"max_retries": 3},
+        )
+
+        # Don't assert exact downstream frames — each retry pushes
+        # AggregatedTextFrame + TTSStartedFrame before the error, and
+        # _stop_frame_handler may push extra TTSStoppedFrame on timeout.
+        # We verify call counts to confirm the retry completed.
+        await run_test(
+            switcher,
+            frames_to_send=[
+                TTSSpeakFrame(text="retry me"),
+                # Give enough time for retry + audio context processing.
+                SleepFrame(sleep=3.0),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=[],
+        )
+
+        # tts1 should have been called twice (1 fail + 1 success)
+        self.assertEqual(tts1._call_count, 2)
+        # tts2 should not have been used
+        self.assertEqual(tts2._call_count, 0)
+
+    async def test_failover_to_second_service_with_real_tts(self):
+        """When the first real TTSService exhausts retries, the second service
+        should handle the request without being blocked by stale audio contexts.
+        """
+        tts1 = MockRealTTSService("tts1", fail_until=999)
+        tts2 = MockRealTTSService("tts2", fail_until=0)
+
+        switcher = ServiceSwitcher(
+            [tts1, tts2],
+            ServiceSwitcherStrategyFailover,
+            strategy_kwargs={"max_retries": 1},
+        )
+
+        await run_test(
+            switcher,
+            frames_to_send=[
+                TTSSpeakFrame(text="failover me"),
+                SleepFrame(sleep=5.0),
+            ],
+            expected_down_frames=None,
+            expected_up_frames=[],
+        )
+
+        # tts1 should have been called max_retries + 1 = 2 times
+        self.assertEqual(tts1._call_count, 2)
+        # tts2 should have succeeded on first try
+        self.assertEqual(tts2._call_count, 1)
 
 
 if __name__ == "__main__":

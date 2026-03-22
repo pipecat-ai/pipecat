@@ -1044,6 +1044,19 @@ class TTSService(AIService):
 
         await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id), text)
 
+        # If the generator yielded no audio frames (e.g. an error occurred),
+        # close the audio context immediately so the audio context task does not
+        # block waiting for more frames.  Without this, a retry triggered by
+        # ServiceSwitcher would create a new context that sits behind the stale
+        # one in the queue, causing a multi-second delay (the 3 s timeout in
+        # _handle_audio_context).
+        if (
+            not self._is_yielding_frames_synchronously
+            and self._push_start_frame
+            and self.audio_context_available(context_id)
+        ):
+            await self.remove_audio_context(context_id)
+
         if not self._is_streaming_tokens:
             await self.stop_processing_metrics()
 
@@ -1413,6 +1426,12 @@ class TTSService(AIService):
                 if frame:
                     if isinstance(frame, ErrorFrame):
                         await self.push_error_frame(frame)
+                        # A TTSErrorFrame means synthesis failed for this
+                        # context.  Stop waiting for more frames so the audio
+                        # context task can move on to the next context (e.g. a
+                        # retry queued by ServiceSwitcher).
+                        if isinstance(frame, TTSErrorFrame):
+                            break
                     else:
                         await self.push_frame(frame)
             except asyncio.TimeoutError:
