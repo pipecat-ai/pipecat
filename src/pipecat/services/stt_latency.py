@@ -49,6 +49,7 @@ OPENAI_REALTIME_TTFS_P99: float = 1.66
 SARVAM_TTFS_P99: float = 1.17
 SONIOX_TTFS_P99: float = 0.35
 SPEECHMATICS_TTFS_P99: float = 0.74
+IBM_TTFS_P99: float = 0.80
 
 # These services run locally and should be replaced with measured values
 NVIDIA_TTFS_P99: float = DEFAULT_TTFS_P99
