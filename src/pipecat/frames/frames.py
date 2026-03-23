@@ -902,10 +902,15 @@ class FunctionCallResultProperties:
     Parameters:
         run_llm: Whether to run the LLM after receiving this result.
         on_context_updated: Callback to execute when context is updated.
+        exclude_from_summary: Whether to exclude the function call and its result
+            from context summarization. When True, the tool response message, its
+            parent assistant message, and all sibling tool responses are marked so
+            they survive summarization cycles.
     """
 
     run_llm: Optional[bool] = None
     on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
+    exclude_from_summary: Optional[bool] = None
 
 
 @dataclass

@@ -420,7 +420,10 @@ class LLMContextSummarizer(BaseObject):
         """Apply summary to compress the conversation context.
 
         Reconstructs the context with:
-        [first_system_message] + [summary_message] + [recent_messages]
+        [first_system_message] + [summary_message] + [excluded_messages] + [recent_messages]
+
+        Messages marked with ``exclude_from_summary`` in the summarized range
+        are preserved intact and placed after the summary message.
 
         Args:
             summary: The generated summary text.
@@ -442,6 +445,15 @@ class LLMContextSummarizer(BaseObject):
             None,
         )
 
+        # Collect messages marked as excluded from summarization within the
+        # summarized range. These are preserved intact after the summary.
+        summary_start = LLMContextSummarizationUtil._find_summary_start(messages)
+        excluded_messages = [
+            msg
+            for msg in messages[summary_start : last_summarized_index + 1]
+            if not isinstance(msg, LLMSpecificMessage) and msg.get("exclude_from_summary")
+        ]
+
         # Get recent messages to keep
         recent_messages = messages[last_summarized_index + 1 :]
 
@@ -455,15 +467,17 @@ class LLMContextSummarizer(BaseObject):
         if first_system_msg:
             new_messages.append(first_system_msg)
         new_messages.append(summary_message)
+        new_messages.extend(excluded_messages)
         new_messages.extend(recent_messages)
 
         # Update context
         original_message_count = len(messages)
         num_system_preserved = 1 if first_system_msg else 0
+        num_excluded = len(excluded_messages)
         self._context.set_messages(new_messages)
 
-        # Messages actually summarized = index range minus the preserved system message
-        summarized_count = last_summarized_index + 1 - num_system_preserved
+        # Messages actually summarized = index range minus preserved ones
+        summarized_count = max(0, last_summarized_index + 1 - num_system_preserved - num_excluded)
 
         logger.info(
             f"{self}: Applied context summary, compressed {summarized_count} messages "
@@ -475,6 +489,6 @@ class LLMContextSummarizer(BaseObject):
             original_message_count=original_message_count,
             new_message_count=len(new_messages),
             summarized_message_count=summarized_count,
-            preserved_message_count=len(recent_messages) + num_system_preserved,
+            preserved_message_count=len(recent_messages) + num_system_preserved + num_excluded,
         )
         await self._call_event_handler("on_summary_applied", event)

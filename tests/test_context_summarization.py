@@ -1174,5 +1174,143 @@ class TestLLMSpecificMessageHandling(unittest.TestCase):
         self.assertEqual(result, -1)
 
 
+class TestExcludeFromSummary(unittest.TestCase):
+    """Tests that messages marked with exclude_from_summary are preserved.
+
+    Messages with ``exclude_from_summary=True`` should be filtered out of the
+    list returned by ``get_messages_to_summarize`` so they never appear in the
+    summary transcript, while ``last_summarized_index`` continues to reflect the
+    full positional range boundary.
+    """
+
+    def test_excluded_message_filtered_from_result(self):
+        """Excluded message is removed but last_summarized_index is unchanged."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Message 1"})  # idx 1
+        context.add_message(  # idx 2 (excluded)
+            {"role": "user", "content": "Important data", "exclude_from_summary": True}
+        )
+        context.add_message({"role": "assistant", "content": "Response 1"})  # idx 3
+        context.add_message({"role": "user", "content": "Message 2"})  # idx 4 (kept)
+        context.add_message({"role": "assistant", "content": "Response 2"})  # idx 5 (kept)
+
+        # Keep 2: summary_end=4, summarizable range is [1, 3].
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        # Excluded message at idx 2 should not appear
+        contents = [msg.get("content") for msg in result.messages]
+        self.assertNotIn("Important data", contents)
+        self.assertIn("Message 1", contents)
+        self.assertIn("Response 1", contents)
+        self.assertEqual(len(result.messages), 2)
+
+        # Positional boundary unchanged
+        self.assertEqual(result.last_summarized_index, 3)
+
+    def test_all_messages_excluded_returns_empty(self):
+        """When every message in the range is excluded the result is empty with index -1."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message(  # idx 1 (excluded)
+            {"role": "user", "content": "Data 1", "exclude_from_summary": True}
+        )
+        context.add_message(  # idx 2 (excluded)
+            {"role": "assistant", "content": "Data 2", "exclude_from_summary": True}
+        )
+        context.add_message({"role": "user", "content": "Recent"})  # idx 3 (kept)
+
+        # Keep 1: summary_end=3, range is [1, 2], both excluded.
+        # Returns -1 so the caller doesn't retry on the same range.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
+
+        self.assertEqual(len(result.messages), 0)
+        self.assertEqual(result.last_summarized_index, -1)
+
+    def test_excluded_tool_call_group_filtered(self):
+        """Excluded assistant+tool pair are both filtered from the summary list."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Hello"})  # idx 1
+        context.add_message(  # idx 2 (excluded)
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_data", "arguments": "{}"},
+                    }
+                ],
+                "exclude_from_summary": True,
+            }
+        )
+        context.add_message(  # idx 3 (excluded)
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": '{"key": "value"}',
+                "exclude_from_summary": True,
+            }
+        )
+        context.add_message({"role": "assistant", "content": "Here is the data"})  # idx 4
+        context.add_message({"role": "user", "content": "Thanks"})  # idx 5 (kept)
+        context.add_message({"role": "assistant", "content": "You're welcome"})  # idx 6 (kept)
+
+        # Keep 2: summary_end=5, range is [1, 4]. Indices 2 and 3 are excluded.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        contents = [msg.get("content") for msg in result.messages]
+        self.assertIn("Hello", contents)
+        self.assertIn("Here is the data", contents)
+        self.assertEqual(len(result.messages), 2)
+        self.assertEqual(result.last_summarized_index, 4)
+
+    def test_excluded_in_summarized_range_not_duplicated(self):
+        """Excluded message within the summarized range appears only once."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Hello"})  # idx 1
+        context.add_message(  # idx 2 (excluded)
+            {"role": "user", "content": "Persistent data", "exclude_from_summary": True}
+        )
+        context.add_message({"role": "assistant", "content": "Got it"})  # idx 3 (kept)
+        context.add_message({"role": "user", "content": "Latest"})  # idx 4 (kept)
+
+        # Keep 2: summary_end=3, summarizable range is [1, 2].
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        # Only "Hello" remains after filtering the excluded message
+        self.assertEqual(len(result.messages), 1)
+        self.assertEqual(result.messages[0]["content"], "Hello")
+        self.assertEqual(result.last_summarized_index, 2)
+
+    def test_find_summary_start_with_system_message(self):
+        """_find_summary_start returns index after first system message."""
+        messages = [
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "Hello"},
+        ]
+        self.assertEqual(LLMContextSummarizationUtil._find_summary_start(messages), 1)
+
+    def test_find_summary_start_without_system_message(self):
+        """_find_summary_start returns 0 when no system message exists."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
+        self.assertEqual(LLMContextSummarizationUtil._find_summary_start(messages), 0)
+
+    def test_find_summary_start_skips_llm_specific_messages(self):
+        """_find_summary_start skips LLMSpecificMessage instances."""
+        messages = [
+            LLMSpecificMessage(llm="google", message={}),
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "Hello"},
+        ]
+        self.assertEqual(LLMContextSummarizationUtil._find_summary_start(messages), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

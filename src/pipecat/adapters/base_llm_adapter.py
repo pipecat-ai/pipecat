@@ -105,13 +105,22 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     def get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
         """Get messages from the LLM context, including standard and LLM-specific messages.
 
+        Internal pipecat metadata keys (e.g. ``exclude_from_summary``) are
+        stripped from standard messages so they never reach provider APIs.
+
         Args:
             context: The LLM context containing messages.
 
         Returns:
             List of messages including standard and LLM-specific messages.
         """
-        return context.get_messages(self.id_for_llm_specific_messages)
+        messages = context.get_messages(self.id_for_llm_specific_messages)
+        return [
+            {k: v for k, v in msg.items() if k != "exclude_from_summary"}
+            if isinstance(msg, dict) and "exclude_from_summary" in msg
+            else msg
+            for msg in messages
+        ]
 
     def from_standard_tools(self, tools: Any) -> List[Any] | NotGiven:
         """Convert tools from standard format to provider format.
