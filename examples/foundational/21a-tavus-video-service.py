@@ -42,7 +42,7 @@ transport_params = {
         video_out_is_live=True,
         video_out_width=1280,
         video_out_height=720,
-        audio_out_insert_silence=False,
+        audio_out_auto_silence=False,
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -51,7 +51,7 @@ transport_params = {
         video_out_is_live=True,
         video_out_width=1280,
         video_out_height=720,
-        audio_out_insert_silence=False,
+        audio_out_auto_silence=False,
     ),
 }
 

@@ -497,7 +497,7 @@ class SmallWebRTCClient:
         if self._params.audio_out_enabled:
             self._audio_output_track = RawAudioTrack(
                 sample_rate=self._out_sample_rate,
-                insert_silence=self._params.audio_out_insert_silence,
+                insert_silence=self._params.audio_out_auto_silence,
             )
             self._webrtc_connection.replace_audio_track(self._audio_output_track)
 

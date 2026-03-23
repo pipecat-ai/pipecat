@@ -836,12 +836,12 @@ class DailyTransportClient(EventHandler):
 
         if self._params.audio_out_enabled and not self._microphone_track:
             logger.debug(
-                f"Creating custom audio source, auto silence {self._params.audio_out_insert_silence}"
+                f"Creating custom audio source, auto silence {self._params.audio_out_auto_silence}"
             )
             audio_source = CustomAudioSource(
                 self._out_sample_rate,
                 self._params.audio_out_channels,
-                self._params.audio_out_insert_silence,
+                self._params.audio_out_auto_silence,
             )
             audio_track = CustomAudioTrack(audio_source)
             self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
