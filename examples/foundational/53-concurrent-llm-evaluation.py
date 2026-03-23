@@ -77,7 +77,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     groq_llm = GroqLLMService(
         api_key=os.getenv("GROQ_API_KEY"),
         settings=GroqLLMService.Settings(
-            model="meta-llama/llama-4-maverick-17b-128e-instruct",
             system_instruction="You are a very helpful assistant. Your goal is to demonstrate your capabilities in detail in a creative and helpful way.",
         ),
     )
