@@ -6,26 +6,18 @@
 
 """Sarvam LLM service implementation using OpenAI-compatible interface."""
 
-import asyncio
-import json
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Literal, Mapping, Optional, TypeVar
+from typing import Literal, Mapping, Optional
 
-import httpx
 from loguru import logger
-from openai import NOT_GIVEN, APITimeoutError, AsyncStream
-from openai.types.chat import ChatCompletionChunk
+from openai import NOT_GIVEN
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import _NotGiven, is_given
-
-_T = TypeVar("_T")
 
 
 @dataclass
@@ -44,15 +36,10 @@ class SarvamLLMSettings(OpenAILLMSettings):
 
 
 class SarvamLLMService(OpenAILLMService):
-    """Sarvam LLM service using Sarvam's OpenAI-compatible chat completions API.
+    """A service for interacting with Sarvam's API using the OpenAI-compatible interface.
 
-    This service extends ``OpenAILLMService`` while adding Sarvam-specific behavior:
-
-    - model allow-list validation
-    - request shaping for Sarvam-compatible parameters
-    - Sarvam auth header wiring (``api-subscription-key``)
-    - SDK User-Agent propagation on every API call
-    - raw Sarvam server error passthrough
+    This service extends OpenAILLMService to connect to Sarvam's API endpoint while
+    maintaining full compatibility with OpenAI's interface and functionality.
     """
 
     _SUPPORTED_MODELS = frozenset(
@@ -153,44 +140,6 @@ class SarvamLLMService(OpenAILLMService):
 
         return params
 
-    async def _call_with_raw_sarvam_errors(self, awaitable: Awaitable[_T]) -> _T:
-        """Await an OpenAI call while preserving Sarvam raw error payloads.
-
-        BaseOpenAILLMService handles pipeline-frame exceptions via push_error(),
-        but direct helper methods like ``get_chat_completions`` and
-        ``run_inference`` are often consumed directly. We normalize those errors
-        here so applications consistently receive server-provided messages.
-        """
-        try:
-            return await awaitable
-        except (APITimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
-            raise
-        except Exception as e:
-            raise RuntimeError(self._format_raw_server_error(e)) from e
-
-    async def get_chat_completions(
-        self, params_from_context: OpenAILLMInvocationParams
-    ) -> AsyncStream[ChatCompletionChunk]:
-        """Get streaming chat completions with Sarvam raw error passthrough."""
-        return await self._call_with_raw_sarvam_errors(
-            super().get_chat_completions(params_from_context)
-        )
-
-    async def run_inference(
-        self,
-        context: LLMContext | OpenAILLMContext,
-        max_tokens: Optional[int] = None,
-        system_instruction: Optional[str] = None,
-    ) -> Optional[str]:
-        """Run one-shot inference and preserve Sarvam raw server errors."""
-        return await self._call_with_raw_sarvam_errors(
-            super().run_inference(
-                context,
-                max_tokens=max_tokens,
-                system_instruction=system_instruction,
-            )
-        )
-
     def _validate_model(self, model: str):
         if model not in self._SUPPORTED_MODELS:
             allowed = ", ".join(sorted(self._SUPPORTED_MODELS))
@@ -209,35 +158,3 @@ class SarvamLLMService(OpenAILLMService):
 
         if has_tool_choice and not has_tools:
             raise ValueError("Sarvam requires non-empty `tools` when `tool_choice` is provided.")
-
-    def _format_raw_server_error(self, error: Exception) -> str:
-        raw_message = self._extract_raw_server_message(error)
-        return f"Sarvam server error: {raw_message}"
-
-    def _extract_raw_server_message(self, error: Exception) -> str:
-        body = getattr(error, "body", None)
-        if body is not None:
-            return self._payload_to_message(body)
-
-        response = getattr(error, "response", None)
-        if response is not None:
-            try:
-                return self._payload_to_message(response.json())
-            except Exception:
-                text = getattr(response, "text", None)
-                if text:
-                    return str(text)
-
-        return str(error)
-
-    def _payload_to_message(self, payload: Any) -> str:
-        if isinstance(payload, dict):
-            error_obj = payload.get("error")
-            if isinstance(error_obj, dict) and isinstance(error_obj.get("message"), str):
-                return error_obj["message"]
-            if isinstance(payload.get("message"), str):
-                return payload["message"]
-            return json.dumps(payload, ensure_ascii=False)
-        if isinstance(payload, list):
-            return json.dumps(payload, ensure_ascii=False)
-        return str(payload)
