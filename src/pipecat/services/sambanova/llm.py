@@ -41,6 +41,10 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    # SambaNova doesn't support the "developer" message role.
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
+
     Settings = SambaNovaLLMSettings
     _settings: Settings
 

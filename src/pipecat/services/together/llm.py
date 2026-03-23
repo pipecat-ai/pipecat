@@ -29,6 +29,11 @@ class TogetherLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    # Together.ai doesn't support the "developer" message role (it seems to quietly
+    # ignore "developer" messages).
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
+
     Settings = TogetherLLMSettings
     _settings: Settings
 
