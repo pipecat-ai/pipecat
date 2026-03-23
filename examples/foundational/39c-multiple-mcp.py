@@ -9,7 +9,6 @@ import asyncio
 import io
 import json
 import os
-import re
 import shutil
 
 import aiohttp
@@ -20,9 +19,7 @@ from mcp.client.session_group import StreamableHttpParameters
 from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
@@ -46,8 +43,6 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -77,7 +72,7 @@ class UrlToImageProcessor(FrameProcessor):
                 return data["artObject"]["webImage"]["url"]
             if "artworks" in data and len(data["artworks"]):
                 return data["artworks"][0]["webImage"]["url"]
-        except:
+        except (json.JSONDecodeError, KeyError, TypeError):
             pass
 
     async def run_image_process(self, image_url: str):
@@ -96,9 +91,8 @@ class UrlToImageProcessor(FrameProcessor):
             logger.error(error_msg)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -106,7 +100,6 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -114,7 +107,6 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -128,15 +120,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            settings=CartesiaTTSService.Settings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
         )
 
-        llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
-        )
-
-        system = f"""
-        You are a helpful LLM in a WebRTC call.
+        system_prompt = f"""
+        You are a helpful LLM in a voice call.
         Your goal is to demonstrate your capabilities in a succinct way.
         You have access to tools to search the Rijksmuseum collection and the user's GitHub repositories and account.
         Offer, for example, to show a floral still life, use the `search_artwork` tool.
@@ -149,7 +139,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         Just respond with short sentences when you are carrying out tool calls.
         """
 
-        messages = [{"role": "system", "content": system}]
+        llm = AnthropicLLMService(
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            settings=AnthropicLLMService.Settings(
+                system_instruction=system_prompt,
+            ),
+        )
 
         try:
             rijksmuseum_mcp = MCPClient(
@@ -192,16 +187,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         all_standard_tools = rijksmuseum_tools.standard_tools + github_tools.standard_tools
         all_tools = ToolsSchema(standard_tools=all_standard_tools)
 
-        context = LLMContext(messages, all_tools)
-        context_aggregator = LLMContextAggregatorPair(
+        context = LLMContext(tools=all_tools)
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
-            user_params=LLMUserAggregatorParams(
-                user_turn_strategies=UserTurnStrategies(
-                    stop=[
-                        TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())
-                    ]
-                ),
-            ),
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
         )
         mcp_image_processor = UrlToImageProcessor(aiohttp_session=session)
 
@@ -209,12 +198,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             [
                 transport.input(),  # Transport user input
                 stt,
-                context_aggregator.user(),  # User spoken responses
+                user_aggregator,  # User spoken responses
                 llm,  # LLM
                 tts,  # TTS
                 mcp_image_processor,  # URL image -> output
                 transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses and tool context
+                assistant_aggregator,  # Assistant spoken responses and tool context
             ]
         )
 

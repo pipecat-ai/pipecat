@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10.18', '3.11.13', '3.12.11', '3.13.5']
+        python-version: ['3.10.19', '3.11.14', '3.12.12', '3.13.12']
 
     name: Python ${{ matrix.python-version }}
     steps:
@@ -40,19 +40,9 @@ jobs:
           uv python install ${{ matrix.python-version }}
           uv python pin ${{ matrix.python-version }}
 
-      - name: Test uv sync with all extras (Python < 3.13)
-        if: "!startsWith(matrix.python-version, '3.13.')"
+      - name: Test uv sync with all extras
         run: |
           uv sync --group dev --all-extras --no-extra krisp
-
-      - name: Test uv sync without PyTorch extras (Python 3.13+)
-        if: startsWith(matrix.python-version, '3.13.')
-        run: |
-          uv sync --group dev --all-extras \
-            --no-extra krisp \
-            --no-extra local-smart-turn \
-            --no-extra moondream \
-            --no-extra mlx-whisper
 
       - name: Verify installation
         run: |

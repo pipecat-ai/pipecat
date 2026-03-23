@@ -11,11 +11,12 @@ text prompts into images.
 """
 
 from abc import abstractmethod
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from pipecat.frames.frames import Frame, TextFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.settings import ImageGenSettings
 
 
 class ImageGenService(AIService):
@@ -26,13 +27,20 @@ class ImageGenService(AIService):
     generation functionality using their specific AI service.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, settings: Optional[ImageGenSettings] = None, **kwargs):
         """Initialize the image generation service.
 
         Args:
+            settings: The runtime-updatable settings for the image generation service.
             **kwargs: Additional arguments passed to the parent AIService.
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            settings=settings
+            # Here in case subclass doesn't implement more specific settings
+            # (which hopefully should be rare)
+            or ImageGenSettings(),
+            **kwargs,
+        )
 
     # Renders the image. Returns an Image object.
     @abstractmethod

@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InterruptionFrame,
 )
-from pipecat.turns.mute import (
+from pipecat.turns.user_mute import (
     AlwaysUserMuteStrategy,
     FirstSpeechUserMuteStrategy,
     FunctionCallUserMuteStrategy,
@@ -137,3 +137,7 @@ class TestFunctionCallUserMuteStrategy(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertFalse(await strategy.process_frame(InterruptionFrame()))
+
+
+if __name__ == "__main__":
+    unittest.main()

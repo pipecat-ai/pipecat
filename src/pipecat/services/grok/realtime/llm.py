@@ -13,8 +13,9 @@ https://docs.x.ai/docs/guides/voice/agent
 import base64
 import json
 import time
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
+from typing import Any, Dict, Mapping, Optional, Type
 
 from loguru import logger
 
@@ -33,7 +34,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
-    LLMUpdateSettingsFrame,
+    LLMTextFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -55,6 +56,12 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.settings import (
+    NOT_GIVEN,
+    LLMSettings,
+    _NotGiven,
+    is_given,
+)
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
@@ -84,6 +91,100 @@ class CurrentAudioResponse:
     total_size: int = 0
 
 
+@dataclass
+class GrokRealtimeLLMSettings(LLMSettings):
+    """Settings for GrokRealtimeLLMService.
+
+    Parameters:
+        session_properties: Grok Realtime session properties (voice, audio config,
+            tools, etc.).  ``instructions`` is synced bidirectionally with the
+            top-level ``system_instruction`` field.
+    """
+
+    session_properties: events.SessionProperties | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+    # -- Bidirectional sync helpers ------------------------------------------
+
+    @staticmethod
+    def _sync_top_level_to_sp(settings: "GrokRealtimeLLMService.Settings"):
+        """Push top-level ``system_instruction`` into ``session_properties``."""
+        if not is_given(settings.session_properties):
+            return
+        sp = settings.session_properties
+        if is_given(settings.system_instruction):
+            sp.instructions = settings.system_instruction
+
+    # -- apply_update override -----------------------------------------------
+
+    def apply_update(self, delta: "GrokRealtimeLLMService.Settings") -> Dict[str, Any]:
+        """Merge a delta, keeping ``system_instruction`` in sync with SP.
+
+        When the delta contains ``session_properties``, it **replaces** the
+        stored SP wholesale (matching legacy behaviour).  Top-level field
+        values always take precedence over conflicting SP values.
+        """
+        # 1. Let the base class handle all fields including session_properties
+        #    (wholesale replacement when given).
+        changed = super().apply_update(delta)
+
+        # 2. SP → top-level: if the SP was just replaced and carries
+        #    instructions that the delta didn't set at top level, pull it up.
+        if "session_properties" in changed and is_given(self.session_properties):
+            sp = self.session_properties
+            if "system_instruction" not in changed and sp.instructions is not None:
+                old_si = self.system_instruction
+                self.system_instruction = sp.instructions
+                if old_si != self.system_instruction:
+                    changed["system_instruction"] = old_si
+
+        # 3. Top-level → SP: ensure SP mirrors the authoritative top-level
+        #    values.  Covers all cases: top-level-only delta, SP-only delta,
+        #    and mixed deltas where top-level takes precedence.
+        self._sync_top_level_to_sp(self)
+
+        return changed
+
+    # -- from_mapping override -----------------------------------------------
+
+    @classmethod
+    def from_mapping(
+        cls: Type["GrokRealtimeLLMService.Settings"], settings: Mapping[str, Any]
+    ) -> "GrokRealtimeLLMService.Settings":
+        """Build a delta from a plain dict, routing SP keys into ``session_properties``.
+
+        Keys that correspond to ``SessionProperties`` fields are collected into
+        a nested ``session_properties`` value.  ``model`` is always routed to
+        the top-level field.  Unknown keys go to ``extra``.
+        """
+        # Determine which keys belong to our own dataclass fields.
+        own_field_names = {f.name for f in dataclass_fields(cls)} - {"extra"}
+
+        top: Dict[str, Any] = {}
+        sp_dict: Dict[str, Any] = {}
+        extra: Dict[str, Any] = {}
+
+        sp_keys = set(events.SessionProperties.model_fields.keys())
+
+        for key, value in settings.items():
+            # Resolve aliases first
+            canonical = cls._aliases.get(key, key)
+            if canonical in own_field_names:
+                top[canonical] = value
+            elif canonical in sp_keys:
+                sp_dict[canonical] = value
+            else:
+                extra[key] = value
+
+        if sp_dict:
+            top["session_properties"] = events.SessionProperties(**sp_dict)
+
+        instance = cls(**top)
+        instance.extra = extra
+        return instance
+
+
 class GrokRealtimeLLMService(LLMService):
     """Grok Realtime Voice Agent LLM service providing real-time audio and text communication.
 
@@ -100,6 +201,9 @@ class GrokRealtimeLLMService(LLMService):
         - Server-side VAD (Voice Activity Detection)
     """
 
+    Settings = GrokRealtimeLLMSettings
+    _settings: Settings
+
     # Use the Grok-specific adapter
     adapter_class = GrokRealtimeLLMAdapter
 
@@ -109,6 +213,7 @@ class GrokRealtimeLLMService(LLMService):
         api_key: str,
         base_url: str = "wss://api.x.ai/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
+        settings: Optional[Settings] = None,
         start_audio_paused: bool = False,
         **kwargs,
     ):
@@ -120,23 +225,63 @@ class GrokRealtimeLLMService(LLMService):
                 Defaults to "wss://api.x.ai/v1/realtime".
             session_properties: Configuration properties for the realtime session.
                 If None, uses default SessionProperties with voice "Ara".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GrokRealtimeLLMService.Settings(session_properties=...)``
+                    instead.
+
                 To set a different voice, configure it in session_properties:
 
                     session_properties = events.SessionProperties(voice="Rex")
 
                 Available voices: Ara, Rex, Sal, Eve, Leo.
+            settings: Runtime-updatable settings for this service.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        super().__init__(base_url=base_url, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=events.SessionProperties(),
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if session_properties is not None:
+            _warn_deprecated_param(
+                "session_properties",
+                self.Settings,
+                "session_properties",
+            )
+            default_settings.session_properties = session_properties
+            # Sync instructions from the deprecated SP arg to top-level
+            if session_properties.instructions is not None:
+                default_settings.system_instruction = session_properties.instructions
+
+        # Sync top-level system_instruction back into session_properties
+        self.Settings._sync_top_level_to_sp(default_settings)
+
+        # 3. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            base_url=base_url,
+            settings=default_settings,
+            **kwargs,
+        )
 
         self.api_key = api_key
         self.base_url = base_url
-
-        # Initialize session_properties
-        self._session_properties: events.SessionProperties = (
-            session_properties or events.SessionProperties()
-        )
 
         self._audio_input_paused = start_audio_paused
         self._websocket = None
@@ -185,13 +330,13 @@ class GrokRealtimeLLMService(LLMService):
             Configured sample rate or None if not manually configured.
             For PCMU/PCMA formats, returns 8000 Hz (G.711 standard).
         """
-        if not self._session_properties.audio:
+        if not self._settings.session_properties.audio:
             return None
 
         audio_config = (
-            self._session_properties.audio.input
+            self._settings.session_properties.audio.input
             if direction == "input"
-            else self._session_properties.audio.output
+            else self._settings.session_properties.audio.output
         )
 
         if audio_config and audio_config.format:
@@ -221,8 +366,8 @@ class GrokRealtimeLLMService(LLMService):
 
     def _is_turn_detection_enabled(self) -> bool:
         """Check if server-side VAD is enabled."""
-        if self._session_properties.turn_detection:
-            return self._session_properties.turn_detection.type == "server_vad"
+        if self._settings.session_properties.turn_detection:
+            return self._settings.session_properties.turn_detection.type == "server_vad"
         return False
 
     async def _handle_interruption(self):
@@ -280,6 +425,27 @@ class GrokRealtimeLLMService(LLMService):
     # Standard AIService frame handling
     #
 
+    def _ensure_audio_config(self, input_sample_rate: int, output_sample_rate: int):
+        """Ensure session_properties.audio has input and output configs.
+
+        Fills in any missing audio configuration using the given sample rates.
+
+        Args:
+            input_sample_rate: Sample rate for audio input (Hz).
+            output_sample_rate: Sample rate for audio output (Hz).
+        """
+        props = self._settings.session_properties
+        if not props.audio:
+            props.audio = events.AudioConfiguration()
+        if not props.audio.input:
+            props.audio.input = events.AudioInput(
+                format=events.PCMAudioFormat(rate=input_sample_rate)
+            )
+        if not props.audio.output:
+            props.audio.output = events.AudioOutput(
+                format=events.PCMAudioFormat(rate=output_sample_rate)
+            )
+
     async def start(self, frame: StartFrame):
         """Start the service and establish WebSocket connection.
 
@@ -287,23 +453,7 @@ class GrokRealtimeLLMService(LLMService):
             frame: The start frame triggering service initialization.
         """
         await super().start(frame)
-
-        # Ensure audio configuration exists with both input and output
-        if not self._session_properties.audio:
-            self._session_properties.audio = events.AudioConfiguration()
-
-        # Fill in missing input configuration
-        if not self._session_properties.audio.input:
-            self._session_properties.audio.input = events.AudioInput(
-                format=events.PCMAudioFormat(rate=frame.audio_in_sample_rate)
-            )
-
-        # Fill in missing output configuration
-        if not self._session_properties.audio.output:
-            self._session_properties.audio.output = events.AudioOutput(
-                format=events.PCMAudioFormat(rate=frame.audio_out_sample_rate)
-            )
-
+        self._ensure_audio_config(frame.audio_in_sample_rate, frame.audio_out_sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -354,11 +504,8 @@ class GrokRealtimeLLMService(LLMService):
             await self._handle_bot_stopped_speaking()
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            self._session_properties = events.SessionProperties(**frame.settings)
-            await self._update_settings()
         elif isinstance(frame, LLMSetToolsFrame):
-            await self._update_settings()
+            await self._send_session_update()
 
         await self.push_frame(frame, direction)
 
@@ -435,9 +582,28 @@ class GrokRealtimeLLMService(LLMService):
                 return
             await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
-    async def _update_settings(self):
+    async def _update_settings(self, delta):
+        """Apply a settings delta, sending a session update when needed."""
+        # Capture audio config before the update — a wholesale SP replacement
+        # would lose it since the new SP likely has audio=None.
+        input_rate = self._get_configured_sample_rate("input")
+        output_rate = self._get_configured_sample_rate("output")
+
+        changed = await super()._update_settings(delta)
+
+        # Re-establish audio config if it was lost during SP replacement.
+        if "session_properties" in changed and input_rate and output_rate:
+            self._ensure_audio_config(input_rate, output_rate)
+
+        handled = {"session_properties", "system_instruction"}
+        if changed.keys() & handled:
+            await self._send_session_update()
+        self._warn_unhandled_updated_settings(changed.keys() - handled)
+        return changed
+
+    async def _send_session_update(self):
         """Update session settings on the server."""
-        settings = self._session_properties
+        settings = self._settings.session_properties
         adapter: GrokRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:
@@ -510,12 +676,18 @@ class GrokRealtimeLLMService(LLMService):
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
-                await self._handle_evt_error(evt)
-                return
+                if evt.error.code in (
+                    "response_cancel_not_active",
+                    "conversation_already_has_active_response",
+                ):
+                    logger.debug(f"{self} {evt.error.message}")
+                else:
+                    await self._handle_evt_error(evt)
+                    return
 
     async def _handle_evt_conversation_created(self, evt):
         """Handle conversation.created event - first event after connecting."""
-        await self._update_settings()
+        await self._send_session_update()
 
     async def _handle_evt_response_created(self, evt):
         """Handle response.created event - response generation started."""
@@ -619,9 +791,26 @@ class GrokRealtimeLLMService(LLMService):
     async def _handle_evt_audio_transcript_delta(self, evt):
         """Handle audio transcript delta event."""
         if evt.delta:
-            frame = TTSTextFrame(evt.delta, aggregated_by=AggregationType.SENTENCE)
-            frame.includes_inter_frame_spaces = True
-            await self.push_frame(frame)
+            await self._push_output_transcript_text_frames(evt.delta)
+
+    async def _push_output_transcript_text_frames(self, text: str):
+        # In a typical "cascade" LLM + TTS setup, LLMTextFrames would not
+        # proceed beyond the TTS service. Therefore, since a speech-to-speech
+        # service like Grok Realtime combines both LLM and TTS functionality,
+        # you might think we wouldn't need to push LLMTextFrames at all.
+        # However, RTVI relies on LLMTextFrames being pushed to trigger its
+        # "bot-llm-text" event. So here we push an LLMTextFrame, too, but avoid
+        # appending it to context to avoid context message duplication.
+
+        # Push LLMTextFrame
+        llm_text_frame = LLMTextFrame(text)
+        llm_text_frame.append_to_context = False
+        await self.push_frame(llm_text_frame)
+
+        # Push TTSTextFrame
+        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame.includes_inter_frame_spaces = True
+        await self.push_frame(tts_text_frame)
 
     async def _handle_evt_function_call_arguments_done(self, evt):
         """Handle function call arguments done event."""
@@ -653,13 +842,13 @@ class GrokRealtimeLLMService(LLMService):
         """Handle speech started event from VAD."""
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.push_interruption_task_frame_and_wait()
+        await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from VAD."""
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame())
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _handle_evt_error(self, evt):
         """Handle error event."""
@@ -701,7 +890,7 @@ class GrokRealtimeLLMService(LLMService):
                 self._messages_added_manually[evt.item.id] = True
                 await self.send_client_event(evt)
 
-            await self._update_settings()
+            await self._send_session_update()
             self._llm_needs_conversation_setup = False
 
         logger.debug("Creating Grok response")
@@ -734,6 +923,14 @@ class GrokRealtimeLLMService(LLMService):
 
     async def _send_user_audio(self, frame):
         """Send user audio to Grok."""
+        # Don't send audio if conversation setup is still pending, as it can
+        # lead to errors. For example: audio sent before conversation setup
+        # will be interpreted as having Grok's default sample rate (24000),
+        # and if that differs from the sample rate we eventually set through
+        # the conversation setup, Grok will error out.
+        if self._llm_needs_conversation_setup:
+            return
+
         payload = base64.b64encode(frame.audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
@@ -742,7 +939,7 @@ class GrokRealtimeLLMService(LLMService):
         item = events.ConversationItem(
             type="function_call_output",
             call_id=tool_call_id,
-            output=json.dumps(result),
+            output=json.dumps(result, ensure_ascii=False),
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 

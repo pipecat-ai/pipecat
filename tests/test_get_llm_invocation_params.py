@@ -43,15 +43,14 @@ For AWS Bedrock adapter:
 import unittest
 
 from google.genai.types import Content, Part
-from openai.types.chat import ChatCompletionMessage
 
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
-    LLMSpecificMessage,
     LLMStandardMessage,
 )
 
@@ -992,6 +991,223 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
 
         # No messages should remain after system extraction
         self.assertEqual(len(params["messages"]), 0)
+
+
+class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
+    def setUp(self) -> None:
+        """Sets up a common adapter instance for all tests."""
+        self.adapter = PerplexityLLMAdapter()
+
+    def test_standard_messages_pass_through(self):
+        """Test that a valid [user, assistant, user] sequence passes through unchanged."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+            {"role": "user", "content": "How are you?"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["content"], "Hello")
+        self.assertEqual(params["messages"][1]["role"], "assistant")
+        self.assertEqual(params["messages"][1]["content"], "Hi there!")
+        self.assertEqual(params["messages"][2]["role"], "user")
+        self.assertEqual(params["messages"][2]["content"], "How are you?")
+
+    def test_initial_system_message_preserved(self):
+        """Test that a valid [system, user, assistant, user] sequence passes through unchanged."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi!"},
+            {"role": "user", "content": "Bye"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 4)
+        self.assertEqual(params["messages"][0]["role"], "system")
+        self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
+        self.assertEqual(params["messages"][1]["role"], "user")
+        self.assertEqual(params["messages"][2]["role"], "assistant")
+        self.assertEqual(params["messages"][3]["role"], "user")
+
+    def test_consecutive_same_role_messages_merged(self):
+        """Test that consecutive user messages are merged into list-of-dicts content."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "First message"},
+            {"role": "user", "content": "Second message"},
+            {"role": "assistant", "content": "Response"},
+            {"role": "user", "content": "Third message"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 3)
+
+        # First message should be merged users
+        merged = params["messages"][0]
+        self.assertEqual(merged["role"], "user")
+        self.assertIsInstance(merged["content"], list)
+        self.assertEqual(len(merged["content"]), 2)
+        self.assertEqual(merged["content"][0]["type"], "text")
+        self.assertEqual(merged["content"][0]["text"], "First message")
+        self.assertEqual(merged["content"][1]["type"], "text")
+        self.assertEqual(merged["content"][1]["text"], "Second message")
+
+        self.assertEqual(params["messages"][1]["role"], "assistant")
+        self.assertEqual(params["messages"][2]["role"], "user")
+
+    def test_non_initial_system_converted_to_user(self):
+        """Test that non-initial system messages are converted to user and merged with adjacent user."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi!"},
+            {"role": "system", "content": "Be concise."},
+            {"role": "user", "content": "Tell me about Python."},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # system(initial), user, assistant, merged(system→user + user)
+        self.assertEqual(len(params["messages"]), 4)
+        self.assertEqual(params["messages"][0]["role"], "system")
+        self.assertEqual(params["messages"][1]["role"], "user")
+        self.assertEqual(params["messages"][2]["role"], "assistant")
+
+        # The converted system→user and the following user should be merged
+        merged = params["messages"][3]
+        self.assertEqual(merged["role"], "user")
+        self.assertIsInstance(merged["content"], list)
+        self.assertEqual(len(merged["content"]), 2)
+        self.assertEqual(merged["content"][0]["text"], "Be concise.")
+        self.assertEqual(merged["content"][1]["text"], "Tell me about Python.")
+
+    def test_multiple_system_messages_at_start_preserved(self):
+        """Test that multiple consecutive system messages at start pass through unchanged."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "system", "content": "Always be polite."},
+            {"role": "user", "content": "Hello"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][0]["role"], "system")
+        self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
+        self.assertEqual(params["messages"][1]["role"], "system")
+        self.assertEqual(params["messages"][1]["content"], "Always be polite.")
+        self.assertEqual(params["messages"][2]["role"], "user")
+        self.assertEqual(params["messages"][2]["content"], "Hello")
+
+    def test_trailing_assistant_removed(self):
+        """Test that a trailing assistant message is removed."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["content"], "Hello")
+
+    def test_only_system_messages_preserved(self):
+        """Test that system-only contexts are left unchanged (no system→user conversion).
+
+        We intentionally do not convert trailing system messages to "user"
+        because that would make the transformation unstable across calls —
+        Perplexity has statefulness within a conversation, so a message that
+        was "user" in one call but becomes "system" in the next causes errors.
+        """
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0]["role"], "system")
+
+    def test_system_exposed_after_trailing_assistant_removed(self):
+        """Test that a system message exposed by trailing assistant removal stays system.
+
+        It's important that initial system messages are never converted to
+        "user", because Perplexity has statefulness within a conversation — if
+        a message was sent as "system" in one call and then becomes "user" in a
+        later call (after more messages are appended), the API rejects it.
+        """
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "assistant", "content": "Sure thing."},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Trailing assistant removed → [system], system stays as-is
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0]["role"], "system")
+        self.assertEqual(params["messages"][0]["content"], "You are helpful.")
+
+    def test_consecutive_assistants_merged_then_trailing_removed(self):
+        """Test that consecutive assistant messages are merged, then trailing assistant is removed."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "First response"},
+            {"role": "assistant", "content": "Second response"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # After merging assistants we get [user, assistant(merged)], then trailing
+        # assistant is removed, leaving just [user]
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["content"], "Hello")
+
+    def test_tool_messages_preserved(self):
+        """Test that tool messages pass through without modification."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "user", "content": "What's the weather?"},
+            {
+                "role": "assistant",
+                "content": "Let me check.",
+                "tool_calls": [{"id": "1", "function": {"name": "get_weather", "arguments": "{}"}}],
+            },
+            {"role": "tool", "content": "Sunny, 72F", "tool_call_id": "1"},
+            {"role": "user", "content": "Thanks!"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(len(params["messages"]), 4)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][1]["role"], "assistant")
+        self.assertEqual(params["messages"][2]["role"], "tool")
+        self.assertEqual(params["messages"][2]["content"], "Sunny, 72F")
+        self.assertEqual(params["messages"][3]["role"], "user")
+
+    def test_empty_messages(self):
+        """Test that empty messages list returns empty."""
+        context = LLMContext(messages=[])
+        params = self.adapter.get_llm_invocation_params(context)
+
+        self.assertEqual(params["messages"], [])
 
 
 if __name__ == "__main__":

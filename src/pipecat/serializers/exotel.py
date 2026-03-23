@@ -11,7 +11,6 @@ import json
 from typing import Optional
 
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler
@@ -39,12 +38,13 @@ class ExotelFrameSerializer(FrameSerializer):
         https://support.exotel.com/support/solutions/articles/3000108630-working-with-the-stream-and-voicebot-applet
     """
 
-    class InputParams(BaseModel):
+    class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for ExotelFrameSerializer.
 
         Parameters:
             exotel_sample_rate: Sample rate used by Exotel, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
+            ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
         exotel_sample_rate: int = 8000
@@ -60,9 +60,10 @@ class ExotelFrameSerializer(FrameSerializer):
             call_sid: The associated Exotel Call SID (optional, not used in this implementation).
             params: Configuration parameters.
         """
+        super().__init__(params or ExotelFrameSerializer.InputParams())
+
         self._stream_sid = stream_sid
         self._call_sid = call_sid
-        self._params = params or ExotelFrameSerializer.InputParams()
 
         self._exotel_sample_rate = self._params.exotel_sample_rate
         self._sample_rate = 0  # Pipeline input rate
@@ -113,6 +114,8 @@ class ExotelFrameSerializer(FrameSerializer):
 
             return json.dumps(answer)
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if self.should_ignore_frame(frame):
+                return None
             return json.dumps(frame.message)
 
         return None

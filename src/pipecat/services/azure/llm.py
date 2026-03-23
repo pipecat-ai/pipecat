@@ -6,10 +6,21 @@
 
 """Azure OpenAI service implementation for the Pipecat AI framework."""
 
+from dataclasses import dataclass
+from typing import Optional
+
 from loguru import logger
 from openai import AsyncAzureOpenAI
 
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+
+
+@dataclass
+class AzureLLMSettings(BaseOpenAILLMService.Settings):
+    """Settings for AzureLLMService."""
+
+    pass
 
 
 class AzureLLMService(OpenAILLMService):
@@ -19,13 +30,16 @@ class AzureLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    Settings = AzureLLMSettings
+
     def __init__(
         self,
         *,
         api_key: str,
         endpoint: str,
-        model: str,
+        model: Optional[str] = None,
         api_version: str = "2024-09-01-preview",
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Azure LLM service.
@@ -33,15 +47,35 @@ class AzureLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Azure OpenAI.
             endpoint: The Azure endpoint URL.
-            model: The model identifier to use.
+            model: The model identifier to use. Defaults to "gpt-4.1".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AzureLLMService.Settings(model=...)`` instead.
+
             api_version: Azure API version. Defaults to "2024-09-01-preview".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(model="gpt-4.1")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
         self._endpoint = endpoint
         self._api_version = api_version
-        super().__init__(api_key=api_key, model=model, **kwargs)
+        super().__init__(api_key=api_key, settings=default_settings, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Azure OpenAI endpoint.

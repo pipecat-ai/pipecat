@@ -21,7 +21,12 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantTurnStoppedMessage,
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+    UserTurnStoppedMessage,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
@@ -77,24 +82,20 @@ weather_function = FunctionSchema(
 tools = ToolsSchema(standard_tools=[weather_function])
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -127,9 +128,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         #   - ap-northeast-1
         region=os.getenv("AWS_REGION"),
         session_token=os.getenv("AWS_SESSION_TOKEN"),
-        voice_id="tiffany",
-        # you could choose to pass instruction here rather than via context
-        # system_instruction=system_instruction
+        settings=AWSNovaSonicLLMService.Settings(
+            voice="tiffany",
+            system_instruction=system_instruction,
+        ),
         # you could choose to pass tools here rather than via context
         # tools=tools
     )
@@ -142,26 +144,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # Set up context and context management.
-    context = LLMContext(
-        messages=[
-            {"role": "system", "content": f"{system_instruction}"},
-            {
-                "role": "user",
-                "content": "Tell me a fun fact!",
-            },
-        ],
-        tools=tools,
+    context = LLMContext(tools=tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
-    context_aggregator = LLMContextAggregatorPair(context)
 
     # Build the pipeline
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -180,6 +176,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
         # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
         # triggering the first assistant response. Note that this trigger requires a special
@@ -191,6 +188,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}user: {message.content}"
+        logger.info(f"Transcript: {line}")
+
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}assistant: {message.content}"
+        logger.info(f"Transcript: {line}")
 
     # Run the pipeline
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)

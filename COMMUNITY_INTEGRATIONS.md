@@ -25,7 +25,6 @@ Your repository must contain these components:
 - **Source code** - Complete implementation following Pipecat patterns
 - **Foundational example** - Single file example showing basic usage (see [Pipecat examples](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational))
 - **README.md** - Must include:
-
   - Introduction and explanation of your integration
   - Installation instructions
   - Usage instructions with Pipecat Pipeline
@@ -110,7 +109,6 @@ Once your PR is submitted, post in the `#community-integrations` Discord channel
 #### Key requirements:
 
 - **Frame sequence:** Output must follow this frame sequence pattern:
-
   - `LLMFullResponseStartFrame` - Signals the start of an LLM response
   - `LLMTextFrame` - Contains LLM content, typically streamed as tokens
   - `LLMFullResponseEndFrame` - Signals the end of an LLM response
@@ -233,24 +231,137 @@ def can_generate_metrics(self) -> bool:
     return True
 ```
 
-### Dynamic Settings Updates
+### Service Settings
 
-STT, LLM, and TTS services support `ServiceUpdateSettingsFrame` for dynamic configuration changes. The base STTService has an `_update_settings()` method that handles settings, and the private `_settings` `Dict` is used to store settings and provide access to the subclass.
+Every AI service (STT, LLM, TTS, image generation, etc.) exposes a **Settings dataclass** that serves two roles:
+
+1. **Store mode** — the service's `self._settings` holds the current value of every runtime-updatable field.
+2. **Delta mode** — an update frame (e.g. `TTSUpdateSettingsFrame`) specifies only the fields that should change; unspecified fields remain `NOT_GIVEN`.
+
+#### Defining your Settings class
+
+Extend `STTSettings`, `TTSSettings`, `LLMSettings`, or `ImageGenSettings` (or, if your service directly subclasses `AIService`, `ServiceSettings`). The base classes already provide common fields (e.g. `model`, `voice`, `language`). You only need to add **service-specific knobs that should be runtime-updatable**:
 
 ```python
-async def set_language(self, language: Language):
-    """Set the recognition language and reconnect.
+from dataclasses import dataclass, field
 
-    Args:
-        language: The language to use for speech recognition.
+from pipecat.services.settings import TTSSettings, NOT_GIVEN
+
+@dataclass
+class MyTTSSettings(TTSSettings):
+    """Settings for MyTTS service.
+
+    Parameters:
+        speaking_rate: Speed multiplier (0.5–2.0).
     """
-    logger.info(f"Switching STT language to: [{language}]")
-    self._settings["language"] = language
-    await self._disconnect()
-    await self._connect()
+
+    speaking_rate: float | None = field(default_factory=lambda: NOT_GIVEN)
 ```
 
-Note that, in this example, Deepgram requires the websocket connection be disconnected and reconnected to reinitialize the service with the new value. Consider if your service requires reconnection.
+**What goes in Settings vs. `__init__` params:**
+
+| Belongs in Settings                                      | Stays as `__init__` params                |
+| -------------------------------------------------------- | ----------------------------------------- |
+| Model name, voice, language                              | API keys, auth tokens                     |
+| Service-specific tuning knobs (rate, pitch, temperature) | Base URLs, endpoint overrides             |
+| Anything users may want to change mid-session            | Audio encoding, sample format             |
+|                                                          | Connection parameters (timeouts, retries) |
+
+The rule of thumb: if a caller might send an update frame to change it at runtime, it belongs in Settings. Everything else is init-only config stored as `self._xxx`.
+
+#### Wiring settings into `__init__`
+
+Accept an **optional** `settings` parameter. Build a `default_settings` object with all fields set to real values, then merge any caller overrides with `apply_update`.
+
+Add a `Settings` **class attribute** that points to your settings dataclass. This lets callers access the settings class through the service itself (e.g. `MyTTSService.Settings(...)`) without a separate import:
+
+```python
+from typing import Optional
+
+class MyTTSService(TTSService):
+    Settings = MyTTSSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        settings: Optional[Settings] = None,
+        **kwargs,
+    ):
+        # 1. Defaults — every field has a real value (store mode).
+        default_settings = self.Settings(
+            model="my-model-v1",
+            voice="default-voice",
+            language="en",
+            speaking_rate=1.0,
+        )
+
+        # 2. Merge caller overrides (only given fields win).
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        # 3. Pass the fully-populated settings to the base class.
+        super().__init__(settings=default_settings, **kwargs)
+
+        # 4. Init-only config stored separately.
+        self._api_key = api_key
+```
+
+This pattern lets callers override only what they care about:
+
+```python
+# Uses all defaults
+svc = MyTTSService(api_key="sk-xxx")
+
+# Overrides just the voice — access Settings through the service class
+svc = MyTTSService(
+    api_key="sk-xxx",
+    settings=MyTTSService.Settings(voice="custom-voice"),
+)
+```
+
+#### Reacting to runtime changes
+
+AI services support runtime configuration changes via `*UpdateSettingsFrame`s (e.g. `STTUpdateSettingsFrame`, `TTSUpdateSettingsFrame`, `LLMUpdateSettingsFrame`).
+
+To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns a `dict` mapping each changed field name to its **pre-update** value. Your override should call `super()` first, then act on the changed fields. A common implementation might look like:
+
+```python
+async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+    """Apply a settings update, reconfiguring the connection if needed."""
+    changed = await super()._update_settings(update)
+
+    if not changed:
+        return changed
+
+    await self._disconnect()
+    await self._connect()
+
+    return changed
+```
+
+The dict keys work like a set for membership tests (`"language" in changed`) and truthiness (`if changed`). Use `changed.keys() - {"language"}` for set difference, or `changed["language"]` to inspect the previous value of a field.
+
+Note that, in this example, the service requires a reconnect to apply the new language. Consider, for each setting, whether your service requires reconnection or can apply changes in-place.
+
+If your service can't yet apply certain settings at runtime, call `self._warn_unhandled_updated_settings(changed)` with any unhandled field names so users get a clear log message:
+
+```python
+async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+    changed = await super()._update_settings(update)
+
+    if not changed:
+        return changed
+
+    if "language" in changed:
+        await self._update_language()
+    else:
+        # TODO: this should be temporary - handle changes to other settings soon!
+        self._warn_unhandled_updated_settings(changed.keys() - {"language"})
+
+    return changed
+```
 
 ### Sample Rate Handling
 
@@ -260,7 +371,7 @@ Sample rates are set via PipelineParams and passed to each frame processor at in
 async def start(self, frame: StartFrame):
     """Start the service."""
     await super().start(frame)
-    self._settings["output_format"]["sample_rate"] = self.sample_rate
+    self._settings.output_sample_rate = self.sample_rate
     await self._connect()
 ```
 

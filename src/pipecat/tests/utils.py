@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -123,9 +123,10 @@ class QueuedFrameProcessor(FrameProcessor):
 async def run_test(
     processor: FrameProcessor,
     *,
-    frames_to_send: Sequence[Frame],
+    enable_rtvi: bool = False,
     expected_down_frames: Optional[Sequence[type]] = None,
     expected_up_frames: Optional[Sequence[type]] = None,
+    frames_to_send: Sequence[Frame],
     ignore_start: bool = True,
     observers: Optional[List[BaseObserver]] = None,
     pipeline_params: Optional[PipelineParams] = None,
@@ -139,9 +140,10 @@ async def run_test(
 
     Args:
         processor: The frame processor to test.
-        frames_to_send: Sequence of frames to send through the processor.
+        enable_rtvi: Whether RTVI should be enabled in this test.
         expected_down_frames: Expected frame types flowing downstream (optional).
         expected_up_frames: Expected frame types flowing upstream (optional).
+        frames_to_send: Sequence of frames to send through the processor.
         ignore_start: Whether to ignore StartFrames in frame validation.
         observers: Optional list of observers to attach to the pipeline.
         pipeline_params: Optional pipeline parameters.
@@ -173,9 +175,10 @@ async def run_test(
 
     task = PipelineTask(
         pipeline,
-        params=pipeline_params,
-        observers=observers,
         cancel_on_idle_timeout=False,
+        enable_rtvi=enable_rtvi,
+        observers=observers,
+        params=pipeline_params,
     )
 
     async def push_frames():
@@ -196,13 +199,13 @@ async def run_test(
     #
     # Down frames
     #
-    received_down_frames: Sequence[Frame] = []
-    if expected_down_frames is not None:
-        while not received_down.empty():
-            frame = await received_down.get()
-            if not isinstance(frame, EndFrame) or not send_end_frame:
-                received_down_frames.append(frame)
+    received_down_frames: list[Frame] = []
+    while not received_down.empty():
+        frame = await received_down.get()
+        if not isinstance(frame, EndFrame) or not send_end_frame:
+            received_down_frames.append(frame)
 
+    if expected_down_frames is not None:
         down_frames_printed = "["
         for frame in received_down_frames:
             down_frames_printed += f"{frame.__class__.__name__}, "
@@ -222,12 +225,12 @@ async def run_test(
     #
     # Up frames
     #
-    received_up_frames: Sequence[Frame] = []
-    if expected_up_frames is not None:
-        while not received_up.empty():
-            frame = await received_up.get()
-            received_up_frames.append(frame)
+    received_up_frames: list[Frame] = []
+    while not received_up.empty():
+        frame = await received_up.get()
+        received_up_frames.append(frame)
 
+    if expected_up_frames is not None:
         print("received UP frames =", received_up_frames)
         print("expected UP frames =", expected_up_frames)
 

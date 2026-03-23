@@ -17,15 +17,14 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.google.gemini_live.llm import (
-    GeminiLiveLLMService,
-    GeminiModalities,
-    InputParams,
-)
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, GeminiModalities
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -44,36 +43,20 @@ Respond to what the user said in a creative and helpful way. Keep your responses
 """
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events. This doesn't really
-        # matter because we can only use the Multimodal Live API's phrase
-        # endpointing, for now.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events. This doesn't really
-        # matter because we can only use the Multimodal Live API's phrase
-        # endpointing, for now.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events. This doesn't really
-        # matter because we can only use the Multimodal Live API's phrase
-        # endpointing, for now.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
 }
 
@@ -87,9 +70,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api/tools#native-audio).
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=SYSTEM_INSTRUCTION,
+        settings=GeminiLiveLLMService.Settings(
+            system_instruction=SYSTEM_INSTRUCTION,
+            modalities=GeminiModalities.TEXT,
+        ),
         tools=[{"google_search": {}}, {"code_execution": {}}],
-        params=InputParams(modalities=GeminiModalities.TEXT),
     )
 
     # Optionally, you can set the response modalities via a function
@@ -111,16 +96,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Set up conversation context and management
     # The context_aggregator will automatically collect conversation context
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            # Set stop_secs to something roughly similar to the internal setting
+            # of the Multimodal Live api, just to align events. This doesn't
+            # really matter because we can only use the Multimodal Live API's
+            # phrase endpointing, for now.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5))
+        ),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             tts,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

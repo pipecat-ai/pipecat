@@ -36,9 +36,8 @@ class TranscriptionLogger(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(audio_in_enabled=True),
     "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True),
@@ -66,7 +65,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
-        params=SpeechmaticsSTTService.InputParams(
+        settings=SpeechmaticsSTTService.Settings(
             language=Language.EN,
             speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
         ),

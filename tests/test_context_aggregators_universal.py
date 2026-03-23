@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
@@ -24,7 +25,10 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    StartFrame,
     TranscriptionFrame,
+    TranslationFrame,
+    UserMuteStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -40,8 +44,12 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.mute import FirstSpeechUserMuteStrategy, FunctionCallUserMuteStrategy
-from pipecat.turns.user_stop import TranscriptionUserTurnStopStrategy
+from pipecat.turns.user_mute import (
+    FirstSpeechUserMuteStrategy,
+    FunctionCallUserMuteStrategy,
+    MuteUntilFirstBotCompleteUserMuteStrategy,
+)
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 USER_TURN_STOP_TIMEOUT = 0.2
@@ -147,9 +155,38 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert context.messages[0]["content"] == "Hi there!"
 
+    async def test_llm_messages_update_does_not_inject_turn_completion_into_context(self):
+        context = LLMContext()
+        params = LLMUserAggregatorParams(filter_incomplete_user_turns=True)
+        pipeline = Pipeline([LLMUserAggregator(context, params=params)])
+
+        new_messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello!"},
+        ]
+        frames_to_send = [LLMMessagesUpdateFrame(messages=new_messages)]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+        )
+        # Turn completion instructions are now set via system_instruction on the
+        # LLM service, not injected into context messages.
+        assert len(context.messages) == 2
+        assert context.messages[0]["content"] == "You are a helpful assistant."
+        assert context.messages[1]["content"] == "Hello!"
+
     async def test_default_user_turn_strategies(self):
         context = LLMContext()
-        user_aggregator = LLMUserAggregator(context)
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
 
         should_start = None
         should_stop = None
@@ -173,6 +210,8 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
+            # Wait for user_speech_timeout to elapse
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
         ]
         expected_down_frames = [
             VADUserStartedSpeakingFrame,
@@ -241,7 +280,9 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             context,
             params=LLMUserAggregatorParams(
                 user_turn_strategies=UserTurnStrategies(
-                    stop=[TranscriptionUserTurnStopStrategy(timeout=TRANSCRIPTION_TIMEOUT)],
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
                 ),
                 user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
             ),
@@ -270,13 +311,13 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         pipeline = Pipeline([user_aggregator])
 
+        # Transcript arrives before VAD stop, then we wait for user_speech_timeout
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
-            VADUserStoppedSpeakingFrame(),
-            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT - 0.1),
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
-            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT - 0.1),
-            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT),
+            VADUserStoppedSpeakingFrame(),
+            # Wait for user_speech_timeout (TRANSCRIPTION_TIMEOUT=0.1s) to elapse
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
         ]
         await run_test(
             pipeline,
@@ -343,6 +384,109 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         # The user mute strategies should have muted the user.
         self.assertFalse(user_turn)
+
+    async def test_pending_transcription_emitted_on_end_frame(self):
+        """Pending user transcription should be emitted when EndFrame arrives."""
+        context = LLMContext()
+
+        user_aggregator = LLMUserAggregator(context)
+
+        stop_messages = []
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy, message):
+            stop_messages.append((strategy, message))
+
+        pipeline = Pipeline([user_aggregator])
+
+        # Start turn and send transcription, but don't trigger normal turn stop
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            # No VADUserStoppedSpeakingFrame - turn doesn't stop normally
+            # EndFrame will be sent by run_test, triggering emission
+        ]
+        await run_test(pipeline, frames_to_send=frames_to_send)
+
+        # The pending transcription should be emitted on EndFrame
+        self.assertEqual(len(stop_messages), 1)
+        strategy, message = stop_messages[0]
+        self.assertIsNone(strategy)  # strategy is None for end/cancel
+        self.assertEqual(message.content, "Hello!")
+
+    async def test_start_frame_before_mute_event(self):
+        """StartFrame must reach downstream before mute events are broadcast.
+
+        With MuteUntilFirstBotCompleteUserMuteStrategy, the mute logic should
+        not run on control frames (StartFrame, EndFrame, CancelFrame). This
+        ensures StartFrame reaches downstream processors before
+        UserMuteStartedFrame is broadcast.
+
+        The default TurnAnalyzerUserTurnStopStrategy broadcasts a
+        SpeechControlParamsFrame when it processes StartFrame, which gets
+        re-queued to the aggregator. That non-control frame legitimately
+        triggers the mute state change, so UserMuteStartedFrame follows
+        StartFrame — but crucially, after it.
+        """
+        context = LLMContext()
+
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_mute_strategies=[MuteUntilFirstBotCompleteUserMuteStrategy()],
+            ),
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        # run_test internally sends StartFrame via PipelineRunner. With
+        # ignore_start=False we can verify ordering: StartFrame must arrive
+        # before UserMuteStartedFrame. Before the fix, UserMuteStartedFrame
+        # was broadcast before StartFrame reached downstream processors.
+        (down_frames, _) = await run_test(
+            pipeline,
+            frames_to_send=[],
+            expected_down_frames=[StartFrame, UserMuteStartedFrame],
+            ignore_start=False,
+        )
+
+    async def test_interim_transcription_not_pushed_downstream(self):
+        """InterimTranscriptionFrame should be consumed and not pushed downstream."""
+        context = LLMContext()
+        pipeline = Pipeline([LLMUserAggregator(context)])
+
+        frames_to_send = [
+            InterimTranscriptionFrame(text="Hel", user_id="", timestamp="now"),
+            InterimTranscriptionFrame(text="Hello", user_id="", timestamp="now"),
+        ]
+        # The interim transcription triggers a user turn start via the default
+        # TranscriptionUserTurnStartStrategy, so we expect turn-related frames
+        # but NOT the InterimTranscriptionFrame itself.
+        expected_down_frames = [
+            UserStartedSpeakingFrame,
+            InterruptionFrame,
+        ]
+        (down_frames, _) = await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertFalse(any(isinstance(f, InterimTranscriptionFrame) for f in down_frames))
+
+    async def test_translation_not_pushed_downstream(self):
+        """TranslationFrame should be consumed and not pushed downstream."""
+        context = LLMContext()
+        pipeline = Pipeline([LLMUserAggregator(context)])
+
+        frames_to_send = [
+            TranslationFrame(text="Hola!", user_id="", timestamp="now", language="es"),
+        ]
+        # No downstream frames expected — translations are consumed.
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
+        )
 
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
@@ -512,3 +656,80 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         await run_test(aggregator, frames_to_send=frames_to_send)
         self.assertEqual(thought_message.content, "I'm thinking!")
+
+    async def test_pending_text_emitted_on_end_frame(self):
+        """Pending assistant text should be emitted when EndFrame arrives."""
+        context = LLMContext()
+
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        # Start response and send text, but don't send LLMFullResponseEndFrame
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello from Pipecat!"),
+            # No LLMFullResponseEndFrame - response doesn't end normally
+            # EndFrame will be sent by run_test, triggering emission
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # The pending text should be emitted on EndFrame
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")
+
+    async def test_turn_completion_markers_stripped_from_transcript(self):
+        """Turn completion markers should be stripped from assistant transcript."""
+        from pipecat.turns.user_turn_completion_mixin import (
+            USER_TURN_COMPLETE_MARKER,
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
+        )
+
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        # Send text with a turn completion marker
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame(f"{USER_TURN_COMPLETE_MARKER} Hello from Pipecat!"),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # The marker should be stripped from the transcript
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")
+
+        # Test incomplete markers are also stripped
+        stop_messages.clear()
+        context2 = LLMContext()
+        aggregator2 = LLMAssistantAggregator(context2)
+
+        @aggregator2.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped2(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame(USER_TURN_INCOMPLETE_SHORT_MARKER),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator2, frames_to_send=frames_to_send)
+
+        # The incomplete marker should be stripped (resulting in empty content)
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "")
+
+
+if __name__ == "__main__":
+    unittest.main()

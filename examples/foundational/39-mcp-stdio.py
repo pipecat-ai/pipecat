@@ -17,9 +17,7 @@ from loguru import logger
 from mcp import StdioServerParameters
 from PIL import Image
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
@@ -43,8 +41,6 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -74,7 +70,7 @@ class UrlToImageProcessor(FrameProcessor):
                 return data["artObject"]["webImage"]["url"]
             if "artworks" in data and len(data["artworks"]):
                 return data["artworks"][0]["webImage"]["url"]
-        except:
+        except (json.JSONDecodeError, KeyError, TypeError):
             pass
 
         return None
@@ -112,9 +108,8 @@ def open_image_output_filter(output: str):
     print(f"🖼️ link to high resolution artwork: {text_to_print}")
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -122,7 +117,6 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -130,7 +124,6 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -144,11 +137,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            settings=CartesiaTTSService.Settings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
         )
 
+        system_prompt = f"""
+        You are a helpful LLM in a voice call.
+        Your goal is to demonstrate your capabilities in a succinct way.
+        You have access to tools to search the Rijksmuseum collection.
+        Offer, for example, to show a floral still life, use the `search_artwork` tool.
+        The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
+        Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
+        Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
+        Respond to what the user said in a creative and helpful way.
+        Don't overexplain what you are doing.
+        Just respond with short sentences when you are carrying out tool calls.
+        """
+
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            settings=AnthropicLLMService.Settings(
+                system_instruction=system_prompt,
+            ),
         )
 
         try:
@@ -176,43 +187,22 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             logger.error(f"error registering tools")
             logger.exception("error trace:")
 
-        system = f"""
-        You are a helpful LLM in a WebRTC call.
-        Your goal is to demonstrate your capabilities in a succinct way.
-        You have access to tools to search the Rijksmuseum collection.
-        Offer, for example, to show a floral still life, use the `search_artwork` tool.
-        The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
-        Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
-        Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
-        Respond to what the user said in a creative and helpful way.
-        Don't overexplain what you are doing.
-        Just respond with short sentences when you are carrying out tool calls.
-        """
-
-        messages = [{"role": "system", "content": system}]
-
-        context = LLMContext(messages, tools)
-        context_aggregator = LLMContextAggregatorPair(
+        context = LLMContext(tools=tools)
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
-            user_params=LLMUserAggregatorParams(
-                user_turn_strategies=UserTurnStrategies(
-                    stop=[
-                        TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())
-                    ]
-                ),
-            ),
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
         )
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 stt,
-                context_aggregator.user(),  # User spoken responses
+                user_aggregator,  # User spoken responses
                 llm,  # LLM
                 tts,  # TTS
                 mcp_image,  # URL image -> output
                 transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses and tool context
+                assistant_aggregator,  # Assistant spoken responses and tool context
             ]
         )
 

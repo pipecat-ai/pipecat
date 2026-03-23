@@ -14,6 +14,7 @@ from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -39,15 +40,12 @@ class TranscriptionLogger(FrameProcessor):
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -61,8 +59,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     tl = TranscriptionLogger()
+    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
 
-    pipeline = Pipeline([transport.input(), stt, tl])
+    pipeline = Pipeline([transport.input(), vad_processor, stt, tl])
 
     task = PipelineTask(
         pipeline,

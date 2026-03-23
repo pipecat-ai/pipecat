@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 import aiofiles
-from deepgram import LiveOptions
 from loguru import logger
 from PIL.ImageFile import ImageFile
 from utils import (
@@ -42,7 +41,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
@@ -195,7 +197,7 @@ class EvalRunner:
 
 
 async def run_example_pipeline(script_path: Path, eval_config: EvalConfig):
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    room_url = os.getenv("DAILY_ROOM_URL")
 
     module = load_module_from_path(script_path)
 
@@ -207,7 +209,6 @@ async def run_example_pipeline(script_path: Path, eval_config: EvalConfig):
             audio_in_enabled=True,
             audio_out_enabled=True,
             video_in_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
         ),
     )
 
@@ -225,7 +226,7 @@ async def run_eval_pipeline(
 ):
     logger.info(f"Starting eval bot")
 
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    room_url = os.getenv("DAILY_ROOM_URL")
 
     transport = DailyTransport(
         room_url,
@@ -235,7 +236,6 @@ async def run_eval_pipeline(
             audio_in_enabled=True,
             audio_out_enabled=True,
             video_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=2.0)),
         ),
     )
 
@@ -243,7 +243,7 @@ async def run_eval_pipeline(
     # 5" (in audio) this can be converted to "32 is 5".
     stt = DeepgramSTTService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        live_options=LiveOptions(
+        settings=DeepgramSTTService.Settings(
             language="multi",
             smart_format=False,
         ),
@@ -251,12 +251,10 @@ async def run_eval_pipeline(
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
+        settings=CartesiaTTSService.Settings(
+            voice="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
+        ),
     )
-
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
-    llm.register_function("eval_function", eval_runner.function_assert_eval)
 
     eval_function = FunctionSchema(
         name="eval_function",
@@ -293,22 +291,30 @@ async def run_eval_pipeline(
         "You should only call the eval function if:\n"
         "- The user explicitly attempts to answer the question, AND\n"
         f"- Their answer can be cleanly evaluated using: {eval_config.eval}\n"
-        "Ignore greetings, comments, non-answers, or requests for clarification."
+        "Ignore greetings, comments, non-answers, or requests for clarification.\n"
+        "Numerical word answers are allowed (e.g., 'five' is the same as '5').\n"
     )
     if eval_config.eval_speaks_first:
-        system_prompt = f"You are an evaluation agent, be extremly brief. Numerical word answers are allowed. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
+        system_prompt = f"You are an evaluation agent, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
     else:
-        system_prompt = f"You are an evaluation agent, be extremly brief. Numerical word answers are allowed. First, ask one question: {example_prompt}. {common_system_prompt}"
+        system_prompt = f"You are an evaluation agent, be extremly brief. First, ask one question: {example_prompt}. {common_system_prompt}"
 
-    messages = [
-        {
-            "role": "system",
-            "content": system_prompt,
-        },
-    ]
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
+            system_instruction=system_prompt,
+        ),
+    )
 
-    context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(context)
+    llm.register_function("eval_function", eval_runner.function_assert_eval)
+
+    context = LLMContext(tools=tools)
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=2.0)),
+        ),
+    )
 
     audio_buffer = AudioBufferProcessor()
 
@@ -331,6 +337,7 @@ async def run_eval_pipeline(
             audio_in_sample_rate=16000,
             audio_out_sample_rate=16000,
         ),
+        enable_rtvi=False,
         idle_timeout_secs=PIPELINE_IDLE_TIMEOUT_SECS,
     )
 
@@ -354,7 +361,7 @@ async def run_eval_pipeline(
         # Default behavior is for the bot to speak first
         # If the eval bot speaks first, we append the prompt to the messages
         if eval_config.eval_speaks_first:
-            messages.append(
+            context.add_message(
                 {"role": "user", "content": f"Start by saying this exactly: '{eval_config.prompt}'"}
             )
             await task.queue_frames([LLMRunFrame()])

@@ -12,14 +12,12 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame, ManuallySwitchServiceFrame
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.service_switcher import ServiceSwitcher, ServiceSwitcherStrategyManual
+from pipecat.pipeline.service_switcher import ServiceSwitcher
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -38,8 +36,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -60,24 +56,20 @@ async def get_restaurant_recommendation(params: FunctionCallParams, location: st
     await params.result_callback({"name": "The Golden Dragon"})
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -104,56 +96,58 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt_cartesia = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
     stt_deepgram = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-    stt_switcher = ServiceSwitcher(
-        services=[stt_cartesia, stt_deepgram], strategy_type=ServiceSwitcherStrategyManual
-    )
+    # Uses ServiceSwitcherStrategyManual by default
+    stt_switcher = ServiceSwitcher(services=[stt_cartesia, stt_deepgram])
 
     tts_cartesia = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
-    tts_deepgram = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-    tts_switcher = ServiceSwitcher(
-        services=[tts_cartesia, tts_deepgram], strategy_type=ServiceSwitcherStrategyManual
+    tts_deepgram = DeepgramTTSService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        settings=DeepgramTTSService.Settings(
+            voice="aura-2-helena-en",
+        ),
     )
+    # Uses ServiceSwitcherStrategyManual by default
+    tts_switcher = ServiceSwitcher(services=[tts_cartesia, tts_deepgram])
 
-    llm_openai = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-    llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
-    llm_switcher = LLMSwitcher(
-        llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
+    system_prompt = "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way."
+
+    llm_openai = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(system_instruction=system_prompt),
     )
+    llm_google = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        settings=GoogleLLMService.Settings(system_instruction=system_prompt),
+    )
+    # Uses ServiceSwitcherStrategyManual by default
+    llm_switcher = LLMSwitcher(llms=[llm_openai, llm_google])
     # Register a "classic" function
     llm_switcher.register_function("get_current_weather", fetch_weather_from_api)
     # Register a "direct" function
     llm_switcher.register_direct_function(get_restaurant_recommendation)
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
     tools = ToolsSchema(standard_tools=[weather_function, get_restaurant_recommendation])
 
-    context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(
+    context = LLMContext(tools=tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt_switcher,
-            context_aggregator.user(),  # User responses
+            user_aggregator,  # User responses
             llm_switcher,  # LLM
             tts_switcher,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 
@@ -170,7 +164,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
         await asyncio.sleep(15)
         print(f"Switching to {stt_deepgram}")

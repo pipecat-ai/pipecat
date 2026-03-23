@@ -10,12 +10,12 @@ This module provides a WebSocket-based connection to AWS Transcribe for real-tim
 speech-to-text transcription with support for multiple languages and audio formats.
 """
 
-import asyncio
 import json
 import os
 import random
 import string
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -29,6 +29,8 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -43,6 +45,13 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class AWSTranscribeSTTSettings(STTSettings):
+    """Settings for AWSTranscribeSTTService."""
+
+    pass
+
+
 class AWSTranscribeSTTService(WebsocketSTTService):
     """AWS Transcribe Speech-to-Text service using WebSocket streaming.
 
@@ -51,6 +60,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
     final transcription results.
     """
 
+    Settings = AWSTranscribeSTTSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
@@ -58,8 +70,10 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         aws_access_key_id: Optional[str] = None,
         aws_session_token: Optional[str] = None,
         region: Optional[str] = None,
-        sample_rate: int = 16000,
-        language: Language = Language.EN,
+        sample_rate: Optional[int] = None,
+        language: Optional[Language] = None,
+        settings: Optional[Settings] = None,
+        ttfs_p99_latency: Optional[float] = AWS_TRANSCRIBE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the AWS Transcribe STT service.
@@ -69,27 +83,49 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
             aws_session_token: AWS session token for temporary credentials. If None, uses AWS_SESSION_TOKEN environment variable.
             region: AWS region for the service.
-            sample_rate: Audio sample rate in Hz. Must be 8000 or 16000. Defaults to 16000.
-            language: Language for transcription. Defaults to English.
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline sample rate.
+                AWS Transcribe only supports 8000 or 16000 Hz; other values are
+                clamped to 16000 Hz at connect time.
+            language: Language for transcription.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSTranscribeSTTService.Settings(language=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(**kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            language=Language.EN,
+        )
 
-        self._settings = {
-            "sample_rate": sample_rate,
-            "language": language,
-            "media_encoding": "linear16",  # AWS expects raw PCM
-            "number_of_channels": 1,
-            "show_speaker_label": False,
-            "enable_channel_identification": False,
-        }
+        # 2. Apply direct init arg overrides (deprecated)
+        if language is not None:
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
 
-        # Validate sample rate - AWS Transcribe only supports 8000 Hz or 16000 Hz
-        if sample_rate not in [8000, 16000]:
-            logger.warning(
-                f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. Converting from {sample_rate} Hz to 16000 Hz."
-            )
-            self._settings["sample_rate"] = 16000
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        # Init-only connection config (not runtime-updatable).
+        self._media_encoding = "linear16"
+        self._number_of_channels = 1
+        self._show_speaker_label = False
+        self._enable_channel_identification = False
 
         self._credentials = {
             "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
@@ -99,6 +135,14 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         }
 
         self._receive_task = None
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as AWS Transcribe STT supports metrics generation.
+        """
+        return True
 
     def get_service_encoding(self, encoding: str) -> str:
         """Convert internal encoding format to AWS Transcribe format.
@@ -113,6 +157,16 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             "linear16": "pcm",  # AWS expects "pcm" for 16-bit linear PCM
         }
         return encoding_map.get(encoding, encoding)
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect if anything changed."""
+        changed = await super()._update_settings(delta)
+
+        if changed and self._websocket:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
 
     async def start(self, frame: StartFrame):
         """Initialize the connection when the service starts.
@@ -159,7 +213,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 await self._websocket.send(event_message)
                 # Start metrics after first chunk sent
                 await self.start_processing_metrics()
-                await self.start_ttfb_metrics()
             except Exception as e:
                 yield ErrorFrame(error=f"Error sending audio: {e}")
 
@@ -170,6 +223,8 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         Establishes websocket connection and starts receive task.
         """
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -180,6 +235,8 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         Sends end-stream message and cleans up.
         """
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -202,9 +259,18 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
             logger.debug("Connecting to AWS Transcribe WebSocket")
 
-            language_code = self.language_to_service_language(Language(self._settings["language"]))
+            language_code = self._settings.language
             if not language_code:
-                raise ValueError(f"Unsupported language: {self._settings['language']}")
+                raise ValueError(f"Unsupported language: {language_code}")
+
+            # Validate sample rate — AWS Transcribe only supports 8000 or 16000 Hz
+            connect_sample_rate = self.sample_rate
+            if connect_sample_rate not in (8000, 16000):
+                logger.warning(
+                    f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. "
+                    f"Converting from {connect_sample_rate} Hz to 16000 Hz."
+                )
+                connect_sample_rate = 16000
 
             # Generate random websocket key
             websocket_key = "".join(
@@ -231,14 +297,14 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 },
                 language_code=language_code,
                 media_encoding=self.get_service_encoding(
-                    self._settings["media_encoding"]
+                    self._media_encoding
                 ),  # Convert to AWS format
-                sample_rate=self._settings["sample_rate"],
-                number_of_channels=self._settings["number_of_channels"],
+                sample_rate=connect_sample_rate,
+                number_of_channels=self._number_of_channels,
                 enable_partial_results_stabilization=True,
                 partial_results_stability="high",
-                show_speaker_label=self._settings["show_speaker_label"],
-                enable_channel_identification=self._settings["enable_channel_identification"],
+                show_speaker_label=self._show_speaker_label,
+                enable_channel_identification=self._enable_channel_identification,
             )
 
             logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
@@ -467,21 +533,20 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                             is_final = not result.get("IsPartial", True)
 
                             if transcript:
-                                await self.stop_ttfb_metrics()
                                 if is_final:
                                     await self.push_frame(
                                         TranscriptionFrame(
                                             transcript,
                                             self._user_id,
                                             time_now_iso8601(),
-                                            self._settings["language"],
+                                            self._settings.language,
                                             result=result,
                                         )
                                     )
                                     await self._handle_transcription(
                                         transcript,
                                         is_final,
-                                        self._settings["language"],
+                                        self._settings.language,
                                     )
                                     await self.stop_processing_metrics()
                                 else:
@@ -490,7 +555,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                                             transcript,
                                             self._user_id,
                                             time_now_iso8601(),
-                                            self._settings["language"],
+                                            self._settings.language,
                                             result=result,
                                         )
                                     )

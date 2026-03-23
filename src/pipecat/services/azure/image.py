@@ -12,14 +12,27 @@ using REST endpoints for creating images from text prompts.
 
 import asyncio
 import io
-from typing import AsyncGenerator
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, Optional
 
 import aiohttp
-from loguru import logger
 from PIL import Image
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
+
+
+@dataclass
+class AzureImageGenSettings(ImageGenSettings):
+    """Settings for the Azure image generation service.
+
+    Parameters:
+        model: Azure image generation model identifier.
+        image_size: Target size for generated images.
+    """
+
+    image_size: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureImageGenServiceREST(ImageGenService):
@@ -30,33 +43,64 @@ class AzureImageGenServiceREST(ImageGenService):
     and automatic image download and processing.
     """
 
+    Settings = AzureImageGenSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
-        image_size: str,
+        image_size: Optional[str] = None,
         api_key: str,
         endpoint: str,
-        model: str,
+        model: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
         api_version="2023-06-01-preview",
+        settings: Optional[Settings] = None,
     ):
         """Initialize the AzureImageGenServiceREST.
 
         Args:
             image_size: Size specification for generated images (e.g., "1024x1024").
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AzureImageGenServiceREST.Settings(image_size=...)`` instead.
+
             api_key: Azure OpenAI API key for authentication.
             endpoint: Azure OpenAI endpoint URL.
             model: The image generation model to use.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AzureImageGenServiceREST.Settings(model=...)`` instead.
+
             aiohttp_session: Shared aiohttp session for HTTP requests.
             api_version: Azure API version string. Defaults to "2023-06-01-preview".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
         """
-        super().__init__()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            image_size=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        if image_size is not None:
+            self._warn_init_param_moved_to_settings("image_size", "image_size")
+            default_settings.image_size = image_size
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings)
 
         self._api_key = api_key
         self._azure_endpoint = endpoint
         self._api_version = api_version
-        self.set_model_name(model)
-        self._image_size = image_size
         self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
@@ -74,11 +118,12 @@ class AzureImageGenServiceREST(ImageGenService):
         headers = {"api-key": self._api_key, "Content-Type": "application/json"}
 
         body = {
-            # Enter your prompt text here
             "prompt": prompt,
-            "size": self._image_size,
             "n": 1,
         }
+
+        if self._settings.image_size is not None:
+            body["size"] = self._settings.image_size
 
         async with self._aiohttp_session.post(url, headers=headers, json=body) as submission:
             # We never get past this line, because this header isn't

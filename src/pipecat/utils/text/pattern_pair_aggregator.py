@@ -96,8 +96,11 @@ class PatternPairAggregator(SimpleTextAggregator):
 
         Creates an empty aggregator with no patterns or handlers registered.
         Text buffering and pattern detection will begin when text is aggregated.
+
+        Args:
+            **kwargs: Additional arguments passed to SimpleTextAggregator (e.g. aggregation_type).
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._patterns = {}
         self._handlers = {}
         self._last_processed_position = 0  # Track where we last checked for complete patterns
@@ -146,7 +149,7 @@ class PatternPairAggregator(SimpleTextAggregator):
         Returns:
             Self for method chaining.
         """
-        if type in [AggregationType.SENTENCE, AggregationType.WORD]:
+        if type in [AggregationType.SENTENCE, AggregationType.WORD, AggregationType.TOKEN]:
             raise ValueError(
                 f"The aggregation type '{type}' is reserved for default behavior and can not be used for custom patterns."
             )
@@ -321,6 +324,9 @@ class PatternPairAggregator(SimpleTextAggregator):
         and uses the parent's lookahead logic for sentence detection when no
         patterns are active.
 
+        In TOKEN mode, pattern detection still works but non-pattern text is
+        yielded as TOKEN aggregations instead of waiting for sentence boundaries.
+
         Args:
             text: Text to aggregate.
 
@@ -370,18 +376,35 @@ class PatternPairAggregator(SimpleTextAggregator):
                 # boundaries when a pattern begins (e.g., "Here is code <code>..." yields "Here is code")
                 result = self._text[: pattern_start[0]]
                 self._text = self._text[pattern_start[0] :]
-                yield PatternMatch(
-                    content=result.strip(), type=AggregationType.SENTENCE, full_match=result
+                agg_type = (
+                    AggregationType.TOKEN
+                    if self._aggregation_type == AggregationType.TOKEN
+                    else AggregationType.SENTENCE
                 )
+                yield PatternMatch(content=result.strip(), type=agg_type, full_match=result)
                 continue
 
-            # Use parent's lookahead logic for sentence detection
-            aggregation = await super()._check_sentence_with_lookahead(char)
-            if aggregation:
-                # Convert to PatternMatch for consistency with return type
+            if self._aggregation_type != AggregationType.TOKEN:
+                # Use parent's lookahead logic for sentence detection
+                aggregation = await super()._check_sentence_with_lookahead(char)
+                if aggregation:
+                    # Convert to PatternMatch for consistency with return type
+                    yield PatternMatch(
+                        content=aggregation.text,
+                        type=aggregation.type,
+                        full_match=aggregation.text,
+                    )
+
+        # In TOKEN mode, yield any accumulated text after processing all chars,
+        # but only if there's no incomplete pattern being buffered.
+        if self._aggregation_type == AggregationType.TOKEN and self._text:
+            if self._match_start_of_pattern(self._text) is None:
                 yield PatternMatch(
-                    content=aggregation.text, type=aggregation.type, full_match=aggregation.text
+                    content=self._text,
+                    type=AggregationType.TOKEN,
+                    full_match=self._text,
                 )
+                self._text = ""
 
     async def handle_interruption(self):
         """Handle interruptions by clearing the buffer and pattern state.

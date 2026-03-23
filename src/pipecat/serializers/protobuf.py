@@ -8,6 +8,7 @@
 
 import dataclasses
 import json
+from typing import Optional
 
 from loguru import logger
 
@@ -60,9 +61,13 @@ class ProtobufFrameSerializer(FrameSerializer):
     }
     DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 
-    def __init__(self):
-        """Initialize the Protobuf frame serializer."""
-        pass
+    def __init__(self, params: Optional[FrameSerializer.InputParams] = None):
+        """Initialize the Protobuf frame serializer.
+
+        Args:
+            params: Configuration parameters.
+        """
+        super().__init__(params)
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize a frame to Protocol Buffer binary format.
@@ -75,6 +80,8 @@ class ProtobufFrameSerializer(FrameSerializer):
         """
         # Wrapping this messages as a JSONFrame to send
         if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if self.should_ignore_frame(frame):
+                return None
             frame = MessageFrame(
                 data=json.dumps(frame.message),
             )
@@ -126,7 +133,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         if "pts" in args_dict:
             del args_dict["pts"]
 
-        # Special handling for MessageFrame -> OutputTransportMessageUrgentFrame
+        # Special handling for MessageFrame -> InputTransportMessageFrame
         if class_name == MessageFrame:
             try:
                 msg = json.loads(args_dict["data"])

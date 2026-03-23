@@ -9,6 +9,7 @@ import sys
 from pipecat.services import DeprecatedModuleProxy
 
 from .flux import *
+from .sagemaker import *
 from .stt import *
 from .tts import *
 

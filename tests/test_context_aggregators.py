@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     FunctionCallResultProperties,
     InterimTranscriptionFrame,
     InterruptionFrame,
-    InterruptionTaskFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -567,7 +566,7 @@ class BaseTestUserContextAggregator:
             SleepFrame(),
             UserStoppedSpeakingFrame(),
         ]
-        expected_up_frames = [InterruptionTaskFrame]
+        expected_up_frames = [InterruptionFrame]
         expected_down_frames = [
             BotStartedSpeakingFrame,
             UserStartedSpeakingFrame,
@@ -1055,3 +1054,7 @@ class TestLLMAssistantAggregator(
             0,
             "Hello Pipecat. Here's some code: ```python\nprint('Hello, World!')\n``` ```javascript\nconsole.log('Hello, World!');\n``` And some more: ```html\n<div>Hello, World!</div>\n``` Hope that helps!",
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -104,7 +104,7 @@ class DTMFAggregator(FrameProcessor):
 
         # For first digit, schedule interruption.
         if is_first_digit:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
 
         # Check for immediate flush conditions
         if frame.button == self._termination_digit:

@@ -7,6 +7,7 @@
 """Azure OpenAI Realtime Beta LLM service implementation."""
 
 import warnings
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -22,6 +23,13 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class AzureRealtimeBetaLLMSettings(OpenAIRealtimeBetaLLMService.Settings):
+    """Settings for AzureRealtimeBetaLLMService."""
+
+    pass
+
+
 class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
     """Azure OpenAI Realtime Beta LLM service with Azure-specific authentication.
 
@@ -33,6 +41,9 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
     using Azure's authentication headers and endpoint format. Provides the same
     real-time audio and text communication capabilities as the base OpenAI service.
     """
+
+    Settings = AzureRealtimeBetaLLMSettings
+    _settings: Settings
 
     def __init__(
         self,

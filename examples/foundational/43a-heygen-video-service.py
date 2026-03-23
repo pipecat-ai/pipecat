@@ -10,9 +10,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -27,18 +25,16 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
 from pipecat.services.heygen.client import ServiceType
 from pipecat.services.heygen.video import HeyGenVideoService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -48,7 +44,6 @@ transport_params = {
         video_out_width=1280,
         video_out_height=720,
         video_out_bitrate=2_000_000,  # 2MBps
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -57,7 +52,6 @@ transport_params = {
         video_out_is_live=True,
         video_out_width=1280,
         video_out_height=720,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -69,46 +63,46 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="00967b2f-88a6-4a31-8153-110a92134b9f",
+            settings=CartesiaTTSService.Settings(
+                voice="00967b2f-88a6-4a31-8153-110a92134b9f",
+            ),
         )
 
-        llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = GoogleLLMService(
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            settings=GoogleLLMService.Settings(
+                system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+            ),
+        )
 
         heyGen = HeyGenVideoService(
             api_key=os.getenv("HEYGEN_LIVE_AVATAR_API_KEY"),
             service_type=ServiceType.LIVE_AVATAR,
             session=session,
+            session_request=LiveAvatarNewSessionRequest(
+                is_sandbox=True,
+                # Sandbox mode only works with this specific avatar
+                # https://docs.liveavatar.com/docs/developing-in-sandbox-mode#sandbox-mode-behaviors
+                avatar_id="dd73ea75-1218-4ef3-92ce-606d5f7fbc0a",
+            ),
         )
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
-            },
-        ]
-
-        context = LLMContext(messages)
-        context_aggregator = LLMContextAggregatorPair(
+        context = LLMContext()
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
-            user_params=LLMUserAggregatorParams(
-                user_turn_strategies=UserTurnStrategies(
-                    stop=[
-                        TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())
-                    ]
-                ),
-            ),
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
         )
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 stt,  # STT
-                context_aggregator.user(),  # User responses
+                user_aggregator,  # User responses
                 llm,  # LLM
                 tts,  # TTS
                 heyGen,  # Avatar
                 transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses
+                assistant_aggregator,  # Assistant spoken responses
             ]
         )
 
@@ -137,9 +131,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 )
 
             # Kick off the conversation.
-            messages.append(
+            context.add_message(
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": "Start by saying 'Hello' and then a short greeting.",
                 }
             )

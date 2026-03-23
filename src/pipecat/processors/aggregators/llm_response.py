@@ -581,7 +581,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                     logger.debug(
                         "Interruption conditions met - pushing interruption and aggregation"
                     )
-                    await self.push_interruption_task_frame_and_wait()
+                    await self.broadcast_interruption()
                     await self._process_aggregation()
                 else:
                     logger.debug("Interruption conditions not met - not pushing aggregation")
@@ -1024,10 +1024,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         logger.debug(
             f"{self} FunctionCallCancelFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
-        if frame.tool_call_id not in self._function_calls_in_progress:
-            return
-
-        if self._function_calls_in_progress[frame.tool_call_id].cancel_on_interruption:
+        function_call = self._function_calls_in_progress.get(frame.tool_call_id)
+        if function_call and function_call.cancel_on_interruption:
             await self.handle_function_call_cancel(frame)
             del self._function_calls_in_progress[frame.tool_call_id]
 
@@ -1044,6 +1042,11 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
         del self._function_calls_in_progress[frame.request.tool_call_id]
 
+        # Call the result_callback if provided. This signals that the image
+        # has been retrieved and the function call can now complete.
+        if frame.request and frame.request.result_callback:
+            await frame.request.result_callback(None)
+
         await self.handle_user_image_frame(frame)
         await self.push_aggregation()
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -1056,7 +1059,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
-        if not self._started or not frame.append_to_context:
+        if not frame.append_to_context:
             return
 
         if self._params.expect_stripped_words:

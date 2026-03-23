@@ -10,6 +10,7 @@ This module provides integration with Coqui XTTS streaming server for
 text-to-speech synthesis using local Docker deployment.
 """
 
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, Optional
 
 import aiohttp
@@ -21,9 +22,8 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -68,6 +68,13 @@ def language_to_xtts_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class XTTSTTSSettings(TTSSettings):
+    """Settings for XTTSService."""
+
+    pass
+
+
 class XTTSService(TTSService):
     """Coqui XTTS text-to-speech service.
 
@@ -76,33 +83,72 @@ class XTTSService(TTSService):
     studio speakers configuration.
     """
 
+    Settings = XTTSTTSSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
         language: Language = Language.EN,
         sample_rate: Optional[int] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the XTTS service.
 
         Args:
             voice_id: ID of the voice/speaker to use for synthesis.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=XTTSService.Settings(voice=...)`` instead.
+
             base_url: Base URL of the XTTS streaming server.
             aiohttp_session: HTTP session for making requests to the server.
             language: Language for synthesis. Defaults to English.
+
+                .. deprecated:: 0.0.106
+                    Use ``settings=XTTSService.Settings(language=...)`` instead.
+
             sample_rate: Audio sample rate. If None, uses default.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            voice=None,
+            language=Language.EN,
+        )
 
-        self._settings = {
-            "language": self.language_to_service_language(language),
-            "base_url": base_url,
-        }
-        self.set_voice(voice_id)
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+        if language is not None:
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        # Init-only fields (not runtime-updatable)
+        self._base_url = base_url
+
         self._studio_speakers: Optional[Dict[str, Any]] = None
         self._aiohttp_session = aiohttp_session
 
@@ -138,7 +184,7 @@ class XTTSService(TTSService):
         if self._studio_speakers:
             return
 
-        async with self._aiohttp_session.get(self._settings["base_url"] + "/studio_speakers") as r:
+        async with self._aiohttp_session.get(self._base_url + "/studio_speakers") as r:
             if r.status != 200:
                 text = await r.text()
                 await self.push_error(
@@ -148,11 +194,12 @@ class XTTSService(TTSService):
             self._studio_speakers = await r.json()
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using XTTS streaming server.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -163,20 +210,18 @@ class XTTSService(TTSService):
             logger.error(f"{self} no studio speakers available")
             return
 
-        embeddings = self._studio_speakers[self._voice_id]
+        embeddings = self._studio_speakers[self._settings.voice]
 
-        url = self._settings["base_url"] + "/tts_stream"
+        url = self._base_url + "/tts_stream"
 
         payload = {
             "text": text.replace(".", "").replace("*", ""),
-            "language": self._settings["language"],
+            "language": self._settings.language,
             "speaker_embedding": embeddings["speaker_embedding"],
             "gpt_cond_latent": embeddings["gpt_cond_latent"],
             "add_wav_header": False,
             "stream_chunk_size": 20,
         }
-
-        await self.start_ttfb_metrics()
 
         async with self._aiohttp_session.post(url, json=payload) as r:
             if r.status != 200:
@@ -185,8 +230,6 @@ class XTTSService(TTSService):
                 return
 
             await self.start_tts_usage_metrics(text)
-
-            yield TTSStartedFrame()
 
             CHUNK_SIZE = self.chunk_size
 
@@ -211,7 +254,9 @@ class XTTSService(TTSService):
                             bytes(process_data), 24000, self.sample_rate
                         )
                         # Create the frame with the resampled audio
-                        frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
+                        frame = TTSAudioRawFrame(
+                            resampled_audio, self.sample_rate, 1, context_id=context_id
+                        )
                         yield frame
 
             # Process any remaining data in the buffer.
@@ -219,7 +264,7 @@ class XTTSService(TTSService):
                 resampled_audio = await self._resampler.resample(
                     bytes(buffer), 24000, self.sample_rate
                 )
-                frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(
+                    resampled_audio, self.sample_rate, 1, context_id=context_id
+                )
                 yield frame
-
-            yield TTSStoppedFrame()

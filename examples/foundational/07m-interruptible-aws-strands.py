@@ -8,7 +8,6 @@
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesAppendFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -27,8 +26,6 @@ from pipecat.services.aws.tts import AWSPollyTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 # Strands agent setup
 try:
@@ -41,24 +38,20 @@ except ImportError:
 
 load_dotenv(override=True)
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -102,13 +95,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = AWSPollyTTSService(
         region="us-west-2",  # only specific regions support generative TTS
-        voice_id="Joanna",
-        params=AWSPollyTTSService.InputParams(engine="generative", rate="1.1"),
+        settings=AWSPollyTTSService.Settings(
+            voice="Joanna",
+            engine="generative",
+            rate="1.1",
+        ),
     )
 
     # Create Strands agent processor
     try:
-        agent = build_agent(model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0", max_tokens=8000)
+        agent = build_agent(model_id="us.anthropic.claude-sonnet-4-6", max_tokens=8000)
         llm = StrandsAgentsProcessor(agent=agent)
         logger.info("Successfully created Strands agent for NAB customer service coaching")
     except Exception as e:
@@ -120,24 +116,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Setup context aggregators for message handling
     context = LLMContext()
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,  # Speech-to-text
-            context_aggregator.user(),  # User responses
+            user_aggregator,  # User responses
             llm,  # Strands Agents processor
             tts,  # Text-to-speech
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 
@@ -160,7 +152,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     messages=[
                         {
                             "role": "user",
-                            "content": f"Greet the user and introduce yourself.",
+                            "content": f"Greet the user and introduce yourself. Don't use emojis.",
                         }
                     ],
                     run_llm=True,

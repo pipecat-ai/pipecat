@@ -10,9 +10,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -31,29 +29,23 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -62,15 +54,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot with Gemini TTS")
 
     stt = GoogleSTTService(
-        params=GoogleSTTService.InputParams(languages=Language.EN_US),
+        settings=GoogleSTTService.Settings(
+            languages=[Language.EN_US],
+        ),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
     tts = GeminiTTSService(
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
-        model="gemini-2.5-flash-tts",
-        voice_id="Charon",
-        params=GeminiTTSService.InputParams(
+        settings=GeminiTTSService.Settings(
+            model="gemini-2.5-flash-tts",
+            voice="Charon",
             language=Language.EN_US,
             prompt="You are a helpful AI assistant. Speak in a natural, conversational tone.",
         ),
@@ -79,13 +73,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         model="gemini-2.5-flash",
-    )
-
-    # System message that instructs the AI on how to speak
-    messages = [
-        {
-            "role": "system",
-            "content": """You are a helpful AI assistant in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
+        settings=GoogleLLMService.Settings(
+            system_instruction="""You are a helpful assistant in a voice conversation.
 
             IMPORTANT: You're using Gemini TTS which supports expressive markup tags. You can use these tags in your responses:
             - [sigh] - Insert a sigh sound
@@ -102,29 +91,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             - "[whispering] Let me tell you a secret."
             - "The answer is... [long pause] ...42!"
 
-            Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.""",
-        },
-    ]
-
-    context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
+            Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep responses concise. Respond to what the user said in a creative and helpful way.""",
         ),
+    )
+
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,  # STT
-            context_aggregator.user(),  # User responses
+            user_aggregator,  # User responses
             llm,  # LLM
             tts,  # Gemini TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 
@@ -141,9 +126,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation
-        messages.append(
+        context.add_message(
             {
-                "role": "system",
+                "role": "user",
                 "content": "You are an AI assistant. You can help with a variety of tasks. Introduce yourself and ask the user what they would like to know.",
             }
         )

@@ -15,11 +15,11 @@ import asyncio
 import datetime
 import json
 import uuid
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import aiohttp
 from loguru import logger
-from openai.types import chat as openai_chat_types
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -31,11 +31,11 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputTextRawFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
-    LLMUpdateSettingsFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -43,7 +43,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
     UserAudioRawFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
@@ -57,6 +57,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -65,6 +66,17 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Ultravox, you need to `pip install pipecat-ai[ultravox]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class UltravoxRealtimeLLMSettings(LLMSettings):
+    """Settings for UltravoxRealtimeLLMService.
+
+    Parameters:
+        output_medium: The output medium for the model ("voice" or "text").
+    """
+
+    output_medium: str | _NotGiven = field(default=NOT_GIVEN)
 
 
 class AgentInputParams(BaseModel):
@@ -79,6 +91,9 @@ class AgentInputParams(BaseModel):
         template_context: Context variables to use when instantiating a call with the
             agent. Defaults to an empty dict.
         metadata: Metadata to attach to the call. Default to an empty dict.
+        output_medium: The initial output medium for the agent. Use "text" for text
+            responses or "voice" for audio responses. Defaults to None, which uses the
+            agent's default.
         max_duration: The maximum duration of the call. Defaults to None, which will
             use the agent's default maximum duration.
         extra: Extra parameters to include in the agent call creation request. Defaults
@@ -90,6 +105,7 @@ class AgentInputParams(BaseModel):
     agent_id: uuid.UUID
     template_context: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, str] = Field(default_factory=dict)
+    output_medium: Optional[Literal["text", "voice"]] = None
     max_duration: Optional[datetime.timedelta] = Field(
         default=None, ge=datetime.timedelta(seconds=10), le=datetime.timedelta(hours=1)
     )
@@ -106,6 +122,8 @@ class OneShotInputParams(BaseModel):
         model: Model identifier to use. Defaults to "fixie-ai/ultravox".
         voice: Voice identifier for speech generation. Defaults to None.
         metadata: Metadata to attach to the call. Default to an empty dict.
+        output_medium: The initial output medium for the agent. Use "text" for text
+            responses or "voice" for audio responses. Defaults to None (voice).
         max_duration: The maximum duration of the call. Defaults to one hour.
         extra: Extra parameters to include in the call creation request. Defaults
             to an empty dict. See the Ultravox API documentation for valid arguments:
@@ -118,6 +136,7 @@ class OneShotInputParams(BaseModel):
     model: Optional[str] = None
     voice: Optional[uuid.UUID] = None
     metadata: Dict[str, str] = Field(default_factory=dict)
+    output_medium: Optional[Literal["text", "voice"]] = None
     max_duration: datetime.timedelta = Field(
         default=datetime.timedelta(hours=1),
         ge=datetime.timedelta(seconds=10),
@@ -147,23 +166,53 @@ class UltravoxRealtimeLLMService(LLMService):
     by the model and may not always align with its understanding of user input.
     """
 
+    Settings = UltravoxRealtimeLLMSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
         params: Union[AgentInputParams, OneShotInputParams, JoinUrlInputParams],
+        settings: Optional[Settings] = None,
         one_shot_selected_tools: Optional[ToolsSchema] = None,
         **kwargs,
     ):
         """Initialize the Ultravox Realtime LLM service.
 
         Args:
-            api_key: Ultravox API key for authentication.
             params: Configuration parameters for the model.
+            settings: Ultravox Realtime LLM settings. If provided, the ``settings``
+                values take precedence over default values.
             one_shot_selected_tools: ToolsSchema for tools to use with this call.
                 May only be set with OneShotInputParams.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        super().__init__(**kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            output_medium=None,
+        )
+
+        # (No step 2/3 — params is required and not deprecated)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            settings=default_settings,
+            **kwargs,
+        )
         self._params = params
         if one_shot_selected_tools:
             if not isinstance(self._params, OneShotInputParams):
@@ -181,6 +230,14 @@ class UltravoxRealtimeLLMService(LLMService):
 
         self._sample_rate = 48000
         self._resampler = create_stream_resampler()
+
+    def can_generate_metrics(self) -> bool:
+        """Check if the service can generate usage metrics.
+
+        Returns:
+            True if metrics generation is supported.
+        """
+        return True
 
     #
     # standard AIService frame handling
@@ -209,6 +266,14 @@ class UltravoxRealtimeLLMService(LLMService):
         except Exception as e:
             await self.push_error("Failed to connect to Ultravox", e, fatal=True)
 
+    @staticmethod
+    def _output_medium_to_api(medium: Optional[Literal["text", "voice"]]) -> Optional[str]:
+        if medium == "text":
+            return "MESSAGE_MEDIUM_TEXT"
+        elif medium == "voice":
+            return "MESSAGE_MEDIUM_VOICE"
+        return None
+
     async def _start_agent_call(self, params: AgentInputParams) -> str:
         request_body = {
             "templateContext": params.template_context,
@@ -219,6 +284,9 @@ class UltravoxRealtimeLLMService(LLMService):
                 }
             },
         }
+        initial_output_medium = self._output_medium_to_api(params.output_medium)
+        if initial_output_medium:
+            request_body["initialOutputMedium"] = initial_output_medium
         if params.max_duration:
             request_body["maxDuration"] = f"{params.max_duration.total_seconds():3f}s"
         request_body = request_body | params.extra
@@ -249,7 +317,11 @@ class UltravoxRealtimeLLMService(LLMService):
                     "inputSampleRate": self._sample_rate,
                 }
             },
-        } | params.extra
+        }
+        initial_output_medium = self._output_medium_to_api(params.output_medium)
+        if initial_output_medium:
+            request_body["initialOutputMedium"] = initial_output_medium
+        request_body = request_body | params.extra
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://api.ultravox.ai/api/calls",
@@ -311,6 +383,13 @@ class UltravoxRealtimeLLMService(LLMService):
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
 
+    async def _update_settings(self, delta: Settings):
+        changed = await super()._update_settings(delta)
+        if "output_medium" in changed:
+            await self._update_output_medium(self._settings.output_medium)
+        self._warn_unhandled_updated_settings(changed.keys() - {"output_medium"})
+        return changed
+
     #
     # frame processing
     # StartFrame, StopFrame, CancelFrame implemented in base class
@@ -332,21 +411,17 @@ class UltravoxRealtimeLLMService(LLMService):
                 else LLMContext.from_openai_context(frame.context)
             )
             await self._handle_context(context)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            if "output_medium" in frame.settings:
-                await self._update_output_medium(frame.settings.get("output_medium"))
+        elif isinstance(frame, InterruptionFrame):
+            await self.stop_all_metrics()
+            await self.push_frame(frame, direction)
         elif isinstance(frame, InputTextRawFrame):
             await self._send_user_text(frame.text)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            # This may or may not align with Ultravox's end of user speech detection,
-            # which relies on a more complex endpointing model. In particular it will
-            # yield a seemingly very slow TTFB in the case of endpointing false
-            # negatives. It will be close in the majority of cases though.
-            await self.start_ttfb_metrics()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._handle_vad_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -366,6 +441,25 @@ class UltravoxRealtimeLLMService(LLMService):
                 else "".join(t.get("text") for t in content),
             }
             await self._send(socket_message)
+
+    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
+        """Handle VAD user stopped speaking frame.
+
+        Calculates the actual speech end time and starts a timeout task to wait
+        for the final transcription before reporting TTFB.
+
+        Args:
+            frame: The VAD user stopped speaking frame.
+        """
+        # Skip TTFB measurement if stop_secs is not set
+        if frame.stop_secs == 0.0:
+            return
+
+        # Calculate the actual speech end time (current time minus VAD stop delay).
+        # This approximates when the last user audio was sent to the Ultravox service,
+        # which we use to measure against the eventual transcription response.
+        speech_end_time = frame.timestamp - frame.stop_secs
+        await self.start_ttfb_metrics(start_time=speech_end_time)
 
     async def _send_user_audio(self, frame: InputAudioRawFrame):
         """Send user audio frame to Ultravox Realtime."""
@@ -470,6 +564,7 @@ class UltravoxRealtimeLLMService(LLMService):
         if not audio:
             return
         if not self._bot_responding:
+            await self.start_processing_metrics()
             await self.stop_ttfb_metrics()
             await self.push_frame(LLMFullResponseStartFrame())
             await self.push_frame(TTSStartedFrame())
@@ -477,6 +572,7 @@ class UltravoxRealtimeLLMService(LLMService):
         await self.push_frame(TTSAudioRawFrame(audio, self._sample_rate, 1))
 
     async def _handle_response_end(self):
+        await self.stop_processing_metrics()
         if self._bot_responding == "voice":
             await self.push_frame(TTSStoppedFrame())
         await self.push_frame(LLMFullResponseEndFrame())
@@ -510,22 +606,29 @@ class UltravoxRealtimeLLMService(LLMService):
     async def _handle_agent_transcript(
         self, medium: str, text: Optional[str], delta: Optional[str], final: bool
     ):
-        if text or delta:
-            frame = LLMTextFrame(text=text or delta)
-            frame.skip_tts = medium == "voice"
-            await self.push_frame(frame)
-        if medium == "text":
-            if text:
-                await self.stop_ttfb_metrics()
-                await self.push_frame(LLMFullResponseStartFrame())
-                await self.push_frame(TTSStartedFrame())
-                await self.push_frame(TTSTextFrame(text=text, aggregated_by=AggregationType.WORD))
-                self._bot_responding = "text"
-            elif final:
+        if medium == "voice":
+            # In voice mode, audio is handled by _handle_audio(). Here we push
+            # text transcripts of the audio for downstream consumers.
+            if (text or delta) and not final:
+                frame = LLMTextFrame(text=text or delta)
+                frame.append_to_context = False
+                await self.push_frame(frame)
+            if delta:
+                tts_frame = TTSTextFrame(text=delta, aggregated_by=AggregationType.WORD)
+                tts_frame.includes_inter_frame_spaces = True
+                await self.push_frame(tts_frame)
+        elif medium == "text":
+            if final:
+                await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
                 self._bot_responding = None
-            elif delta:
-                await self.push_frame(TTSTextFrame(text=delta, aggregated_by=AggregationType.WORD))
+            elif text or delta:
+                if not self._bot_responding:
+                    await self.start_processing_metrics()
+                    await self.stop_ttfb_metrics()
+                    await self.push_frame(LLMFullResponseStartFrame())
+                    self._bot_responding = "text"
+                await self.push_frame(LLMTextFrame(text=text or delta))
 
     def create_context_aggregator(
         self,

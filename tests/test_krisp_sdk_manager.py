@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -194,3 +194,7 @@ class TestSampleRateConversion:
         expected_rates = [8000, 16000, 24000, 32000, 44100, 48000]
         for rate in expected_rates:
             assert rate in KRISP_SAMPLE_RATES
+
+
+if __name__ == "__main__":
+    unittest.main()

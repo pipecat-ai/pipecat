@@ -23,9 +23,11 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -56,11 +58,14 @@ class FastAPIWebsocketParams(TransportParams):
         add_wav_header: Whether to add WAV headers to audio frames.
         serializer: Frame serializer for encoding/decoding messages.
         session_timeout: Session timeout in seconds, None for no timeout.
+        fixed_audio_packet_size: Optional fixed-size packetization for raw PCM audio payloads.
+            Useful when the remote WebSocket media endpoint requires strict audio framing.
     """
 
     add_wav_header: bool = False
     serializer: Optional[FrameSerializer] = None
     session_timeout: Optional[int] = None
+    fixed_audio_packet_size: Optional[int] = None
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -256,6 +261,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         if not self._monitor_websocket_task and self._params.session_timeout:
             self._monitor_websocket_task = self.create_task(self._monitor_websocket())
         await self._client.trigger_client_connected()
+        await self.push_frame(ClientConnectedFrame())
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_messages())
         await self.set_transport_ready(frame)
@@ -308,6 +314,8 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
                 if isinstance(frame, InputAudioRawFrame):
                     await self.push_audio_frame(frame)
+                elif isinstance(frame, InputTransportMessageFrame):
+                    await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
                 else:
                     await self.push_frame(frame)
         except Exception as e:
@@ -359,6 +367,14 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         # computed on StartFrame.
         self._send_interval = 0
         self._next_send_time = 0
+
+        # Buffer for optional protocol-level audio packetization.
+        # Some serializers may emit arbitrarily sized raw PCM payloads, while
+        # certain downstream transports or media endpoints require audio to be
+        # sent in fixed-size frames. When `params.fixed_audio_packet_size` is set,
+        # this buffer accumulates outgoing audio until a full packet can be
+        # emitted, preserving any remainder for subsequent sends.
+        self._audio_send_buffer = bytearray()
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
@@ -417,6 +433,10 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, InterruptionFrame):
+            # Drop any partially buffered audio to avoid replaying stale PCM
+            if self._params.fixed_audio_packet_size:
+                self._audio_send_buffer.clear()
+
             await self._write_frame(frame)
             self._next_send_time = 0
 
@@ -480,6 +500,21 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload:
+                # Optional protocol-level audio packetization:
+                # If a downstream WebSocket media endpoint requires fixed-size PCM frames,
+                # configure params.fixed_audio_packet_size (e.g. 640 for 20ms @ 16kHz PCM16 mono).
+                packet_bytes = self._params.fixed_audio_packet_size
+
+                if packet_bytes and isinstance(payload, (bytes, bytearray)):
+                    self._audio_send_buffer.extend(bytes(payload))
+
+                    # Send only full frames; keep remainder for the next call.
+                    while len(self._audio_send_buffer) >= packet_bytes:
+                        chunk = bytes(self._audio_send_buffer[:packet_bytes])
+                        del self._audio_send_buffer[:packet_bytes]
+                        await self._client.send(chunk)
+                    return
+
                 await self._client.send(payload)
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
@@ -501,6 +536,18 @@ class FastAPIWebsocketTransport(BaseTransport):
 
     Provides bidirectional WebSocket communication with frame serialization,
     session management, and event handling for client connections and timeouts.
+
+    Event handlers available:
+
+    - on_client_connected(transport, websocket): Client WebSocket connected
+    - on_client_disconnected(transport, websocket): Client WebSocket disconnected
+    - on_session_timeout(transport, websocket): Session timed out
+
+    Example::
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, websocket):
+            ...
     """
 
     def __init__(

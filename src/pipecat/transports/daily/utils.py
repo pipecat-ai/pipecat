@@ -10,11 +10,11 @@ Methods that wrap the Daily API to create rooms, check room URLs, and get meetin
 """
 
 import time
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 import aiohttp
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class DailyRoomSipParams(BaseModel):
@@ -77,7 +77,7 @@ class TranscriptionBucketConfig(BaseModel):
     allow_api_access: bool = False
 
 
-class DailyRoomProperties(BaseModel, extra="allow"):
+class DailyRoomProperties(BaseModel):
     """Properties for configuring a Daily room.
 
     Reference: https://docs.daily.co/reference/rest-api/rooms/create-room#properties
@@ -89,7 +89,7 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         enable_emoji_reactions: Whether emoji reactions are enabled.
         eject_at_room_exp: Whether to remove participants when room expires.
         enable_dialout: Whether SIP dial-out is enabled.
-        enable_recording: Recording settings ('cloud', 'local', 'raw-tracks').
+        enable_recording: Recording settings ('cloud', 'cloud-audio-only', 'local', 'raw-tracks').
         enable_transcription_storage: Whether transcription storage is enabled.
         geo: Geographic region for room.
         max_participants: Maximum number of participants allowed in the room.
@@ -100,20 +100,22 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         start_video_off: Whether video is off by default.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     exp: Optional[float] = None
     enable_chat: bool = False
     enable_prejoin_ui: bool = False
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = False
     enable_dialout: Optional[bool] = None
-    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
+    enable_recording: Optional[Literal["cloud", "cloud-audio-only", "local", "raw-tracks"]] = None
     enable_transcription_storage: Optional[bool] = None
     geo: Optional[str] = None
     max_participants: Optional[int] = None
     recordings_bucket: Optional[RecordingsBucketConfig] = None
     transcription_bucket: Optional[TranscriptionBucketConfig] = None
     sip: Optional[DailyRoomSipParams] = None
-    sip_uri: Optional[dict] = None
+    sip_uri: Optional[Dict[str, Any]] = None
     start_video_off: bool = False
 
     @property
@@ -183,7 +185,7 @@ class DailyMeetingTokenProperties(BaseModel):
         enable_screenshare: If True, the user will be able to share their screen.
         start_video_off: If True, the user's video will be turned off when they join the room.
         start_audio_off: If True, the user's audio will be turned off when they join the room.
-        enable_recording: Recording settings for the token. Must be one of 'cloud', 'local' or 'raw-tracks'.
+        enable_recording: Recording settings for the token. Must be one of 'cloud', 'cloud-audio-only', 'local' or 'raw-tracks'.
         enable_prejoin_ui: If True, the user will see the prejoin UI before joining the room.
         start_cloud_recording: Start cloud recording when the user joins the room.
         permissions: Specifies the initial default permissions for a non-meeting-owner participant.
@@ -200,10 +202,10 @@ class DailyMeetingTokenProperties(BaseModel):
     enable_screenshare: Optional[bool] = None
     start_video_off: Optional[bool] = None
     start_audio_off: Optional[bool] = None
-    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
+    enable_recording: Optional[Literal["cloud", "cloud-audio-only", "local", "raw-tracks"]] = None
     enable_prejoin_ui: Optional[bool] = None
     start_cloud_recording: Optional[bool] = None
-    permissions: Optional[dict] = None
+    permissions: Optional[Dict[str, Any]] = None
 
 
 class DailyMeetingTokenParams(BaseModel):

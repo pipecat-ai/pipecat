@@ -49,12 +49,12 @@ Every pull request that makes a user-facing change should include a changelog en
    ```
 
 2. Choose the appropriate type:
-
    - `added.md` - New features
    - `changed.md` - Changes in existing functionality
    - `deprecated.md` - Soon-to-be removed features
    - `removed.md` - Removed features
    - `fixed.md` - Bug fixes
+   - `performance.md` - Performance improvements
    - `security.md` - Security fixes
    - `other.md` - Other changes (documentation, dependencies, etc.)
 
@@ -80,7 +80,6 @@ Every pull request that makes a user-facing change should include a changelog en
 
 ```markdown
 - Updated service configuration:
-
   - Changed default timeout to 30 seconds
   - Added retry logic for failed connections
 ```
@@ -105,7 +104,6 @@ changelog/1234.changed.2.md
 
 ```markdown
 - Updated service configuration:
-
   - Changed default timeout to 30 seconds
   - Added retry logic for failed connections
 ```

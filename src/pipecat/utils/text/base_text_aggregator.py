@@ -21,6 +21,7 @@ class AggregationType(str, Enum):
     """Built-in aggregation strings."""
 
     SENTENCE = "sentence"
+    TOKEN = "token"
     WORD = "word"
 
     def __str__(self):
@@ -65,6 +66,25 @@ class BaseTextAggregator(ABC):
     Subclasses must implement all abstract methods to define specific aggregation
     logic, text manipulation behavior, and state management for interruptions.
     """
+
+    def __init__(self, *, aggregation_type: AggregationType = AggregationType.SENTENCE):
+        """Initialize the base text aggregator.
+
+        Args:
+            aggregation_type: The aggregation strategy to use. SENTENCE buffers
+                text until sentence boundaries are detected, TOKEN passes text
+                through immediately, and WORD buffers until word boundaries.
+        """
+        self._aggregation_type = AggregationType(aggregation_type)
+
+    @property
+    def aggregation_type(self) -> AggregationType:
+        """Get the aggregation type for this aggregator.
+
+        Returns:
+            The aggregation type.
+        """
+        return self._aggregation_type
 
     @property
     @abstractmethod

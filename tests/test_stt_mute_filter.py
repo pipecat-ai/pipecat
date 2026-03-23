@@ -10,11 +10,11 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     FunctionCallFromLLM,
-    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -327,3 +327,28 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_returned_frames,
         )
+
+    async def test_interruption_frame_suppressed_when_muted(self):
+        """Test that InterruptionFrame is suppressed when the filter is muted."""
+        filter = STTMuteFilter(config=STTMuteConfig(strategies={STTMuteStrategy.ALWAYS}))
+
+        frames_to_send = [
+            BotStartedSpeakingFrame(),
+            InterruptionFrame(),
+            BotStoppedSpeakingFrame(),
+        ]
+
+        expected_returned_frames = [
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+        ]
+
+        await run_test(
+            filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -6,6 +6,8 @@
 
 import base64
 import os
+import warnings
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
 
 import httpx
@@ -16,16 +18,15 @@ from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import WordTTSService
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -47,7 +48,22 @@ DEFAULT_HEADERS = {
 }
 
 
-class HumeTTSService(WordTTSService):
+@dataclass
+class HumeTTSSettings(TTSSettings):
+    """Settings for HumeTTSService.
+
+    Parameters:
+        description: Natural-language acting directions (up to 100 characters).
+        speed: Speaking-rate multiplier (0.5-2.0).
+        trailing_silence: Seconds of silence to append at the end (0-5).
+    """
+
+    description: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    trailing_silence: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+class HumeTTSService(TTSService):
     """Hume Octave Text-to-Speech service.
 
     Streams PCM audio via Hume's HTTP output streaming (JSON chunks) endpoint
@@ -62,8 +78,14 @@ class HumeTTSService(WordTTSService):
     - Provides metrics for Time To First Byte (TTFB) and TTS usage.
     """
 
+    Settings = HumeTTSSettings
+    _settings: Settings
+
     class InputParams(BaseModel):
         """Optional synthesis parameters for Hume TTS.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=HumeTTSService.Settings(...)`` instead.
 
         Parameters:
             description: Natural-language acting directions (up to 100 characters).
@@ -79,9 +101,10 @@ class HumeTTSService(WordTTSService):
         self,
         *,
         api_key: Optional[str] = None,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         params: Optional[InputParams] = None,
         sample_rate: Optional[int] = HUME_SAMPLE_RATE,
+        settings: Optional[Settings] = None,
         **kwargs,
     ) -> None:
         """Initialize the HumeTTSService.
@@ -89,8 +112,18 @@ class HumeTTSService(WordTTSService):
         Args:
             api_key: Hume API key. If omitted, reads the ``HUME_API_KEY`` environment variable.
             voice_id: ID of the voice to use. Only voice IDs are supported; voice names are not.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=HumeTTSService.Settings(voice=...)`` instead.
+
             params: Optional synthesis controls (acting instructions, speed, trailing silence).
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=HumeTTSService.Settings(...)`` instead.
+
             sample_rate: Output sample rate for emitted PCM frames. Defaults to 48_000 (Hume).
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent class.
         """
         api_key = api_key or os.getenv("HUME_API_KEY")
@@ -102,11 +135,39 @@ class HumeTTSService(WordTTSService):
                 f"Hume TTS streams at {HUME_SAMPLE_RATE} Hz; configured sample_rate={sample_rate}"
             )
 
-        # WordTTSService sets push_text_frames=False by default, which we want
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            voice=None,
+            language=None,  # Not applicable here
+            description=None,
+            speed=None,
+            trailing_silence=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                default_settings.description = params.description
+                default_settings.speed = params.speed
+                default_settings.trailing_silence = params.trailing_silence
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             push_text_frames=False,
             push_stop_frames=True,
+            push_start_frame=True,
+            settings=default_settings,
             **kwargs,
         )
 
@@ -115,16 +176,11 @@ class HumeTTSService(WordTTSService):
         self._http_client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
 
         self._client = AsyncHumeClient(api_key=api_key, httpx_client=self._http_client)
-        self._params = params or HumeTTSService.InputParams()
-
-        # Store voice in the base class (mirrors other services)
-        self.set_voice(voice_id)
 
         self._audio_bytes = b""
 
         # Track cumulative time for word timestamps across utterances
         self._cumulative_time = 0.0
-        self._started = False
 
     def can_generate_metrics(self) -> bool:
         """Can generate metrics.
@@ -146,7 +202,6 @@ class HumeTTSService(WordTTSService):
     def _reset_state(self):
         """Reset internal state variables."""
         self._cumulative_time = 0.0
-        self._started = False
 
     async def stop(self, frame: EndFrame) -> None:
         """Stop the service and cleanup resources.
@@ -184,7 +239,10 @@ class HumeTTSService(WordTTSService):
                 await self.add_word_timestamps([("Reset", 0)])
 
     async def update_setting(self, key: str, value: Any) -> None:
-        """Runtime updates via `TTSUpdateSettingsFrame`.
+        """Runtime updates via key/value pair.
+
+        .. deprecated:: 0.0.104
+            Use ``TTSUpdateSettingsFrame(delta=HumeTTSService.Settings(...))`` instead.
 
         Args:
             key: The name of the setting to update. Recognized keys are:
@@ -194,27 +252,37 @@ class HumeTTSService(WordTTSService):
                 - "trailing_silence"
             value: The new value for the setting.
         """
-        key_l = (key or "").lower()
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'update_setting' is deprecated, use "
+                "'TTSUpdateSettingsFrame(delta=self.Settings(...))' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
-        if key_l == "voice_id":
-            self.set_voice(str(value))
-            logger.debug(f"HumeTTSService voice_id set to: {self.voice}")
-        elif key_l == "description":
-            self._params.description = None if value is None else str(value)
-        elif key_l == "speed":
-            self._params.speed = None if value is None else float(value)
-        elif key_l == "trailing_silence":
-            self._params.trailing_silence = None if value is None else float(value)
-        else:
-            # Defer unknown keys to the base class
-            await super().update_setting(key, value)
+        key_l = (key or "").lower()
+        known_keys = {"voice_id", "voice", "description", "speed", "trailing_silence"}
+
+        if key_l in known_keys:
+            kwargs: dict[str, Any] = {}
+            if key_l in ("voice_id", "voice"):
+                kwargs["voice"] = str(value)
+            elif key_l == "description":
+                kwargs["description"] = None if value is None else str(value)
+            elif key_l == "speed":
+                kwargs["speed"] = None if value is None else float(value)
+            elif key_l == "trailing_silence":
+                kwargs["trailing_silence"] = None if value is None else float(value)
+            await self._update_settings(self.Settings(**kwargs))
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Hume TTS with word timestamps.
 
         Args:
             text: The text to be synthesized.
+            context_id: Unique identifier for this TTS context.
 
         Returns:
             An async generator that yields `Frame` objects, including
@@ -226,28 +294,21 @@ class HumeTTSService(WordTTSService):
         # Build the request payload
         utterance_kwargs: dict[str, Any] = {
             "text": text,
-            "voice": PostedUtteranceVoiceWithId(id=self._voice_id),
+            "voice": PostedUtteranceVoiceWithId(id=self._settings.voice),
         }
-        if self._params.description is not None:
-            utterance_kwargs["description"] = self._params.description
-        if self._params.speed is not None:
-            utterance_kwargs["speed"] = self._params.speed
-        if self._params.trailing_silence is not None:
-            utterance_kwargs["trailing_silence"] = self._params.trailing_silence
+        if self._settings.description is not None:
+            utterance_kwargs["description"] = self._settings.description
+        if self._settings.speed is not None:
+            utterance_kwargs["speed"] = self._settings.speed
+        if self._settings.trailing_silence is not None:
+            utterance_kwargs["trailing_silence"] = self._settings.trailing_silence
 
         utterance = PostedUtterance(**utterance_kwargs)
 
         # Request raw PCM chunks in the streaming JSON
         pcm_fmt = FormatPcm(type="pcm")
 
-        await self.start_ttfb_metrics()
         await self.start_tts_usage_metrics(text)
-
-        # Start TTS sequence if not already started
-        if not self._started:
-            await self.start_word_timestamps()
-            yield TTSStartedFrame()
-            self._started = True
 
         try:
             # Instant mode is always enabled here (not user-configurable)
@@ -257,7 +318,7 @@ class HumeTTSService(WordTTSService):
 
             # Use version "2" by default if no description is provided
             # Version "1" is needed when description is used
-            version = "1" if self._params.description is not None else "2"
+            version = "1" if self._settings.description is not None else "2"
 
             # Track the duration of this utterance based on the last timestamp
             utterance_duration = 0.0
@@ -282,6 +343,7 @@ class HumeTTSService(WordTTSService):
                             audio=self._audio_bytes,
                             sample_rate=self.sample_rate,
                             num_channels=1,
+                            context_id=context_id,
                         )
                         yield frame
                         self._audio_bytes = b""
@@ -298,7 +360,9 @@ class HumeTTSService(WordTTSService):
                         utterance_duration = max(utterance_duration, word_end_time)
 
                         # Add word timestamp
-                        await self.add_word_timestamps([(timestamp.text, word_start_time)])
+                        await self.add_word_timestamps(
+                            [(timestamp.text, word_start_time)], context_id
+                        )
 
             # Flush any remaining audio bytes
             if self._audio_bytes:
@@ -306,6 +370,7 @@ class HumeTTSService(WordTTSService):
                     audio=self._audio_bytes,
                     sample_rate=self.sample_rate,
                     num_channels=1,
+                    context_id=context_id,
                 )
 
                 yield frame
@@ -321,4 +386,3 @@ class HumeTTSService(WordTTSService):
         finally:
             # Ensure TTFB timer is stopped even on early failures
             await self.stop_ttfb_metrics()
-            # Let the parent class handle TTSStoppedFrame via push_stop_frames

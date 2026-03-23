@@ -1002,16 +1002,13 @@ class TokenDetails(BaseModel):
         image_tokens: Number of image tokens used (for input only).
     """
 
+    model_config = ConfigDict(extra="allow")
+
     cached_tokens: Optional[int] = 0
     text_tokens: Optional[int] = 0
     audio_tokens: Optional[int] = 0
     cached_tokens_details: Optional[CachedTokensDetails] = None
     image_tokens: Optional[int] = 0
-
-    class Config:
-        """Pydantic configuration for TokenDetails."""
-
-        extra = "allow"
 
 
 class Usage(BaseModel):

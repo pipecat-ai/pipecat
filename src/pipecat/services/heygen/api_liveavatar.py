@@ -9,6 +9,7 @@
 API to communicate with LiveAvatar Streaming API.
 """
 
+from enum import Enum
 from typing import Any, Dict, Optional
 
 import aiohttp
@@ -46,17 +47,45 @@ class CustomSDKLiveKitConfig(BaseModel):
     livekit_client_token: str
 
 
+class VideoEncoding(str, Enum):
+    """Enum representing the video encoding."""
+
+    H264 = "H264"
+    VP8 = "VP8"
+
+
+class VideoQuality(str, Enum):
+    """Enum representing different avatar quality levels."""
+
+    low = "low"
+    medium = "medium"
+    high = "high"
+    very_high = "very_high"
+
+
+class VideoSettings(BaseModel):
+    """Video encoding settings for session configuration."""
+
+    encoding: VideoEncoding
+    quality: VideoQuality = VideoQuality.high
+
+
 class LiveAvatarNewSessionRequest(BaseModel):
     """Request model for creating a LiveAvatar session token.
 
     Parameters:
-        mode (str): Session mode (default: "CUSTOM").
+        mode (str): Session mode (default: "LITE").
         avatar_id (str): Unique identifier for the avatar.
+        video_settings (VideoSettings): Video encoding settings.
+        is_sandbox (bool): Enable sandbox mode (default: False).
         avatar_persona (AvatarPersona): Avatar persona configuration.
+        livekit_config (CustomSDKLiveKitConfig): Custom LiveKit configuration.
     """
 
-    mode: str = "CUSTOM"
+    mode: str = "LITE"
     avatar_id: str
+    video_settings: Optional[VideoSettings] = VideoSettings(encoding=VideoEncoding.VP8)
+    is_sandbox: Optional[bool] = False
     avatar_persona: Optional[AvatarPersona] = None
     livekit_config: Optional[CustomSDKLiveKitConfig] = None
 
@@ -219,7 +248,7 @@ class LiveAvatarApi(BaseAvatarApi):
             Session token information.
         """
         params: dict[str, Any] = {
-            "mode": request_data.mode,
+            "mode": request_data.mode if request_data.mode is not None else "LITE",
             "avatar_id": request_data.avatar_id,
         }
 
@@ -234,6 +263,20 @@ class LiveAvatarApi(BaseAvatarApi):
             avatar_persona = {k: v for k, v in avatar_persona.items() if v is not None}
             params["avatar_persona"] = avatar_persona
 
+        if request_data.is_sandbox is not None:
+            params["is_sandbox"] = request_data.is_sandbox
+
+        if request_data.video_settings is not None:
+            video_settings = {
+                "encoding": request_data.video_settings.encoding.value,
+                "quality": request_data.video_settings.quality.value,
+            }
+            params["video_settings"] = video_settings
+        else:
+            # Fall back to VP8 encoding if video_settings is not provided
+            params["video_settings"] = {"encoding": VideoEncoding.VP8.value}
+
+        logger.debug(f"Creating LiveAvatar session token with params: {params}")
         response = await self._request("POST", "/sessions/token", params)
         logger.debug(f"LiveAvatar session token created")
 

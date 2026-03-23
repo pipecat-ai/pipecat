@@ -11,9 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from mcp.client.session_group import StreamableHttpParameters
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -32,29 +30,23 @@ from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -66,10 +58,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
-    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash")
+    system_prompt = f"""
+    You are a helpful LLM in a voice call.
+    Your goal is to answer questions about the user's GitHub repositories and account.
+    You have access to a number of tools provided by Github. Use any and all tools to help users.
+    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
+    Don't overexplain what you are doing.
+    Just respond with short sentences when you are carrying out tool calls.
+    """
+
+    llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        system_instruction=system_prompt,
+    )
 
     try:
         # Github MCP docs: https://github.com/github/github-mcp-server
@@ -93,36 +99,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.error(f"error registering tools")
         logger.exception("error trace:")
 
-    system = f"""
-    You are a helpful LLM in a WebRTC call.
-    Your goal is to answer questions about the user's GitHub repositories and account.
-    You have access to a number of tools provided by Github. Use any and all tools to help users.
-    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
-    Don't overexplain what you are doing.
-    Just respond with short sentences when you are carrying out tool calls.
-    """
-
-    messages = [{"role": "system", "content": system}]
-
-    context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(
+    context = LLMContext(tools=tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,
-            context_aggregator.user(),  # User spoken responses
+            user_aggregator,  # User spoken responses
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses and tool context
+            assistant_aggregator,  # Assistant spoken responses and tool context
         ]
     )
 

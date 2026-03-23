@@ -19,7 +19,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.azure.realtime.llm import AzureRealtimeLLMService
@@ -87,24 +90,20 @@ restaurant_function = FunctionSchema(
 tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -112,19 +111,11 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    session_properties = SessionProperties(
-        audio=AudioConfiguration(
-            input=AudioInput(
-                transcription=InputAudioTranscription(model="whisper-1"),
-                # Set openai TurnDetection parameters. Not setting this at all will turn it
-                # on by default
-                # turn_detection=TurnDetection(silence_duration_ms=1000),
-                # Or set to False to disable openai turn detection and use transport VAD
-                # turn_detection=False,
-            )
-        ),
-        # tools=tools,
-        instructions="""You are a helpful and friendly AI.
+    llm = AzureRealtimeLLMService(
+        api_key=os.getenv("AZURE_REALTIME_API_KEY"),
+        base_url=os.getenv("AZURE_REALTIME_BASE_URL"),
+        settings=AzureRealtimeLLMService.Settings(
+            system_instruction="""You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human
 things in the real world. Your voice and personality should be warm and engaging, with a lively and
@@ -142,12 +133,20 @@ You have access to the following tools:
 - get_restaurant_recommendation: Get a restaurant recommendation for a given location.
 
 Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
-    )
-
-    llm = AzureRealtimeLLMService(
-        api_key=os.getenv("AZURE_REALTIME_API_KEY"),
-        base_url=os.getenv("AZURE_REALTIME_BASE_URL"),
-        session_properties=session_properties,
+            session_properties=SessionProperties(
+                audio=AudioConfiguration(
+                    input=AudioInput(
+                        transcription=InputAudioTranscription(model="whisper-1"),
+                        # Set openai TurnDetection parameters. Not setting this at all will turn it
+                        # on by default
+                        # turn_detection=TurnDetection(silence_duration_ms=1000),
+                        # Or set to False to disable openai turn detection and use transport VAD
+                        # turn_detection=False,
+                    )
+                ),
+                # tools=tools,
+            ),
+        ),
     )
 
     # you can either register a single function for all function calls, or specific functions
@@ -173,15 +172,18 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         tools,
     )
 
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            context_aggregator.user(),
+            user_aggregator,
             llm,  # LLM
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

@@ -12,7 +12,8 @@ gRPC API for high-quality speech synthesis.
 
 import asyncio
 import os
-from typing import AsyncGenerator, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, AsyncIterator, Generator, Mapping, Optional
 
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -25,22 +26,31 @@ from pydantic import BaseModel
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 try:
     import riva.client
-
+    import riva.client.proto.riva_tts_pb2 as rtts
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use NVIDIA Riva TTS, you need to `pip install pipecat-ai[nvidia]`.")
     raise Exception(f"Missing module: {e}")
 
-NVIDIA_TTS_TIMEOUT_SECS = 5
+
+@dataclass
+class NvidiaTTSSettings(TTSSettings):
+    """Settings for NvidiaTTSService.
+
+    Parameters:
+        quality: Audio quality setting (0-100).
+    """
+
+    quality: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NvidiaTTSService(TTSService):
@@ -51,8 +61,14 @@ class NvidiaTTSService(TTSService):
     configurable quality settings.
     """
 
+    Settings = NvidiaTTSSettings
+    _settings: Settings
+
     class InputParams(BaseModel):
         """Input parameters for Riva TTS configuration.
+
+        .. deprecated:: 0.0.105
+            Use ``NvidiaTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             language: Language code for synthesis. Defaults to US English.
@@ -67,13 +83,14 @@ class NvidiaTTSService(TTSService):
         *,
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: str = "Magpie-Multilingual.EN-US.Aria",
+        voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         model_function_map: Mapping[str, str] = {
             "function_id": "877104f7-e885-42b9-8de8-f6e4c6303969",
             "model_name": "magpie-tts-multilingual",
         },
         params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
         use_ssl: bool = True,
         **kwargs,
     ):
@@ -82,108 +99,197 @@ class NvidiaTTSService(TTSService):
         Args:
             api_key: NVIDIA API key for authentication.
             server: gRPC server endpoint. Defaults to NVIDIA's cloud endpoint.
-            voice_id: Voice model identifier. Defaults to multilingual Ray voice.
+            voice_id: Voice model identifier. Defaults to multilingual Aria voice.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=NvidiaTTSService.Settings(voice=...)`` instead.
+
             sample_rate: Audio sample rate. If None, uses service default.
             model_function_map: Dictionary containing function_id and model_name for the TTS model.
             params: Additional configuration parameters for TTS synthesis.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=NvidiaTTSService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=model_function_map.get("model_name"),
+            voice="Magpie-Multilingual.EN-US.Aria",
+            language=Language.EN_US,
+            quality=20,
+        )
 
-        params = params or NvidiaTTSService.InputParams()
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
 
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.quality is not None:
+                    default_settings.quality = params.quality
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._server = server
         self._api_key = api_key
-        self._voice_id = voice_id
-        self._language_code = params.language
-        self._quality = params.quality
         self._function_id = model_function_map.get("function_id")
         self._use_ssl = use_ssl
-        self.set_model_name(model_function_map.get("model_name"))
-        self.set_voice(voice_id)
+
+        self._service = None
+        self._config = None
+
+    async def set_model(self, model: str):
+        """Set the TTS model.
+
+        .. deprecated:: 0.0.104
+            Model cannot be changed after initialization for NVIDIA Riva TTS.
+            Set model and function id in the constructor instead, e.g.::
+
+                NvidiaTTSService(
+                    api_key=...,
+                    model_function_map={"function_id": "<UUID>", "model_name": "<model_name>"},
+                )
+
+        Args:
+            model: The model name to set.
+        """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_model' is deprecated. Model cannot be changed after initialization"
+                " for NVIDIA Riva TTS. Set model and function id in the constructor"
+                " instead, e.g.: NvidiaTTSService(api_key=..., model_function_map="
+                "{'function_id': '<UUID>', 'model_name': '<model_name>'})",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(delta)
+        if not changed:
+            return changed
+        # TODO: reconnect gRPC client to apply changed settings.
+        self._warn_unhandled_updated_settings(changed)
+        return changed
+
+    def _initialize_client(self):
+        if self._service is not None:
+            return
 
         metadata = [
             ["function-id", self._function_id],
-            ["authorization", f"Bearer {api_key}"],
+            ["authorization", f"Bearer {self._api_key}"],
         ]
-        auth = riva.client.Auth(None, self._use_ssl, server, metadata)
+        auth = riva.client.Auth(None, self._use_ssl, self._server, metadata)
 
         self._service = riva.client.SpeechSynthesisService(auth)
 
+    def _create_synthesis_config(self):
+        if not self._service:
+            return
+
         # warm up the service
-        config_response = self._service.stub.GetRivaSynthesisConfig(
+        config = self._service.stub.GetRivaSynthesisConfig(
             riva.client.proto.riva_tts_pb2.RivaSynthesisConfigRequest()
         )
+        return config
 
-    async def set_model(self, model: str):
-        """Attempt to set the TTS model.
-
-        Note: Model cannot be changed after initialization for Riva service.
+    async def start(self, frame: StartFrame):
+        """Start the Cartesia TTS service.
 
         Args:
-            model: The model name to set (operation not supported).
+            frame: The start frame containing initialization parameters.
         """
-        logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
-        example = {"function_id": "<UUID>", "model_name": "<model_name>"}
-        logger.warning(
-            f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
-        )
+        await super().start(frame)
+        self._initialize_client()
+        self._config = self._create_synthesis_config()
+        logger.debug(f"Initialized NvidiaTTSService with model: {self._settings.model}")
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using NVIDIA Riva TTS.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech data.
         """
 
-        def read_audio_responses(queue: asyncio.Queue):
-            def add_response(r):
-                asyncio.run_coroutine_threadsafe(queue.put(r), self.get_event_loop())
+        def read_audio_responses() -> Generator[rtts.SynthesizeSpeechResponse, None, None]:
+            responses = self._service.synthesize_online(
+                text,
+                self._settings.voice,
+                self._settings.language,
+                sample_rate_hz=self.sample_rate,
+                zero_shot_audio_prompt_file=None,
+                zero_shot_quality=self._settings.quality,
+                custom_dictionary={},
+            )
+            return responses
 
+        def async_next(it):
             try:
-                responses = self._service.synthesize_online(
-                    text,
-                    self._voice_id,
-                    self._language_code,
-                    sample_rate_hz=self.sample_rate,
-                    zero_shot_audio_prompt_file=None,
-                    zero_shot_quality=self._quality,
-                    custom_dictionary={},
-                )
-                for r in responses:
-                    add_response(r)
-                add_response(None)
-            except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                add_response(None)
+                return next(it)
+            except StopIteration:
+                return None
 
-        await self.start_ttfb_metrics()
-        yield TTSStartedFrame()
-
-        logger.debug(f"{self}: Generating TTS [{text}]")
+        async def async_iterator(iterator) -> AsyncIterator[rtts.SynthesizeSpeechResponse]:
+            while True:
+                item = await asyncio.to_thread(async_next, iterator)
+                if item is None:
+                    return
+                yield item
 
         try:
-            queue = asyncio.Queue()
-            await asyncio.to_thread(read_audio_responses, queue)
+            assert self._service is not None, "TTS service not initialized"
+            assert self._config is not None, "Synthesis configuration not created"
 
-            # Wait for the thread to start.
-            resp = await asyncio.wait_for(queue.get(), timeout=NVIDIA_TTS_TIMEOUT_SECS)
-            while resp:
+            logger.debug(f"{self}: Generating TTS [{text}]")
+
+            responses = await asyncio.to_thread(read_audio_responses)
+
+            async for resp in async_iterator(responses):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
                     audio=resp.audio,
                     sample_rate=self.sample_rate,
                     num_channels=1,
+                    context_id=context_id,
                 )
                 yield frame
-                resp = await asyncio.wait_for(queue.get(), timeout=NVIDIA_TTS_TIMEOUT_SECS)
-        except asyncio.TimeoutError:
+
+            await self.start_tts_usage_metrics(text)
+        except asyncio.TimeoutError as e:
             logger.error(f"{self} timeout waiting for audio response")
             yield ErrorFrame(error=f"{self} error: {e}")
-
-        await self.start_tts_usage_metrics(text)
-        yield TTSStoppedFrame()
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")

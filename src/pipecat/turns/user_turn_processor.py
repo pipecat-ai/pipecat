@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
 from pipecat.turns.user_turn_controller import UserTurnController
@@ -38,6 +39,7 @@ class UserTurnProcessor(FrameProcessor):
     - on_user_turn_started: Emitted when a user turn starts.
     - on_user_turn_stopped: Emitted when a user turn stops.
     - on_user_turn_stop_timeout: Emitted if no stop strategy triggers before timeout.
+    - on_user_turn_idle: Emitted when the user has been idle for the configured timeout.
 
     Example::
 
@@ -53,6 +55,10 @@ class UserTurnProcessor(FrameProcessor):
         async def on_user_turn_stop_timeout(processor):
             ...
 
+        @processor.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(processor):
+            ...
+
     """
 
     def __init__(
@@ -60,6 +66,7 @@ class UserTurnProcessor(FrameProcessor):
         *,
         user_turn_strategies: Optional[UserTurnStrategies] = None,
         user_turn_stop_timeout: float = 5.0,
+        user_idle_timeout: float = 0,
         **kwargs,
     ):
         """Initialize the user turn processor.
@@ -68,6 +75,10 @@ class UserTurnProcessor(FrameProcessor):
             user_turn_strategies: Configured strategies for starting and stopping user turns.
             user_turn_stop_timeout: Timeout in seconds to automatically stop a user turn
                 if no activity is detected.
+            user_idle_timeout: Timeout in seconds for detecting user idle state.
+                The processor will emit an `on_user_turn_idle` event when the user
+                has been idle (not speaking) for this duration. Set to 0 to disable
+                idle detection.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
@@ -75,6 +86,7 @@ class UserTurnProcessor(FrameProcessor):
         self._register_event_handler("on_user_turn_started")
         self._register_event_handler("on_user_turn_stopped")
         self._register_event_handler("on_user_turn_stop_timeout")
+        self._register_event_handler("on_user_turn_idle")
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies or UserTurnStrategies(),
@@ -91,6 +103,9 @@ class UserTurnProcessor(FrameProcessor):
         self._user_turn_controller.add_event_handler(
             "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
         )
+
+        self._user_idle_controller = UserIdleController(user_idle_timeout=user_idle_timeout)
+        self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
 
     async def cleanup(self):
         """Clean up processor resources."""
@@ -129,8 +144,11 @@ class UserTurnProcessor(FrameProcessor):
 
         await self._user_turn_controller.process_frame(frame)
 
+        await self._user_idle_controller.process_frame(frame)
+
     async def _start(self, frame: StartFrame):
         await self._user_turn_controller.setup(self.task_manager)
+        await self._user_idle_controller.setup(self.task_manager)
 
     async def _stop(self, frame: EndFrame):
         await self._cleanup()
@@ -140,6 +158,7 @@ class UserTurnProcessor(FrameProcessor):
 
     async def _cleanup(self):
         await self._user_turn_controller.cleanup()
+        await self._user_idle_controller.cleanup()
 
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
@@ -155,13 +174,15 @@ class UserTurnProcessor(FrameProcessor):
         strategy: BaseUserTurnStartStrategy,
         params: UserTurnStartedParams,
     ):
-        logger.debug(f"{self}: User started speaking (user turn start strategy: {strategy})")
+        logger.debug(f"{self}: User started speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
+        await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
+
         if params.enable_interruptions and self._allow_interruptions:
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
 
         await self._call_event_handler("on_user_turn_started", strategy)
 
@@ -171,12 +192,17 @@ class UserTurnProcessor(FrameProcessor):
         strategy: BaseUserTurnStopStrategy,
         params: UserTurnStoppedParams,
     ):
-        logger.debug(f"{self}: User stopped speaking (user turn stop strategy: {strategy})")
+        logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStoppedSpeakingFrame)
+
+        await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._call_event_handler("on_user_turn_stopped", strategy)
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
+
+    async def _on_user_turn_idle(self, controller):
+        await self._call_event_handler("on_user_turn_idle")

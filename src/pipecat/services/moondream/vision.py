@@ -11,6 +11,7 @@ for image analysis and description generation.
 """
 
 import asyncio
+from dataclasses import dataclass
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     VisionFullResponseStartFrame,
     VisionTextFrame,
 )
+from pipecat.services.settings import VisionSettings
 from pipecat.services.vision_service import VisionService
 
 try:
@@ -46,7 +48,7 @@ def detect_device():
                and dtype is the recommended torch data type for that device.
     """
     try:
-        import intel_extension_for_pytorch
+        import intel_extension_for_pytorch  # noqa: F401
 
         if torch.xpu.is_available():
             return torch.device("xpu"), torch.float32
@@ -60,6 +62,15 @@ def detect_device():
         return torch.device("cpu"), torch.float32
 
 
+@dataclass
+class MoondreamSettings(VisionSettings):
+    """Settings for the Moondream vision service.
+
+    Parameters:
+        model: Moondream model identifier.
+    """
+
+
 class MoondreamService(VisionService):
     """Moondream vision-language model service.
 
@@ -68,20 +79,45 @@ class MoondreamService(VisionService):
     including CUDA, MPS, and Intel XPU.
     """
 
+    Settings = MoondreamSettings
+    _settings: Settings
+
     def __init__(
-        self, *, model="vikhyatk/moondream2", revision="2025-01-09", use_cpu=False, **kwargs
+        self,
+        *,
+        model: Optional[str] = None,
+        revision="2025-01-09",
+        use_cpu=False,
+        settings: Optional[Settings] = None,
+        **kwargs,
     ):
         """Initialize the Moondream service.
 
         Args:
             model: Hugging Face model identifier for the Moondream model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=MoondreamService.Settings(model=...)`` instead.
+
             revision: Specific model revision to use.
             use_cpu: Whether to force CPU usage instead of hardware acceleration.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent VisionService.
         """
-        super().__init__(**kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(model="vikhyatk/moondream2")
 
-        self.set_model_name(model)
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
 
         if not use_cpu:
             device, dtype = detect_device()
@@ -92,7 +128,7 @@ class MoondreamService(VisionService):
         logger.debug("Loading Moondream model...")
 
         self._model = AutoModelForCausalLM.from_pretrained(
-            model,
+            self._settings.model,
             trust_remote_code=True,
             revision=revision,
             device_map={"": device},

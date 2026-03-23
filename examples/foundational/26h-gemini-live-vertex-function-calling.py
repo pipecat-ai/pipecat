@@ -20,10 +20,13 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.gemini_live.llm_vertex import GeminiLiveVertexLLMService
+from pipecat.services.google.gemini_live.vertex.llm import GeminiLiveVertexLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -57,36 +60,20 @@ You have three tools available to you:
 """
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events. This doesn't really
-        # matter because we can only use the Multimodal Live API's phrase
-        # endpointing, for now.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events. This doesn't really
-        # matter because we can only use the Multimodal Live API's phrase
-        # endpointing, for now.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events. This doesn't really
-        # matter because we can only use the Multimodal Live API's phrase
-        # endpointing, for now.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
 }
 
@@ -130,8 +117,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
         project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
         location=os.getenv("GOOGLE_CLOUD_LOCATION"),
-        system_instruction=system_instruction,
-        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+        settings=GeminiLiveVertexLLMService.Settings(
+            system_instruction=system_instruction,
+            voice="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+        ),
         tools=tools,
     )
 
@@ -139,15 +128,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     context = LLMContext([{"role": "user", "content": "Say hello."}])
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            # Set stop_secs to something roughly similar to the internal setting
+            # of the Multimodal Live api, just to align events. This doesn't
+            # really matter because we can only use the Multimodal Live API's
+            # phrase endpointing, for now.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5))
+        ),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

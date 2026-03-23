@@ -9,25 +9,38 @@ import unittest
 
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, TranscriptionUserTurnStopStrategy
+from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
+# Use 0 STT timeout for deterministic test timing
+STT_TIMEOUT = 0.0
 
 
-class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
+class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.task_manager = TaskManager()
         self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
+    async def _create_strategy(self, user_speech_timeout=AGGREGATION_TIMEOUT):
+        """Create strategy and configure STT timeout via metadata frame."""
+        strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=user_speech_timeout)
+        await strategy.setup(self.task_manager)
+        # Set STT timeout via metadata frame (as would happen in real pipeline)
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=STT_TIMEOUT)
+        )
+        return strategy
+
     async def test_ste(self):
-        strategy = TranscriptionUserTurnStopStrategy()
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -46,13 +59,15 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         # E
         await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertIsNone(should_start)
 
-        # Transcription comes in between user started/stopped and there are not
-        # interim, we just trigger bot speech.
+        # Transcription came in between user started/stopped. Now we wait for
+        # timeout before triggering.
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
 
     async def test_site(self):
-        strategy = TranscriptionUserTurnStopStrategy()
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -77,13 +92,15 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         # E
         await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertIsNone(should_start)
 
-        # Transcription comes in between user started/stopped, so we trigger
-        # speech right away.
+        # Transcription came in between user started/stopped. Now we wait for
+        # timeout before triggering.
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
 
     async def test_st1iest2e(self):
-        strategy = TranscriptionUserTurnStopStrategy()
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -122,15 +139,14 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         # E
         await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertIsNone(should_start)
 
-        # There was an interim before the first user stopped speaking, then we
-        # got a transcription comes in between user started/stopped, so we
-        # trigger speech right away.
+        # Now we wait for timeout before triggering.
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
 
     async def test_siet(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -163,8 +179,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_sieit(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -205,8 +220,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_set(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -235,8 +249,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_seit(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -271,8 +284,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_st1et2(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -291,16 +303,28 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         # E
         await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertIsNone(should_start)
 
-        # Transcription comes between user start/stopped speaking, we need to
-        # trigger speech right away.
+        # Transcription came between user start/stopped speaking, wait for timeout.
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
         should_start = None
+
+        # Reset for next turn (in real usage, UserTurnController would do this)
+        await strategy.reset()
+
+        # S - new turn starts
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertIsNone(should_start)
 
         # T2
         await strategy.process_frame(
             TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
         )
+        self.assertIsNone(should_start)
+
+        # E
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
         self.assertIsNone(should_start)
 
         # Transcription comes after user stopped speaking, we need to wait for
@@ -309,8 +333,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_set1t2(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -343,8 +366,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_siet1it2(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -388,8 +410,8 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_t(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        """Transcription without VAD - uses fallback timeout."""
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -402,14 +424,13 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
         self.assertIsNone(should_start)
 
-        # Transcription comes after user stopped speaking, we need to wait for
-        # at least the aggregation timeout.
+        # Transcription without VAD triggers fallback timeout.
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
 
     async def test_it(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        """Interim + Transcription without VAD - uses fallback timeout."""
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -427,14 +448,12 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
         self.assertIsNone(should_start)
 
-        # Transcription comes after user stopped speaking, we need to wait for
-        # at least the aggregation timeout.
+        # Transcription without VAD triggers fallback timeout.
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
 
     async def test_sie_delay_it(self):
-        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -456,24 +475,67 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await strategy.process_frame(VADUserStoppedSpeakingFrame())
         self.assertIsNone(should_start)
 
-        # Delay
+        # Delay - timeout expires but no transcript yet
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        # Still no trigger because no transcript received
+        self.assertIsNone(should_start)
 
         # I
         await strategy.process_frame(
             InterimTranscriptionFrame(text="How", user_id="cat", timestamp="")
         )
 
-        # T
+        # T (finalized) - triggers immediately since timeout already elapsed
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="", finalized=True)
+        )
+
+        # Finalized transcript received after timeout, triggers immediately
+        self.assertTrue(should_start)
+
+    async def test_reset_clears_stale_text_no_premature_stop(self):
+        """Test that reset() clears stale text and cancels timeout, preventing premature stop.
+
+        Reproduces the bug from issue #4053: after turn 1 completes and
+        reset() is called, a late transcription sets _text. If reset() is
+        called again at turn 2 start, the stale _text should be cleared
+        so no premature stop occurs on VAD stop.
+        """
+        strategy = await self._create_strategy()
+
+        stop_count = 0
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal stop_count
+            stop_count += 1
+
+        # === Turn 1: S-T-E ===
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertEqual(stop_count, 1)
+
+        # Reset after turn 1 (as controller would do at turn stop)
+        await strategy.reset()
+
+        # === Late transcription arrives between turns ===
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+
+        # Reset at turn 2 start (the fix: controller now resets stop strategies at turn start)
+        await strategy.reset()
+
+        # === Turn 2: S-T-E (transcription arrives during turn) ===
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
         await strategy.process_frame(
             TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
         )
-        self.assertIsNone(should_start)
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
 
-        # Transcription comes after user stopped speaking, we need to wait for
-        # at least the aggregation timeout.
+        # Wait for timeout — should get turn 2 stop with the real transcription
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
-        self.assertTrue(should_start)
+        self.assertEqual(stop_count, 2)
 
 
 class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
@@ -506,3 +568,7 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertTrue(should_start)
+
+
+if __name__ == "__main__":
+    unittest.main()

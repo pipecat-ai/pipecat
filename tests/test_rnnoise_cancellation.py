@@ -171,3 +171,7 @@ class TestRNNoiseCancellation(unittest.IsolatedAsyncioTestCase):
             self.assertLess(mse_output, mse_input, "MSE did not improve")
 
         print("Test Passed: Noise cancellation verified.")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -206,7 +206,7 @@ class LLMContext:
         """
         content = [{"type": "text", "text": text}]
 
-        async def encode_audio():
+        def encode_audio():
             sample_rate = audio_frames[0].sample_rate
             num_channels = audio_frames[0].num_channels
 
@@ -255,7 +255,7 @@ class LLMContext:
         this method, which is part of the public API of OpenAILLMContext but
         doesn't need to be for LLMContext.
 
-        .. deprecated::
+        .. deprecated:: 0.0.92
             Use `get_messages()` instead.
 
         Returns:

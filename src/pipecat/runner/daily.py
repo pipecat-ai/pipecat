@@ -17,7 +17,7 @@ Functions:
 Environment variables:
 
 - DAILY_API_KEY - Daily API key for room/token creation (required)
-- DAILY_SAMPLE_ROOM_URL (optional) - Existing room URL to use. If not provided,
+- DAILY_ROOM_URL (optional) - Existing room URL to use. If not provided,
   a temporary room will be created automatically.
 
 Example::
@@ -79,19 +79,22 @@ async def configure(
     aiohttp_session: aiohttp.ClientSession,
     *,
     api_key: Optional[str] = None,
-    room_exp_duration: Optional[float] = 2.0,
-    token_exp_duration: Optional[float] = 2.0,
+    room_exp_duration: float = 2.0,
+    token_exp_duration: float = 2.0,
     sip_caller_phone: Optional[str] = None,
-    sip_enable_video: Optional[bool] = False,
-    sip_num_endpoints: Optional[int] = 1,
+    sip_enable_video: bool = False,
+    sip_num_endpoints: int = 1,
+    enable_dialout: bool = False,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
+    sip_provider: Optional[str] = None,
+    room_geo: Optional[str] = None,
     room_properties: Optional[DailyRoomProperties] = None,
-    token_properties: Optional["DailyMeetingTokenProperties"] = None,
+    token_properties: Optional[DailyMeetingTokenProperties] = None,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
 
     This function will either:
-    1. Use an existing room URL from DAILY_SAMPLE_ROOM_URL environment variable (standard mode only)
+    1. Use an existing room URL from DAILY_ROOM_URL environment variable (standard mode only)
     2. Create a new temporary room automatically if no URL is provided
 
     Args:
@@ -103,8 +106,14 @@ async def configure(
             When provided, enables SIP functionality and returns SipRoomConfig.
         sip_enable_video: Whether video is enabled for SIP.
         sip_num_endpoints: Number of allowed SIP endpoints.
+        enable_dialout: Whether to enable outbound dialing (PSTN or SIP) on the room.
+            Requires dial-out entitlement on your Daily account.
         sip_codecs: Codecs to support for audio and video. If None, uses Daily defaults.
             Example: {"audio": ["OPUS"], "video": ["H264"]}
+        sip_provider: SIP provider name (e.g., "daily"). Only used when
+            sip_caller_phone is provided and room_properties is not.
+        room_geo: Daily room geographic region (e.g., "us-east-1"). Only used
+            when room_properties is not provided.
         room_properties: Optional DailyRoomProperties to use instead of building from
             individual parameters. When provided, this overrides room_exp_duration and
             SIP-related parameters. If not provided, properties are built from the
@@ -153,7 +162,10 @@ async def configure(
                 sip_caller_phone is not None,
                 sip_enable_video is not False,
                 sip_num_endpoints != 1,
+                enable_dialout is not False,
                 sip_codecs is not None,
+                sip_provider is not None,
+                room_geo is not None,
             ]
         )
         if individual_params_provided:
@@ -176,23 +188,26 @@ async def configure(
         aiohttp_session=aiohttp_session,
     )
 
+    token_expiry_seconds: float = token_exp_duration * 60 * 60
+
     # Check for existing room URL (only in standard mode)
-    existing_room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    existing_room_url = os.getenv("DAILY_ROOM_URL")
     if existing_room_url and not sip_enabled:
         # Use existing room (standard mode only)
         logger.info(f"Using existing Daily room: {existing_room_url}")
         room_url = existing_room_url
 
         # Create token and return standard format
-        expiry_time: float = token_exp_duration * 60 * 60
         token_params = None
         if token_properties:
             token_params = DailyMeetingTokenParams(properties=token_properties)
-        token = await daily_rest_helper.get_token(room_url, expiry_time, params=token_params)
+        token = await daily_rest_helper.get_token(
+            room_url, token_expiry_seconds, params=token_params
+        )
         return DailyRoomConfig(room_url=room_url, token=token)
 
     # Create a new room
-    room_prefix = "pipecat-sip" if sip_enabled else "pipecat"
+    room_prefix = "pipecat-telephony" if (sip_enabled or enable_dialout) else "pipecat"
     room_name = f"{room_prefix}-{uuid.uuid4().hex[:8]}"
     logger.info(f"Creating new Daily room: {room_name}")
 
@@ -207,6 +222,12 @@ async def configure(
             eject_at_room_exp=True,
         )
 
+        if room_geo:
+            room_properties.geo = room_geo
+
+        if enable_dialout:
+            room_properties.enable_dialout = True
+
         # Add SIP configuration if enabled
         if sip_enabled:
             sip_params = DailyRoomSipParams(
@@ -215,9 +236,9 @@ async def configure(
                 sip_mode="dial-in",
                 num_endpoints=sip_num_endpoints,
                 codecs=sip_codecs,
+                provider=sip_provider,
             )
             room_properties.sip = sip_params
-            room_properties.enable_dialout = True  # Enable outbound calls if needed
             room_properties.start_video_off = not sip_enable_video  # Voice-only by default
 
     # Create room parameters
@@ -229,7 +250,6 @@ async def configure(
         logger.info(f"Created Daily room: {room_url}")
 
         # Create meeting token
-        token_expiry_seconds = token_exp_duration * 60 * 60
         token_params = None
         if token_properties:
             token_params = DailyMeetingTokenParams(properties=token_properties)

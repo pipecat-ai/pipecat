@@ -24,7 +24,7 @@ from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 
 VAD_CONFIDENCE = 0.7
 VAD_START_SECS = 0.2
-VAD_STOP_SECS = 0.8
+VAD_STOP_SECS = 0.2
 VAD_MIN_VOLUME = 0.6
 
 
@@ -127,7 +127,7 @@ class VADAnalyzer(ABC):
         pass
 
     @abstractmethod
-    def voice_confidence(self, buffer) -> float:
+    def voice_confidence(self, buffer: bytes) -> float:
         """Calculate voice activity confidence for the given audio buffer.
 
         Args:

@@ -23,7 +23,8 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
-from typing import Any, AsyncGenerator, List, Literal, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, List, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -33,13 +34,18 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
+)
+from pipecat.services.settings import (
+    NOT_GIVEN,
+    TTSSettings,
+    _NotGiven,
+    is_given,
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 
 try:
+    from google.api_core.client_options import ClientOptions
     from google.auth import default
     from google.auth.exceptions import GoogleAuthError
     from google.cloud import texttospeech_v1
@@ -473,6 +479,70 @@ def language_to_gemini_tts_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+@dataclass
+class GoogleHttpTTSSettings(TTSSettings):
+    """Settings for GoogleHttpTTSService.
+
+    Parameters:
+        pitch: Voice pitch adjustment (e.g., "+2st", "-50%").
+        rate: Speaking rate adjustment (e.g., "slow", "fast", "125%"). Used for
+            SSML prosody tags (non-Chirp voices).
+        speaking_rate: Speaking rate for AudioConfig (Chirp/Journey voices).
+            Range [0.25, 2.0].
+        volume: Volume adjustment (e.g., "loud", "soft", "+6dB").
+        emphasis: Emphasis level for the text.
+        gender: Voice gender preference.
+        google_style: Google-specific voice style.
+    """
+
+    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emphasis: Literal["strong", "moderate", "reduced", "none"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    gender: Literal["male", "female", "neutral"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    google_style: (
+        Literal["apologetic", "calm", "empathetic", "firm", "lively"] | None | _NotGiven
+    ) = field(default_factory=lambda: NOT_GIVEN)
+
+
+@dataclass
+class GoogleTTSSettings(TTSSettings):
+    """Settings for GoogleTTSService.
+
+    Parameters:
+        speaking_rate: The speaking rate, in the range [0.25, 2.0].
+    """
+
+    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
+#: .. deprecated:: 0.0.105
+#:     Use ``GoogleTTSService.Settings`` instead.
+GoogleStreamTTSSettings = GoogleTTSSettings
+
+
+@dataclass
+class GeminiTTSSettings(TTSSettings):
+    """Settings for GeminiTTSService.
+
+    Parameters:
+        prompt: Optional style instructions for how to synthesize the content.
+        multi_speaker: Whether to enable multi-speaker support.
+        speaker_configs: List of speaker configurations for multi-speaker mode.
+    """
+
+    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    multi_speaker: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_configs: list[dict[str, Any]] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+
 class GoogleHttpTTSService(TTSService):
     """Google Cloud Text-to-Speech HTTP service with SSML support.
 
@@ -487,8 +557,14 @@ class GoogleHttpTTSService(TTSService):
         Chirp and Journey voices don't support SSML and will use plain text input.
     """
 
+    Settings = GoogleHttpTTSSettings
+    _settings: Settings
+
     class InputParams(BaseModel):
         """Input parameters for Google HTTP TTS voice customization.
+
+        .. deprecated:: 0.0.105
+            Use ``GoogleHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             pitch: Voice pitch adjustment (e.g., "+2st", "-50%").
@@ -515,9 +591,11 @@ class GoogleHttpTTSService(TTSService):
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        voice_id: str = "en-US-Chirp3-HD-Charon",
+        location: Optional[str] = None,
+        voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initializes the Google HTTP TTS service.
@@ -525,28 +603,75 @@ class GoogleHttpTTSService(TTSService):
         Args:
             credentials: JSON string containing Google Cloud service account credentials.
             credentials_path: Path to Google Cloud service account JSON file.
+            location: Google Cloud location for regional endpoint (e.g., "us-central1").
             voice_id: Google TTS voice identifier (e.g., "en-US-Standard-A").
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleHttpTTSService.Settings(voice=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If None, uses default.
             params: Voice customization parameters including pitch, rate, volume, etc.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleHttpTTSService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            voice="en-US-Chirp3-HD-Charon",
+            language="en-US",
+            pitch=None,
+            rate=None,
+            speaking_rate=None,
+            volume=None,
+            emphasis=None,
+            gender=None,
+            google_style=None,
+        )
 
-        params = params or GoogleHttpTTSService.InputParams()
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
 
-        self._settings = {
-            "pitch": params.pitch,
-            "rate": params.rate,
-            "speaking_rate": params.speaking_rate,
-            "volume": params.volume,
-            "emphasis": params.emphasis,
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            "gender": params.gender,
-            "google_style": params.google_style,
-        }
-        self.set_voice(voice_id)
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                if params.pitch is not None:
+                    default_settings.pitch = params.pitch
+                if params.rate is not None:
+                    default_settings.rate = params.rate
+                if params.speaking_rate is not None:
+                    default_settings.speaking_rate = params.speaking_rate
+                if params.volume is not None:
+                    default_settings.volume = params.volume
+                if params.emphasis is not None:
+                    default_settings.emphasis = params.emphasis
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.gender is not None:
+                    default_settings.gender = params.gender
+                if params.google_style is not None:
+                    default_settings.google_style = params.google_style
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._location = location
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
         )
@@ -586,7 +711,15 @@ class GoogleHttpTTSService(TTSService):
         if not creds:
             raise ValueError("No valid credentials provided.")
 
-        return texttospeech_v1.TextToSpeechAsyncClient(credentials=creds)
+        client_options = None
+        if self._location:
+            client_options = ClientOptions(
+                api_endpoint=f"{self._location}-texttospeech.googleapis.com"
+            )
+
+        return texttospeech_v1.TextToSpeechAsyncClient(
+            credentials=creds, client_options=client_options
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -607,61 +740,60 @@ class GoogleHttpTTSService(TTSService):
         """
         return language_to_google_tts_language(language)
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Override to handle speaking_rate updates for Chirp/Journey voices.
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Override to handle speaking_rate validation.
 
         Args:
-            settings: Dictionary of settings to update. Can include 'speaking_rate' (float)
+            delta: Settings delta. Can include 'speaking_rate' (float).
         """
-        if "speaking_rate" in settings:
-            rate_value = float(settings["speaking_rate"])
-            if 0.25 <= rate_value <= 2.0:
-                self._settings["speaking_rate"] = rate_value
-            else:
+        if isinstance(delta, self.Settings) and is_given(delta.speaking_rate):
+            rate_value = float(delta.speaking_rate)
+            if not (0.25 <= rate_value <= 2.0):
                 logger.warning(
                     f"Invalid speaking_rate value: {rate_value}. Must be between 0.25 and 2.0"
                 )
-        await super()._update_settings(settings)
+                delta.speaking_rate = NOT_GIVEN
+        return await super()._update_settings(delta)
 
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
 
         # Voice tag
-        voice_attrs = [f"name='{self._voice_id}'"]
+        voice_attrs = [f"name='{self._settings.voice}'"]
 
-        language = self._settings["language"]
+        language = self._settings.language
         voice_attrs.append(f"language='{language}'")
 
-        if self._settings["gender"]:
-            voice_attrs.append(f"gender='{self._settings['gender']}'")
+        if self._settings.gender:
+            voice_attrs.append(f"gender='{self._settings.gender}'")
         ssml += f"<voice {' '.join(voice_attrs)}>"
 
         # Prosody tag
         prosody_attrs = []
-        if self._settings["pitch"]:
-            prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
-        if self._settings["rate"]:
-            prosody_attrs.append(f"rate='{self._settings['rate']}'")
-        if self._settings["volume"]:
-            prosody_attrs.append(f"volume='{self._settings['volume']}'")
+        if self._settings.pitch:
+            prosody_attrs.append(f"pitch='{self._settings.pitch}'")
+        if self._settings.rate:
+            prosody_attrs.append(f"rate='{self._settings.rate}'")
+        if self._settings.volume:
+            prosody_attrs.append(f"volume='{self._settings.volume}'")
 
         if prosody_attrs:
             ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
         # Emphasis tag
-        if self._settings["emphasis"]:
-            ssml += f"<emphasis level='{self._settings['emphasis']}'>"
+        if self._settings.emphasis:
+            ssml += f"<emphasis level='{self._settings.emphasis}'>"
 
         # Google style tag
-        if self._settings["google_style"]:
-            ssml += f"<google:style name='{self._settings['google_style']}'>"
+        if self._settings.google_style:
+            ssml += f"<google:style name='{self._settings.google_style}'>"
 
         ssml += text
 
         # Close tags
-        if self._settings["google_style"]:
+        if self._settings.google_style:
             ssml += "</google:style>"
-        if self._settings["emphasis"]:
+        if self._settings.emphasis:
             ssml += "</emphasis>"
         if prosody_attrs:
             ssml += "</prosody>"
@@ -670,11 +802,12 @@ class GoogleHttpTTSService(TTSService):
         return ssml
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Google's HTTP TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -682,11 +815,9 @@ class GoogleHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             # Check if the voice is a Chirp voice (including Chirp 3) or Journey voice
-            is_chirp_voice = "chirp" in self._voice_id.lower()
-            is_journey_voice = "journey" in self._voice_id.lower()
+            is_chirp_voice = "chirp" in self._settings.voice.lower()
+            is_journey_voice = "journey" in self._settings.voice.lower()
 
             # Create synthesis input based on voice_id
             if is_chirp_voice or is_journey_voice:
@@ -697,7 +828,7 @@ class GoogleHttpTTSService(TTSService):
                 synthesis_input = texttospeech_v1.SynthesisInput(ssml=ssml)
 
             voice = texttospeech_v1.VoiceSelectionParams(
-                language_code=self._settings["language"], name=self._voice_id
+                language_code=self._settings.language, name=self._settings.voice
             )
             # Build audio config with conditional speaking_rate
             audio_config_params = {
@@ -706,8 +837,8 @@ class GoogleHttpTTSService(TTSService):
             }
 
             # For Chirp and Journey voices, include speaking_rate in AudioConfig
-            if (is_chirp_voice or is_journey_voice) and self._settings["speaking_rate"] is not None:
-                audio_config_params["speaking_rate"] = self._settings["speaking_rate"]
+            if (is_chirp_voice or is_journey_voice) and self._settings.speaking_rate is not None:
+                audio_config_params["speaking_rate"] = self._settings.speaking_rate
 
             audio_config = texttospeech_v1.AudioConfig(**audio_config_params)
 
@@ -719,8 +850,6 @@ class GoogleHttpTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame()
-
             # Skip the first 44 bytes to remove the WAV header
             audio_content = response.audio_content[44:]
 
@@ -731,10 +860,8 @@ class GoogleHttpTTSService(TTSService):
                 if not chunk:
                     break
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                 yield frame
-
-            yield TTSStoppedFrame()
 
         except Exception as e:
             error_message = f"TTS generation error: {str(e)}"
@@ -783,7 +910,15 @@ class GoogleBaseTTSService(TTSService):
         if not creds:
             raise ValueError("No valid credentials provided.")
 
-        return texttospeech_v1.TextToSpeechAsyncClient(credentials=creds)
+        client_options = None
+        if self._location:
+            client_options = ClientOptions(
+                api_endpoint=f"{self._location}-texttospeech.googleapis.com"
+            )
+
+        return texttospeech_v1.TextToSpeechAsyncClient(
+            credentials=creds, client_options=client_options
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -808,6 +943,7 @@ class GoogleBaseTTSService(TTSService):
         self,
         streaming_config: texttospeech_v1.StreamingSynthesizeConfig,
         text: str,
+        context_id: str,
         prompt: Optional[str] = None,
     ) -> AsyncGenerator[Frame, None]:
         """Shared streaming synthesis logic.
@@ -815,6 +951,7 @@ class GoogleBaseTTSService(TTSService):
         Args:
             streaming_config: The streaming configuration.
             text: The text to synthesize.
+            context_id: Unique identifier for this TTS context.
             prompt: Optional prompt for style instructions (Gemini only).
 
         Yields:
@@ -836,8 +973,6 @@ class GoogleBaseTTSService(TTSService):
         streaming_responses = await self._client.streaming_synthesize(request_generator())
         await self.start_tts_usage_metrics(text)
 
-        yield TTSStartedFrame()
-
         audio_buffer = b""
         first_chunk_for_ttfb = False
 
@@ -856,12 +991,10 @@ class GoogleBaseTTSService(TTSService):
             while len(audio_buffer) >= CHUNK_SIZE:
                 piece = audio_buffer[:CHUNK_SIZE]
                 audio_buffer = audio_buffer[CHUNK_SIZE:]
-                yield TTSAudioRawFrame(piece, self.sample_rate, 1)
+                yield TTSAudioRawFrame(piece, self.sample_rate, 1, context_id=context_id)
 
         if audio_buffer:
-            yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1)
-
-        yield TTSStoppedFrame()
+            yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1, context_id=context_id)
 
 
 class GoogleTTSService(GoogleBaseTTSService):
@@ -880,15 +1013,21 @@ class GoogleTTSService(GoogleBaseTTSService):
 
         tts = GoogleTTSService(
             credentials_path="/path/to/service-account.json",
-            voice_id="en-US-Chirp3-HD-Charon",
-            params=GoogleTTSService.InputParams(
+            settings=GoogleTTSService.Settings(
+                voice="en-US-Chirp3-HD-Charon",
                 language=Language.EN_US,
             )
         )
     """
 
+    Settings = GoogleTTSSettings
+    _settings: Settings
+
     class InputParams(BaseModel):
         """Input parameters for Google streaming TTS configuration.
+
+        .. deprecated:: 0.0.105
+            Use ``GoogleTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             language: Language for synthesis. Defaults to English.
@@ -903,10 +1042,12 @@ class GoogleTTSService(GoogleBaseTTSService):
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        voice_id: str = "en-US-Chirp3-HD-Charon",
+        location: Optional[str] = None,
+        voice_id: Optional[str] = None,
         voice_cloning_key: Optional[str] = None,
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initializes the Google streaming TTS service.
@@ -914,50 +1055,85 @@ class GoogleTTSService(GoogleBaseTTSService):
         Args:
             credentials: JSON string containing Google Cloud service account credentials.
             credentials_path: Path to Google Cloud service account JSON file.
+            location: Google Cloud location for regional endpoint (e.g., "us-central1").
             voice_id: Google TTS voice identifier (e.g., "en-US-Chirp3-HD-Charon").
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleTTSService.Settings(voice=...)`` instead.
+
             voice_cloning_key: The voice cloning key for Chirp 3 custom voices.
             sample_rate: Audio sample rate in Hz. If None, uses default.
             params: Language configuration parameters.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleTTSService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            voice="en-US-Chirp3-HD-Charon",
+            language="en-US",
+            speaking_rate=None,
+        )
 
-        params = params or GoogleTTSService.InputParams()
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
 
-        self._settings = {
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            "speaking_rate": params.speaking_rate,
-        }
-        self.set_voice(voice_id)
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.speaking_rate is not None:
+                    default_settings.speaking_rate = params.speaking_rate
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._location = location
         self._voice_cloning_key = voice_cloning_key
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
         )
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Override to handle speaking_rate updates for streaming API.
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Override to handle speaking_rate validation.
 
         Args:
-            settings: Dictionary of settings to update. Can include 'speaking_rate' (float)
+            delta: Settings delta. Can include 'speaking_rate' (float).
         """
-        if "speaking_rate" in settings:
-            rate_value = float(settings["speaking_rate"])
-            if 0.25 <= rate_value <= 2.0:
-                self._settings["speaking_rate"] = rate_value
-            else:
+        if isinstance(delta, self.Settings) and is_given(delta.speaking_rate):
+            rate_value = float(delta.speaking_rate)
+            if not (0.25 <= rate_value <= 2.0):
                 logger.warning(
                     f"Invalid speaking_rate value: {rate_value}. Must be between 0.25 and 2.0"
                 )
-        await super()._update_settings(settings)
+                delta.speaking_rate = NOT_GIVEN
+        return await super()._update_settings(delta)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate streaming speech from text using Google's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech as it's generated.
@@ -965,19 +1141,17 @@ class GoogleTTSService(GoogleBaseTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             # Build voice selection params
             if self._voice_cloning_key:
                 voice_clone_params = texttospeech_v1.VoiceCloneParams(
                     voice_cloning_key=self._voice_cloning_key
                 )
                 voice = texttospeech_v1.VoiceSelectionParams(
-                    language_code=self._settings["language"], voice_clone=voice_clone_params
+                    language_code=self._settings.language, voice_clone=voice_clone_params
                 )
             else:
                 voice = texttospeech_v1.VoiceSelectionParams(
-                    language_code=self._settings["language"], name=self._voice_id
+                    language_code=self._settings.language, name=self._settings.voice
                 )
 
             # Create streaming config
@@ -986,12 +1160,12 @@ class GoogleTTSService(GoogleBaseTTSService):
                 streaming_audio_config=texttospeech_v1.StreamingAudioConfig(
                     audio_encoding=texttospeech_v1.AudioEncoding.PCM,
                     sample_rate_hertz=self.sample_rate,
-                    speaking_rate=self._settings["speaking_rate"],
+                    speaking_rate=self._settings.speaking_rate,
                 ),
             )
 
             # Use base class streaming logic
-            async for frame in self._stream_tts(streaming_config, text):
+            async for frame in self._stream_tts(streaming_config, text, context_id):
                 yield frame
 
         except Exception as e:
@@ -1016,14 +1190,17 @@ class GeminiTTSService(GoogleBaseTTSService):
 
         tts = GeminiTTSService(
             credentials_path="/path/to/service-account.json",
-            model="gemini-2.5-flash-tts",
-            voice_id="Kore",
-            params=GeminiTTSService.InputParams(
+            settings=GeminiTTSService.Settings(
+                model="gemini-2.5-flash-tts",
+                voice="Kore",
                 language=Language.EN_US,
                 prompt="Say this in a friendly and helpful tone"
             )
         )
     """
+
+    Settings = GeminiTTSSettings
+    _settings: Settings
 
     GOOGLE_SAMPLE_RATE = 24000  # Google TTS always outputs at 24kHz
 
@@ -1064,6 +1241,9 @@ class GeminiTTSService(GoogleBaseTTSService):
     class InputParams(BaseModel):
         """Input parameters for Gemini TTS configuration.
 
+        .. deprecated:: 0.0.105
+            Use ``GeminiTTSService.Settings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             language: Language for synthesis. Defaults to English.
             prompt: Optional style instructions for how to synthesize the content.
@@ -1080,12 +1260,14 @@ class GeminiTTSService(GoogleBaseTTSService):
         self,
         *,
         api_key: Optional[str] = None,
-        model: str = "gemini-2.5-flash-tts",
+        model: Optional[str] = None,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        voice_id: str = "Kore",
+        location: Optional[str] = None,
+        voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initializes the Gemini TTS service.
@@ -1099,11 +1281,26 @@ class GeminiTTSService(GoogleBaseTTSService):
 
             model: Gemini TTS model to use. Must be a TTS model like
                    "gemini-2.5-flash-tts" or "gemini-2.5-pro-tts".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GeminiTTSService.Settings(model=...)`` instead.
+
             credentials: JSON string containing Google Cloud service account credentials.
             credentials_path: Path to Google Cloud service account JSON file.
+            location: Google Cloud location for regional endpoint (e.g., "us-central1").
             voice_id: Voice name from the available Gemini voices.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GeminiTTSService.Settings(voice=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If None, uses Google's default 24kHz.
             params: TTS configuration parameters.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GeminiTTSService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # Handle deprecated api_key parameter
@@ -1120,24 +1317,56 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Google TTS only supports {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, **kwargs)
 
-        params = params or GeminiTTSService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="gemini-2.5-flash-tts",
+            voice="Kore",
+            language="en-US",
+            prompt=None,
+            multi_speaker=False,
+            speaker_configs=None,
+        )
 
-        if voice_id not in self.AVAILABLE_VOICES:
-            logger.warning(f"Voice '{voice_id}' not in known voices list. Using anyway.")
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
 
-        self._model = model
-        self._voice_id = voice_id
-        self._settings = {
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            "prompt": params.prompt,
-            "multi_speaker": params.multi_speaker,
-            "speaker_configs": params.speaker_configs,
-        }
+        if default_settings.voice not in self.AVAILABLE_VOICES:
+            logger.warning(
+                f"Voice '{default_settings.voice}' not in known voices list. Using anyway."
+            )
 
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.prompt is not None:
+                    default_settings.prompt = params.prompt
+                if params.multi_speaker is not None:
+                    default_settings.multi_speaker = params.multi_speaker
+                if params.speaker_configs is not None:
+                    default_settings.speaker_configs = params.speaker_configs
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._location = location
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
         )
@@ -1153,16 +1382,6 @@ class GeminiTTSService(GoogleBaseTTSService):
         """
         return language_to_gemini_tts_language(language)
 
-    def set_voice(self, voice_id: str):
-        """Set the voice for TTS generation.
-
-        Args:
-            voice_id: Name of the voice to use from AVAILABLE_VOICES.
-        """
-        if voice_id not in self.AVAILABLE_VOICES:
-            logger.warning(f"Voice '{voice_id}' not in known voices list. Using anyway.")
-        self._voice_id = voice_id
-
     async def start(self, frame: StartFrame):
         """Start the Gemini TTS service.
 
@@ -1176,22 +1395,27 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Override to handle prompt updates.
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta with voice validation.
 
         Args:
-            settings: Dictionary of settings to update. Can include 'prompt' (str)
+            delta: Settings delta. Can include 'voice', 'prompt', etc.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
         """
-        if "prompt" in settings:
-            self._settings["prompt"] = settings["prompt"]
-        await super()._update_settings(settings)
+        if is_given(delta.voice) and delta.voice not in self.AVAILABLE_VOICES:
+            logger.warning(f"Voice '{delta.voice}' not in known voices list. Using anyway.")
+
+        return await super()._update_settings(delta)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate streaming speech from text using Gemini TTS models.
 
         Args:
-            text: The text to synthesize into speech. Can include markup tags
+            text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames. Can include markup tags
                   like [sigh], [laughing], [whispering] for expressive control.
 
         Yields:
@@ -1200,17 +1424,15 @@ class GeminiTTSService(GoogleBaseTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             # Build voice selection params
-            if self._settings["multi_speaker"] and self._settings["speaker_configs"]:
+            if self._settings.multi_speaker and self._settings.speaker_configs:
                 # Multi-speaker mode
                 speaker_voice_configs = []
-                for speaker_config in self._settings["speaker_configs"]:
+                for speaker_config in self._settings.speaker_configs:
                     speaker_voice_configs.append(
                         texttospeech_v1.MultispeakerPrebuiltVoice(
                             speaker_alias=speaker_config["speaker_alias"],
-                            speaker_id=speaker_config.get("speaker_id", self._voice_id),
+                            speaker_id=speaker_config.get("speaker_id", self._settings.voice),
                         )
                     )
 
@@ -1219,16 +1441,16 @@ class GeminiTTSService(GoogleBaseTTSService):
                 )
 
                 voice = texttospeech_v1.VoiceSelectionParams(
-                    language_code=self._settings["language"],
-                    model_name=self._model,
+                    language_code=self._settings.language,
+                    model_name=self._settings.model,
                     multi_speaker_voice_config=multi_speaker_voice_config,
                 )
             else:
                 # Single speaker mode
                 voice = texttospeech_v1.VoiceSelectionParams(
-                    language_code=self._settings["language"],
-                    name=self._voice_id,
-                    model_name=self._model,
+                    language_code=self._settings.language,
+                    name=self._settings.voice,
+                    model_name=self._settings.model,
                 )
 
             # Create streaming config
@@ -1241,7 +1463,9 @@ class GeminiTTSService(GoogleBaseTTSService):
             )
 
             # Use base class streaming logic with prompt support
-            async for frame in self._stream_tts(streaming_config, text, self._settings["prompt"]):
+            async for frame in self._stream_tts(
+                streaming_config, text, context_id, self._settings.prompt
+            ):
                 yield frame
 
         except Exception as e:
