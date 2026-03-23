@@ -79,17 +79,17 @@ class RawAudioTrack(AudioStreamTrack):
     supporting queued audio data with proper synchronization.
     """
 
-    def __init__(self, sample_rate: int, insert_silence: bool = True):
+    def __init__(self, sample_rate: int, auto_silence: bool = True):
         """Initialize the raw audio track.
 
         Args:
             sample_rate: The audio sample rate in Hz.
-            insert_silence: If True, emit silence when the queue is empty. If False,
+            auto_silence: If True, emit silence when the queue is empty. If False,
                 wait until audio data is available.
         """
         super().__init__()
         self._sample_rate = sample_rate
-        self._insert_silence = insert_silence
+        self._auto_silence = auto_silence
         self._samples_per_10ms = sample_rate * 10 // 1000
         self._bytes_per_10ms = self._samples_per_10ms * 2  # 16-bit (2 bytes per sample)
         self._timestamp = 0
@@ -127,7 +127,7 @@ class RawAudioTrack(AudioStreamTrack):
 
         Returns:
             An AudioFrame containing the next audio data, or silence if the queue is empty
-            and ``insert_silence`` is True.
+            and ``auto_silence`` is True.
         """
         # Compute required wait time for synchronization
         if self._timestamp > 0:
@@ -136,7 +136,7 @@ class RawAudioTrack(AudioStreamTrack):
                 await asyncio.sleep(wait)
 
         if not self._chunk_queue:
-            if self._insert_silence:
+            if self._auto_silence:
                 chunk = bytes(self._bytes_per_10ms)
             else:
                 while not self._chunk_queue:
@@ -497,7 +497,7 @@ class SmallWebRTCClient:
         if self._params.audio_out_enabled:
             self._audio_output_track = RawAudioTrack(
                 sample_rate=self._out_sample_rate,
-                insert_silence=self._params.audio_out_auto_silence,
+                auto_silence=self._params.audio_out_auto_silence,
             )
             self._webrtc_connection.replace_audio_track(self._audio_output_track)
 
