@@ -13,6 +13,10 @@ transcript is received.
 These values are used by turn stop strategies to optimize timing. Each STT
 service publishes its latency via STTMetadataFrame at pipeline start.
 
+All built-in values were measured with VADParams.stop_secs=0.2, the recommended
+default. If you change stop_secs, re-run the benchmark with your VAD settings
+and pass the measured value to your STT service constructor.
+
 To measure latency for your specific deployment (region, network conditions,
 self-hosted instances), use the STT benchmark tool:
 https://github.com/pipecat-ai/stt-benchmark
