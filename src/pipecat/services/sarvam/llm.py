@@ -23,7 +23,7 @@ from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import _NotGiven, _warn_deprecated_param, is_given
+from pipecat.services.settings import _NotGiven, is_given
 
 _T = TypeVar("_T")
 
@@ -58,17 +58,15 @@ class SarvamLLMService(OpenAILLMService):
     _SUPPORTED_MODELS = frozenset(
         {"sarvam-30b", "sarvam-30b-16k", "sarvam-105b", "sarvam-105b-32k"}
     )
-    _TOOL_CALLING_MODELS = _SUPPORTED_MODELS
     Settings = SarvamLLMSettings
-    _settings: SarvamLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
         base_url: str = "https://api.sarvam.ai/v1",
-        model: Optional[str] = None,
-        settings: Optional[SarvamLLMSettings] = None,
+        settings: Optional[Settings] = None,
         default_headers: Optional[Mapping[str, str]] = None,
         **kwargs,
     ):
@@ -77,38 +75,32 @@ class SarvamLLMService(OpenAILLMService):
         Args:
             api_key: Sarvam API key used for both OpenAI auth and Sarvam subscription header.
             base_url: Sarvam OpenAI-compatible base URL.
-            model: Sarvam model identifier. Supported values: ``sarvam-30b``,
-                ``sarvam-30b-16k``, ``sarvam-105b``, ``sarvam-105b-32k``.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=SarvamLLMSettings(model=...)`` instead.
-
-            settings: Runtime-updatable settings. When provided alongside deprecated
-                parameters, ``settings`` values take precedence.
+            settings: Runtime-updatable settings.
             default_headers: Additional HTTP headers to include in requests.
             **kwargs: Additional keyword arguments passed to ``OpenAILLMService``.
         """
-        # 1. Initialize default_settings with hardcoded defaults
-        default_settings = SarvamLLMSettings(model="sarvam-30b")
+        # Initialize defaults with concrete values for Sarvam-specific fields.
+        default_settings = self.Settings(
+            model="sarvam-30b",
+            system_instruction=None,
+            frequency_penalty=NOT_GIVEN,
+            presence_penalty=NOT_GIVEN,
+            seed=NOT_GIVEN,
+            temperature=NOT_GIVEN,
+            top_p=NOT_GIVEN,
+            top_k=None,
+            max_tokens=NOT_GIVEN,
+            max_completion_tokens=NOT_GIVEN,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            extra={},
+            wiki_grounding=None,
+            reasoning_effort=None,
+        )
 
-        # 2. Apply direct init arg overrides (deprecated)
-        if model is not None:
-            # Keep deprecated init arg for backward compatibility while steering callers
-            # to settings=SarvamLLMService.Settings(model=...).
-            _warn_deprecated_param("model", SarvamLLMSettings, "model")
-            default_settings.model = model
-
-        # 3. Apply settings delta (canonical API, always wins)
+        # Apply settings delta (canonical API, always wins).
         if settings is not None:
             default_settings.apply_update(settings)
-
-        # BaseOpenAILLMService currently stores settings as OpenAILLMSettings.
-        # Preserve Sarvam-only runtime knobs in ``extra`` so they survive
-        # initialization and future update frames.
-        default_settings.extra = dict(default_settings.extra)
-        default_settings.extra.update(self._extract_sarvam_extra_from_settings(default_settings))
-
-        self._validate_model(default_settings.model)
 
         super().__init__(
             api_key=api_key,
@@ -117,6 +109,9 @@ class SarvamLLMService(OpenAILLMService):
             default_headers=default_headers,
             **kwargs,
         )
+        # Keep Sarvam-specific settings object so runtime updates include
+        # ``wiki_grounding`` and ``reasoning_effort`` without extra bridging.
+        self._settings = default_settings
 
     def create_client(
         self,
@@ -160,25 +155,15 @@ class SarvamLLMService(OpenAILLMService):
         params.pop("max_completion_tokens", None)
         params.pop("service_tier", None)
 
-        # Sarvam-only fields are bridged through settings.extra (see __init__ and _update_settings).
-        extra = self._settings.extra if isinstance(self._settings.extra, dict) else {}
-        if "wiki_grounding" in extra and extra["wiki_grounding"] is not None:
-            params["wiki_grounding"] = extra["wiki_grounding"]
-        if "reasoning_effort" in extra and extra["reasoning_effort"] is not None:
-            params["reasoning_effort"] = extra["reasoning_effort"]
+        if is_given(self._settings.wiki_grounding) and self._settings.wiki_grounding is not None:
+            params["wiki_grounding"] = self._settings.wiki_grounding
+        if (
+            is_given(self._settings.reasoning_effort)
+            and self._settings.reasoning_effort is not None
+        ):
+            params["reasoning_effort"] = self._settings.reasoning_effort
 
         return params
-
-    async def _update_settings(self, delta: OpenAILLMSettings) -> dict[str, Any]:
-        """Apply settings updates, preserving Sarvam-specific runtime knobs."""
-        # LLMUpdateSettingsFrame commonly carries OpenAILLMSettings deltas.
-        # Lift Sarvam-only fields into delta.extra before delegating to base.
-        sarvam_extra = self._extract_sarvam_extra_from_settings(delta)
-        if sarvam_extra:
-            delta.extra = dict(delta.extra)
-            delta.extra.update(sarvam_extra)
-
-        return await super()._update_settings(delta)
 
     async def _call_with_raw_sarvam_errors(self, awaitable: Awaitable[_T]) -> _T:
         """Await an OpenAI call while preserving Sarvam raw error payloads.
@@ -193,7 +178,7 @@ class SarvamLLMService(OpenAILLMService):
         except (APITimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
             raise
         except Exception as e:
-            raise RuntimeError(self._format_raw_server_error(e)) from e
+            raise RuntimeError(str(e)) from e
 
     async def get_chat_completions(
         self, params_from_context: OpenAILLMInvocationParams
@@ -218,23 +203,6 @@ class SarvamLLMService(OpenAILLMService):
             )
         )
 
-    def _validate_model(self, model: str):
-        if model not in self._SUPPORTED_MODELS:
-            allowed = ", ".join(sorted(self._SUPPORTED_MODELS))
-            raise ValueError(f"Unsupported Sarvam LLM model '{model}'. Allowed values: {allowed}.")
-
-    def _extract_sarvam_extra_from_settings(self, settings_obj: Any) -> dict[str, Any]:
-        updates: dict[str, Any] = {}
-        wiki_grounding = getattr(settings_obj, "wiki_grounding", _NOT_GIVEN)
-        if is_given(wiki_grounding):
-            updates["wiki_grounding"] = wiki_grounding
-
-        reasoning_effort = getattr(settings_obj, "reasoning_effort", _NOT_GIVEN)
-        if is_given(reasoning_effort):
-            updates["reasoning_effort"] = reasoning_effort
-
-        return updates
-
     def _validate_tool_parameters(self, params_from_context: OpenAILLMInvocationParams):
         tools = params_from_context.get("tools", NOT_GIVEN)
         tool_choice = params_from_context.get("tool_choice", NOT_GIVEN)
@@ -248,34 +216,6 @@ class SarvamLLMService(OpenAILLMService):
 
         if has_tool_choice and not has_tools:
             raise ValueError("Sarvam requires non-empty `tools` when `tool_choice` is provided.")
-
-        # Validate early to provide deterministic errors before network calls.
-        if has_tools and self._settings.model not in self._TOOL_CALLING_MODELS:
-            allowed = ", ".join(sorted(self._TOOL_CALLING_MODELS))
-            raise ValueError(
-                f"Model '{self._settings.model}' does not support tools. "
-                f"Supported models: {allowed}."
-            )
-
-    def _format_raw_server_error(self, error: Exception) -> str:
-        raw_message = self._extract_raw_server_message(error)
-        return f"Sarvam server error: {raw_message}"
-
-    def _extract_raw_server_message(self, error: Exception) -> str:
-        body = getattr(error, "body", None)
-        if body is not None:
-            return self._payload_to_message(body)
-
-        response = getattr(error, "response", None)
-        if response is not None:
-            try:
-                return self._payload_to_message(response.json())
-            except Exception:
-                text = getattr(response, "text", None)
-                if text:
-                    return str(text)
-
-        return str(error)
 
     def _payload_to_message(self, payload: Any) -> str:
         if isinstance(payload, dict):
