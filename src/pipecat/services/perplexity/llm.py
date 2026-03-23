@@ -41,6 +41,9 @@ class PerplexityLLMService(OpenAILLMService):
     """
 
     adapter_class = PerplexityLLMAdapter
+    # Perplexity doesn't support the "developer" message role.
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
 
     Settings = PerplexityLLMSettings
     _settings: Settings

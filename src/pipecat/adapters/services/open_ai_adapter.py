@@ -52,7 +52,11 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         return "openai"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, *, system_instruction: Optional[str] = None
+        self,
+        context: LLMContext,
+        *,
+        system_instruction: Optional[str] = None,
+        convert_developer_to_user: bool,
     ) -> OpenAILLMInvocationParams:
         """Get OpenAI-specific LLM invocation parameters from a universal LLM context.
 
@@ -60,11 +64,16 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             context: The LLM context containing messages, tools, etc.
             system_instruction: Optional system instruction from service settings
                 or ``run_inference``. If provided, prepended as a system message.
+            convert_developer_to_user: If True, convert "developer"-role messages
+                to "user"-role messages. Used by OpenAI-compatible services that
+                don't support the "developer" role.
 
         Returns:
             Dictionary of parameters for OpenAI's ChatCompletion API.
         """
-        messages = self._from_universal_context_messages(self.get_messages(context))
+        messages = self._from_universal_context_messages(
+            self.get_messages(context), convert_developer_to_user=convert_developer_to_user
+        )
 
         if system_instruction:
             # Detect initial system message for warning purposes (don't extract)
@@ -131,7 +140,10 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         return msgs
 
     def _from_universal_context_messages(
-        self, messages: List[LLMContextMessage]
+        self,
+        messages: List[LLMContextMessage],
+        *,
+        convert_developer_to_user: bool,
     ) -> List[ChatCompletionMessageParam]:
         result = []
         for message in messages:
@@ -141,6 +153,12 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             else:
                 # Standard message, pass through unchanged
                 result.append(message)
+
+        if convert_developer_to_user:
+            for msg in result:
+                if msg.get("role") == "developer":
+                    msg["role"] = "user"
+
         return result
 
     def _from_standard_tool_choice(

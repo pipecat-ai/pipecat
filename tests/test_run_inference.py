@@ -60,8 +60,9 @@ async def test_openai_run_inference_with_llm_context():
         # Verify
         assert result == "Hello! How can I help you today?"
         service.get_llm_adapter.assert_called_once()
+        # convert_developer_to_user=False because OpenAILLMService.supports_developer_role is True
         mock_adapter.get_llm_invocation_params.assert_called_once_with(
-            mock_context, system_instruction=None
+            mock_context, system_instruction=None, convert_developer_to_user=False
         )
         service._client.chat.completions.create.assert_called_once_with(
             model="gpt-4",
@@ -549,9 +550,12 @@ async def test_openai_run_inference_system_instruction_overrides_context():
         )
 
         assert result == "Response"
-        # Verify the adapter was called with the correct system_instruction
+        # Verify the adapter was called with the correct system_instruction.
+        # convert_developer_to_user=False because OpenAILLMService.supports_developer_role is True.
         mock_adapter.get_llm_invocation_params.assert_called_once_with(
-            mock_context, system_instruction="New system instruction"
+            mock_context,
+            system_instruction="New system instruction",
+            convert_developer_to_user=False,
         )
 
 

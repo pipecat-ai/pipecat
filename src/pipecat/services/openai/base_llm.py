@@ -71,6 +71,15 @@ class BaseOpenAILLMService(LLMService):
     Settings = OpenAILLMSettings
     _settings: Settings
 
+    supports_developer_role: bool = True
+    """Whether this service's API supports the "developer" message role.
+
+    OpenAI's native API supports it, but some OpenAI-compatible services
+    (e.g. Cerebras) do not. Subclasses that don't support it should set
+    this to ``False``, which causes the adapter to convert "developer"
+    messages to "user" messages before sending them to the API.
+    """
+
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
 
@@ -351,7 +360,9 @@ class BaseOpenAILLMService(LLMService):
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
             invocation_params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
-                context, system_instruction=effective_instruction
+                context,
+                system_instruction=effective_instruction,
+                convert_developer_to_user=not self.supports_developer_role,
             )
         else:
             invocation_params = OpenAILLMInvocationParams(
@@ -421,7 +432,9 @@ class BaseOpenAILLMService(LLMService):
         )
 
         params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
-            context, system_instruction=self._settings.system_instruction
+            context,
+            system_instruction=self._settings.system_instruction,
+            convert_developer_to_user=not self.supports_developer_role,
         )
         chunks = await self.get_chat_completions(params)
 

@@ -15,7 +15,8 @@ For OpenAI adapter:
 3. Complex message structures (like multi-part content) are preserved
 4. System instructions are preserved throughout messages at any position
 5. system_instruction is prepended as a system message, with conflict warnings
-6. Developer messages pass through without triggering warnings
+6. Developer messages pass through when convert_developer_to_user is False
+7. Developer messages are converted to user when convert_developer_to_user is True
 
 For Gemini adapter:
 1. LLMStandardMessage objects are converted to Gemini Content format
@@ -85,6 +86,11 @@ from pipecat.processors.aggregators.llm_context import (
 
 
 class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
+    # In production, BaseOpenAILLMService always passes convert_developer_to_user
+    # to the adapter (True or False depending on the service's supports_developer_role).
+    # Tests below use False to simulate native OpenAI usage, except for the
+    # developer-conversion-specific tests which use True.
+
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = OpenAILLMAdapter()
@@ -102,7 +108,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=standard_messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
 
         # Verify messages are passed through unchanged
         self.assertEqual(params["messages"], standard_messages)
@@ -134,7 +140,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
 
         # Should only include standard messages and OpenAI-specific ones
         # (3 total: system, standard user, openai assistant)
@@ -181,7 +187,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
 
         # Verify complex content is preserved
         self.assertEqual(len(params["messages"]), 3)
@@ -222,7 +228,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         # Get invocation params
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
 
         # OpenAI should preserve all messages unchanged, including multiple system messages
         self.assertEqual(len(params["messages"]), 7)
@@ -249,7 +255,9 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context, system_instruction="Be helpful.")
+        params = self.adapter.get_llm_invocation_params(
+            context, system_instruction="Be helpful.", convert_developer_to_user=False
+        )
 
         self.assertEqual(params["messages"][0]["role"], "system")
         self.assertEqual(params["messages"][0]["content"], "Be helpful.")
@@ -262,7 +270,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
             {"role": "user", "content": "Hello"},
         ]
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=False)
 
         self.assertEqual(len(params["messages"]), 2)
         self.assertEqual(params["messages"][0]["role"], "system")
@@ -278,7 +286,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
 
         with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
             params = self.adapter.get_llm_invocation_params(
-                context, system_instruction="Be concise."
+                context, system_instruction="Be concise.", convert_developer_to_user=False
             )
             mock_logger.warning.assert_called_once()
             warning_msg = mock_logger.warning.call_args[0][0]
@@ -298,7 +306,7 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
 
         with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
             params = self.adapter.get_llm_invocation_params(
-                context, system_instruction="Be concise."
+                context, system_instruction="Be concise.", convert_developer_to_user=False
             )
             mock_logger.warning.assert_not_called()
 
@@ -315,9 +323,44 @@ class TestOpenAIGetLLMInvocationParams(unittest.TestCase):
         context = LLMContext(messages=messages)
 
         with patch("pipecat.adapters.base_llm_adapter.logger") as mock_logger:
-            self.adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
-            self.adapter.get_llm_invocation_params(context, system_instruction="Be concise.")
+            self.adapter.get_llm_invocation_params(
+                context, system_instruction="Be concise.", convert_developer_to_user=False
+            )
+            self.adapter.get_llm_invocation_params(
+                context, system_instruction="Be concise.", convert_developer_to_user=False
+            )
             mock_logger.warning.assert_called_once()
+
+    def test_developer_messages_converted_to_user(self):
+        """Developer messages are converted to user role when convert_developer_to_user is True."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "developer", "content": "Extra context."},
+            {"role": "user", "content": "Hello"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["content"], "Extra context.")
+
+    def test_developer_conversion_does_not_affect_other_roles(self):
+        """convert_developer_to_user only affects developer messages, not system/user/assistant."""
+        messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "System prompt."},
+            {"role": "developer", "content": "Dev guidance."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
+
+        context = LLMContext(messages=messages)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
+
+        self.assertEqual(params["messages"][0]["role"], "system")
+        self.assertEqual(params["messages"][1]["role"], "user")
+        self.assertEqual(params["messages"][1]["content"], "Dev guidance.")
+        self.assertEqual(params["messages"][2]["role"], "user")
+        self.assertEqual(params["messages"][3]["role"], "assistant")
 
 
 class TestGeminiGetLLMInvocationParams(unittest.TestCase):
@@ -1377,6 +1420,10 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
 
 
 class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
+    # Perplexity doesn't support the "developer" role, so PerplexityLLMService
+    # sets supports_developer_role = False. Tests below pass
+    # convert_developer_to_user=True to match production behavior.
+
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
         self.adapter = PerplexityLLMAdapter()
@@ -1390,7 +1437,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][0]["role"], "user")
@@ -1410,7 +1457,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(len(params["messages"]), 4)
         self.assertEqual(params["messages"][0]["role"], "system")
@@ -1429,7 +1476,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(len(params["messages"]), 3)
 
@@ -1457,7 +1504,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         # system(initial), user, assistant, merged(system→user + user)
         self.assertEqual(len(params["messages"]), 4)
@@ -1482,7 +1529,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(len(params["messages"]), 3)
         self.assertEqual(params["messages"][0]["role"], "system")
@@ -1500,7 +1547,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
@@ -1519,7 +1566,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "system")
@@ -1538,7 +1585,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         # Trailing assistant removed → [system], system stays as-is
         self.assertEqual(len(params["messages"]), 1)
@@ -1554,7 +1601,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         # After merging assistants we get [user, assistant(merged)], then trailing
         # assistant is removed, leaving just [user]
@@ -1576,7 +1623,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(len(params["messages"]), 4)
         self.assertEqual(params["messages"][0]["role"], "user")
@@ -1594,7 +1641,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "Extra context.")
@@ -1609,7 +1656,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
         ]
 
         context = LLMContext(messages=messages)
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         # developer→user merged with following user
         self.assertEqual(len(params["messages"]), 3)
@@ -1623,7 +1670,7 @@ class TestPerplexityGetLLMInvocationParams(unittest.TestCase):
     def test_empty_messages(self):
         """Test that empty messages list returns empty."""
         context = LLMContext(messages=[])
-        params = self.adapter.get_llm_invocation_params(context)
+        params = self.adapter.get_llm_invocation_params(context, convert_developer_to_user=True)
 
         self.assertEqual(params["messages"], [])
 

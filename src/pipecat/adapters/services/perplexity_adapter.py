@@ -50,7 +50,11 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
     """
 
     def get_llm_invocation_params(
-        self, context: LLMContext, *, system_instruction: Optional[str] = None
+        self,
+        context: LLMContext,
+        *,
+        system_instruction: Optional[str] = None,
+        convert_developer_to_user: bool,
     ) -> OpenAILLMInvocationParams:
         """Get OpenAI-compatible invocation parameters with Perplexity message fixes applied.
 
@@ -58,12 +62,18 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
             context: The LLM context containing messages, tools, etc.
             system_instruction: Optional system instruction from service settings
                 or ``run_inference``. Forwarded to the parent adapter.
+            convert_developer_to_user: If True, convert "developer"-role messages
+                to "user"-role messages. Forwarded to the parent adapter.
 
         Returns:
             Dictionary of parameters for Perplexity's ChatCompletion API, with
             messages transformed to satisfy Perplexity's constraints.
         """
-        params = super().get_llm_invocation_params(context, system_instruction=system_instruction)
+        params = super().get_llm_invocation_params(
+            context,
+            system_instruction=system_instruction,
+            convert_developer_to_user=convert_developer_to_user,
+        )
         params["messages"] = self._transform_messages(list(params["messages"]))
         return params
 
@@ -109,11 +119,8 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
 
         messages = copy.deepcopy(messages)
 
-        # Step 0: Convert "developer" messages to "user".
-        # Perplexity doesn't support the "developer" role.
-        for msg in messages:
-            if msg.get("role") == "developer":
-                msg["role"] = "user"
+        # Note: "developer" → "user" conversion is handled by the parent adapter
+        # via the convert_developer_to_user parameter.
 
         # Step 1: Convert non-initial system messages to "user".
         # Perplexity allows system messages at the start, but rejects them
