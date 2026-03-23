@@ -63,19 +63,19 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)), # or KrispVivaVadAnalyzer
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),  # or KrispVivaVadAnalyzer
         audio_in_filter=KrispVivaFilter(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)), # or KrispVivaVadAnalyzer
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),  # or KrispVivaVadAnalyzer
         audio_in_filter=KrispVivaFilter(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)), # or KrispVivaVadAnalyzer
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),  # or KrispVivaVadAnalyzer
         audio_in_filter=KrispVivaFilter(),
     ),
 }
