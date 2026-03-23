@@ -207,8 +207,8 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
             logger.error(f"Error analyzing audio with Krisp VIVA VAD: {e}", exc_info=True)
             return 0.0
 
-    def __del__(self):
-        """Cleanup when the analyzer is destroyed."""
+    async def cleanup(self):
+        """Cleanup analyzer resources."""
         try:
             self._session = None
             KrispVivaSDKManager.release()

@@ -6,6 +6,7 @@
 
 """Unit tests for KrispVivaVadAnalyzer."""
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -132,7 +133,7 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
             self.assertIn("Model path", str(context.exception))
             # acquire() is not called because exception is raised before it
             self.mock_sdk_manager.acquire.assert_not_called()
-            # release() is called in exception handler and also in __del__ when object is destroyed
+            # release() is called in the initialization exception handler
             self.assertGreaterEqual(self.mock_sdk_manager.release.call_count, 1)
 
     def test_initialization_with_invalid_extension(self):
@@ -148,7 +149,7 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
             self.assertIn(".kef extension", str(context.exception))
             # acquire() is not called because exception is raised before it
             self.mock_sdk_manager.acquire.assert_not_called()
-            # release() is called in exception handler and also in __del__ when object is destroyed
+            # release() is called in the initialization exception handler
             self.assertGreaterEqual(self.mock_sdk_manager.release.call_count, 1)
         finally:
             os.unlink(tmp_path)
@@ -160,7 +161,7 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
 
         # acquire() is not called because exception is raised before it
         self.mock_sdk_manager.acquire.assert_not_called()
-        # release() is called in exception handler and also in __del__ when object is destroyed
+        # release() is called in the initialization exception handler
         self.assertGreaterEqual(self.mock_sdk_manager.release.call_count, 1)
 
     def test_initialization_with_custom_frame_duration(self):
@@ -348,19 +349,19 @@ class TestKrispVivaVadAnalyzer(unittest.TestCase):
             self.assertGreaterEqual(confidence, 0.0)
             self.assertLessEqual(confidence, 1.0)
 
-    def test_cleanup_on_destruction(self):
-        """Test that cleanup happens when analyzer is destroyed."""
+    def test_cleanup(self):
+        """Test that cleanup releases resources explicitly."""
         analyzer = KrispVivaVadAnalyzer(model_path=self.model_path)
         analyzer.set_sample_rate(16000)
 
         # Reset mock to track calls
         self.mock_sdk_manager.release.reset_mock()
 
-        # Delete analyzer (triggers __del__)
-        del analyzer
+        asyncio.run(analyzer.cleanup())
 
-        # Verify SDK was released
+        # Verify SDK was released and session was cleared
         self.mock_sdk_manager.release.assert_called_once()
+        self.assertIsNone(analyzer._session)
 
     def test_initialization_with_vad_params(self):
         """Test analyzer initialization with VAD parameters."""
