@@ -6,26 +6,18 @@
 
 """Sarvam LLM service implementation using OpenAI-compatible interface."""
 
-import asyncio
-import json
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Literal, Mapping, Optional, TypeVar
+from typing import Literal, Mapping, Optional
 
-import httpx
 from loguru import logger
-from openai import NOT_GIVEN, APITimeoutError, AsyncStream
-from openai.types.chat import ChatCompletionChunk
+from openai import NOT_GIVEN
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import _NotGiven, is_given
-
-_T = TypeVar("_T")
 
 
 @dataclass
@@ -52,7 +44,6 @@ class SarvamLLMService(OpenAILLMService):
     - request shaping for Sarvam-compatible parameters
     - Sarvam auth header wiring (``api-subscription-key``)
     - SDK User-Agent propagation on every API call
-    - raw Sarvam server error passthrough
     """
 
     _SUPPORTED_MODELS = frozenset(
@@ -216,15 +207,3 @@ class SarvamLLMService(OpenAILLMService):
 
         if has_tool_choice and not has_tools:
             raise ValueError("Sarvam requires non-empty `tools` when `tool_choice` is provided.")
-
-    def _payload_to_message(self, payload: Any) -> str:
-        if isinstance(payload, dict):
-            error_obj = payload.get("error")
-            if isinstance(error_obj, dict) and isinstance(error_obj.get("message"), str):
-                return error_obj["message"]
-            if isinstance(payload.get("message"), str):
-                return payload["message"]
-            return json.dumps(payload, ensure_ascii=False)
-        if isinstance(payload, list):
-            return json.dumps(payload, ensure_ascii=False)
-        return str(payload)
