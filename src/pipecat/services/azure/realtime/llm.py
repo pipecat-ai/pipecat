@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from pipecat.frames.frames import LLMFullResponseStartFrame
 from pipecat.services.openai.realtime import events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 
@@ -81,9 +82,10 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
         """Override to omit output_modalities from response.create events.
 
         Azure's Realtime API does not support the ``response.output_modalities``
-        parameter and will reject requests that include it. This override sends
-        a plain ``ResponseCreateEvent`` without specifying output modalities,
-        while keeping all other behavior from the parent class.
+        parameter in ``response.create`` events and will reject requests that
+        include it.  This override sends a plain ``ResponseCreateEvent`` without
+        specifying output modalities while keeping all other behaviour from the
+        parent class.
         """
         if not self._api_session_ready:
             self._run_llm_when_api_session_ready = True
