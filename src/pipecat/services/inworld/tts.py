@@ -653,6 +653,11 @@ class InworldTTSService(WebsocketTTSService):
         # Track the end time of the last word in the current generation
         self._generation_end_time = 0.0
 
+        # Context IDs already sent to the server via _send_context, used to
+        # make _send_context idempotent so on_turn_context_created can eagerly
+        # open contexts without causing duplicate creates in run_tts.
+        self._sent_context_ids: set[str] = set()
+
         # Init-only config (not runtime-updatable).
         self._audio_encoding = encoding
         self._audio_sample_rate = 0  # Set in start()
@@ -726,6 +731,17 @@ class InworldTTSService(WebsocketTTSService):
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)])
 
+    async def on_turn_context_created(self, context_id: str):
+        """Eagerly open the context on the server when a new turn starts.
+
+        This overlaps server-side context creation with sentence aggregation
+        time, so the context is ready by the time text arrives in run_tts.
+        """
+        try:
+            await self._send_context(context_id)
+        except Exception as e:
+            logger.warning(f"{self}: Failed to pre-open context: {e}")
+
     def _calculate_word_times(self, timestamp_info: Dict[str, Any]) -> List[Tuple[str, float]]:
         """Calculate word timestamps from Inworld WebSocket API response.
 
@@ -771,6 +787,7 @@ class InworldTTSService(WebsocketTTSService):
                 await self._send_close_context(context_id)
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+        self._sent_context_ids.discard(context_id)
         self._cumulative_time = 0.0
         self._generation_end_time = 0.0
 
@@ -887,6 +904,7 @@ class InworldTTSService(WebsocketTTSService):
         finally:
             await self.remove_active_audio_context()
             self._websocket = None
+            self._sent_context_ids.clear()
             self._cumulative_time = 0.0
             self._generation_end_time = 0.0
             await self._call_event_handler("on_disconnected")
@@ -931,8 +949,11 @@ class InworldTTSService(WebsocketTTSService):
                 await self.push_error(error_msg=str(msg["error"]))
                 continue
 
+            # Handle context created confirmation
+            if "contextCreated" in result:
+                logger.trace(f"{self}: Context created on server: {ctx_id}")
             # If the context isn't available recreate it (handles race conditions during interruption recovery).
-            if ctx_id and not self.audio_context_available(ctx_id):
+            elif ctx_id and not self.audio_context_available(ctx_id):
                 logger.trace(f"{self}: Recreating audio context for current context: {ctx_id}")
                 await self.create_audio_context(ctx_id)
 
@@ -956,10 +977,6 @@ class InworldTTSService(WebsocketTTSService):
                 word_times = self._calculate_word_times(timestamp_info)
                 if word_times:
                     await self.add_word_timestamps(word_times, ctx_id)
-
-            # Handle context created confirmation
-            if "contextCreated" in result:
-                logger.trace(f"{self}: Context created on server: {ctx_id}")
 
             # Handle flush completion, which indicates the end of a generation
             if "flushCompleted" in result:
@@ -1001,9 +1018,16 @@ class InworldTTSService(WebsocketTTSService):
     async def _send_context(self, context_id: str):
         """Send a context to the Inworld WebSocket TTS service.
 
+        Idempotent: skips the send if this context was already opened on the
+        server (e.g., eagerly via on_turn_context_created).
+
         Args:
             context_id: The context ID.
         """
+        if context_id in self._sent_context_ids:
+            return
+        self._sent_context_ids.add(context_id)
+
         audio_config = {
             "audioEncoding": self._audio_encoding,
             "sampleRateHertz": self._audio_sample_rate,

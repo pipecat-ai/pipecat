@@ -656,6 +656,18 @@ class TTSService(AIService):
 
         await self.queue_frame(TTSSpeakFrame(text))
 
+    async def on_turn_context_created(self, context_id: str):
+        """Called when a new turn context ID has been created.
+
+        Override to perform provider-specific setup (e.g., eagerly opening a
+        server-side context) before text starts flowing. This is called from
+        ``process_frame`` when an ``LLMFullResponseStartFrame`` arrives.
+
+        Args:
+            context_id: The newly created turn context ID.
+        """
+        pass
+
     async def on_turn_context_completed(self):
         """Handle the completion of a turn."""
         # For HTTP services they emit the frames synchronously, so close the audio context here
@@ -708,6 +720,7 @@ class TTSService(AIService):
             self._llm_response_started = True
             # New LLM turn → assign a fresh context ID shared by all sentences
             self._turn_context_id = self.create_context_id()
+            await self.on_turn_context_created(self._turn_context_id)
             await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             # Flush any remaining text (including text waiting for lookahead)
