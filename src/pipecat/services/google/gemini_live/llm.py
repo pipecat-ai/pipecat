@@ -1181,6 +1181,7 @@ class GeminiLiveLLMService(LLMService):
         """Release a deferred EndFrame and cancel the deferral timeout."""
         if self._end_frame_pending_bot_turn_finished:
             self._cancel_end_frame_deferral_timeout()
+            self._bot_is_responding = False
             frame = self._end_frame_pending_bot_turn_finished
             self._end_frame_pending_bot_turn_finished = None
             await self.queue_frame(frame)
