@@ -682,7 +682,12 @@ class TTSService(AIService):
             await self.remove_audio_context(self._turn_context_id)
 
         # Flush any pending audio so the TTS service closes the current context.
-        await self.flush_audio(context_id=self._turn_context_id)
+        # Only flush if the context was actually opened (text reached run_tts).
+        # When an interruption arrives before any text flows, the turn context ID
+        # exists but was never registered via create_audio_context, so flushing
+        # would send a message for a context the provider never opened.
+        if self._turn_context_id and self.audio_context_available(self._turn_context_id):
+            await self.flush_audio(context_id=self._turn_context_id)
 
         # Reset the turn context ID
         self._turn_context_id = None
