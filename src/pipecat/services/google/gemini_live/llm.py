@@ -1459,6 +1459,8 @@ class GeminiLiveLLMService(LLMService):
             if self._transcription_timeout_task:
                 await self.cancel_task(self._transcription_timeout_task)
                 self._transcription_timeout_task = None
+            self._cancel_end_frame_deferral_timeout()
+            self._end_frame_pending_bot_turn_finished = None
             if self._session:
                 await self._session.close()
                 self._session = None
