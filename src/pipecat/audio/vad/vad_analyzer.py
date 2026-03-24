@@ -242,3 +242,12 @@ class VADAnalyzer(ABC):
             self._vad_stopping_count = 0
 
         return self._vad_state
+
+    async def cleanup(self):
+        """Clean up resources.
+
+        This method should be called when the object is no longer needed.
+        It waits for all currently executing event handler tasks to finish
+        before returning.
+        """
+        pass
