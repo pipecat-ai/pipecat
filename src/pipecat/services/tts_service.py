@@ -750,7 +750,11 @@ class TTSService(AIService):
             self._processing_text = False
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
-                    await self.push_frame(frame, direction)
+                    # Route through the serialization queue so the frame is
+                    # emitted only after the audio context has been fully
+                    # drained (including the final TTSTextFrame).  Pushing
+                    # directly would let it race ahead of queued text frames.
+                    await self._serialization_queue.put(frame)
             else:
                 await self.push_frame(frame, direction)
 
