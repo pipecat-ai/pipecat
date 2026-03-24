@@ -37,7 +37,6 @@ class NovitaLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.novita.ai/openai",
-        model: Optional[str] = None,
         settings: Optional[Settings] = None,
         **kwargs,
     ):
@@ -46,25 +45,23 @@ class NovitaLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Novita AI's API.
             base_url: The base URL for Novita AI API. Defaults to "https://api.novita.ai/openai".
-            model: The model identifier to use. Defaults to "moonshotai/kimi-k2.5".
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=NovitaLLMService.Settings(model=...)`` instead.
-
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        default_settings = self.Settings(model="moonshotai/kimi-k2.5")
-
-        if model is not None:
-            self._warn_init_param_moved_to_settings("model", "model")
-            default_settings.model = model
+        default_settings = self.Settings(
+            model="moonshotai/kimi-k2.5",
+        )
 
         if settings is not None:
             default_settings.apply_update(settings)
 
-        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            settings=default_settings,
+            **kwargs,
+        )
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Novita AI API endpoint.
