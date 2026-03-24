@@ -45,7 +45,6 @@ class SarvamLLMService(OpenAILLMService):
     _SUPPORTED_MODELS = frozenset(
         {"sarvam-30b", "sarvam-30b-16k", "sarvam-105b", "sarvam-105b-32k"}
     )
-    _TOOL_CALLING_MODELS = _SUPPORTED_MODELS
     Settings = SarvamLLMSettings
     _settings: Settings
 
@@ -88,12 +87,6 @@ class SarvamLLMService(OpenAILLMService):
             default_headers=default_headers,
             **kwargs,
         )
-        # Rehydrate into Sarvam settings using inherited concrete store values
-        # from base initialization, then layer Sarvam-specific fields.
-        sarvam_settings = self.Settings.from_mapping(self._settings.given_fields())
-        sarvam_settings.wiki_grounding = default_settings.wiki_grounding
-        sarvam_settings.reasoning_effort = default_settings.reasoning_effort
-        self._settings = sarvam_settings
 
     def create_client(
         self,
