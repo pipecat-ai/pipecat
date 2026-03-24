@@ -7,6 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
+## [0.0.107] - 2026-03-23
+
+### Added
+
+- Added `frame_order` parameter to `SyncParallelPipeline`. Set
+  `frame_order=FrameOrder.PIPELINE` to push synchronized output frames in
+  pipeline definition order (all frames from the first pipeline, then the
+  second, etc.) instead of the default arrival order.
+  (PR [#4029](https://github.com/pipecat-ai/pipecat/pull/4029))
+
+- Added `sync_with_audio` field to `OutputImageRawFrame`. When set to `True`,
+  the output transport queues image frames with audio so they are displayed
+  only after all preceding audio has been sent, enabling synchronized
+  audio/image playback.
+  (PR [#4029](https://github.com/pipecat-ai/pipecat/pull/4029))
+
+- Added `OpenAIResponsesLLMService`, a new LLM service that uses the OpenAI
+  Responses API. Supports streaming text, function calling, usage metrics, and
+  out-of-band inference. Works with the universal `LLMContext` and
+  `LLMContextAggregatorPair`. See
+  `examples/foundational/07-interruptible-openai-responses.py` and
+  `14-function-calling-openai-responses.py`.
+  (PR [#4074](https://github.com/pipecat-ai/pipecat/pull/4074))
+
+- Added `audio_out_auto_silence` parameter to `TransportParams` (defaults to
+  `True`). When set to `False`, the transport waits for audio data instead of
+  inserting silence when the output queue is empty, which is useful for
+  scenarios that require uninterrupted audio playback without artificial gaps.
+  (PR [#4104](https://github.com/pipecat-ai/pipecat/pull/4104))
+
+### Changed
+
+- Renamed tracing span attributes to align with OpenTelemetry GenAI semantic
+  conventions: `gen_ai.system` to `gen_ai.provider.name`, `system` to
+  `gen_ai.system_instructions`, `gen_ai.usage.cache_read_input_tokens` to
+  `gen_ai.usage.cache_read.input_tokens`, and
+  `gen_ai.usage.cache_creation_input_tokens` to
+  `gen_ai.usage.cache_creation.input_tokens`.
+  (PR [#3449](https://github.com/pipecat-ai/pipecat/pull/3449))
+
+- `DeepgramSageMakerTTSService` now correctly routes audio through the base
+  `TTSService` audio context queue. Audio frames are delivered via
+  `append_to_audio_context()` instead of being pushed directly, enabling proper
+  ordering, interruption handling, and start/stop frame lifecycle management.
+  Interruptions now trigger a `Clear` message to Deepgram (flushing its text
+  buffer) at the right time via `on_audio_context_interrupted`.
+  (PR [#4083](https://github.com/pipecat-ai/pipecat/pull/4083))
+
+- `GradiumTTSService` now sends a per-context `setup` message with
+  `client_req_id` before the first text message for each TTS context, following
+  Gradium's multiplexing protocol. Previously, a single setup message was sent
+  at connection time without a `client_req_id`, which prevented Gradium from
+  associating requests with their sessions when using `close_ws_on_eos=False`.
+  (PR [#4091](https://github.com/pipecat-ai/pipecat/pull/4091))
+
+### Fixed
+
+- Fixed stale `system_instruction` in LLM tracing spans by reading from
+  `_settings.system_instruction` instead of the removed `_system_instruction`
+  attribute.
+  (PR [#3449](https://github.com/pipecat-ai/pipecat/pull/3449))
+
+- Fixed `SyncParallelPipeline` breaking the Whisker debugger.
+  (PR [#4029](https://github.com/pipecat-ai/pipecat/pull/4029))
+
+- Fixed `SyncParallelPipeline` race condition where concurrent SystemFrame
+  processing (e.g. from RTVI) could corrupt sink queues and cause deadlocks.
+  SystemFrames now take a fast path that passes them through without draining
+  queued output.
+  (PR [#4029](https://github.com/pipecat-ai/pipecat/pull/4029))
+
+- Fixed TTS frame ordering so that non-system frames always arrive in correct
+  order relative to the `TTSStartedFrame`/`TTSAudioRawFrame`/`TTSStoppedFrame`
+  sequence. Previously these frames could race ahead of or behind audio context
+  frames, producing out-of-order output downstream.
+  (PR [#4075](https://github.com/pipecat-ai/pipecat/pull/4075))
+
+- Fixed `SarvamTTSService` audio and error frames now route through
+  `append_to_audio_context()` instead of `push_frame()`, ensuring correct
+  behavior with audio contexts and interruptions.
+  (PR [#4082](https://github.com/pipecat-ai/pipecat/pull/4082))
+
+- Fixed audio frame ordering and interruption handling in Fish Audio, LMNT,
+  Neuphonic, and Rime NonJson TTS services. These services were bypassing the
+  base `TTSService` audio context serialization queue by pushing audio frames
+  directly, which could cause out-of-order frames and broken interruptions
+  during speech.
+  (PR [#4090](https://github.com/pipecat-ai/pipecat/pull/4090))
+
+- Fixed Genesys AudioHook serializer to always include the `parameters` field in
+  protocol messages. The AudioHook protocol requires every message to carry a
+  `parameters` object (even if empty), but `_create_message` omitted it when no
+  parameters were provided. This caused clients that validate message structure
+  (including the Genesys reference implementation) to reject `pong` and
+  parameter-less `closed` responses, breaking server sequence tracking and
+  preventing `outputVariables` from reaching the Architect flow.
+  (PR [#4093](https://github.com/pipecat-ai/pipecat/pull/4093))
+
 ## [0.0.106] - 2026-03-18
 
 ### Added
