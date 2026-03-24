@@ -846,6 +846,7 @@ class GeminiLiveLLMService(LLMService):
 
         # Bookkeeping for ending gracefully (i.e. after the bot is finished)
         self._end_frame_pending_bot_turn_finished: Optional[EndFrame] = None
+        self._end_frame_deferral_timeout_task: Optional[asyncio.Task] = None
 
         # Initialize the API client. Subclasses can override this if needed.
         self.create_client()
@@ -1022,6 +1023,7 @@ class GeminiLiveLLMService(LLMService):
             if self._bot_is_responding:
                 logger.debug("Deferring handling EndFrame until bot turn is finished")
                 self._end_frame_pending_bot_turn_finished = frame
+                self._create_end_frame_deferral_timeout()
                 return
 
         await super().process_frame(frame, direction)
@@ -1173,8 +1175,47 @@ class GeminiLiveLLMService(LLMService):
         self._bot_is_responding = responding
 
         if not self._bot_is_responding and self._end_frame_pending_bot_turn_finished:
-            await self.queue_frame(self._end_frame_pending_bot_turn_finished)
+            await self._release_deferred_end_frame()
+
+    async def _release_deferred_end_frame(self):
+        """Release a deferred EndFrame and cancel the deferral timeout."""
+        if self._end_frame_pending_bot_turn_finished:
+            self._cancel_end_frame_deferral_timeout()
+            self._bot_is_responding = False
+            frame = self._end_frame_pending_bot_turn_finished
             self._end_frame_pending_bot_turn_finished = None
+            await self.queue_frame(frame)
+
+    # Timeout (in seconds) for the EndFrame deferral. If turn_complete is not
+    # received within this time, the EndFrame is released anyway to prevent the
+    # pipeline from hanging indefinitely.
+    _END_FRAME_DEFERRAL_TIMEOUT_SECS = 30.0
+
+    def _create_end_frame_deferral_timeout(self):
+        """Start a timeout that releases the deferred EndFrame if turn_complete never arrives."""
+        self._cancel_end_frame_deferral_timeout()
+
+        async def _timeout():
+            await asyncio.sleep(self._END_FRAME_DEFERRAL_TIMEOUT_SECS)
+            if self._end_frame_pending_bot_turn_finished:
+                logger.warning(
+                    f"EndFrame deferral timed out after {self._END_FRAME_DEFERRAL_TIMEOUT_SECS}s "
+                    "without receiving turn_complete — releasing EndFrame"
+                )
+                await self._release_deferred_end_frame()
+
+        self._end_frame_deferral_timeout_task = self.create_task(
+            _timeout(), "end_frame_deferral_timeout"
+        )
+
+    def _cancel_end_frame_deferral_timeout(self):
+        """Cancel the EndFrame deferral timeout if active."""
+        if (
+            self._end_frame_deferral_timeout_task
+            and not self._end_frame_deferral_timeout_task.done()
+        ):
+            self._end_frame_deferral_timeout_task.cancel()
+        self._end_frame_deferral_timeout_task = None
 
     async def _connect(self, session_resumption_handle: Optional[str] = None):
         """Establish client connection to Gemini Live API."""
@@ -1334,13 +1375,12 @@ class GeminiLiveLLMService(LLMService):
                             await self.broadcast_interruption()
                         elif message.server_content and message.server_content.model_turn:
                             await self._handle_msg_model_turn(message)
-                        elif (
-                            message.server_content
-                            and message.server_content.turn_complete
-                            and message.usage_metadata
-                        ):
+                        elif message.server_content and message.server_content.turn_complete:
+                            if not message.usage_metadata:
+                                logger.warning("Received turn_complete without usage_metadata")
                             await self._handle_msg_turn_complete(message)
-                            await self._handle_msg_usage_metadata(message)
+                            if message.usage_metadata:
+                                await self._handle_msg_usage_metadata(message)
                         elif message.server_content and message.server_content.input_transcription:
                             await self._handle_msg_input_transcription(message)
                         elif message.server_content and message.server_content.output_transcription:
@@ -1420,6 +1460,8 @@ class GeminiLiveLLMService(LLMService):
             if self._transcription_timeout_task:
                 await self.cancel_task(self._transcription_timeout_task)
                 self._transcription_timeout_task = None
+            self._cancel_end_frame_deferral_timeout()
+            self._end_frame_pending_bot_turn_finished = None
             if self._session:
                 await self._session.close()
                 self._session = None
