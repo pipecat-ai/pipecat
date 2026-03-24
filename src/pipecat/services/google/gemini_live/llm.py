@@ -649,6 +649,11 @@ class GeminiLiveLLMService(LLMService):
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
+    @property
+    def _is_gemini_3(self) -> bool:
+        """Check if the current model is a Gemini 3.x model."""
+        return "gemini-3" in (self._settings.model or "")
+
     def __init__(
         self,
         *,
@@ -792,7 +797,7 @@ class GeminiLiveLLMService(LLMService):
         self._system_instruction_from_init = system_instruction
         self._tools_from_init = tools
         self._inference_on_context_initialization = inference_on_context_initialization
-        self._needs_turn_complete_message = False
+        self._needs_initial_turn_complete_message = False
 
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
@@ -994,8 +999,8 @@ class GeminiLiveLLMService(LLMService):
         self._user_is_speaking = False
         self._user_audio_buffer = bytearray()
         await self.start_ttfb_metrics()
-        if self._needs_turn_complete_message:
-            self._needs_turn_complete_message = False
+        if self._needs_initial_turn_complete_message:
+            self._needs_initial_turn_complete_message = False
             # NOTE: without this, the model ignores the context it's been
             # seeded with before the user started speaking
             await self._session.send_client_content(turn_complete=True)
@@ -1057,9 +1062,10 @@ class GeminiLiveLLMService(LLMService):
         elif isinstance(frame, LLMMessagesAppendFrame):
             # NOTE: handling LLMMessagesAppendFrame here in the LLMService is
             # unusual - typically this would be handled in the user context
-            # aggregator. Leaving this handling here so that user code that
-            # uses this frame *without* a user context aggregator still works
-            # (we have an example that does just that, actually).
+            # aggregator. Leaving this handling here so that legacy user code
+            # that uses this frame *without* a user context aggregator to kick
+            # off a conversation still works (we used to have an example that
+            # did that).
             await self._create_single_response(frame.messages)
         elif isinstance(frame, LLMSetToolsFrame):
             # TODO: implement runtime tool updates for Gemini Live.
@@ -1510,29 +1516,27 @@ class GeminiLiveLLMService(LLMService):
             await self._session.send_client_content(
                 turns=messages, turn_complete=self._inference_on_context_initialization
             )
-            # Gemini 3.1 wants turn_complete=True, but also won't run inference without a realtime input
-            if self._inference_on_context_initialization:
+            # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
+            if self._is_gemini_3 and self._inference_on_context_initialization:
                 await self._session.send_realtime_input(text=" ")
         except Exception as e:
             await self._handle_send_error(e)
 
         # If we're generating a response right away upon initializing
-        # conversation history, set a flag saying that we need a turn complete
-        # message when the user stops speaking.
-        if not self._inference_on_context_initialization:
-            self._needs_turn_complete_message = True
+        # conversation history, set a flag saying that we'll need a turn
+        # complete message when the user stops speaking.
+        # This is a quirky workaround, and not one that Gemini 3 needs.
+        if not self._inference_on_context_initialization and not self._is_gemini_3:
+            self._needs_initial_turn_complete_message = True
 
     async def _create_single_response(self, messages_list):
-        """Create a single response from a list of messages."""
-        if self._disconnecting or not self._session:
-            return
+        """Create a single response from a list of messages.
 
-        model = self._settings.model or ""
-        if "gemini-3" in model:
-            await self.push_error(
-                f"LLMMessagesAppendFrame is not supported with model '{model}'. "
-                "This model does not support send_client_content."
-            )
+        This is only here to support the very specific 'legacy' scenario of
+        kicking off a conversation using LLMMessagesAppendFrame when there's no
+        context aggregators in the pipeline (see process_frame for more details).
+        """
+        if self._disconnecting or not self._session:
             return
 
         # Create a throwaway context just for the purpose of getting messages
@@ -1550,6 +1554,9 @@ class GeminiLiveLLMService(LLMService):
 
         try:
             await self._session.send_client_content(turns=messages, turn_complete=True)
+            # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
+            if self._is_gemini_3:
+                await self._session.send_realtime_input(text=" ")
         except Exception as e:
             await self._handle_send_error(e)
 
