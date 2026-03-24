@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService, OpenAIRealtimeLLMSettings
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -21,7 +21,7 @@ except ModuleNotFoundError as e:
 
 
 @dataclass
-class AzureRealtimeLLMSettings(OpenAIRealtimeLLMSettings):
+class AzureRealtimeLLMSettings(OpenAIRealtimeLLMService.Settings):
     """Settings for AzureRealtimeLLMService."""
 
     pass
@@ -36,7 +36,7 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
     """
 
     Settings = AzureRealtimeLLMSettings
-    _settings: AzureRealtimeLLMSettings
+    _settings: Settings
 
     def __init__(
         self,

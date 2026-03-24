@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -137,17 +137,17 @@ class MiniMaxHttpTTSService(TTSService):
     Supports real-time audio streaming with configurable voice parameters.
 
     Platform documentation:
-    https://www.minimax.io/platform/document/T2A%20V2?key=66719005a427f0c8a5701643
+    https://platform.minimax.io/docs/api-reference/speech-t2a-http
     """
 
     Settings = MiniMaxTTSSettings
-    _settings: MiniMaxTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for MiniMax TTS.
 
         .. deprecated:: 0.0.105
-            Use ``MiniMaxTTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``MiniMaxHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             language: Language for TTS generation. Supports 40 languages.
@@ -190,7 +190,7 @@ class MiniMaxHttpTTSService(TTSService):
         sample_rate: Optional[int] = None,
         stream: bool = True,
         params: Optional[InputParams] = None,
-        settings: Optional[MiniMaxTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the MiniMax TTS service.
@@ -208,12 +208,12 @@ class MiniMaxHttpTTSService(TTSService):
                 "speech-01-hd", "speech-01-turbo".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=MiniMaxTTSSettings(model=...)`` instead.
+                    Use ``settings=MiniMaxHttpTTSService.Settings(model=...)`` instead.
 
             voice_id: Voice identifier. Defaults to "Calm_Woman".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=MiniMaxTTSSettings(voice=...)`` instead.
+                    Use ``settings=MiniMaxHttpTTSService.Settings(voice=...)`` instead.
 
             aiohttp_session: aiohttp.ClientSession for API communication.
             sample_rate: Output audio sample rate in Hz. If None, uses pipeline default.
@@ -221,14 +221,14 @@ class MiniMaxHttpTTSService(TTSService):
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=MiniMaxTTSSettings(...)`` instead.
+                    Use ``settings=MiniMaxHttpTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = MiniMaxTTSSettings(
+        default_settings = self.Settings(
             model="speech-02-turbo",
             voice="Calm_Woman",
             language=None,
@@ -243,15 +243,15 @@ class MiniMaxHttpTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", MiniMaxTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", MiniMaxTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", MiniMaxTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.speed = params.speed
                 default_settings.volume = params.volume

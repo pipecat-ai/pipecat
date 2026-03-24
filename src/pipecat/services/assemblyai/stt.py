@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -129,7 +129,7 @@ class AssemblyAISTTService(WebsocketSTTService):
     """
 
     Settings = AssemblyAISTTSettings
-    _settings: AssemblyAISTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -143,7 +143,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         vad_force_turn_endpoint: bool = True,
         should_interrupt: bool = True,
         speaker_format: Optional[str] = None,
-        settings: Optional[AssemblyAISTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = ASSEMBLYAI_TTFS_P99,
         **kwargs,
     ):
@@ -154,7 +154,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             language: Language code for transcription. Defaults to English (Language.EN).
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AssemblyAISTTSettings(language=...)`` instead.
+                    Use ``settings=AssemblyAISTTService.Settings(language=...)`` instead.
 
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
             sample_rate: Audio sample rate in Hz. Defaults to 16000.
@@ -162,7 +162,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             connection_params: Connection configuration parameters.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AssemblyAISTTSettings(...)`` instead.
+                    Use ``settings=AssemblyAISTTService.Settings(...)`` instead.
 
             vad_force_turn_endpoint: Controls turn detection mode.
                 When True (Pipecat mode, default): Forces AssemblyAI to return finals ASAP
@@ -190,7 +190,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to parent STTService class.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AssemblyAISTTSettings(
+        default_settings = self.Settings(
             model="u3-rt-pro",
             language=Language.EN,
             formatted_finals=True,
@@ -208,12 +208,12 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if language is not None:
-            _warn_deprecated_param("language", AssemblyAISTTSettings, "language")
+            self._warn_init_param_moved_to_settings("language", "language")
             default_settings.language = language
 
         # 3. Apply connection_params overrides (deprecated) — only if settings not provided
         if connection_params is not None:
-            _warn_deprecated_param("connection_params", AssemblyAISTTSettings)
+            self._warn_init_param_moved_to_settings("connection_params")
             if not settings:
                 sample_rate = connection_params.sample_rate
                 encoding = connection_params.encoding
@@ -299,7 +299,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         self._user_speaking = False
 
-    def _configure_pipecat_turn_mode(self, settings: AssemblyAISTTSettings, is_u3_pro: bool):
+    def _configure_pipecat_turn_mode(self, settings: Settings, is_u3_pro: bool):
         """Configure settings for Pipecat turn detection mode.
 
         When vad_force_turn_endpoint is enabled, force AssemblyAI to return
@@ -353,7 +353,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings(self, delta: AssemblyAISTTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta and reconnect to apply changes.
 
         Args:

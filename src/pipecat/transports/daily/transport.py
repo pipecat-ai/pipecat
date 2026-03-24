@@ -22,6 +22,7 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     BotConnectedFrame,
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputDTMFFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
@@ -394,6 +396,7 @@ class DailyCallbacks(BaseModel):
         on_dialout_stopped: Called when dial-out is stopped.
         on_dialout_error: Called when dial-out encounters an error.
         on_dialout_warning: Called when dial-out has a warning.
+        on_dtmf_event: Called when a DTMF tone happens.
         on_participant_joined: Called when a participant joins.
         on_participant_left: Called when a participant leaves.
         on_participant_updated: Called when participant info is updated.
@@ -424,6 +427,7 @@ class DailyCallbacks(BaseModel):
     on_dialout_stopped: Callable[[Any], Awaitable[None]]
     on_dialout_error: Callable[[Any], Awaitable[None]]
     on_dialout_warning: Callable[[Any], Awaitable[None]]
+    on_dtmf_event: Callable[[Any], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
@@ -672,15 +676,19 @@ class DailyTransportClient(EventHandler):
             await asyncio.sleep(0.01)
             return None
 
-    async def register_audio_destination(self, destination: str):
+    async def register_audio_destination(
+        self, destination: str, auto_silence: Optional[bool] = True
+    ):
         """Register a custom audio destination for multi-track output.
 
         Args:
             destination: The destination identifier to register.
+            auto_silence: If True, the audio source inserts silence when no audio is available.
+                If False, the source waits for audio data. Defaults to True.
         """
         params = (self._params.custom_audio_track_params or {}).get(destination)
         self._custom_audio_tracks[destination] = await self.add_custom_audio_track(
-            destination, params=params
+            destination, params=params, auto_silence=auto_silence
         )
         publishing: Dict[str, Any] = {"customAudio": {destination: True}}
         if params and params.send_settings:
@@ -827,7 +835,14 @@ class DailyTransportClient(EventHandler):
             self._camera_track = DailyVideoTrack(source=video_source, track=video_track)
 
         if self._params.audio_out_enabled and not self._microphone_track:
-            audio_source = CustomAudioSource(self._out_sample_rate, self._params.audio_out_channels)
+            logger.debug(
+                f"Creating custom audio source, auto silence {self._params.audio_out_auto_silence}"
+            )
+            audio_source = CustomAudioSource(
+                self._out_sample_rate,
+                self._params.audio_out_channels,
+                self._params.audio_out_auto_silence,
+            )
             audio_track = CustomAudioTrack(audio_source)
             self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
 
@@ -1265,12 +1280,15 @@ class DailyTransportClient(EventHandler):
         self,
         track_name: str,
         params: Optional[DailyCustomAudioTrackParams] = None,
+        auto_silence: Optional[bool] = True,
     ) -> DailyAudioTrack:
         """Add a custom audio track for multi-stream output.
 
         Args:
             track_name: Name for the custom audio track.
             params: Optional per-track configuration for sample rate, channels, and sendSettings.
+            auto_silence: If True, the audio source inserts silence when no audio is available.
+                If False, the source waits for audio data. Defaults to True.
 
         Returns:
             The created DailyAudioTrack instance.
@@ -1280,7 +1298,7 @@ class DailyTransportClient(EventHandler):
         sample_rate = params.sample_rate if params and params.sample_rate else self._out_sample_rate
         channels = params.channels if params else 1
 
-        audio_source = CustomAudioSource(sample_rate, channels)
+        audio_source = CustomAudioSource(sample_rate, channels, auto_silence)
 
         audio_track = CustomAudioTrack(audio_source)
 
@@ -1559,6 +1577,14 @@ class DailyTransportClient(EventHandler):
             data: Dial-out warning data.
         """
         self._call_event_callback(self._callbacks.on_dialout_warning, data)
+
+    def on_dtmf_event(self, data: Any):
+        """Handle incoming DTMF events.
+
+        Args:
+            data: DTMF data.
+        """
+        self._call_event_callback(self._callbacks.on_dtmf_event, data)
 
     def on_participant_joined(self, participant):
         """Handle participant joined events.
@@ -2313,6 +2339,7 @@ class DailyTransport(BaseTransport):
             on_dialout_stopped=self._on_dialout_stopped,
             on_dialout_error=self._on_dialout_error,
             on_dialout_warning=self._on_dialout_warning,
+            on_dtmf_event=self._on_dtmf_event,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
@@ -2354,6 +2381,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_dialout_stopped")
         self._register_event_handler("on_dialout_error")
         self._register_event_handler("on_dialout_warning")
+        self._register_event_handler("on_dtmf_event")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
@@ -2863,6 +2891,15 @@ class DailyTransport(BaseTransport):
         """Handle dial-out warning events."""
         logger.warning(f"{self} dial-out warning: {data}")
         await self._call_event_handler("on_dialout_warning", data)
+
+    async def _on_dtmf_event(self, data):
+        """Handle incoming DTMF events."""
+        logger.debug(f"{self} DTMF event: {data}")
+        await self._call_event_handler("on_dtmf_event", data)
+
+        if self._input:
+            frame = InputDTMFFrame(button=KeypadEntry(data["tone"]))
+            await self._input.push_frame(frame)
 
     async def _on_participant_joined(self, participant):
         """Handle participant joined events."""

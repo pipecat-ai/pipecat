@@ -241,6 +241,7 @@ class TavusTransportClient:
                 on_dialout_stopped=partial(self._on_handle_callback, "on_dialout_stopped"),
                 on_dialout_error=partial(self._on_handle_callback, "on_dialout_error"),
                 on_dialout_warning=partial(self._on_handle_callback, "on_dialout_warning"),
+                on_dtmf_event=partial(self._on_handle_callback, "on_dtmf_event"),
                 on_participant_joined=self._callbacks.on_participant_joined,
                 on_participant_left=self._callbacks.on_participant_left,
                 on_participant_updated=partial(self._on_handle_callback, "on_participant_updated"),
@@ -416,16 +417,20 @@ class TavusTransportClient:
             return False
         return await self._client.write_audio_frame(frame)
 
-    async def register_audio_destination(self, destination: str):
+    async def register_audio_destination(
+        self, destination: str, auto_silence: Optional[bool] = True
+    ):
         """Register an audio destination for output.
 
         Args:
             destination: The destination identifier to register.
+            auto_silence: If True, the audio source inserts silence when no audio is available.
+                If False, the source waits for audio data. Defaults to True.
         """
         if not self._client:
             return
 
-        await self._client.register_audio_destination(destination)
+        await self._client.register_audio_destination(destination, auto_silence=auto_silence)
 
 
 class TavusInputTransport(BaseInputTransport):

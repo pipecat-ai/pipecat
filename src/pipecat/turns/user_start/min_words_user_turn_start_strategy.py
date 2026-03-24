@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     TranscriptionFrame,
 )
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
@@ -47,7 +48,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         await super().reset()
         self._bot_speaking = False
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame to detect the start of a user turn.
 
         This method updates internal state based on transcription frames and
@@ -55,17 +56,20 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         Args:
             frame: The frame to be analyzed.
-        """
-        await super().process_frame(frame)
 
+        Returns:
+            STOP if the minimum word count was reached, CONTINUE otherwise.
+        """
         if isinstance(frame, BotStartedSpeakingFrame):
             await self._handle_bot_started_speaking(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking(frame)
         elif isinstance(frame, TranscriptionFrame):
-            await self._handle_transcription(frame)
+            return await self._handle_transcription(frame)
         elif isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
-            await self._handle_transcription(frame)
+            return await self._handle_transcription(frame)
+
+        return ProcessFrameResult.CONTINUE
 
     async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
         """Handle bot started speaking frame.
@@ -87,11 +91,16 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         self._bot_speaking = False
 
-    async def _handle_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
-        """Handle a completed transcription frame and check word count.
+    async def _handle_transcription(
+        self, frame: TranscriptionFrame | InterimTranscriptionFrame
+    ) -> ProcessFrameResult:
+        """Handle a transcription frame and check word count.
 
         Args:
             frame: The transcription frame to be processed.
+
+        Returns:
+            STOP if the minimum word count was reached, CONTINUE otherwise.
         """
         min_words = self._min_words if self._bot_speaking else 1
 
@@ -106,3 +115,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         if should_trigger:
             await self.trigger_user_turn_started()
+            return ProcessFrameResult.STOP
+        await self.trigger_reset_aggregation()
+
+        return ProcessFrameResult.CONTINUE

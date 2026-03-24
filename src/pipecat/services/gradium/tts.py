@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -48,13 +48,13 @@ class GradiumTTSService(WebsocketTTSService):
     """Text-to-Speech service using Gradium's websocket API."""
 
     Settings = GradiumTTSSettings
-    _settings: GradiumTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Gradium TTS service.
 
         .. deprecated:: 0.0.105
-            Use ``GradiumTTSSettings`` directly via the ``settings`` parameter instead.
+            Use ``GradiumTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             temp: Temperature to be used for generation, defaults to 0.6.
@@ -71,7 +71,7 @@ class GradiumTTSService(WebsocketTTSService):
         model: Optional[str] = None,
         json_config: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[GradiumTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Gradium TTS service.
@@ -81,26 +81,26 @@ class GradiumTTSService(WebsocketTTSService):
             voice_id: the voice identifier.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GradiumTTSSettings(voice=...)`` instead.
+                    Use ``settings=GradiumTTSService.Settings(voice=...)`` instead.
 
             url: Gradium websocket API endpoint.
             model: Model ID to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GradiumTTSSettings(model=...)`` instead.
+                    Use ``settings=GradiumTTSService.Settings(model=...)`` instead.
 
             json_config: Optional JSON configuration string for additional model settings.
             params: Additional configuration parameters.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GradiumTTSSettings(...)`` instead.
+                    Use ``settings=GradiumTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent class.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GradiumTTSSettings(
+        default_settings = self.Settings(
             model="default",
             voice="YTpq7expH9539ERJ",
             language=None,
@@ -108,15 +108,15 @@ class GradiumTTSService(WebsocketTTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GradiumTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", GradiumTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GradiumTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             # Note: params.temp has no corresponding settings field
 
         # 4. Apply settings delta (canonical API, always wins)
@@ -140,6 +140,7 @@ class GradiumTTSService(WebsocketTTSService):
 
         # State tracking
         self._receive_task = None
+        self._setup_context_ids: set[str] = set()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -153,7 +154,7 @@ class GradiumTTSService(WebsocketTTSService):
         """Apply a settings delta and reconnect if voice changed.
 
         Args:
-            delta: A :class:`TTSSettings` (or ``GradiumTTSSettings``) delta.
+            delta: A :class:`TTSSettings` (or ``GradiumTTSService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.
@@ -166,8 +167,25 @@ class GradiumTTSService(WebsocketTTSService):
             self._warn_unhandled_updated_settings(changed)
         return changed
 
-    def _build_msg(self, text: str = "", context_id: str = "") -> dict:
-        """Build JSON message for Gradium API."""
+    def _build_setup_msg(self, context_id: str) -> dict:
+        """Build setup message for Gradium API.
+
+        Args:
+            context_id: Context ID to use as ``client_req_id``.
+        """
+        setup_msg: dict[str, Any] = {
+            "type": "setup",
+            "output_format": "pcm",
+            "voice_id": self._settings.voice,
+            "close_ws_on_eos": False,
+            "client_req_id": context_id,
+        }
+        if self._json_config is not None:
+            setup_msg["json_config"] = self._json_config
+        return setup_msg
+
+    def _build_text_msg(self, text: str = "", context_id: str = "") -> dict:
+        """Build text message for Gradium API."""
         msg = {"text": text, "type": "text", "client_req_id": context_id}
         return msg
 
@@ -236,22 +254,6 @@ class GradiumTTSService(WebsocketTTSService):
             headers = {"x-api-key": self._api_key, "x-api-source": "pipecat"}
             self._websocket = await websocket_connect(self._url, additional_headers=headers)
 
-            setup_msg = {
-                "type": "setup",
-                "output_format": "pcm",
-                "voice_id": self._settings.voice,
-                "close_ws_on_eos": False,
-            }
-            if self._json_config is not None:
-                setup_msg["json_config"] = self._json_config
-            await self._websocket.send(json.dumps(setup_msg))
-            ready_msg = await self._websocket.recv()
-            ready_msg = json.loads(ready_msg)
-            if ready_msg["type"] == "error":
-                raise Exception(f"received error {ready_msg['message']}")
-            if ready_msg["type"] != "ready":
-                raise Exception(f"unexpected first message type {ready_msg['type']}")
-
             await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -269,6 +271,7 @@ class GradiumTTSService(WebsocketTTSService):
         finally:
             await self.remove_active_audio_context()
             self._websocket = None
+            self._setup_context_ids.clear()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -334,10 +337,15 @@ class GradiumTTSService(WebsocketTTSService):
                 if ctx_id and self.audio_context_available(ctx_id):
                     await self.add_word_timestamps([(msg["text"], msg["start_s"])], ctx_id)
 
+            elif msg["type"] == "ready":
+                pass
+
             elif msg["type"] == "end_of_stream":
                 if ctx_id and self.audio_context_available(ctx_id):
                     await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
                     await self.remove_audio_context(ctx_id)
+                if ctx_id:
+                    self._setup_context_ids.discard(ctx_id)
                 await self.stop_all_metrics()
 
             elif msg["type"] == "error":
@@ -363,8 +371,12 @@ class GradiumTTSService(WebsocketTTSService):
                 await self._connect()
 
             try:
-                msg = self._build_msg(text=text, context_id=context_id)
-                await self._get_websocket().send(json.dumps(msg))
+                ws = self._get_websocket()
+                if context_id not in self._setup_context_ids:
+                    await ws.send(json.dumps(self._build_setup_msg(context_id)))
+                    self._setup_context_ids.add(context_id)
+                msg = self._build_text_msg(text=text, context_id=context_id)
+                await ws.send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")

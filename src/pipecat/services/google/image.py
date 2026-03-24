@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
 
 try:
     from google import genai
@@ -60,13 +60,13 @@ class GoogleImageGenService(ImageGenService):
     """
 
     Settings = GoogleImageGenSettings
-    _settings: GoogleImageGenSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Google image generation.
 
         .. deprecated:: 0.0.105
-            Use ``settings=GoogleImageGenSettings(...)`` instead.
+            Use ``settings=GoogleImageGenService.Settings(...)`` instead.
 
         Parameters:
             number_of_images: Number of images to generate (1-8). Defaults to 1.
@@ -84,7 +84,7 @@ class GoogleImageGenService(ImageGenService):
         api_key: str,
         params: Optional[InputParams] = None,
         http_options: Optional[Any] = None,
-        settings: Optional[GoogleImageGenSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the GoogleImageGenService with API key and parameters.
@@ -94,7 +94,7 @@ class GoogleImageGenService(ImageGenService):
             params: Configuration parameters for image generation.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GoogleImageGenSettings(...)`` instead.
+                    Use ``settings=GoogleImageGenService.Settings(...)`` instead.
 
             http_options: HTTP options for the client.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -102,7 +102,7 @@ class GoogleImageGenService(ImageGenService):
             **kwargs: Additional arguments passed to the parent ImageGenService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GoogleImageGenSettings(
+        default_settings = self.Settings(
             model="imagen-3.0-generate-002",
             number_of_images=1,
             negative_prompt=None,
@@ -110,7 +110,7 @@ class GoogleImageGenService(ImageGenService):
 
         # 2. Apply params overrides (deprecated)
         if params is not None:
-            _warn_deprecated_param("params", GoogleImageGenSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.model = params.model
                 default_settings.number_of_images = params.number_of_images

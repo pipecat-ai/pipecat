@@ -14,17 +14,19 @@ reporting patterns while maintaining compatibility with the Pipecat framework.
 from dataclasses import dataclass
 from typing import Optional
 
+from loguru import logger
+
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class PerplexityLLMSettings(OpenAILLMSettings):
+class PerplexityLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for PerplexityLLMService."""
 
     pass
@@ -38,8 +40,10 @@ class PerplexityLLMService(OpenAILLMService):
     in token usage reporting between Perplexity (incremental) and OpenAI (final summary).
     """
 
+    adapter_class = PerplexityLLMAdapter
+
     Settings = PerplexityLLMSettings
-    _settings: PerplexityLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -47,7 +51,7 @@ class PerplexityLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://api.perplexity.ai",
         model: Optional[str] = None,
-        settings: Optional[PerplexityLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Perplexity LLM service.
@@ -58,18 +62,18 @@ class PerplexityLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "sonar".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=PerplexityLLMService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = PerplexityLLMSettings(model="sonar")
+        default_settings = self.Settings(model="sonar")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", PerplexityLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)
@@ -120,6 +124,10 @@ class PerplexityLLMService(OpenAILLMService):
         # Prepend system instruction if set
         if self._settings.system_instruction:
             messages = params.get("messages", [])
+            if messages and messages[0].get("role") == "system":
+                logger.warning(
+                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
+                )
             params["messages"] = [
                 {"role": "system", "content": self._settings.system_instruction}
             ] + messages

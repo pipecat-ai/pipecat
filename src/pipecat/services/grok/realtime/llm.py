@@ -60,7 +60,6 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
     _NotGiven,
-    _warn_deprecated_param,
     is_given,
 )
 from pipecat.utils.time import time_now_iso8601
@@ -109,7 +108,7 @@ class GrokRealtimeLLMSettings(LLMSettings):
     # -- Bidirectional sync helpers ------------------------------------------
 
     @staticmethod
-    def _sync_top_level_to_sp(settings: "GrokRealtimeLLMSettings"):
+    def _sync_top_level_to_sp(settings: "GrokRealtimeLLMService.Settings"):
         """Push top-level ``system_instruction`` into ``session_properties``."""
         if not is_given(settings.session_properties):
             return
@@ -119,7 +118,7 @@ class GrokRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "GrokRealtimeLLMSettings") -> Dict[str, Any]:
+    def apply_update(self, delta: "GrokRealtimeLLMService.Settings") -> Dict[str, Any]:
         """Merge a delta, keeping ``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -151,8 +150,8 @@ class GrokRealtimeLLMSettings(LLMSettings):
 
     @classmethod
     def from_mapping(
-        cls: Type["GrokRealtimeLLMSettings"], settings: Mapping[str, Any]
-    ) -> "GrokRealtimeLLMSettings":
+        cls: Type["GrokRealtimeLLMService.Settings"], settings: Mapping[str, Any]
+    ) -> "GrokRealtimeLLMService.Settings":
         """Build a delta from a plain dict, routing SP keys into ``session_properties``.
 
         Keys that correspond to ``SessionProperties`` fields are collected into
@@ -203,7 +202,7 @@ class GrokRealtimeLLMService(LLMService):
     """
 
     Settings = GrokRealtimeLLMSettings
-    _settings: GrokRealtimeLLMSettings
+    _settings: Settings
 
     # Use the Grok-specific adapter
     adapter_class = GrokRealtimeLLMAdapter
@@ -214,7 +213,7 @@ class GrokRealtimeLLMService(LLMService):
         api_key: str,
         base_url: str = "wss://api.x.ai/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
-        settings: Optional[GrokRealtimeLLMSettings] = None,
+        settings: Optional[Settings] = None,
         start_audio_paused: bool = False,
         **kwargs,
     ):
@@ -228,7 +227,7 @@ class GrokRealtimeLLMService(LLMService):
                 If None, uses default SessionProperties with voice "Ara".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GrokRealtimeLLMSettings(session_properties=...)``
+                    Use ``settings=GrokRealtimeLLMService.Settings(session_properties=...)``
                     instead.
 
                 To set a different voice, configure it in session_properties:
@@ -241,7 +240,7 @@ class GrokRealtimeLLMService(LLMService):
             **kwargs: Additional arguments passed to parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GrokRealtimeLLMSettings(
+        default_settings = self.Settings(
             model=None,
             system_instruction=None,
             temperature=None,
@@ -260,7 +259,7 @@ class GrokRealtimeLLMService(LLMService):
         if session_properties is not None:
             _warn_deprecated_param(
                 "session_properties",
-                GrokRealtimeLLMSettings,
+                self.Settings,
                 "session_properties",
             )
             default_settings.session_properties = session_properties
@@ -269,7 +268,7 @@ class GrokRealtimeLLMService(LLMService):
                 default_settings.system_instruction = session_properties.instructions
 
         # Sync top-level system_instruction back into session_properties
-        GrokRealtimeLLMSettings._sync_top_level_to_sp(default_settings)
+        self.Settings._sync_top_level_to_sp(default_settings)
 
         # 3. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -940,7 +939,7 @@ class GrokRealtimeLLMService(LLMService):
         item = events.ConversationItem(
             type="function_call_output",
             call_id=tool_call_id,
-            output=json.dumps(result),
+            output=json.dumps(result, ensure_ascii=False),
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 

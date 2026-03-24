@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     VisionFullResponseStartFrame,
     VisionTextFrame,
 )
-from pipecat.services.settings import VisionSettings, _warn_deprecated_param
+from pipecat.services.settings import VisionSettings
 from pipecat.services.vision_service import VisionService
 
 try:
@@ -80,7 +80,7 @@ class MoondreamService(VisionService):
     """
 
     Settings = MoondreamSettings
-    _settings: MoondreamSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -88,7 +88,7 @@ class MoondreamService(VisionService):
         model: Optional[str] = None,
         revision="2025-01-09",
         use_cpu=False,
-        settings: Optional[MoondreamSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Moondream service.
@@ -97,7 +97,7 @@ class MoondreamService(VisionService):
             model: Hugging Face model identifier for the Moondream model.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=MoondreamSettings(model=...)`` instead.
+                    Use ``settings=MoondreamService.Settings(model=...)`` instead.
 
             revision: Specific model revision to use.
             use_cpu: Whether to force CPU usage instead of hardware acceleration.
@@ -106,11 +106,11 @@ class MoondreamService(VisionService):
             **kwargs: Additional arguments passed to the parent VisionService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = MoondreamSettings(model="vikhyatk/moondream2")
+        default_settings = self.Settings(model="vikhyatk/moondream2")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", MoondreamSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 4. Apply settings delta (canonical API, always wins)

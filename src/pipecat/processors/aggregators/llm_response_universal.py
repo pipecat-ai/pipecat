@@ -75,6 +75,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     SummaryAppliedEvent,
 )
 from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
+from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
@@ -446,6 +447,9 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_controller.add_event_handler(
             "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
         )
+        self._user_turn_controller.add_event_handler(
+            "on_reset_aggregation", self._on_reset_aggregation
+        )
 
         self._user_idle_controller = UserIdleController(
             user_idle_timeout=self._params.user_idle_timeout
@@ -561,10 +565,10 @@ class LLMUserAggregator(LLMContextAggregator):
             # Enable the feature on the LLM with config
             await self.push_frame(
                 LLMUpdateSettingsFrame(
-                    settings={
-                        "filter_incomplete_user_turns": True,
-                        "user_turn_completion_config": config,
-                    }
+                    delta=LLMSettings(
+                        filter_incomplete_user_turns=True,
+                        user_turn_completion_config=config,
+                    )
                 )
             )
 
@@ -746,6 +750,12 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._maybe_emit_user_turn_stopped(strategy)
+
+    async def _on_reset_aggregation(
+        self, controller: UserTurnController, strategy: BaseUserTurnStartStrategy
+    ):
+        logger.debug(f"{self}: Resetting aggregation (strategy: {strategy})")
+        await self.reset()
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")

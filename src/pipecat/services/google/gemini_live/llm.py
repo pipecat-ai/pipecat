@@ -76,7 +76,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
@@ -553,7 +553,7 @@ class InputParams(BaseModel):
     """Input parameters for Gemini Live generation.
 
     .. deprecated:: 0.0.105
-        Use ``GeminiLiveLLMSettings`` instead.
+        Use ``GeminiLiveLLMService.Settings`` instead.
 
     Parameters:
         frequency_penalty: Frequency penalty for generation (0.0-2.0). Defaults to None.
@@ -643,7 +643,7 @@ class GeminiLiveLLMService(LLMService):
     """
 
     Settings = GeminiLiveLLMSettings
-    _settings: GeminiLiveLLMSettings
+    _settings: Settings
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
@@ -660,7 +660,7 @@ class GeminiLiveLLMService(LLMService):
         system_instruction: Optional[str] = None,
         tools: Optional[Union[List[dict], ToolsSchema]] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[GeminiLiveLLMSettings] = None,
+        settings: Optional[Settings] = None,
         inference_on_context_initialization: bool = True,
         file_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/files",
         http_options: Optional[HttpOptions] = None,
@@ -680,12 +680,12 @@ class GeminiLiveLLMService(LLMService):
             model: Model identifier to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GeminiLiveLLMSettings(model=...)`` instead.
+                    Use ``settings=GeminiLiveLLMService.Settings(model=...)`` instead.
 
             voice_id: TTS voice identifier. Defaults to "Charon".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GeminiLiveLLMSettings(voice=...)`` instead.
+                    Use ``settings=GeminiLiveLLMService.Settings(voice=...)`` instead.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             system_instruction: System prompt for the model. Defaults to None.
@@ -693,7 +693,7 @@ class GeminiLiveLLMService(LLMService):
             params: Configuration parameters for the model.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GeminiLiveLLMSettings(...)`` instead.
+                    Use ``settings=GeminiLiveLLMService.Settings(...)`` instead.
 
             settings: Gemini Live LLM settings. If provided together with deprecated
                 top-level parameters, the ``settings`` values take precedence.
@@ -716,7 +716,7 @@ class GeminiLiveLLMService(LLMService):
                 )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GeminiLiveLLMSettings(
+        default_settings = self.Settings(
             model="models/gemini-2.5-flash-native-audio-preview-12-2025",
             system_instruction=system_instruction,
             voice="Charon",
@@ -742,15 +742,15 @@ class GeminiLiveLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", GeminiLiveLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id != "Charon":
-            _warn_deprecated_param("voice_id", GeminiLiveLLMSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GeminiLiveLLMSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.frequency_penalty = params.frequency_penalty
                 default_settings.max_tokens = params.max_tokens

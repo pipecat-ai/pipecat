@@ -43,6 +43,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     StartFrame,
+    SystemFrame,
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -244,6 +245,26 @@ class TTSService(AIService):
             or TTSSettings(),
             **kwargs,
         )
+
+        # Convert Language enum to service-specific format at init time.
+        # Runtime updates are handled by _update_settings(), but init-time
+        # settings bypass that path and need explicit conversion.
+        # Raw strings (e.g. "de-DE") are first converted to Language enums
+        # so they go through the same resolution logic.
+        if isinstance(self._settings.language, str) and not isinstance(
+            self._settings.language, Language
+        ):
+            try:
+                self._settings.language = Language(self._settings.language)
+            except ValueError:
+                logger.warning(
+                    f"Language string '{self._settings.language}' is not a recognized "
+                    f"Language code. It will be passed to the service as-is."
+                )
+        if isinstance(self._settings.language, Language):
+            converted = self.language_to_service_language(self._settings.language)
+            if converted is not None:
+                self._settings.language = converted
 
         # Resolve text_aggregation_mode from the new param or deprecated aggregate_sentences
         if aggregate_sentences is not None:
@@ -536,15 +557,15 @@ class TTSService(AIService):
             frame: The end frame.
         """
         await super().stop(frame)
+        if self._audio_context_task:
+            # Sentinel None shuts down the serialization queue once all
+            # pending contexts and frames have been processed.
+            await self._serialization_queue.put(None)
+            await self._audio_context_task
+            self._audio_context_task = None
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
-        if self._audio_context_task:
-            # Indicate no more audio contexts are available; this will end the
-            # task cleanly after all contexts have been processed.
-            await self._contexts_queue.put(None)
-            await self._audio_context_task
-            self._audio_context_task = None
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the TTS service.
@@ -602,7 +623,20 @@ class TTSService(AIService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        # Translate language *before* applying so the stored value is canonical
+        # Translate language *before* applying so the stored value is canonical.
+        # Raw strings are first converted to Language enums for proper resolution.
+        if (
+            is_given(delta.language)
+            and isinstance(delta.language, str)
+            and not isinstance(delta.language, Language)
+        ):
+            try:
+                delta.language = Language(delta.language)
+            except ValueError:
+                logger.warning(
+                    f"Language string '{delta.language}' is not a recognized "
+                    f"Language code. It will be passed to the service as-is."
+                )
         if is_given(delta.language) and isinstance(delta.language, Language):
             converted = self.language_to_service_language(delta.language)
             if converted is not None:
@@ -687,17 +721,17 @@ class TTSService(AIService):
             self._turn_context_id = self.create_context_id()
             await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
-            # We pause processing incoming frames if the LLM response included
-            # text (it might be that it's only a function calling response). We
-            # pause to avoid audio overlapping.
-            await self._maybe_pause_frame_processing()
-
             # Flush any remaining text (including text waiting for lookahead)
             remaining = await self._text_aggregator.flush()
             # Stop the aggregation metric (no-op if already stopped on first sentence).
             await self.stop_text_aggregation_metrics()
             if remaining:
                 await self._push_tts_frames(AggregatedTextFrame(remaining.text, remaining.type))
+
+            # We pause processing incoming frames if the LLM response included
+            # text (it might be that it's only a function calling response). We
+            # pause to avoid audio overlapping.
+            await self._maybe_pause_frame_processing()
 
             # Log accumulated streamed text and emit aggregated usage metric.
             if self._streamed_text:
@@ -738,7 +772,9 @@ class TTSService(AIService):
             self._turn_context_id = saved_turn_context_id
             self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
-            if frame.delta is not None:
+            if frame.service is not None and frame.service is not self:
+                await self.push_frame(frame, direction)
+            elif frame.delta is not None:
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
@@ -756,7 +792,15 @@ class TTSService(AIService):
             await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
         else:
-            await self.push_frame(frame, direction)
+            if direction == FrameDirection.DOWNSTREAM and not isinstance(frame, SystemFrame):
+                # Route non-system downstream frames through the serialization queue so they
+                # are emitted in the same order they arrive relative to any audio contexts that
+                # are already queued (e.g. a FooFrame sent right after a TTSSpeakFrame must
+                # not overtake the TTSStartedFrame / TTSAudioRawFrame / TTSStoppedFrame
+                # sequence from that speak frame).
+                await self._serialization_queue.put(frame)
+            else:
+                await self.push_frame(frame, direction)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream with TTS-specific handling.
@@ -959,7 +1003,15 @@ class TTSService(AIService):
         # is spoken, so we set append_to_context to False.
         src_frame.append_to_context = False
         src_frame.context_id = context_id
-        await self.push_frame(src_frame)
+        # Route AggregatedTextFrame through the serialization queue so it is emitted
+        # immediately before the TTSStartedFrame of the audio context it describes,
+        # rather than racing ahead of audio frames from a previous context.
+        if not self.audio_context_available(context_id):
+            await self._serialization_queue.put(src_frame)
+        # Otherwise, if the context already exists, we append the AggregatedTextFrame
+        # to the existing context queue.
+        else:
+            await self.append_to_audio_context(context_id, src_frame)
 
         # Note: Text transformations are meant to only affect the text sent to the TTS for
         # TTS-specific purposes. This allows for explicit TTS modifications (e.g., inserting
@@ -1008,11 +1060,8 @@ class TTSService(AIService):
             # Only override append_to_context if explicitly set
             if append_tts_text_to_context is not None:
                 frame.append_to_context = append_tts_text_to_context
-            # For services using the audio context we are appending to the context, so it preserves the ordering.
-            if self.audio_context_available(context_id):
-                await self.append_to_audio_context(context_id, frame)
-            else:
-                await self.push_frame(frame)
+            # Appending to the context, so it preserves the ordering.
+            await self.append_to_audio_context(context_id, frame)
 
     async def tts_process_generator(
         self, context_id: str, generator: AsyncGenerator[Frame | None, None]
@@ -1168,7 +1217,7 @@ class TTSService(AIService):
         Args:
             context_id: Unique identifier for the audio context.
         """
-        await self._contexts_queue.put(context_id)
+        await self._serialization_queue.put(context_id)
         self._audio_contexts[context_id] = asyncio.Queue()
         logger.trace(f"{self} created audio context {context_id}")
 
@@ -1260,7 +1309,14 @@ class TTSService(AIService):
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
-            self._contexts_queue: asyncio.Queue = asyncio.Queue()
+            # Single FIFO queue that serializes everything the TTS service emits downstream.
+            # Items can be:
+            #   str   – an audio context ID: process the per-context audio queue in full before
+            #           moving on (see _handle_audio_context).
+            #   Frame – a non-system downstream frame (e.g. AggregatedTextFrame, FooFrame) that
+            #           must be emitted in-order relative to surrounding audio contexts.
+            #   None  – shutdown sentinel (sent by stop()).
+            self._serialization_queue: asyncio.Queue = asyncio.Queue()
             self._audio_contexts: Dict[str, asyncio.Queue] = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
@@ -1270,13 +1326,26 @@ class TTSService(AIService):
             self._audio_context_task = None
 
     async def _audio_context_task_handler(self):
-        """In this task we process audio contexts in order."""
+        """Drain the serialization queue, preserving downstream frame order.
+
+        The queue carries three kinds of items (see _create_audio_context_task):
+
+        * str  – audio context ID: block until all audio for that context has been
+                 pushed downstream, then call on_audio_context_completed().
+        * Frame – a non-system downstream frame that must be emitted at this exact
+                  position in the output stream (e.g. AggregatedTextFrame preceding
+                  its audio, or an arbitrary frame that arrived between two speak frames).
+        * None – shutdown sentinel; exit the loop once reached.
+        """
         running = True
         while running:
-            context_id = await self._contexts_queue.get()
-            self._playing_context_id = context_id
+            context_value = await self._serialization_queue.get()
+            if isinstance(context_value, Frame):
+                await self.push_frame(context_value)
+            elif isinstance(context_value, str):
+                context_id = context_value
+                self._playing_context_id = context_id
 
-            if context_id:
                 # Process the audio context until the context doesn't have more
                 # audio available (i.e. we find None).
                 await self._handle_audio_context(context_id)
@@ -1288,7 +1357,7 @@ class TTSService(AIService):
             else:
                 running = False
 
-            self._contexts_queue.task_done()
+            self._serialization_queue.task_done()
 
     async def _handle_audio_context(self, context_id: str):
         """Process items from an audio context queue until it is exhausted."""

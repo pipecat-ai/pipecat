@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -82,7 +82,7 @@ class OpenAITTSService(TTSService):
     """
 
     Settings = OpenAITTSSettings
-    _settings: OpenAITTSSettings
+    _settings: Settings
 
     OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
 
@@ -90,7 +90,7 @@ class OpenAITTSService(TTSService):
         """Input parameters for OpenAI TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=OpenAITTSSettings(...)`` instead.
+            Use ``settings=OpenAITTSService.Settings(...)`` instead.
 
         Parameters:
             instructions: Instructions to guide voice synthesis behavior.
@@ -111,7 +111,7 @@ class OpenAITTSService(TTSService):
         instructions: Optional[str] = None,
         speed: Optional[float] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[OpenAITTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize OpenAI TTS service.
@@ -122,28 +122,28 @@ class OpenAITTSService(TTSService):
             voice: Voice ID to use for synthesis. Defaults to "alloy".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAITTSSettings(voice=...)`` instead.
+                    Use ``settings=OpenAITTSService.Settings(voice=...)`` instead.
 
             model: TTS model to use. Defaults to "gpt-4o-mini-tts".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAITTSSettings(model=...)`` instead.
+                    Use ``settings=OpenAITTSService.Settings(model=...)`` instead.
 
             sample_rate: Output audio sample rate in Hz. If None, uses OpenAI's default 24kHz.
             instructions: Optional instructions to guide voice synthesis behavior.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAITTSSettings(instructions=...)`` instead.
+                    Use ``settings=OpenAITTSService.Settings(instructions=...)`` instead.
 
             speed: Voice speed control (0.25 to 4.0, default 1.0).
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAITTSSettings(speed=...)`` instead.
+                    Use ``settings=OpenAITTSService.Settings(speed=...)`` instead.
 
             params: Optional synthesis controls (acting instructions, speed, ...).
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAITTSSettings(...)`` instead.
+                    Use ``settings=OpenAITTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -156,7 +156,7 @@ class OpenAITTSService(TTSService):
             )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAITTSSettings(
+        default_settings = self.Settings(
             model="gpt-4o-mini-tts",
             voice="alloy",
             language=None,
@@ -166,21 +166,21 @@ class OpenAITTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice is not None:
-            _warn_deprecated_param("voice", OpenAITTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice", "voice")
             default_settings.voice = voice
         if model is not None:
-            _warn_deprecated_param("model", OpenAITTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if instructions is not None:
-            _warn_deprecated_param("instructions", OpenAITTSSettings, "instructions")
+            self._warn_init_param_moved_to_settings("instructions", "instructions")
             default_settings.instructions = instructions
         if speed is not None:
-            _warn_deprecated_param("speed", OpenAITTSSettings, "speed")
+            self._warn_init_param_moved_to_settings("speed", "speed")
             default_settings.speed = speed
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", OpenAITTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.instructions is not None:
                     default_settings.instructions = params.instructions

@@ -81,23 +81,12 @@ Transform your local bot into a production-ready service. Pipecat Cloud handles 
 
 > 💡 Tip: You can run the `pipecat` CLI using the `pc` alias.
 
-3. Set up Docker for building your bot image:
-
-   - **Install [Docker](https://www.docker.com/)** on your system
-   - **Create a [Docker Hub](https://hub.docker.com/) account**
-   - **Login to Docker Hub:**
-
-     ```bash
-     docker login
-     ```
-
 ### Configure your deployment
 
-The `pcc-deploy.toml` file tells Pipecat Cloud how to run your bot. **Update the image field** with your Docker Hub username by editing `pcc-deploy.toml`.
+The `pcc-deploy.toml` file tells Pipecat Cloud how to run your bot.
 
 ```ini
 agent_name = "quickstart"
-image = "YOUR_DOCKERHUB_USERNAME/quickstart:0.1"  # 👈 Update this line
 secret_set = "quickstart-secrets"
 
 [scaling]
@@ -107,11 +96,8 @@ secret_set = "quickstart-secrets"
 **Understanding the TOML file settings:**
 
 - `agent_name`: Your bot's name in Pipecat Cloud
-- `image`: The Docker image to deploy (format: `username/image:version`)
 - `secret_set`: Where your API keys are stored securely
 - `min_agents`: Number of bot instances to keep ready (1 = instant start)
-
-> 💡 Tip: [Set up `image_credentials`](https://docs.pipecat.ai/deployment/pipecat-cloud/fundamentals/secrets#image-pull-secrets) in your TOML file for authenticated image pulls
 
 ### Log in to Pipecat Cloud
 
@@ -121,7 +107,7 @@ To start using the CLI, authenticate to Pipecat Cloud:
 pipecat cloud auth login
 ```
 
-You'll be presented with a link that you can click to authenticate your client.
+You'll be presented with a link and six-digit code that you can click to authenticate your client.
 
 ### Configure secrets
 
@@ -133,19 +119,15 @@ pipecat cloud secrets set quickstart-secrets --file .env
 
 This creates a secret set called `quickstart-secrets` (matching your TOML file) and uploads all your API keys from `.env`.
 
-### Build and deploy
-
-Build your Docker image and push to Docker Hub:
-
-```bash
-pipecat cloud docker build-push
-```
+### Deploy
 
 Deploy to Pipecat Cloud:
 
 ```bash
 pipecat cloud deploy
 ```
+
+This pushes your project files to Pipecat Cloud where a docker image is built and deployed into production.
 
 ### Connect to your agent
 

@@ -63,7 +63,6 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
     _NotGiven,
-    _warn_deprecated_param,
     is_given,
 )
 from pipecat.transcriptions.language import Language
@@ -115,7 +114,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
     # -- Bidirectional sync helpers ------------------------------------------
 
     @staticmethod
-    def _sync_top_level_to_sp(settings: "OpenAIRealtimeLLMSettings"):
+    def _sync_top_level_to_sp(settings: "OpenAIRealtimeLLMService.Settings"):
         """Push top-level ``model``/``system_instruction`` into ``session_properties``."""
         if not is_given(settings.session_properties):
             return
@@ -127,7 +126,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "OpenAIRealtimeLLMSettings") -> Dict[str, Any]:
+    def apply_update(self, delta: "OpenAIRealtimeLLMService.Settings") -> Dict[str, Any]:
         """Merge a delta, keeping ``model``/``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -165,8 +164,8 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
 
     @classmethod
     def from_mapping(
-        cls: Type["OpenAIRealtimeLLMSettings"], settings: Mapping[str, Any]
-    ) -> "OpenAIRealtimeLLMSettings":
+        cls: Type["OpenAIRealtimeLLMService.Settings"], settings: Mapping[str, Any]
+    ) -> "OpenAIRealtimeLLMService.Settings":
         """Build a delta from a plain dict, routing SP keys into ``session_properties``.
 
         Keys that correspond to ``SessionProperties`` fields (except ``model``)
@@ -211,7 +210,7 @@ class OpenAIRealtimeLLMService(LLMService):
     """
 
     Settings = OpenAIRealtimeLLMSettings
-    _settings: OpenAIRealtimeLLMSettings
+    _settings: Settings
 
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
     adapter_class = OpenAIRealtimeLLMAdapter
@@ -223,7 +222,7 @@ class OpenAIRealtimeLLMService(LLMService):
         model: Optional[str] = None,
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
-        settings: Optional[OpenAIRealtimeLLMSettings] = None,
+        settings: Optional[Settings] = None,
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         video_frame_detail: str = "auto",
@@ -237,7 +236,7 @@ class OpenAIRealtimeLLMService(LLMService):
             model: OpenAI model name.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAIRealtimeLLMSettings(model=...)`` instead.
+                    Use ``settings=OpenAIRealtimeLLMService.Settings(model=...)`` instead.
 
                 This is a connection-level parameter set via the WebSocket URL query
                 parameter and cannot be changed during the session.
@@ -247,7 +246,7 @@ class OpenAIRealtimeLLMService(LLMService):
                 If None, uses default SessionProperties.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAIRealtimeLLMSettings(session_properties=...)``
+                    Use ``settings=OpenAIRealtimeLLMService.Settings(session_properties=...)``
                     instead.
             settings: Runtime-updatable settings for this service.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
@@ -277,7 +276,7 @@ class OpenAIRealtimeLLMService(LLMService):
                 )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAIRealtimeLLMSettings(
+        default_settings = self.Settings(
             model="gpt-realtime-1.5",
             system_instruction=None,
             temperature=None,
@@ -294,13 +293,13 @@ class OpenAIRealtimeLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAIRealtimeLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         if session_properties is not None:
             _warn_deprecated_param(
                 "session_properties",
-                OpenAIRealtimeLLMSettings,
+                self.Settings,
                 "session_properties",
             )
             default_settings.session_properties = session_properties
@@ -312,7 +311,7 @@ class OpenAIRealtimeLLMService(LLMService):
                 default_settings.system_instruction = session_properties.instructions
 
         # Sync top-level model back into session_properties
-        OpenAIRealtimeLLMSettings._sync_top_level_to_sp(default_settings)
+        self.Settings._sync_top_level_to_sp(default_settings)
 
         # 3. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -1129,7 +1128,7 @@ class OpenAIRealtimeLLMService(LLMService):
         item = events.ConversationItem(
             type="function_call_output",
             call_id=tool_call_id,
-            output=json.dumps(result),
+            output=json.dumps(result, ensure_ascii=False),
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 

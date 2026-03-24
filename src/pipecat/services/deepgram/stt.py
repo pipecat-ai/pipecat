@@ -29,7 +29,6 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     STTSettings,
     _NotGiven,
-    _warn_deprecated_param,
     is_given,
 )
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
@@ -59,7 +58,7 @@ class LiveOptions:
     deepgram-sdk v6.
 
     .. deprecated:: 0.0.105
-        Use ``settings=DeepgramSTTSettings(...)`` for runtime-updatable fields
+        Use ``settings=DeepgramSTTService.Settings(...)`` for runtime-updatable fields
         and direct ``__init__`` parameters for connection-level config instead.
     """
 
@@ -248,6 +247,45 @@ class DeepgramSTTSettings(STTSettings):
                 del self.extra[key]
 
 
+def _derive_deepgram_urls(base_url: str) -> tuple[str, str]:
+    """Derive paired WebSocket and HTTP URLs from a single base URL.
+
+    The Deepgram SDK client requires both a WebSocket URL (for streaming)
+    and an HTTP URL (for REST calls). This helper lets developers provide
+    a single ``base_url`` and consistently derives both, preserving the
+    security level they chose. Useful for air-gapped or private deployments
+    where insecure schemes (ws:// / http://) are acceptable.
+
+    Accepted inputs:
+        - ``wss://`` or ``https://`` — secure (paired as wss + https)
+        - ``ws://`` or ``http://`` — insecure (paired as ws + http)
+        - Bare hostname (no scheme) — defaults to secure
+        - Unrecognized scheme — logs a warning, defaults to secure
+
+    Args:
+        base_url: Host with optional scheme, port, and path.
+
+    Returns:
+        A (ws_url, http_url) tuple with consistent schemes.
+    """
+    known_schemes = ("wss://", "https://", "ws://", "http://")
+    if "://" in base_url:
+        scheme, host = base_url.split("://", 1)
+        scheme += "://"
+        if scheme not in known_schemes:
+            logger.warning(
+                f"Unrecognized scheme in base_url '{base_url}', defaulting to wss:// / https://"
+            )
+    else:
+        scheme = ""
+        host = base_url
+
+    insecure = scheme in ("ws://", "http://")
+    ws_url = f"{'ws' if insecure else 'wss'}://{host}"
+    http_url = f"{'http' if insecure else 'https'}://{host}"
+    return ws_url, http_url
+
+
 class DeepgramSTTService(STTService):
     """Deepgram speech-to-text service.
 
@@ -267,7 +305,7 @@ class DeepgramSTTService(STTService):
     """
 
     Settings = DeepgramSTTSettings
-    _settings: DeepgramSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -286,7 +324,7 @@ class DeepgramSTTService(STTService):
         live_options: Optional[LiveOptions] = None,
         addons: Optional[dict] = None,
         should_interrupt: bool = True,
-        settings: Optional[DeepgramSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = DEEPGRAM_TTFS_P99,
         **kwargs,
     ):
@@ -313,7 +351,7 @@ class DeepgramSTTService(STTService):
             live_options: Legacy configuration options.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=DeepgramSTTSettings(...)`` for runtime-updatable
+                    Use ``settings=DeepgramSTTService.Settings(...)`` for runtime-updatable
                     fields and direct init parameters for connection-level config.
 
             addons: Additional Deepgram features to enable.
@@ -345,7 +383,7 @@ class DeepgramSTTService(STTService):
             base_url = url
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = DeepgramSTTSettings(
+        default_settings = self.Settings(
             model="nova-3-general",
             language=Language.EN,
             detect_entities=False,
@@ -370,7 +408,7 @@ class DeepgramSTTService(STTService):
 
         # 3. Apply live_options overrides — only if settings not provided
         if live_options is not None:
-            _warn_deprecated_param("live_options", DeepgramSTTSettings)
+            self._warn_init_param_moved_to_settings("live_options")
             if not settings:
                 # Extract init-only fields from live_options
                 if live_options.sample_rate is not None and sample_rate is None:
@@ -402,7 +440,7 @@ class DeepgramSTTService(STTService):
                     "mip_opt_out",
                 }
                 lo_dict = {k: v for k, v in live_options.to_dict().items() if k not in init_only}
-                delta = DeepgramSTTSettings.from_mapping(lo_dict)
+                delta = self.Settings.from_mapping(lo_dict)
                 default_settings.apply_update(delta)
 
         # 4. Apply settings delta (canonical API, always wins)
@@ -446,8 +484,7 @@ class DeepgramSTTService(STTService):
             try:
                 from deepgram import DeepgramClientEnvironment
 
-                ws_url = base_url if base_url.startswith("wss://") else f"wss://{base_url}"
-                http_url = base_url if base_url.startswith("https://") else f"https://{base_url}"
+                ws_url, http_url = _derive_deepgram_urls(base_url)
                 environment = DeepgramClientEnvironment(
                     base=http_url,
                     production=ws_url,
@@ -494,7 +531,7 @@ class DeepgramSTTService(STTService):
             return changed
 
         # Sync extra to fields after the update so self._settings stays unambiguous
-        if isinstance(self._settings, DeepgramSTTSettings):
+        if isinstance(self._settings, self.Settings):
             self._settings._sync_extra_to_fields()
 
         if self._connection:
@@ -555,7 +592,15 @@ class DeepgramSTTService(STTService):
             value = getattr(s, f.name)
             if not is_given(value) or value is None:
                 continue
-            kwargs[f.name] = str(value).lower() if isinstance(value, bool) else str(value)
+            # Lists (e.g. keyterm, keywords, search, redact, replace) must be
+            # passed through as-is so the SDK's encode_query produces repeated
+            # query params (keyterm=a&keyterm=b) instead of a stringified list.
+            if isinstance(value, list):
+                kwargs[f.name] = value
+            elif isinstance(value, bool):
+                kwargs[f.name] = str(value).lower()
+            else:
+                kwargs[f.name] = str(value)
 
         # model and language
         if is_given(s.model) and s.model is not None:
@@ -581,7 +626,12 @@ class DeepgramSTTService(STTService):
         # Any remaining values in extra (that didn't map to declared fields)
         for key, value in s.extra.items():
             if value is not None:
-                kwargs[key] = str(value).lower() if isinstance(value, bool) else str(value)
+                if isinstance(value, list):
+                    kwargs[key] = value
+                elif isinstance(value, bool):
+                    kwargs[key] = str(value).lower()
+                else:
+                    kwargs[key] = str(value)
 
         if self._addons:
             for key, value in self._addons.items():

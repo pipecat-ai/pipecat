@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import TTSSettings, _warn_deprecated_param
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -84,7 +84,7 @@ class XTTSService(TTSService):
     """
 
     Settings = XTTSTTSSettings
-    _settings: XTTSTTSSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -94,7 +94,7 @@ class XTTSService(TTSService):
         aiohttp_session: aiohttp.ClientSession,
         language: Language = Language.EN,
         sample_rate: Optional[int] = None,
-        settings: Optional[XTTSTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the XTTS service.
@@ -103,27 +103,34 @@ class XTTSService(TTSService):
             voice_id: ID of the voice/speaker to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=XTTSTTSSettings(voice=...)`` instead.
+                    Use ``settings=XTTSService.Settings(voice=...)`` instead.
 
             base_url: Base URL of the XTTS streaming server.
             aiohttp_session: HTTP session for making requests to the server.
             language: Language for synthesis. Defaults to English.
+
+                .. deprecated:: 0.0.106
+                    Use ``settings=XTTSService.Settings(language=...)`` instead.
+
             sample_rate: Audio sample rate. If None, uses default.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = XTTSTTSSettings(
+        default_settings = self.Settings(
             model=None,
             voice=None,
-            language=self.language_to_service_language(language),
+            language=Language.EN,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", XTTSTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
+        if language is not None:
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
 
         # 3. (No step 3, as there's no params object to apply)
 
