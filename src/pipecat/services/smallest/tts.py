@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -59,7 +59,7 @@ def language_to_smallest_tts_language(language: Language) -> Optional[str]:
     Returns:
         The Smallest language code string, or None if unsupported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AR: "ar",
         Language.BN: "bn",
         Language.DE: "de",
@@ -78,14 +78,7 @@ def language_to_smallest_tts_language(language: Language) -> Optional[str]:
         Language.TA: "ta",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    if not result:
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 @dataclass
@@ -118,7 +111,7 @@ class SmallestTTSService(InterruptibleTTSService):
             api_key="your-api-key",
             settings=SmallestTTSService.Settings(
                 voice="sophia",
-                language="en",
+                language=Language.EN,
                 speed=1.0,
             ),
         )
@@ -148,7 +141,7 @@ class SmallestTTSService(InterruptibleTTSService):
         default_settings = self.Settings(
             model=SmallestTTSModel.LIGHTNING_V3_1.value,
             voice="sophia",
-            language=language_to_smallest_tts_language(Language.EN),
+            language=Language.EN,
             speed=None,
             consistency=None,
             similarity=None,
@@ -325,7 +318,9 @@ class SmallestTTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from Smallest TTS")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(
+                error_msg=f"Smallest TTS error closing websocket: {e}", exception=e
+            )
         finally:
             self._context_id = None
             self._websocket = None
@@ -379,7 +374,6 @@ class SmallestTTSService(InterruptibleTTSService):
                 )
                 await self.push_frame(frame)
             elif status == "error":
-                logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame(context_id=self._context_id))
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Smallest TTS error: {msg.get('error', msg)}")
@@ -412,7 +406,6 @@ class SmallestTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
                 yield ErrorFrame(error=f"Smallest TTS send error: {e}")
                 yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
@@ -420,5 +413,4 @@ class SmallestTTSService(InterruptibleTTSService):
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
             yield ErrorFrame(error=f"Smallest TTS error: {e}")
