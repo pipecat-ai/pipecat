@@ -7,6 +7,7 @@
 """Reson8 speech-to-text service implementation."""
 
 import json
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import urlencode
@@ -39,26 +40,23 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-FLUSH_REQUEST_MESSAGE = '{"type": "flush_request"}'
-
-
 @dataclass
 class Reson8STTSettings(STTSettings):
     """Settings for Reson8 STT service.
 
     Parameters:
-        phrases: Custom phrases for recognition bias.
-        bias_strength: Phrase bias strength.
         include_timestamps: Word-level timestamps.
         include_words: Individual word results.
         include_confidence: Confidence scores.
+        include_interim: Interim (partial) transcription results.
+        custom_model_id: Custom model ID for transcription bias.
     """
 
-    phrases: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    bias_strength: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     include_timestamps: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     include_words: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     include_confidence: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    include_interim: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    custom_model_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class Reson8STTService(WebsocketSTTService):
@@ -74,13 +72,12 @@ class Reson8STTService(WebsocketSTTService):
         *,
         api_key: str,
         api_url: str = "https://api.reson8.dev",
-        language: str = "nl",
-        phrases: Optional[list[str]] = None,
-        bias_strength: Optional[float] = None,
         sample_rate: Optional[int] = None,
         include_timestamps: Optional[bool] = None,
         include_words: Optional[bool] = None,
         include_confidence: Optional[bool] = None,
+        include_interim: Optional[bool] = True,
+        custom_model_id: Optional[str] = None,
         ttfs_p99_latency: Optional[float] = RESON8_TTFS_P99,
         **kwargs,
     ):
@@ -89,13 +86,12 @@ class Reson8STTService(WebsocketSTTService):
         Args:
             api_key: Reson8 API key.
             api_url: Reson8 API base URL.
-            language: Language code for transcription.
-            phrases: Custom phrases for recognition bias.
-            bias_strength: Phrase bias strength.
             sample_rate: Audio sample rate.
             include_timestamps: Enable word-level timestamps.
             include_words: Enable individual word results.
             include_confidence: Enable confidence scores.
+            include_interim: Enable interim (partial) transcription results.
+            custom_model_id: Custom model ID for transcription bias.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
             **kwargs: Additional arguments passed to the STTService.
         """
@@ -104,12 +100,12 @@ class Reson8STTService(WebsocketSTTService):
             ttfs_p99_latency=ttfs_p99_latency,
             settings=Reson8STTSettings(
                 model=None,
-                language=language,
-                phrases=phrases,
-                bias_strength=bias_strength,
+                language=None,
                 include_timestamps=include_timestamps,
                 include_words=include_words,
                 include_confidence=include_confidence,
+                include_interim=include_interim,
+                custom_model_id=custom_model_id,
             ),
             **kwargs,
         )
@@ -157,8 +153,10 @@ class Reson8STTService(WebsocketSTTService):
 
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._websocket and self._websocket.state is State.OPEN:
-                await self._websocket.send(FLUSH_REQUEST_MESSAGE)
-                logger.debug(f"Sent flush_request on: {frame.name=}, {direction=}")
+                flush_id = str(uuid.uuid4())
+                flush_msg = json.dumps({"type": "flush_request", "id": flush_id})
+                await self._websocket.send(flush_msg)
+                logger.debug(f"Sent flush_request (id={flush_id}) on: {frame.name=}, {direction=}")
 
     async def _connect(self):
         await self._connect_websocket()
@@ -282,11 +280,7 @@ class Reson8STTService(WebsocketSTTService):
         await self._websocket.send(silence)
 
     async def _update_settings(self, delta: Reson8STTSettings) -> dict[str, Any]:
-        """Apply settings delta, reconnecting to apply changes.
-
-        Settings like language, phrases, and bias_strength are encoded in the
-        WebSocket URL, so a reconnect is required to apply them.
-        """
+        """Apply settings delta, reconnecting to apply changes."""
         changed = await super()._update_settings(delta)
 
         if not changed:
@@ -302,20 +296,19 @@ class Reson8STTService(WebsocketSTTService):
         base = self._api_url.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
         s = self._settings
         params: dict[str, str] = {
-            "language": s.language,
             "encoding": "pcm_s16le",
             "sample_rate": str(self.sample_rate),
             "channels": "1",
         }
-        if s.phrases:
-            params["phrases"] = ",".join(s.phrases)
-            if s.bias_strength is not None:
-                params["bias_strength"] = str(s.bias_strength)
         if s.include_timestamps:
             params["include_timestamps"] = "true"
         if s.include_words:
             params["include_words"] = "true"
         if s.include_confidence:
             params["include_confidence"] = "true"
+        if s.include_interim:
+            params["include_interim"] = "true"
+        if s.custom_model_id:
+            params["custom_model_id"] = s.custom_model_id
 
         return f"{base}/v1/speech-to-text/realtime?{urlencode(params)}"
