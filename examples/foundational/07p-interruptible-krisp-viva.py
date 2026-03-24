@@ -30,6 +30,7 @@ from loguru import logger
 from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
 from pipecat.audio.turn.krisp_viva_turn import KrispVivaTurn
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.metrics.metrics import TurnMetricsData
 from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
@@ -63,17 +64,20 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=krisp_viva_filter,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),  # or KrispVivaVadAnalyzer
+        audio_in_filter=KrispVivaFilter(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=krisp_viva_filter,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),  # or KrispVivaVadAnalyzer
+        audio_in_filter=KrispVivaFilter(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=krisp_viva_filter,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),  # or KrispVivaVadAnalyzer
+        audio_in_filter=KrispVivaFilter(),
     ),
 }
 
