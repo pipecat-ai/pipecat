@@ -109,6 +109,16 @@ class VADController(BaseObject):
         # Broadcast initial VAD params so other services (e.g. STT) can use them
         await self.broadcast_frame(SpeechControlParamsFrame, vad_params=self._vad_analyzer.params)
 
+    async def cleanup(self):
+        """Clean up resources.
+
+        This method should be called when the object is no longer needed.
+        It waits for all currently executing event handler tasks to finish
+        before returning.
+        """
+        if self._vad_analyzer:
+            await self._vad_analyzer.cleanup()
+
     async def _handle_audio(self, frame: InputAudioRawFrame):
         """Process an audio chunk and emit speech events as needed.
 
