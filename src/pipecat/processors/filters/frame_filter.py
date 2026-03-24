@@ -20,15 +20,16 @@ class FrameFilter(FrameProcessor):
     automatically allowed to pass through to maintain pipeline integrity.
     """
 
-    def __init__(self, types: Tuple[Type[Frame], ...]):
+    def __init__(self, types: Tuple[Type[Frame], ...], **kwargs):
         """Initialize the frame filter.
 
         Args:
             types: Tuple of frame types that should be allowed to pass through
                    the filter. All other frame types (except SystemFrame and
                    EndFrame) will be blocked.
+            **kwargs: Additional arguments passed to the parent FrameProcessor.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True, **kwargs)
         self._types = types
 
     #
