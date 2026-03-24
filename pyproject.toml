@@ -95,6 +95,7 @@ moondream = [ "accelerate~=1.10.0", "einops~=0.8.0", "pyvips[binary]~=3.0.0", "t
 neuphonic = [ "pipecat-ai[websockets-base]" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 nvidia = [ "nvidia-riva-client>=2.21.1,<3" ]
+novita = []
 openai = [ "pipecat-ai[websockets-base]" ]
 rnnoise = [ "pyrnnoise~=0.4.1" ]
 openpipe = [ "openpipe>=4.50.0,<6" ]
