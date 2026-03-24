@@ -30,6 +30,7 @@ from loguru import logger
 from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
 from pipecat.audio.turn.krisp_viva_turn import KrispVivaTurn
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.metrics.metrics import TurnMetricsData
 from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
