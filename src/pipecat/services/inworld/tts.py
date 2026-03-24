@@ -791,12 +791,18 @@ class InworldTTSService(WebsocketTTSService):
         self._cumulative_time = 0.0
         self._generation_end_time = 0.0
 
+    async def on_turn_context_completed(self):
+        """Close the server-side context at end of turn.
+
+        Sends close_context so contextClosed arrives immediately after the
+        last audio byte.
+        """
+        ctx_id = self._turn_context_id
+        await super().on_turn_context_completed()
+        await self._close_context(ctx_id)
+
     async def on_audio_context_interrupted(self, context_id: str):
         """Callback invoked when an audio context has been interrupted."""
-        await self._close_context(context_id)
-
-    async def on_audio_context_completed(self, context_id: str):
-        """Callback invoked when an audio context has been completed."""
         await self._close_context(context_id)
 
     def _get_websocket(self):
