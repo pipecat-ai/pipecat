@@ -59,8 +59,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=GeminiLiveLLMService.Settings(
             voice="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
             # system_instruction="Talk like a pirate."
-            # inference_on_context_initialization=False,
         ),
+        # inference_on_context_initialization=False,
     )
 
     context = LLMContext(
