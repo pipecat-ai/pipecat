@@ -156,7 +156,7 @@ class TTSService(AIService):
         # if True, TTSService will push TTSStartedFrames and create audio contexts automatically
         push_start_frame: bool = False,
         # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
-        stop_frame_timeout_s: float = 2.0,
+        stop_frame_timeout_s: float = 3.0,
         # if True, TTSService will push silence audio frames after TTSStoppedFrame
         push_silence_after_stop: bool = False,
         # if push_silence_after_stop is True, send this amount of audio silence
@@ -332,9 +332,6 @@ class TTSService(AIService):
             self._text_filters = [text_filter]
 
         self._resampler = create_stream_resampler()
-
-        self._stop_frame_task: Optional[asyncio.Task] = None
-        self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
         self._processing_text: bool = False
         self._tts_contexts: Dict[str, TTSContext] = {}
@@ -546,8 +543,6 @@ class TTSService(AIService):
         """
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
-        if self._push_stop_frames and not self._stop_frame_task:
-            self._stop_frame_task = self.create_task(self._stop_frame_handler())
         self._create_audio_context_task()
 
     async def stop(self, frame: EndFrame):
@@ -563,9 +558,6 @@ class TTSService(AIService):
             await self._serialization_queue.put(None)
             await self._audio_context_task
             self._audio_context_task = None
-        if self._stop_frame_task:
-            await self.cancel_task(self._stop_frame_task)
-            self._stop_frame_task = None
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the TTS service.
@@ -574,9 +566,6 @@ class TTSService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        if self._stop_frame_task:
-            await self.cancel_task(self._stop_frame_task)
-            self._stop_frame_task = None
         await self._stop_audio_context_task()
 
     def add_text_transformer(
@@ -832,14 +821,6 @@ class TTSService(AIService):
 
         await super().push_frame(frame, direction)
 
-        if self._push_stop_frames and (
-            isinstance(frame, InterruptionFrame)
-            or isinstance(frame, TTSStartedFrame)
-            or isinstance(frame, TTSAudioRawFrame)
-            or isinstance(frame, TTSStoppedFrame)
-        ):
-            await self._stop_frame_queue.put(frame)
-
     async def _stream_audio_frames_from_iterator(
         self,
         iterator: AsyncIterator[bytes],
@@ -1092,24 +1073,6 @@ class TTSService(AIService):
 
         self._is_yielding_frames_synchronously = is_yielding_frames
 
-    async def _stop_frame_handler(self):
-        has_started = False
-        context_id = None
-        while True:
-            try:
-                frame = await asyncio.wait_for(
-                    self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
-                )
-                if isinstance(frame, TTSStartedFrame):
-                    context_id = frame.context_id
-                    has_started = True
-                elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-                    has_started = False
-            except asyncio.TimeoutError:
-                if has_started:
-                    await self.push_frame(TTSStoppedFrame(context_id=context_id))
-                    has_started = False
-
     #
     # Word timestamp methods
     #
@@ -1361,13 +1324,13 @@ class TTSService(AIService):
 
     async def _handle_audio_context(self, context_id: str):
         """Process items from an audio context queue until it is exhausted."""
-        AUDIO_CONTEXT_TIMEOUT = 3.0
         queue = self._audio_contexts[context_id]
         running = True
         timestamps_started = False
+        should_push_stop_frame = False
         while running:
             try:
-                frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
+                frame = await asyncio.wait_for(queue.get(), timeout=self._stop_frame_timeout_s)
                 if frame is TTSService._CONTEXT_KEEPALIVE:
                     # Context is still in use, reset the timeout.
                     continue
@@ -1389,6 +1352,11 @@ class TTSService(AIService):
                         timestamps_started = True
 
                 if frame:
+                    if isinstance(frame, TTSStartedFrame):
+                        should_push_stop_frame = self._push_stop_frames
+                    elif isinstance(frame, TTSStoppedFrame):
+                        should_push_stop_frame = False
+
                     if isinstance(frame, ErrorFrame):
                         await self.push_error_frame(frame)
                     else:
@@ -1396,7 +1364,12 @@ class TTSService(AIService):
             except asyncio.TimeoutError:
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
+                if should_push_stop_frame and self._push_stop_frames:
+                    await self.push_frame(TTSStoppedFrame(context_id=context_id))
                 break
+
+        if should_push_stop_frame and self._push_stop_frames:
+            await self.push_frame(TTSStoppedFrame(context_id=context_id))
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Called when an audio context is cancelled due to an interruption.
