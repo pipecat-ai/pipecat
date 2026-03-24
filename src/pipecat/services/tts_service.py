@@ -661,7 +661,7 @@ class TTSService(AIService):
 
         Override to perform provider-specific setup (e.g., eagerly opening a
         server-side context) before text starts flowing. This is called from
-        ``process_frame`` when an ``LLMFullResponseStartFrame`` arrives.
+        ``process_frame`` when an ``LLMFullResponseStartFrame`` or ``TTSSpeakFrame`` arrives.
 
         Args:
             context_id: The newly created turn context ID.
@@ -759,6 +759,7 @@ class TTSService(AIService):
             self._turn_context_id = None
             # Creating a new context_id for the TTS request.
             self._turn_context_id = self.create_context_id()
+            await self.on_turn_context_created(self._turn_context_id)
             # If we are not receiving text from the LLM, we can assume that the SpeakFrame should be automatically added to the context
             push_assistant_aggregation = frame.append_to_context and not self._llm_response_started
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
