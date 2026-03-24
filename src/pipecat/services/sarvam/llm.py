@@ -36,19 +36,16 @@ class SarvamLLMSettings(OpenAILLMSettings):
 
 
 class SarvamLLMService(OpenAILLMService):
-    """Sarvam LLM service using Sarvam's OpenAI-compatible chat completions API.
+    """A service for interacting with Sarvam's API using the OpenAI-compatible interface.
 
-    This service extends ``OpenAILLMService`` while adding Sarvam-specific behavior:
-
-    - model allow-list validation
-    - request shaping for Sarvam-compatible parameters
-    - Sarvam auth header wiring (``api-subscription-key``)
-    - SDK User-Agent propagation on every API call
+    This service extends OpenAILLMService to connect to Sarvam's API endpoint while
+    maintaining full compatibility with OpenAI's interface and functionality.
     """
 
     _SUPPORTED_MODELS = frozenset(
         {"sarvam-30b", "sarvam-30b-16k", "sarvam-105b", "sarvam-105b-32k"}
     )
+    _TOOL_CALLING_MODELS = _SUPPORTED_MODELS
     Settings = SarvamLLMSettings
     _settings: Settings
 
@@ -70,28 +67,19 @@ class SarvamLLMService(OpenAILLMService):
             default_headers: Additional HTTP headers to include in requests.
             **kwargs: Additional keyword arguments passed to ``OpenAILLMService``.
         """
-        # Initialize defaults with concrete values for Sarvam-specific fields.
+        # Initialize only Sarvam-specific defaults; inherited defaults are
+        # provided by the OpenAI base service initialization.
         default_settings = self.Settings(
             model="sarvam-30b",
-            system_instruction=None,
-            frequency_penalty=NOT_GIVEN,
-            presence_penalty=NOT_GIVEN,
-            seed=NOT_GIVEN,
-            temperature=NOT_GIVEN,
-            top_p=NOT_GIVEN,
-            top_k=None,
-            max_tokens=NOT_GIVEN,
-            max_completion_tokens=NOT_GIVEN,
-            filter_incomplete_user_turns=False,
-            user_turn_completion_config=None,
-            extra={},
             wiki_grounding=None,
             reasoning_effort=None,
         )
 
-        # Apply settings delta (canonical API, always wins).
+        # Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        self._validate_model(default_settings.model)
 
         super().__init__(
             api_key=api_key,
@@ -100,9 +88,12 @@ class SarvamLLMService(OpenAILLMService):
             default_headers=default_headers,
             **kwargs,
         )
-        # Keep Sarvam-specific settings object so runtime updates include
-        # ``wiki_grounding`` and ``reasoning_effort`` without extra bridging.
-        self._settings = default_settings
+        # Rehydrate into Sarvam settings using inherited concrete store values
+        # from base initialization, then layer Sarvam-specific fields.
+        sarvam_settings = self.Settings.from_mapping(self._settings.given_fields())
+        sarvam_settings.wiki_grounding = default_settings.wiki_grounding
+        sarvam_settings.reasoning_effort = default_settings.reasoning_effort
+        self._settings = sarvam_settings
 
     def create_client(
         self,
@@ -156,43 +147,10 @@ class SarvamLLMService(OpenAILLMService):
 
         return params
 
-    async def _call_with_raw_sarvam_errors(self, awaitable: Awaitable[_T]) -> _T:
-        """Await an OpenAI call while preserving Sarvam raw error payloads.
-
-        BaseOpenAILLMService handles pipeline-frame exceptions via push_error(),
-        but direct helper methods like ``get_chat_completions`` and
-        ``run_inference`` are often consumed directly. We normalize those errors
-        here so applications consistently receive server-provided messages.
-        """
-        try:
-            return await awaitable
-        except (APITimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
-            raise
-        except Exception as e:
-            raise RuntimeError(str(e)) from e
-
-    async def get_chat_completions(
-        self, params_from_context: OpenAILLMInvocationParams
-    ) -> AsyncStream[ChatCompletionChunk]:
-        """Get streaming chat completions with Sarvam raw error passthrough."""
-        return await self._call_with_raw_sarvam_errors(
-            super().get_chat_completions(params_from_context)
-        )
-
-    async def run_inference(
-        self,
-        context: LLMContext | OpenAILLMContext,
-        max_tokens: Optional[int] = None,
-        system_instruction: Optional[str] = None,
-    ) -> Optional[str]:
-        """Run one-shot inference and preserve Sarvam raw server errors."""
-        return await self._call_with_raw_sarvam_errors(
-            super().run_inference(
-                context,
-                max_tokens=max_tokens,
-                system_instruction=system_instruction,
-            )
-        )
+    def _validate_model(self, model: str):
+        if model not in self._SUPPORTED_MODELS:
+            allowed = ", ".join(sorted(self._SUPPORTED_MODELS))
+            raise ValueError(f"Unsupported Sarvam LLM model '{model}'. Allowed values: {allowed}.")
 
     def _validate_tool_parameters(self, params_from_context: OpenAILLMInvocationParams):
         tools = params_from_context.get("tools", NOT_GIVEN)

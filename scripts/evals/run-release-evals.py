@@ -184,6 +184,7 @@ TESTS_14 = [
     ("14v-function-calling-openai.py", EVAL_WEATHER),
     ("14w-function-calling-mistral.py", EVAL_WEATHER),
     ("14x-function-calling-openpipe.py", EVAL_WEATHER),
+    ("14y-function-calling-sarvam.py", EVAL_WEATHER),
     # Video
     ("14d-function-calling-anthropic-video.py", EVAL_VISION_CAMERA),
     ("14d-function-calling-aws-video.py", EVAL_VISION_CAMERA),
