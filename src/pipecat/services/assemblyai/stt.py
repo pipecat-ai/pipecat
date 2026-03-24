@@ -101,6 +101,8 @@ class AssemblyAISTTSettings(STTSettings):
         speaker_labels: Enable speaker diarization.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
             audio frames as silence. Only applicable to u3-rt-pro.
+        domain: Optional domain for specialized recognition modes. For example,
+            set to "medical-v1" to enable Medical Mode for healthcare transcription.
     """
 
     formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -118,6 +120,7 @@ class AssemblyAISTTSettings(STTSettings):
     format_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_labels: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AssemblyAISTTService(WebsocketSTTService):
@@ -204,6 +207,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             format_turns=True,
             speaker_labels=None,
             vad_threshold=None,
+            domain=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -470,6 +474,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             "format_turns": s.format_turns,
             "speaker_labels": s.speaker_labels,
             "vad_threshold": s.vad_threshold,
+            "domain": s.domain,
         }
 
         for k, v in optional_fields.items():
