@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+
 import os
 
 from dotenv import load_dotenv
@@ -11,11 +12,17 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMMessagesAppendFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.audio.vad_processor import VADProcessor
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantTurnStoppedMessage,
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+    UserTurnStoppedMessage,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -23,7 +30,6 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
-# Load environment variables
 load_dotenv(override=True)
 
 
@@ -33,20 +39,14 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events.
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events.
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events.
     ),
 }
 
@@ -54,35 +54,44 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    # Create the Gemini Multimodal Live LLM service
-    system_instruction = f"""
-    You are a helpful AI assistant.
-    Your goal is to demonstrate your capabilities in a helpful and engaging way.
-    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
-    Respond to what the user said in a creative and helpful way.
-    """
-
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GeminiLiveLLMService.Settings(
-            system_instruction=system_instruction,
-            voice="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+            voice="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
+            # system_instruction="Talk like a pirate."
+        ),
+        # inference_on_context_initialization=False,
+    )
+
+    context = LLMContext(
+        [
+            {
+                "role": "user",
+                "content": "Say hello. Then ask if I want to hear a joke.",
+            },
+        ],
+    )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            # Set stop_secs to something roughly similar to the internal setting
+            # of the Multimodal Live api, just to align events. This doesn't
+            # really matter because we can only use the Multimodal Live API's
+            # phrase endpointing, for now.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5))
         ),
     )
 
-    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)))
-
-    # Build the pipeline
     pipeline = Pipeline(
         [
             transport.input(),
-            vad_processor,
+            user_aggregator,
             llm,
             transport.output(),
+            assistant_aggregator,
         ]
     )
 
-    # Configure the pipeline task
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
@@ -92,32 +101,31 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
-    # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames(
-            [
-                LLMMessagesAppendFrame(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"Greet the user and introduce yourself.",
-                        }
-                    ]
-                )
-            ]
-        )
+        await task.queue_frames([LLMRunFrame()])
 
-    # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    # Run the pipeline
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}user: {message.content}"
+        logger.info(f"Transcript: {line}")
+
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}assistant: {message.content}"
+        logger.info(f"Transcript: {line}")
+
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+
     await runner.run(task)
 
 
