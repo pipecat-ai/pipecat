@@ -133,7 +133,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context = LLMContext(
             [
                 {
-                    "role": "user",
+                    "role": "developer",
                     "content": [
                         {
                             "type": "text",
@@ -156,7 +156,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context = LLMContext(
             [
                 {
-                    "role": "user",
+                    "role": "developer",
                     "content": "Greet the user and explain that there was an issue with file upload, but you're ready to help with other tasks.",
                 }
             ]

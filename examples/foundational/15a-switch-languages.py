@@ -162,7 +162,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message(
             {
-                "role": "user",
+                "role": "developer",
                 "content": f"Please introduce yourself to the user and let them know the languages you speak. Your initial responses should be in {tts.current_language}.",
             }
         )

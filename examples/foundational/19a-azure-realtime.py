@@ -158,11 +158,11 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
     context = LLMContext(
-        [{"role": "user", "content": "Say hello!"}],
-        # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
+        [{"role": "developer", "content": "Say hello!"}],
+        # [{"role": "developer", "content": [{"type": "text", "text": "Say hello!"}]}],
         #     [
         #         {
-        #             "role": "user",
+        #             "role": "developer",
         #             "content": [
         #                 {"type": "text", "text": "Say"},
         #                 {"type": "text", "text": "yo what's up!"},

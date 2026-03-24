@@ -226,7 +226,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message(
             {
-                "role": "user",
+                "role": "developer",
                 "content": "Start the call by saying the word 'hello'. Say only that word.",
             }
         )

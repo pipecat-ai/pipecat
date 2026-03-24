@@ -60,7 +60,10 @@ async def test_openai_run_inference_with_llm_context():
         # Verify
         assert result == "Hello! How can I help you today?"
         service.get_llm_adapter.assert_called_once()
-        mock_adapter.get_llm_invocation_params.assert_called_once_with(mock_context)
+        # convert_developer_to_user=False because OpenAILLMService.supports_developer_role is True
+        mock_adapter.get_llm_invocation_params.assert_called_once_with(
+            mock_context, system_instruction=None, convert_developer_to_user=False
+        )
         service._client.chat.completions.create.assert_called_once_with(
             model="gpt-4",
             stream=False,
@@ -187,7 +190,7 @@ async def test_anthropic_run_inference_with_llm_context():
     assert result == "Hello! How can I help you today?"
     service.get_llm_adapter.assert_called_once()
     mock_adapter.get_llm_invocation_params.assert_called_once_with(
-        mock_context, enable_prompt_caching=False
+        mock_context, enable_prompt_caching=False, system_instruction=None
     )
     service._client.beta.messages.create.assert_called_once_with(
         model="claude-3-sonnet-20240229",
@@ -302,7 +305,9 @@ async def test_google_run_inference_with_llm_context():
     # Verify
     assert result == "Hello! How can I help you today?"
     service.get_llm_adapter.assert_called_once()
-    mock_adapter.get_llm_invocation_params.assert_called_once_with(mock_context)
+    mock_adapter.get_llm_invocation_params.assert_called_once_with(
+        mock_context, system_instruction=None
+    )
     service._client.aio.models.generate_content.assert_called_once()
 
 
@@ -421,7 +426,9 @@ async def test_aws_bedrock_run_inference_with_llm_context():
         # Verify
         assert result == "Hello! How can I help you today?"
         service.get_llm_adapter.assert_called_once()
-        mock_adapter.get_llm_invocation_params.assert_called_once_with(mock_context)
+        mock_adapter.get_llm_invocation_params.assert_called_once_with(
+            mock_context, system_instruction=None
+        )
 
         # Verify the call includes configured parameters
         call_kwargs = mock_client.converse.call_args.kwargs
@@ -543,15 +550,13 @@ async def test_openai_run_inference_system_instruction_overrides_context():
         )
 
         assert result == "Response"
-        call_kwargs = service._client.chat.completions.create.call_args.kwargs
-        messages = call_kwargs["messages"]
-        # system_instruction should be prepended as the first message
-        assert messages[0] == {"role": "system", "content": "New system instruction"}
-        # Original system message should still be present
-        assert messages[1] == {"role": "system", "content": "Original system message"}
-        # User message should still be present
-        assert messages[2] == {"role": "user", "content": "Hello"}
-        assert len(messages) == 3
+        # Verify the adapter was called with the correct system_instruction.
+        # convert_developer_to_user=False because OpenAILLMService.supports_developer_role is True.
+        mock_adapter.get_llm_invocation_params.assert_called_once_with(
+            mock_context,
+            system_instruction="New system instruction",
+            convert_developer_to_user=False,
+        )
 
 
 @pytest.mark.asyncio
@@ -608,9 +613,12 @@ async def test_anthropic_run_inference_system_instruction_overrides_context():
     result = await service.run_inference(mock_context, system_instruction="New system instruction")
 
     assert result == "Response"
-    call_kwargs = service._client.beta.messages.create.call_args.kwargs
-    assert call_kwargs["system"] == "New system instruction"
-    assert call_kwargs["messages"] == test_messages
+    # Verify the adapter was called with the correct system_instruction
+    mock_adapter.get_llm_invocation_params.assert_called_once_with(
+        mock_context,
+        enable_prompt_caching=False,
+        system_instruction="New system instruction",
+    )
 
 
 @pytest.mark.asyncio
@@ -665,9 +673,10 @@ async def test_google_run_inference_system_instruction_overrides_context():
     result = await service.run_inference(mock_context, system_instruction="New system instruction")
 
     assert result == "Response"
-    call_kwargs = service._client.aio.models.generate_content.call_args.kwargs
-    config = call_kwargs["config"]
-    assert config.system_instruction == "New system instruction"
+    # Verify the adapter was called with the correct system_instruction
+    mock_adapter.get_llm_invocation_params.assert_called_once_with(
+        mock_context, system_instruction="New system instruction"
+    )
 
 
 @pytest.mark.asyncio
@@ -731,9 +740,10 @@ async def test_aws_bedrock_run_inference_system_instruction_overrides_context():
         )
 
         assert result == "Response"
-        call_kwargs = mock_client.converse.call_args.kwargs
-        assert call_kwargs["system"] == [{"text": "New system instruction"}]
-        assert call_kwargs["messages"] == test_messages
+        # Verify the adapter was called with the correct system_instruction
+        mock_adapter.get_llm_invocation_params.assert_called_once_with(
+            mock_context, system_instruction="New system instruction"
+        )
 
 
 @pytest.mark.asyncio

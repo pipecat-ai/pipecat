@@ -41,6 +41,9 @@ class PerplexityLLMService(OpenAILLMService):
     """
 
     adapter_class = PerplexityLLMAdapter
+    # Perplexity doesn't support the "developer" message role.
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
 
     Settings = PerplexityLLMSettings
     _settings: Settings
@@ -120,17 +123,6 @@ class PerplexityLLMService(OpenAILLMService):
             params["top_p"] = self._settings.top_p
         if self._settings.max_tokens is not None:
             params["max_tokens"] = self._settings.max_tokens
-
-        # Prepend system instruction if set
-        if self._settings.system_instruction:
-            messages = params.get("messages", [])
-            if messages and messages[0].get("role") == "system":
-                logger.warning(
-                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
-                )
-            params["messages"] = [
-                {"role": "system", "content": self._settings.system_instruction}
-            ] + messages
 
         return params
 

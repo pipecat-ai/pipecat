@@ -116,8 +116,8 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         messages = copy.deepcopy(universal_context_messages)
         system_instruction = None
 
-        # If we have a "system" message as our first message, let's pull that out into session
-        # "instructions"
+        # If we have a "system" message as our first message,
+        # pull that out into session "instructions"
         if messages[0].get("role") == "system":
             system = messages.pop(0)
             content = system.get("content")
@@ -127,6 +127,11 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
                 system_instruction = content[0].get("text")
             if not messages:
                 return self.ConvertedMessages(messages=[], system_instruction=system_instruction)
+
+        # Convert any remaining "system"/"developer" messages to "user"
+        for msg in messages:
+            if msg.get("role") in ("system", "developer"):
+                msg["role"] = "user"
 
         # If we have just a single "user" item, we can just send it normally
         if len(messages) == 1 and messages[0].get("role") == "user":

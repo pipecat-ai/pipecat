@@ -60,7 +60,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         context = LLMContext()
-        context.add_message({"role": "user", "content": "Say hello to the world."})
+        context.add_message({"role": "developer", "content": "Say hello to the world."})
         await task.queue_frames([LLMContextFrame(context), EndFrame()])
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)

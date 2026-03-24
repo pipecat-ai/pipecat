@@ -169,7 +169,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message(
             {
-                "role": "user",
+                "role": "developer",
                 "content": f"Please introduce yourself to the user briefly; don't mention the camera. Use '{client_id}' as the user ID during function calls.",
             }
         )

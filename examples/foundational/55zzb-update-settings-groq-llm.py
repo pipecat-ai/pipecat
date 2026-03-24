@@ -62,7 +62,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GroqLLMService(
         api_key=os.getenv("GROQ_API_KEY"),
         settings=GroqLLMService.Settings(
-            model="meta-llama/llama-4-maverick-17b-128e-instruct",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
@@ -97,7 +96,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)

@@ -29,6 +29,10 @@ class QwenLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    # Qwen doesn't support the "developer" message role.
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
+
     Settings = QwenLLMSettings
     _settings: Settings
 

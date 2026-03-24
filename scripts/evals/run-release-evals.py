@@ -108,6 +108,7 @@ TESTS_07 = [
     ("07c-interruptible-deepgram-http.py", EVAL_SIMPLE_MATH),
     ("07d-interruptible-elevenlabs.py", EVAL_SIMPLE_MATH),
     ("07d-interruptible-elevenlabs-http.py", EVAL_SIMPLE_MATH),
+    ("07e-interruptible-anthropic.py", EVAL_SIMPLE_MATH),
     ("07f-interruptible-azure.py", EVAL_SIMPLE_MATH),
     ("07f-interruptible-azure-http.py", EVAL_SIMPLE_MATH),
     ("07g-interruptible-openai.py", EVAL_SIMPLE_MATH),

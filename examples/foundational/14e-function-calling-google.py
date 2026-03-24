@@ -220,7 +220,7 @@ indicate you should use the get_image tool are:
         # Kick off the conversation.
         context.add_message(
             {
-                "role": "user",
+                "role": "developer",
                 "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
             }
         )
