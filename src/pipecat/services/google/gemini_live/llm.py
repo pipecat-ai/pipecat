@@ -1334,13 +1334,12 @@ class GeminiLiveLLMService(LLMService):
                             await self.broadcast_interruption()
                         elif message.server_content and message.server_content.model_turn:
                             await self._handle_msg_model_turn(message)
-                        elif (
-                            message.server_content
-                            and message.server_content.turn_complete
-                            and message.usage_metadata
-                        ):
+                        elif message.server_content and message.server_content.turn_complete:
+                            if not message.usage_metadata:
+                                logger.warning("Received turn_complete without usage_metadata")
                             await self._handle_msg_turn_complete(message)
-                            await self._handle_msg_usage_metadata(message)
+                            if message.usage_metadata:
+                                await self._handle_msg_usage_metadata(message)
                         elif message.server_content and message.server_content.input_transcription:
                             await self._handle_msg_input_transcription(message)
                         elif message.server_content and message.server_content.output_transcription:
