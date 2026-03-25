@@ -86,7 +86,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+        # Avoid appending this filler message to the LLM context — it would
+        # alter the conversation history and prevent
+        # OpenAIResponsesLLMService's previous_response_id optimization from
+        # matching, forcing a full context resend.
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that.", append_to_context=False))
 
     weather_function = FunctionSchema(
         name="get_current_weather",

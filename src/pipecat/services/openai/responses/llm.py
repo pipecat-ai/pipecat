@@ -491,31 +491,56 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         Returns:
             The (possibly modified) params dict.
         """
+        if self._previous_response_id is None:
+            logger.trace(
+                f"{self}: Sending full context ({len(full_input)} items) — no previous response"
+            )
+            return params
+
         if (
-            self._previous_response_id is not None
-            and self._previous_input_length is not None
-            and self._previous_input_hash is not None
-            and len(full_input) > self._previous_input_length
+            self._previous_input_length is None
+            or self._previous_input_hash is None
+            or len(full_input) <= self._previous_input_length
         ):
-            prefix = full_input[: self._previous_input_length]
-            prefix_hash = self._hash_input_items(prefix)
-            if prefix_hash == self._previous_input_hash:
-                items_after_prefix = full_input[self._previous_input_length :]
-                response_output = self._previous_response_output or []
+            logger.trace(
+                f"{self}: Sending full context ({len(full_input)} items) — "
+                f"input not longer than previous ({self._previous_input_length})"
+            )
+            return params
 
-                if self._starts_with_response_output(items_after_prefix, response_output):
-                    # The server already knows its own output — skip those items
-                    items_to_send = items_after_prefix[len(response_output) :]
-                    cached = self._previous_input_length + len(response_output)
-                    params["input"] = items_to_send
-                    params["previous_response_id"] = self._previous_response_id
-                    logger.debug(
-                        f"{self}: Sending incremental context via previous_response_id "
-                        f"({len(items_to_send)} new items, {cached} cached)"
-                    )
-                    return params
+        prefix = full_input[: self._previous_input_length]
+        prefix_hash = self._hash_input_items(prefix)
+        if prefix_hash != self._previous_input_hash:
+            logger.trace(
+                f"{self}: Sending full context ({len(full_input)} items) — "
+                f"input prefix hash mismatch "
+                f"(previous input: {json.dumps(prefix, indent=2, default=str)}, "
+                f"expected hash: {self._previous_input_hash}, "
+                f"actual hash: {prefix_hash})"
+            )
+            return params
 
-        logger.debug(f"{self}: Sending full context ({len(full_input)} items)")
+        items_after_prefix = full_input[self._previous_input_length :]
+        response_output = self._previous_response_output or []
+
+        if not self._starts_with_response_output(items_after_prefix, response_output):
+            logger.trace(
+                f"{self}: Sending full context ({len(full_input)} items) — "
+                f"response output mismatch after prefix "
+                f"(previous response output: {json.dumps(response_output, indent=2, default=str)}, "
+                f"items after prefix: {json.dumps(items_after_prefix, indent=2, default=str)})"
+            )
+            return params
+
+        # The server already knows its own output — skip those items
+        items_to_send = items_after_prefix[len(response_output) :]
+        cached = self._previous_input_length + len(response_output)
+        params["input"] = items_to_send
+        params["previous_response_id"] = self._previous_response_id
+        logger.trace(
+            f"{self}: Sending incremental context via previous_response_id "
+            f"({len(items_to_send)} new items, {cached} cached)"
+        )
         return params
 
     @staticmethod
