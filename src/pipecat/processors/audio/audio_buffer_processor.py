@@ -13,6 +13,8 @@ configurations and event-driven processing.
 
 from typing import Optional
 
+from loguru import logger
+
 from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -204,6 +206,17 @@ class AudioBufferProcessor(FrameProcessor):
 
     async def _process_recording(self, frame: Frame):
         """Process audio frames for recording."""
+        # Track speaking state here (not just in _process_turn_recording) so the
+        # silence-injection guards below work regardless of enable_turn_audio.
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_speaking = False
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+
         resampled = None
         if isinstance(frame, InputAudioRawFrame):
             resampled = await self._resample_input_audio(frame)
@@ -220,15 +233,26 @@ class AudioBufferProcessor(FrameProcessor):
                 # If we synced AFTER, we'd pad the bot buffer with silence for the same
                 # window we just gave to the user, effectively "overwriting" that time slot
                 # with silence and causing the bot's audio to flicker or cut out.
-                self._sync_buffer_to_position(self._bot_audio_buffer, len(self._user_audio_buffer))
+                #
+                # Skip silence injection if the bot is actively speaking to avoid
+                # inserting silence in the middle of a bot utterance (causes crackling).
+                if not self._bot_speaking:
+                    self._sync_buffer_to_position(
+                        self._bot_audio_buffer, len(self._user_audio_buffer)
+                    )
                 # Add user audio.
                 self._user_audio_buffer.extend(resampled)
-        elif self._recording and isinstance(frame, OutputAudioRawFrame):
+        elif isinstance(frame, OutputAudioRawFrame):
             resampled = await self._resample_output_audio(frame)
             # Ignoring in case we don't have audio
             if len(resampled) > 0:
-                # Sync user buffer to current bot position before adding bot audio
-                self._sync_buffer_to_position(self._user_audio_buffer, len(self._bot_audio_buffer))
+                # Sync user buffer to current bot position before adding bot audio.
+                # Skip silence injection if the user is actively speaking to avoid
+                # inserting silence in the middle of a user utterance (causes crackling).
+                if not self._user_speaking:
+                    self._sync_buffer_to_position(
+                        self._user_audio_buffer, len(self._bot_audio_buffer)
+                    )
                 # Add bot audio.
                 self._bot_audio_buffer.extend(resampled)
 
@@ -260,21 +284,17 @@ class AudioBufferProcessor(FrameProcessor):
 
     async def _process_turn_recording(self, frame: Frame, resampled_audio: Optional[bytes] = None):
         """Process frames for turn-based audio recording."""
-        if isinstance(frame, UserStartedSpeakingFrame):
-            self._user_speaking = True
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        # Speaking state (_user_speaking / _bot_speaking) is maintained by
+        # _process_recording so it is always up-to-date here.
+        if isinstance(frame, UserStoppedSpeakingFrame):
             await self._call_event_handler(
                 "on_user_turn_audio_data", self._user_turn_audio_buffer, self.sample_rate, 1
             )
-            self._user_speaking = False
             self._user_turn_audio_buffer = bytearray()
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._call_event_handler(
                 "on_bot_turn_audio_data", self._bot_turn_audio_buffer, self.sample_rate, 1
             )
-            self._bot_speaking = False
             self._bot_turn_audio_buffer = bytearray()
 
         if isinstance(frame, InputAudioRawFrame) and resampled_audio:
