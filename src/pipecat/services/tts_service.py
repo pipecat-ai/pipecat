@@ -257,7 +257,7 @@ class TTSService(AIService):
             try:
                 self._settings.language = Language(self._settings.language)
             except ValueError:
-                logger.warning(
+                logger.debug(
                     f"Language string '{self._settings.language}' is not a recognized "
                     f"Language code. It will be passed to the service as-is."
                 )
@@ -622,7 +622,7 @@ class TTSService(AIService):
             try:
                 delta.language = Language(delta.language)
             except ValueError:
-                logger.warning(
+                logger.debug(
                     f"Language string '{delta.language}' is not a recognized "
                     f"Language code. It will be passed to the service as-is."
                 )
