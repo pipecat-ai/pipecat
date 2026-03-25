@@ -1137,12 +1137,13 @@ class TTSService(AIService):
         """
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
-                await self._audio_contexts[context_id].put(
+                await self.append_to_audio_context(
+                    context_id,
                     _WordTimestampEntry(
                         word=word,
                         timestamp=timestamp,
                         context_id=context_id,
-                    )
+                    ),
                 )
         else:
             await self._add_word_timestamps(word_times=word_times, context_id=context_id)
@@ -1207,7 +1208,9 @@ class TTSService(AIService):
         self._audio_contexts[context_id] = asyncio.Queue()
         logger.trace(f"{self} created audio context {context_id}")
 
-    async def append_to_audio_context(self, context_id: str, frame: Frame):
+    async def append_to_audio_context(
+        self, context_id: str, frame: Frame | _WordTimestampEntry | None
+    ):
         """Append audio or control frame to an existing context.
 
         Args:
@@ -1241,7 +1244,7 @@ class TTSService(AIService):
             # None. Once we reach None while handling audio we know we can
             # safely remove the context.
             logger.trace(f"{self} marking audio context {context_id} for deletion")
-            await self._audio_contexts[context_id].put(None)
+            await self.append_to_audio_context(context_id, None)
         else:
             logger.warning(f"{self} unable to remove context {context_id}")
 
