@@ -50,18 +50,26 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
         """Get the identifier used in LLMSpecificMessage instances for Inworld Realtime."""
         return "inworld-realtime"
 
-    def get_llm_invocation_params(self, context: LLMContext) -> InworldRealtimeLLMInvocationParams:
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, system_instruction: Optional[str] = None
+    ) -> InworldRealtimeLLMInvocationParams:
         """Get Inworld Realtime-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings.
 
         Returns:
             Dictionary of parameters for invoking Inworld's Realtime API.
         """
         messages = self._from_universal_context_messages(self.get_messages(context))
+        effective_system = self._resolve_system_instruction(
+            messages.system_instruction,
+            system_instruction,
+            discard_context_system=True,
+        )
         return {
-            "system_instruction": messages.system_instruction,
+            "system_instruction": effective_system,
             "messages": messages.messages,
             "tools": self.from_standard_tools(context.tools) or [],
         }
