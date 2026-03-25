@@ -6,6 +6,7 @@
 
 """OpenAI Responses API LLM service implementations (WebSocket and HTTP)."""
 
+import asyncio
 import hashlib
 import json
 from contextlib import asynccontextmanager
@@ -388,6 +389,11 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         self._previous_input_length: Optional[int] = None
         self._previous_response_output: Optional[list] = None
 
+        # Response cancellation state
+        self._current_response_id: Optional[str] = None
+        self._cancel_pending_response: bool = False
+        self._needs_drain: bool = False
+
     # -- lifecycle ------------------------------------------------------------
 
     async def start(self, frame: StartFrame):
@@ -444,6 +450,7 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
                 await self._websocket.close()
                 self._websocket = None
             self._clear_previous_response_state()
+            self._clear_cancellation_state()
             self._disconnecting = False
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting from WebSocket: {e}", exception=e)
@@ -503,9 +510,8 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
             The (possibly modified) params dict.
         """
         if self._previous_response_id is None:
-            logger.trace(
-                f"{self}: Sending full context ({len(full_input)} items) — no previous response"
-            )
+            logger.debug(f"{self}: Sending full context ({len(full_input)} items)")
+            logger.trace(f"{self}: Reason: no previous response")
             return params
 
         if (
@@ -513,18 +519,18 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
             or self._previous_input_hash is None
             or len(full_input) <= self._previous_input_length
         ):
+            logger.debug(f"{self}: Sending full context ({len(full_input)} items)")
             logger.trace(
-                f"{self}: Sending full context ({len(full_input)} items) — "
-                f"input not longer than previous ({self._previous_input_length})"
+                f"{self}: Reason: input not longer than previous ({self._previous_input_length})"
             )
             return params
 
         prefix = full_input[: self._previous_input_length]
         prefix_hash = self._hash_input_items(prefix)
         if prefix_hash != self._previous_input_hash:
+            logger.debug(f"{self}: Sending full context ({len(full_input)} items)")
             logger.trace(
-                f"{self}: Sending full context ({len(full_input)} items) — "
-                f"input prefix hash mismatch "
+                f"{self}: Reason: input prefix hash mismatch "
                 f"(previous input: {json.dumps(prefix, indent=2, default=str)}, "
                 f"expected hash: {self._previous_input_hash}, "
                 f"actual hash: {prefix_hash})"
@@ -535,9 +541,9 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         response_output = self._previous_response_output or []
 
         if not self._starts_with_response_output(items_after_prefix, response_output):
+            logger.debug(f"{self}: Sending full context ({len(full_input)} items)")
             logger.trace(
-                f"{self}: Sending full context ({len(full_input)} items) — "
-                f"response output mismatch after prefix "
+                f"{self}: Reason: response output mismatch after prefix "
                 f"(previous response output: {json.dumps(response_output, indent=2, default=str)}, "
                 f"items after prefix: {json.dumps(items_after_prefix, indent=2, default=str)})"
             )
@@ -548,7 +554,7 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         cached = self._previous_input_length + len(response_output)
         params["input"] = items_to_send
         params["previous_response_id"] = self._previous_response_id
-        logger.trace(
+        logger.debug(
             f"{self}: Sending incremental context via previous_response_id "
             f"({len(items_to_send)} new items, {cached} cached)"
         )
@@ -643,6 +649,68 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         self._previous_input_hash = None
         self._previous_response_output = None
 
+    # -- response cancellation ------------------------------------------------
+
+    def _clear_cancellation_state(self):
+        """Clear response cancellation tracking state."""
+        self._current_response_id = None
+        self._cancel_pending_response = False
+        self._needs_drain = False
+
+    async def _drain_cancelled_response(self):
+        """Drain events from a cancelled response before starting a new one.
+
+        After a cancellation, the WebSocket may still have in-flight events
+        from the cancelled response.  We must drain them before sending a
+        new ``response.create`` — we can't simply filter them inline because
+        the API doesn't provide a reliable way to correlate events to a
+        specific response (e.g. delta events carry neither a
+        ``response_id`` nor any intermediary identifier that could be
+        traced back to one).
+
+        This method reads and discards events until a terminal event
+        (``response.completed``, ``response.failed``, or
+        ``response.incomplete``) arrives, ensuring the connection is clean.
+        Falls back to reconnecting if draining takes too long.
+        """
+        logger.debug(f"{self}: Draining cancelled response events")
+        try:
+            while True:
+                raw = await asyncio.wait_for(self._websocket.recv(), timeout=5.0)
+                event = json.loads(raw)
+                event_type = event.get("type")
+
+                # If we were cancelled before response.created, the first
+                # event here will be response.created for the cancelled
+                # request — send cancel now that we have the id.
+                if event_type == "response.created" and self._cancel_pending_response:
+                    response_id = event.get("response", {}).get("id")
+                    logger.debug(
+                        f"{self}: Received response.created for pending-cancel "
+                        f"response {response_id} — sending response.cancel"
+                    )
+                    self._cancel_pending_response = False
+                    if response_id:
+                        try:
+                            await self._ws_send(
+                                {"type": "response.cancel", "response_id": response_id}
+                            )
+                        except Exception:
+                            pass
+                    continue
+
+                if event_type in ("response.completed", "response.failed", "response.incomplete"):
+                    logger.debug(
+                        f"{self}: Cancelled response terminated with {event_type} — "
+                        f"connection is clean"
+                    )
+                    self._needs_drain = False
+                    return
+        except asyncio.TimeoutError:
+            logger.warning(f"{self}: Timed out draining cancelled response — reconnecting")
+            self._needs_drain = False
+            await self._reconnect()
+
     # -- frame processing -----------------------------------------------------
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -665,6 +733,33 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(context)
+            except asyncio.CancelledError:
+                # The pipeline cancelled us (e.g. due to an interruption).
+                # Ask the server to stop generating and flag that we need
+                # to drain stale events before the next inference.  We
+                # can't just send a new response.create and filter stale
+                # events inline — the API doesn't provide a reliable way
+                # to correlate events to a specific response.
+                if self._current_response_id:
+                    logger.debug(
+                        f"{self}: Cancelled during response {self._current_response_id} "
+                        f"— sending response.cancel"
+                    )
+                    try:
+                        await self._ws_send(
+                            {"type": "response.cancel", "response_id": self._current_response_id}
+                        )
+                    except Exception:
+                        pass
+                else:
+                    logger.debug(
+                        f"{self}: Cancelled before response.created "
+                        f"— will cancel on next response.created"
+                    )
+                    self._cancel_pending_response = True
+                self._current_response_id = None
+                self._needs_drain = True
+                raise
             except Exception as e:
                 await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
             finally:
@@ -680,6 +775,11 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         Args:
             context: The LLM context containing conversation history.
         """
+        # If a previous response was cancelled, drain its remaining events
+        # before starting a new one.
+        if self._needs_drain:
+            await self._drain_cancelled_response()
+
         adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
         logger.debug(
             f"{self}: Generating response from universal context "
@@ -766,6 +866,11 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
             raw = await self._websocket.recv()
             event = json.loads(raw)
             event_type = event.get("type")
+
+            if event_type == "response.created":
+                self._current_response_id = event.get("response", {}).get("id")
+                logger.debug(f"{self}: Response started: {self._current_response_id}")
+                continue
 
             if event_type == "response.output_text.delta":
                 await self.stop_ttfb_metrics()
