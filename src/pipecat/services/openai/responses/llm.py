@@ -223,6 +223,10 @@ class _BaseOpenAIResponsesLLMService(LLMService):
         params: Dict[str, Any] = {
             "model": self._settings.model,
             "stream": True,
+            # store=False avoids OpenAI-side 30-day conversation storage.
+            # The WebSocket variant's previous_response_id optimization
+            # still works with store=False because it uses a connection-local
+            # in-memory cache. See the class docstrings for details.
             "store": False,
             "input": invocation_params["input"],
         }
@@ -336,6 +340,13 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
     for lower-latency inference, especially beneficial for tool-call-heavy workflows.
     Automatically uses ``previous_response_id`` to send only incremental context when
     possible, and falls back to full context on reconnection or cache miss.
+
+    The ``previous_response_id`` optimization works with ``store=False`` (the default)
+    because WebSocket mode uses a connection-local in-memory cache — no conversations
+    are stored on OpenAI's servers.  This is why the HTTP variant
+    (``OpenAIResponsesHttpLLMService``) does not offer this optimization by default
+    (or at all, yet): over HTTP, ``previous_response_id`` requires ``store=True``,
+    which enables OpenAI-side 30-day conversation storage.
 
     This is the recommended variant for real-time / conversational use.
 
@@ -855,6 +866,15 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
 
     Uses server-sent events (SSE) via the OpenAI Python SDK for streaming
     inference. Each ``_process_context`` call opens a new HTTP connection.
+
+    Unlike the WebSocket variant, this service does not use
+    ``previous_response_id`` for incremental context delivery by default
+    (or at all, yet).  Over HTTP, ``previous_response_id`` requires
+    ``store=True``, which enables OpenAI-side 30-day conversation storage
+    — a privacy/compliance tradeoff that many users won't want.  The
+    WebSocket variant avoids this because its ``previous_response_id``
+    uses a connection-local in-memory cache that works with
+    ``store=False`` (nothing is stored long-term).
 
     Example::
 
