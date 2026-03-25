@@ -1360,7 +1360,12 @@ class GeminiLiveLLMService(LLMService):
                         # Reset failure counter if connection has been stable
                         self._check_and_reset_failure_counter()
 
-                        if message.server_content and message.server_content.interrupted:
+                        # server_content fields are NOT mutually exclusive —
+                        # Gemini 3.x can bundle e.g. model_turn and
+                        # output_transcription on the same message — so check
+                        # each field independently.
+                        sc = message.server_content
+                        if sc and sc.interrupted:
                             # NOTE: while the service triggers interruptions in
                             # the specific case of barge-ins, it does *not*
                             # emit UserStarted/StoppedSpeakingFrames, as the
@@ -1373,23 +1378,23 @@ class GeminiLiveLLMService(LLMService):
                             # turn strategies.
                             logger.debug("Gemini VAD: interrupted signal received")
                             await self.broadcast_interruption()
-                        elif message.server_content and message.server_content.model_turn:
+                        if sc and sc.model_turn:
                             await self._handle_msg_model_turn(message)
-                        elif message.server_content and message.server_content.turn_complete:
+                        if sc and sc.turn_complete:
                             if not message.usage_metadata:
                                 logger.warning("Received turn_complete without usage_metadata")
                             await self._handle_msg_turn_complete(message)
                             if message.usage_metadata:
                                 await self._handle_msg_usage_metadata(message)
-                        elif message.server_content and message.server_content.input_transcription:
+                        if sc and sc.input_transcription:
                             await self._handle_msg_input_transcription(message)
-                        elif message.server_content and message.server_content.output_transcription:
+                        if sc and sc.output_transcription:
                             await self._handle_msg_output_transcription(message)
-                        elif message.server_content and message.server_content.grounding_metadata:
+                        if sc and sc.grounding_metadata:
                             await self._handle_msg_grounding_metadata(message)
-                        elif message.tool_call:
+                        if message.tool_call:
                             await self._handle_msg_tool_call(message)
-                        elif message.session_resumption_update:
+                        if message.session_resumption_update:
                             self._handle_msg_resumption_update(message)
                 except Exception as e:
                     if not self._disconnecting:
