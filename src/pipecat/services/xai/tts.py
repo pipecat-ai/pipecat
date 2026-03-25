@@ -62,7 +62,7 @@ def language_to_xai_language(language: Language) -> Optional[str]:
 
 
 @dataclass
-class XAIHttpTTSSettings(TTSSettings):
+class XAITTSSettings(TTSSettings):
     """Settings for XAIHttpTTSService."""
 
     pass
@@ -75,7 +75,7 @@ class XAIHttpTTSService(TTSService):
     match Pipecat's downstream expectations without extra decoding.
     """
 
-    Settings = XAIHttpTTSSettings
+    Settings = XAITTSSettings
     _settings: Settings
 
     def __init__(
