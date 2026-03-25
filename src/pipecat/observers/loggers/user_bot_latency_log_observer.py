@@ -84,6 +84,6 @@ class UserBotLatencyLogObserver(BaseObserver):
         Args:
             latency: The latency to log.
         """
-        logger.debug(
+        logger.info(
             f"⏱️ LATENCY FROM USER STOPPED SPEAKING TO BOT STARTED SPEAKING: {latency:.3f}s"
         )

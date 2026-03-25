@@ -131,24 +131,24 @@ class MetricsLogObserver(BaseObserver):
         model_info = f" ({metrics_data.model})" if metrics_data.model else ""
 
         if isinstance(metrics_data, TTFBMetricsData):
-            logger.debug(
+            logger.info(
                 f"📊 {processor_info} TTFB{model_info}: {metrics_data.value}s at {time_sec:.3f}s"
             )
         elif isinstance(metrics_data, ProcessingMetricsData):
-            logger.debug(
+            logger.info(
                 f"📊 {processor_info} PROCESSING TIME{model_info}: {metrics_data.value}s at {time_sec:.3f}s"
             )
         elif isinstance(metrics_data, LLMUsageMetricsData):
             self._log_llm_usage(metrics_data, processor_info, model_info, time_sec)
         elif isinstance(metrics_data, TTSUsageMetricsData):
-            logger.debug(
+            logger.info(
                 f"📊 {processor_info} TTS USAGE{model_info}: {metrics_data.value} characters at {time_sec:.3f}s"
             )
         elif isinstance(metrics_data, SmartTurnMetricsData):
             self._log_smart_turn(metrics_data, processor_info, model_info, time_sec)
         else:
             # Generic fallback for unknown metrics types
-            logger.debug(
+            logger.info(
                 f"📊 {processor_info} METRICS{model_info}: {metrics_data} at {time_sec:.3f}s"
             )
 
@@ -187,7 +187,7 @@ class MetricsLogObserver(BaseObserver):
 
         usage_str = ", ".join(details)
 
-        logger.debug(
+        logger.info(
             f"📊 {processor_info} LLM TOKEN USAGE{model_info}: {usage_str} at {time_sec:.2f}s"
         )
 
@@ -208,7 +208,7 @@ class MetricsLogObserver(BaseObserver):
         """
         complete_str = "COMPLETE" if metrics_data.is_complete else "INCOMPLETE"
 
-        logger.debug(
+        logger.info(
             f"📊 {processor_info} SMART TURN{model_info}: {complete_str} "
             f"(probability: {metrics_data.probability:.2%}, "
             f"inference: {metrics_data.inference_time_ms:.1f}ms, "
