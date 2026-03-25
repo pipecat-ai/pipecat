@@ -342,7 +342,7 @@ class GradiumTTSService(WebsocketTTSService):
 
             elif msg["type"] == "end_of_stream":
                 if ctx_id and self.audio_context_available(ctx_id):
-                    await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
+                    await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                     await self.remove_audio_context(ctx_id)
                 if ctx_id:
                     self._setup_context_ids.discard(ctx_id)

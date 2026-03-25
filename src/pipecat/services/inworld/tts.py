@@ -248,8 +248,6 @@ class InworldHttpTTSService(TTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (InterruptionFrame, TTSStoppedFrame)):
             self._cumulative_time = 0.0
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)])
 
     def _calculate_word_times(
         self,
@@ -728,8 +726,6 @@ class InworldTTSService(WebsocketTTSService):
             )
             self._cumulative_time = 0.0
             self._generation_end_time = 0.0
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)])
 
     async def on_turn_context_created(self, context_id: str):
         """Eagerly open the context on the server when a new turn starts.
@@ -996,7 +992,7 @@ class InworldTTSService(WebsocketTTSService):
             if "contextClosed" in result:
                 logger.trace(f"{self}: Context closed on server: {ctx_id}")
                 await self.stop_ttfb_metrics()
-                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
+                await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                 await self.remove_audio_context(ctx_id)
 
     async def _keepalive_task_handler(self):

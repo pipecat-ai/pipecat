@@ -387,7 +387,9 @@ class ResembleAITTSService(WebsocketTTSService):
                     if request_id in self._request_id_to_context:
                         del self._request_id_to_context[request_id]
 
-                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], context_id)
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
                 await self.remove_audio_context(context_id)
 
             elif msg_type == "error":
