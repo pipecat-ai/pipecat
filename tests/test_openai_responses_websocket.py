@@ -61,6 +61,107 @@ class TestHashInputItems:
         assert h1 == h2
 
 
+class TestStartsWithResponseOutput:
+    def test_text_message_matches_by_role(self):
+        response_output = [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Hello!"}],
+            }
+        ]
+        # Adapter produces a different format, but same role
+        items = [{"role": "assistant", "content": "Hello!"}, {"role": "user", "content": "hi"}]
+        assert OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+    def test_function_call_matches_by_call_id(self):
+        response_output = [
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "get_weather",
+                "arguments": '{"location": "SF"}',
+            }
+        ]
+        # Adapter format (no "id" field)
+        items = [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "get_weather",
+                "arguments": "{}",
+            },
+            {"type": "function_call_output", "call_id": "call_1", "output": "sunny"},
+        ]
+        assert OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+    def test_mixed_output(self):
+        response_output = [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Let me check."}],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "get_weather",
+                "arguments": "{}",
+            },
+        ]
+        items = [
+            {"role": "assistant", "content": "Let me check."},
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "get_weather",
+                "arguments": "{}",
+            },
+            {"type": "function_call_output", "call_id": "call_1", "output": "sunny"},
+        ]
+        assert OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+    def test_role_mismatch(self):
+        response_output = [{"type": "message", "role": "assistant", "content": []}]
+        items = [{"role": "user", "content": "hi"}]
+        assert not OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+    def test_text_content_mismatch(self):
+        response_output = [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Hello!"}],
+            }
+        ]
+        items = [{"role": "assistant", "content": "Something completely different"}]
+        assert not OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+    def test_call_id_mismatch(self):
+        response_output = [{"type": "function_call", "call_id": "call_1", "name": "f"}]
+        items = [{"type": "function_call", "call_id": "call_999", "name": "f"}]
+        assert not OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+    def test_too_few_items(self):
+        response_output = [
+            {"type": "message", "role": "assistant", "content": []},
+            {"type": "function_call", "call_id": "call_1", "name": "f"},
+        ]
+        items = [{"role": "assistant", "content": "hi"}]
+        assert not OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+    def test_empty_output_always_matches(self):
+        assert OpenAIResponsesLLMService._starts_with_response_output([], [])
+        assert OpenAIResponsesLLMService._starts_with_response_output([{"role": "user"}], [])
+
+    def test_unknown_output_type_rejects(self):
+        response_output = [{"type": "unknown_thing", "data": "something"}]
+        items = [{"role": "assistant", "content": "hi"}]
+        assert not OpenAIResponsesLLMService._starts_with_response_output(items, response_output)
+
+
 # ---------------------------------------------------------------------------
 # previous_response_id optimization
 # ---------------------------------------------------------------------------
@@ -79,9 +180,18 @@ class TestPreviousResponseOptimization:
 
     def test_matching_prefix_sends_incremental(self):
         service = _make_service()
+        # Simulate: sent [user_msg], got assistant reply "hello"
         prev_input = [{"role": "user", "content": "hi"}]
-        service._store_previous_response_state("resp_123", prev_input)
+        prev_output = [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "hello"}],
+            }
+        ]
+        service._store_previous_response_state("resp_123", prev_input, prev_output)
 
+        # Next call: adapter produces full context including assistant reply + new user msg
         full_input = [
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "hello"},
@@ -92,12 +202,13 @@ class TestPreviousResponseOptimization:
         result = service._apply_previous_response_optimization(params, full_input)
 
         assert result["previous_response_id"] == "resp_123"
-        assert result["input"] == full_input[1:]
+        # Only the new user message should be sent
+        assert result["input"] == [{"role": "user", "content": "how are you?"}]
 
     def test_mismatched_prefix_sends_full(self):
         service = _make_service()
         prev_input = [{"role": "user", "content": "hi"}]
-        service._store_previous_response_state("resp_123", prev_input)
+        service._store_previous_response_state("resp_123", prev_input, [])
 
         # Different first message
         full_input = [
@@ -115,7 +226,7 @@ class TestPreviousResponseOptimization:
         """When new input is same length as previous, no optimization."""
         service = _make_service()
         prev_input = [{"role": "user", "content": "hi"}]
-        service._store_previous_response_state("resp_123", prev_input)
+        service._store_previous_response_state("resp_123", prev_input, [])
 
         full_input = [{"role": "user", "content": "hi"}]
         params = {"input": list(full_input), "model": "gpt-4.1"}
@@ -124,9 +235,35 @@ class TestPreviousResponseOptimization:
 
         assert "previous_response_id" not in result
 
+    def test_output_mismatch_sends_full_context(self):
+        """When prefix matches but output doesn't, fall back to full context."""
+        service = _make_service()
+        prev_input = [{"role": "user", "content": "hi"}]
+        prev_output = [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "hello"}],
+            }
+        ]
+        service._store_previous_response_state("resp_123", prev_input, prev_output)
+
+        # Aggregator stored the output differently (e.g. different role)
+        full_input = [
+            {"role": "user", "content": "hi"},
+            {"role": "developer", "content": "something unexpected"},
+            {"role": "user", "content": "how are you?"},
+        ]
+        params = {"input": list(full_input), "model": "gpt-4.1"}
+
+        result = service._apply_previous_response_optimization(params, full_input)
+
+        assert "previous_response_id" not in result
+        assert result["input"] == full_input
+
     def test_clear_state(self):
         service = _make_service()
-        service._store_previous_response_state("resp_123", [{"role": "user", "content": "hi"}])
+        service._store_previous_response_state("resp_123", [{"role": "user", "content": "hi"}], [])
         service._clear_previous_response_state()
 
         assert service._previous_response_id is None
@@ -188,6 +325,13 @@ class TestReceiveResponseEventsText:
                 "response": {
                     "id": "resp_42",
                     "model": "gpt-4.1",
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "Hello!"}],
+                        }
+                    ],
                     "usage": {
                         "input_tokens": 10,
                         "output_tokens": 5,
@@ -207,6 +351,7 @@ class TestReceiveResponseEventsText:
         assert service._previous_response_id == "resp_42"
         assert service._previous_input_length == 1
         assert service._previous_input_hash is not None
+        assert len(service._previous_response_output) == 1
         assert service.start_llm_usage_metrics.called
 
     @pytest.mark.asyncio
@@ -442,7 +587,7 @@ class TestConnectionLifecycle:
     @pytest.mark.asyncio
     async def test_disconnect_clears_previous_response_state(self):
         service = _make_service()
-        service._store_previous_response_state("resp_1", [{"role": "user", "content": "hi"}])
+        service._store_previous_response_state("resp_1", [{"role": "user", "content": "hi"}], [])
         service.stop_all_metrics = AsyncMock()
 
         await service._disconnect()
@@ -454,7 +599,7 @@ class TestConnectionLifecycle:
     @pytest.mark.asyncio
     async def test_reconnect_clears_state_and_reconnects(self):
         service = _make_service()
-        service._store_previous_response_state("resp_1", [{"role": "user", "content": "hi"}])
+        service._store_previous_response_state("resp_1", [{"role": "user", "content": "hi"}], [])
         service.stop_all_metrics = AsyncMock()
         service.push_error = AsyncMock()
 

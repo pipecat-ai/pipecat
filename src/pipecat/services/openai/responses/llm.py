@@ -375,6 +375,7 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         self._previous_response_id: Optional[str] = None
         self._previous_input_hash: Optional[str] = None
         self._previous_input_length: Optional[int] = None
+        self._previous_response_output: Optional[list] = None
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -499,35 +500,112 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
             prefix = full_input[: self._previous_input_length]
             prefix_hash = self._hash_input_items(prefix)
             if prefix_hash == self._previous_input_hash:
-                new_items = full_input[self._previous_input_length :]
-                params["input"] = new_items
-                params["previous_response_id"] = self._previous_response_id
-                logger.debug(
-                    f"{self}: Using previous_response_id optimization "
-                    f"({len(new_items)} new items, "
-                    f"{self._previous_input_length} cached)"
-                )
-                return params
+                items_after_prefix = full_input[self._previous_input_length :]
+                response_output = self._previous_response_output or []
 
-        # Full context send (no optimization possible)
+                if self._starts_with_response_output(items_after_prefix, response_output):
+                    # The server already knows its own output — skip those items
+                    items_to_send = items_after_prefix[len(response_output) :]
+                    cached = self._previous_input_length + len(response_output)
+                    params["input"] = items_to_send
+                    params["previous_response_id"] = self._previous_response_id
+                    logger.debug(
+                        f"{self}: Sending incremental context via previous_response_id "
+                        f"({len(items_to_send)} new items, {cached} cached)"
+                    )
+                    return params
+
+        logger.debug(f"{self}: Sending full context ({len(full_input)} items)")
         return params
 
-    def _store_previous_response_state(self, response_id: str, full_input: list):
+    @staticmethod
+    def _starts_with_response_output(items: list, response_output: list) -> bool:
+        """Check whether ``items`` begins with entries that match ``response_output``.
+
+        When using ``previous_response_id``, the server already knows its own
+        output.  After confirming that the input prefix matches what we
+        previously sent, this method checks whether the items immediately
+        following that prefix correspond to the server's response output.
+        If they do, those items can be skipped so we send only the truly
+        new items (user messages, tool results, etc.).
+
+        For messages, the comparison checks role and text content (extracting
+        text from the output's ``output_text`` content parts and comparing
+        against the input's content).  For function calls, it matches by
+        ``call_id``.  This avoids requiring exact format equality while
+        still confirming the items represent the same data.  If the match
+        fails for any reason, the caller falls back to sending the full
+        context.
+
+        Args:
+            items: The input items following the matched prefix.
+            response_output: Raw ``output`` array from the previous
+                ``response.completed`` event.
+
+        Returns:
+            True if the leading items correspond to the response output.
+        """
+        if len(items) < len(response_output):
+            return False
+
+        for output_item, input_item in zip(response_output, items):
+            output_type = output_item.get("type")
+            if output_type == "message":
+                if input_item.get("role") != output_item.get("role", "assistant"):
+                    return False
+                # Extract text from the output's content array and compare
+                # against the input's content (which the adapter stores as
+                # a plain string for simple text responses).
+                output_content = output_item.get("content", [])
+                if isinstance(output_content, list):
+                    output_text = "".join(
+                        p.get("text", "") for p in output_content if p.get("type") == "output_text"
+                    )
+                else:
+                    output_text = str(output_content)
+                input_content = input_item.get("content", "")
+                if isinstance(input_content, list):
+                    # Adapter may produce multimodal content parts
+                    input_text = "".join(
+                        p.get("text", "") for p in input_content if p.get("type") == "input_text"
+                    )
+                else:
+                    input_text = str(input_content)
+                if output_text != input_text:
+                    return False
+            elif output_type == "function_call":
+                if input_item.get("type") != "function_call" or input_item.get(
+                    "call_id"
+                ) != output_item.get("call_id"):
+                    return False
+            else:
+                # Unknown output type — can't confirm match
+                return False
+
+        return True
+
+    def _store_previous_response_state(
+        self, response_id: str, full_input: list, response_output: list
+    ):
         """Store state for the next call's previous_response_id optimization.
 
         Args:
             response_id: The response ID returned by the server.
-            full_input: The complete input items list that was used.
+            full_input: The complete input items list that was sent.
+            response_output: Raw ``output`` array from the ``response.completed``
+                event, stored for loose comparison on the next call.
         """
         self._previous_response_id = response_id
         self._previous_input_length = len(full_input)
         self._previous_input_hash = self._hash_input_items(full_input)
+        self._previous_response_output = response_output
 
     def _clear_previous_response_state(self):
         """Clear stored previous_response_id state."""
         self._previous_response_id = None
         self._previous_input_length = None
         self._previous_input_hash = None
+        self._previous_response_output = None
 
     # -- frame processing -----------------------------------------------------
 
@@ -705,10 +783,13 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
 
                 self._full_model_name = response.get("model")
 
-                # Store state for next call's previous_response_id optimization
+                # Store state for next call's previous_response_id optimization.
+                # Include the response output so the hash covers the assistant's
+                # reply — the server already knows it, so we won't resend it.
                 response_id = response.get("id")
                 if response_id:
-                    self._store_previous_response_state(response_id, full_input)
+                    response_output = response.get("output") or []
+                    self._store_previous_response_state(response_id, full_input, response_output)
 
                 break  # Response complete
 
