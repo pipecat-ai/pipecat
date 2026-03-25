@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 import asyncio
 from openai import AsyncOpenAI
+import json
 
 from pipecat.frames.frames import (
     Frame,
@@ -39,16 +40,80 @@ class MyLLMService(LLMService):
             "description": "Get the current system time",
             "parameters": {}
             }
+        },
+        {
+            "type": "function",
+            "function": {
+        "name": "get_current_weather",
+        "description": "Get the current weather of the city that is provided",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA or only the city name"
+                }
+            },
+            "required": ["location"]
+            }
+        } 
+       },
+       {
+    "type": "function",
+    "function": {
+        "name": "calculate_distance",
+        "description": "Calculate the distance between two cities",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "city1": {
+                    "type": "string",
+                    "description": "The first city"
+                },
+                "city2": {
+                    "type": "string",
+                    "description": "The second city"
+                }
+            },
+            "required": ["city1", "city2"]
         }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "calculate_amount",
+        "description": "Calculate the amount for the distance",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "distance": {
+                    "type": "number",
+                    "description": "The distance"
+                }
+            },
+            "required": ["distance"]
+        }
+    }
+}
         ]
 
         return TOOLS
     
 
-    def tool_calls(self, tool_call):
+    def tool_calls(self, tool_call, arguments):
         if tool_call == "get_current_time":
             result = self.get_current_time()
-            return result
+        elif tool_call == "get_current_weather":
+            result = self.get_current_weather(arguments["location"])
+        elif tool_call == "calculate_distance":
+            result = self.calculate_distance(arguments["city1"], arguments["city2"])
+        elif tool_call == "calculate_amount":
+            result = self.calculate_amount(arguments["distance"])
+        return result
+
+    def get_current_weather(self, location):
+        return f"The current weather of {location} is sunny"
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         # print("================================================")
@@ -83,74 +148,80 @@ class MyLLMService(LLMService):
           
     
     async def generate(self, messages: list) -> LLMResponse:
-        print("================================================")
-        print("into my LLM generate")
         client = AsyncOpenAI(api_key=self.api_key)
 
         messages = self._to_provider_messages(messages)
 
         if not messages:
             raise "No messages provided"
-        
+
         await asyncio.sleep(0.5)
         last_message = messages[-1]["content"]
 
         if not last_message:
             return LLMResponse(text= "", raw = None)
-            
+
         try:
             print("into MyLLM generate try block")
-            response = await client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=self.create_tools(), 
-            tool_choice="auto"
-            )
 
-            tool_call = response.choices[0].message.tool_calls
-
-            if tool_call:
-                tool_call_id = response.choices[0].message.tool_calls[0].id
-                assistant_message = response.choices[0].message
-
-                messages.append({
-                    "role": "assistant",
-                     "content": assistant_message.content,
-                     "tool_calls": assistant_message.tool_calls,
-                    })
-
-
-                result = self.tool_calls(tool_call[0].function.name)
-
-                messages.append({
-                    "role": "tool",
-                     "tool_call_id": tool_call_id,
-                     "content": result
-                })
-
+            while True:
                 response = await client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                )
-
-                response_text = response.choices[0].message.content
-
-                print("before return LLMResponse")
-
-                return LLMResponse(
-                text=response_text,
-                raw=response
+                    tools=self.create_tools(),
+                    tool_choice="auto"
                 )
                 
-            else:
-                response_text = response.choices[0].message.content
-                print("response_text", response_text)
+                print()
                 print("================================================")
-                return LLMResponse(
-                text=response_text,
-                raw=response
-                )
-            
+                print("response.choices[0].message", response.choices[0].message)
+
+                tool_calls = response.choices[0].message.tool_calls
+                
+                print()
+                print("================================================")
+                print("tool_calls", tool_calls)
+
+                if not tool_calls:
+                    response_text = response.choices[0].message.content
+                    print("if not tool_calls response", response_text)
+                    return LLMResponse(
+                        text=response_text,
+                        raw=response
+                    )
+
+                assistant_message = response.choices[0].message
+
+                print()
+                print("================================================")
+                print("assistant_message", assistant_message)
+
+                messages.append({
+                    "role": "assistant",
+                    "content": assistant_message.content,
+                    "tool_calls": assistant_message.tool_calls,
+                })
+
+                print()
+                print("================================================")
+                print("messages", messages)
+
+                for tc in tool_calls:
+                    result = self.tool_calls(tc.function.name, json.loads(tc.function.arguments))
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result
+                    })
+
+                print()
+                print("================================================")
+                print("messages after tool calls", messages)
+
+                print()
+                print("================================================")
+                print(f"Processed {len(tool_calls)} tool call(s), looping for next response...")
+
         except asyncio.TimeoutError:
             raise RuntimeError("LLM request timed out")
             
@@ -181,10 +252,22 @@ class MyLLMService(LLMService):
 
         return summary
 
+
     def get_current_time(self):
         from datetime import datetime
         return datetime.now().strftime("%H:%M:%S")
 
+    def calculate_distance(self, city1, city2):
+        return f"The distance between {city1} and {city2} is 100 miles"
+
+    def calculate_amount(self, distance):
+        return f"The amount for the distance {distance} is 1000rs"
+
+    def book_cab(self, city1, city2):
+        return f"The cab has been booked from {city1} to {city2}"
+
+    def get_cab_details(self, city1, city2):
+        return f"The cab details for the city {city1} to {city2} are as follows: The cab is a sedan, the color is blue, the license plate number is ABC123, the driver's name is John Doe, the driver's phone number is 1234567890"
 
 
         
