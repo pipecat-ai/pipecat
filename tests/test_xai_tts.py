@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for XAITTSService."""
+"""Tests for XAIHttpTTSService."""
 
 import asyncio
 import unittest
@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.xai.tts import XAITTSService
+from pipecat.services.xai.tts import XAIHttpTTSService
 from pipecat.tests.utils import run_test
 
 
@@ -52,7 +52,7 @@ async def test_run_xai_tts_success(aiohttp_client):
     base_url = str(client.make_url("/v1/tts"))
 
     async with aiohttp.ClientSession() as session:
-        tts_service = XAITTSService(
+        tts_service = XAIHttpTTSService(
             api_key="test-key",
             base_url=base_url,
             aiohttp_session=session,
