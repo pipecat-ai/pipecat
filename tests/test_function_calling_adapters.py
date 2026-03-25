@@ -13,6 +13,7 @@ from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 
@@ -142,6 +143,32 @@ class TestFunctionAdapters(unittest.TestCase):
             }
         ]
         assert OpenAIRealtimeLLMAdapter().to_provider_tools_format(self.tools_def) == expected
+
+    def test_inworld_realtime_adapter(self):
+        """Test Inworld Realtime adapter format transformation."""
+        expected = [
+            {
+                "type": "function",
+                "name": "get_weather",
+                "description": "Get the weather in a given location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city, e.g. San Francisco",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"],
+                            "description": "The temperature unit to use.",
+                        },
+                    },
+                    "required": ["location", "format"],
+                },
+            }
+        ]
+        assert InworldRealtimeLLMAdapter().to_provider_tools_format(self.tools_def) == expected
 
     def test_gemini_adapter_with_custom_tools(self):
         """Test Gemini adapter format transformation."""
