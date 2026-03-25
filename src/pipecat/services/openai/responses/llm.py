@@ -4,8 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Responses API LLM service implementation."""
+"""OpenAI Responses API LLM service implementations (WebSocket and HTTP)."""
 
+import hashlib
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -30,10 +31,13 @@ from pipecat.adapters.services.open_ai_responses_adapter import (
     OpenAIResponsesLLMInvocationParams,
 )
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    StartFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -43,10 +47,46 @@ from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven
 from pipecat.utils.tracing.service_decorators import traced_llm
 
+try:
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.exceptions import ConnectionClosed
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
+    raise Exception(f"Missing module: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Private retry exception classes
+# ---------------------------------------------------------------------------
+
+
+class _RetryableError(Exception):
+    """Base for errors that should trigger a retry in _process_context."""
+
+    pass
+
+
+class _PreviousResponseNotFoundError(_RetryableError):
+    """Server could not find the previous response (connection-local cache miss)."""
+
+    pass
+
+
+class _ConnectionLimitReachedError(_RetryableError):
+    """WebSocket connection hit the 60-minute server-side limit."""
+
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
 
 @dataclass
 class OpenAIResponsesLLMSettings(LLMSettings):
-    """Settings for OpenAIResponsesLLMService.
+    """Settings for OpenAI Responses API LLM services.
 
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
@@ -55,20 +95,17 @@ class OpenAIResponsesLLMSettings(LLMSettings):
     max_completion_tokens: int | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
 
 
-class OpenAIResponsesLLMService(LLMService):
-    """OpenAI Responses API LLM service.
+# ---------------------------------------------------------------------------
+# Shared base class (private)
+# ---------------------------------------------------------------------------
 
-    This service works with the universal LLMContext and LLMContextAggregatorPair.
 
-    Example::
+class _BaseOpenAIResponsesLLMService(LLMService):
+    """Shared base for HTTP and WebSocket OpenAI Responses API services.
 
-        llm = OpenAIResponsesLLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            settings=OpenAIResponsesLLMService.Settings(
-                model="gpt-4.1",
-                system_instruction="You are a helpful assistant.",
-            ),
-        )
+    Contains settings, adapter reference, HTTP client creation, parameter
+    building, ``run_inference``, and metrics support. Subclasses implement
+    ``process_frame`` and ``_process_context`` for their transport.
     """
 
     Settings = OpenAIResponsesLLMSettings
@@ -124,6 +161,7 @@ class OpenAIResponsesLLMService(LLMService):
             **kwargs,
         )
 
+        self._api_key = api_key
         self._service_tier = service_tier
         self._client = self._create_client(
             api_key=api_key,
@@ -172,6 +210,556 @@ class OpenAIResponsesLLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
         return True
+
+    def _build_response_params(self, invocation_params: OpenAIResponsesLLMInvocationParams) -> dict:
+        """Build parameters for a Responses API call.
+
+        Args:
+            invocation_params: Parameters derived from the LLM context.
+
+        Returns:
+            Dictionary of parameters for the Responses API call.
+        """
+        params: Dict[str, Any] = {
+            "model": self._settings.model,
+            "stream": True,
+            "store": False,
+            "input": invocation_params["input"],
+        }
+
+        # instructions (set by the adapter when input is non-empty)
+        if "instructions" in invocation_params:
+            params["instructions"] = invocation_params["instructions"]
+
+        # Optional parameters - only include if given
+        if isinstance(self._settings.temperature, (int, float)):
+            params["temperature"] = self._settings.temperature
+
+        if isinstance(self._settings.top_p, (int, float)):
+            params["top_p"] = self._settings.top_p
+
+        if isinstance(self._settings.max_completion_tokens, int):
+            params["max_output_tokens"] = self._settings.max_completion_tokens
+
+        if self._service_tier is not None:
+            params["service_tier"] = self._service_tier
+
+        # Tools
+        tools = invocation_params.get("tools")
+        if tools is not None and not isinstance(tools, type(NOT_GIVEN)):
+            params["tools"] = tools
+
+        # Extra settings
+        params.update(self._settings.extra)
+
+        return params
+
+    async def run_inference(
+        self,
+        context: LLMContext,
+        max_tokens: Optional[int] = None,
+        system_instruction: Optional[str] = None,
+    ) -> Optional[str]:
+        """Run a one-shot, out-of-band inference with the given LLM context.
+
+        Always uses the HTTP client regardless of transport variant.
+
+        Args:
+            context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate.
+            system_instruction: Optional system instruction for this inference.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
+        effective_instruction = system_instruction or self._settings.system_instruction
+        invocation_params = adapter.get_llm_invocation_params(
+            context, system_instruction=effective_instruction
+        )
+
+        params = self._build_response_params(invocation_params)
+
+        # Override for non-streaming
+        params["stream"] = False
+
+        if max_tokens is not None:
+            params["max_output_tokens"] = max_tokens
+
+        response = await self._client.responses.create(**params)
+
+        return response.output_text
+
+    def _process_function_calls(
+        self,
+        context: LLMContext,
+        function_calls: Dict[str, Dict[str, str]],
+    ) -> List[FunctionCallFromLLM]:
+        """Convert accumulated function call data into FunctionCallFromLLM list.
+
+        Args:
+            context: The LLM context for the current inference.
+            function_calls: Map of item_id to {name, call_id, arguments}.
+
+        Returns:
+            List of parsed function call objects.
+        """
+        fc_list: List[FunctionCallFromLLM] = []
+        for item_id, fc in function_calls.items():
+            try:
+                arguments = json.loads(fc["arguments"]) if fc["arguments"] else {}
+            except json.JSONDecodeError:
+                logger.warning(
+                    f"{self}: Failed to parse function call arguments: {fc['arguments']}"
+                )
+                arguments = {}
+            fc_list.append(
+                FunctionCallFromLLM(
+                    context=context,
+                    tool_call_id=fc["call_id"],
+                    function_name=fc["name"],
+                    arguments=arguments,
+                )
+            )
+        return fc_list
+
+
+# ---------------------------------------------------------------------------
+# WebSocket variant (default / recommended)
+# ---------------------------------------------------------------------------
+
+
+class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
+    """OpenAI Responses API LLM service using WebSocket transport.
+
+    Maintains a persistent WebSocket connection to ``wss://api.openai.com/v1/responses``
+    for lower-latency inference, especially beneficial for tool-call-heavy workflows.
+    Automatically uses ``previous_response_id`` to send only incremental context when
+    possible, and falls back to full context on reconnection or cache miss.
+
+    This is the recommended variant for real-time / conversational use.
+
+    Example::
+
+        llm = OpenAIResponsesLLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            settings=OpenAIResponsesLLMService.Settings(
+                model="gpt-4.1",
+                system_instruction="You are a helpful assistant.",
+            ),
+        )
+    """
+
+    def __init__(
+        self,
+        *,
+        ws_url: str = "wss://api.openai.com/v1/responses",
+        **kwargs,
+    ):
+        """Initialize the WebSocket-based OpenAI Responses API LLM service.
+
+        Args:
+            ws_url: WebSocket endpoint URL.
+                Defaults to ``wss://api.openai.com/v1/responses``.
+            **kwargs: Additional arguments passed to the base class (api_key,
+                base_url, organization, project, default_headers, service_tier,
+                settings, etc.).
+        """
+        super().__init__(**kwargs)
+
+        self._ws_url = ws_url
+        self._websocket = None
+        self._disconnecting = False
+
+        # State for previous_response_id optimization
+        self._previous_response_id: Optional[str] = None
+        self._previous_input_hash: Optional[str] = None
+        self._previous_input_length: Optional[int] = None
+
+    # -- lifecycle ------------------------------------------------------------
+
+    async def start(self, frame: StartFrame):
+        """Start the service and establish WebSocket connection.
+
+        Args:
+            frame: The start frame triggering service initialization.
+        """
+        await super().start(frame)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the service and close WebSocket connection.
+
+        Args:
+            frame: The end frame triggering service shutdown.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the service and close WebSocket connection.
+
+        Args:
+            frame: The cancel frame triggering service cancellation.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    # -- connection management ------------------------------------------------
+
+    async def _connect(self):
+        """Establish the WebSocket connection."""
+        self._disconnecting = False
+        try:
+            if self._websocket:
+                return
+            self._websocket = await websocket_connect(
+                uri=self._ws_url,
+                additional_headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                },
+            )
+        except Exception as e:
+            await self.push_error(error_msg=f"Error connecting to WebSocket: {e}", exception=e)
+            self._websocket = None
+
+    async def _disconnect(self):
+        """Close the WebSocket connection and clear state."""
+        try:
+            self._disconnecting = True
+            await self.stop_all_metrics()
+            if self._websocket:
+                await self._websocket.close()
+                self._websocket = None
+            self._clear_previous_response_state()
+            self._disconnecting = False
+        except Exception as e:
+            await self.push_error(error_msg=f"Error disconnecting from WebSocket: {e}", exception=e)
+
+    async def _reconnect(self):
+        """Reconnect to the WebSocket, clearing previous_response_id state."""
+        await self._disconnect()
+        await self._connect()
+
+    async def _ensure_connected(self):
+        """Ensure a WebSocket connection is available, reconnecting if needed.
+
+        Raises:
+            _RetryableError: If the connection could not be established.
+        """
+        if self._websocket is None:
+            await self._connect()
+        if self._websocket is None:
+            raise _RetryableError("Failed to establish WebSocket connection")
+
+    async def _ws_send(self, message: dict):
+        """Send a JSON message over the WebSocket.
+
+        Args:
+            message: The message dict to serialize and send.
+        """
+        if self._disconnecting or not self._websocket:
+            return
+        await self._websocket.send(json.dumps(message))
+
+    # -- previous_response_id optimization ------------------------------------
+
+    @staticmethod
+    def _hash_input_items(items: list) -> str:
+        """Compute a deterministic hash of input items for comparison.
+
+        Args:
+            items: List of Responses API input items.
+
+        Returns:
+            Hex digest of the SHA-256 hash.
+        """
+        return hashlib.sha256(json.dumps(items, sort_keys=True).encode()).hexdigest()
+
+    def _apply_previous_response_optimization(self, params: dict, full_input: list) -> dict:
+        """Try to use previous_response_id to send only new input items.
+
+        If the prefix of ``full_input`` matches the stored hash from the
+        previous inference call, only new items are sent along with
+        ``previous_response_id``. Otherwise the full input is sent.
+
+        Args:
+            params: The response params dict (modified in place).
+            full_input: The complete input items list from the adapter.
+
+        Returns:
+            The (possibly modified) params dict.
+        """
+        if (
+            self._previous_response_id is not None
+            and self._previous_input_length is not None
+            and self._previous_input_hash is not None
+            and len(full_input) > self._previous_input_length
+        ):
+            prefix = full_input[: self._previous_input_length]
+            prefix_hash = self._hash_input_items(prefix)
+            if prefix_hash == self._previous_input_hash:
+                new_items = full_input[self._previous_input_length :]
+                params["input"] = new_items
+                params["previous_response_id"] = self._previous_response_id
+                logger.debug(
+                    f"{self}: Using previous_response_id optimization "
+                    f"({len(new_items)} new items, "
+                    f"{self._previous_input_length} cached)"
+                )
+                return params
+
+        # Full context send (no optimization possible)
+        return params
+
+    def _store_previous_response_state(self, response_id: str, full_input: list):
+        """Store state for the next call's previous_response_id optimization.
+
+        Args:
+            response_id: The response ID returned by the server.
+            full_input: The complete input items list that was used.
+        """
+        self._previous_response_id = response_id
+        self._previous_input_length = len(full_input)
+        self._previous_input_hash = self._hash_input_items(full_input)
+
+    def _clear_previous_response_state(self):
+        """Clear stored previous_response_id state."""
+        self._previous_response_id = None
+        self._previous_input_length = None
+        self._previous_input_hash = None
+
+    # -- frame processing -----------------------------------------------------
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames for LLM completion requests.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        await super().process_frame(frame, direction)
+
+        context = None
+        if isinstance(frame, LLMContextFrame):
+            context = frame.context
+        else:
+            await self.push_frame(frame, direction)
+
+        if context:
+            try:
+                await self.push_frame(LLMFullResponseStartFrame())
+                await self.start_processing_metrics()
+                await self._process_context(context)
+            except Exception as e:
+                await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
+            finally:
+                await self.stop_processing_metrics()
+                await self.push_frame(LLMFullResponseEndFrame())
+
+    # -- core inference -------------------------------------------------------
+
+    @traced_llm
+    async def _process_context(self, context: LLMContext):
+        """Run inference over WebSocket with retry and previous_response_id.
+
+        Args:
+            context: The LLM context containing conversation history.
+        """
+        adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
+        logger.debug(
+            f"{self}: Generating response from universal context "
+            f"{adapter.get_messages_for_logging(context)}"
+        )
+
+        invocation_params = adapter.get_llm_invocation_params(
+            context, system_instruction=self._settings.system_instruction
+        )
+
+        full_input = invocation_params["input"]
+
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            params = self._build_response_params(invocation_params)
+            # WebSocket mode does not use the "stream" parameter
+            params.pop("stream", None)
+
+            # Apply previous_response_id optimization (skipped after a retry)
+            if attempt == 0:
+                params = self._apply_previous_response_optimization(params, full_input)
+
+            try:
+                await self._ensure_connected()
+                await self.start_ttfb_metrics()
+                await self._ws_send({"type": "response.create", **params})
+                await self._receive_response_events(context, full_input)
+                return  # Success
+            except _PreviousResponseNotFoundError:
+                logger.warning(
+                    f"{self}: previous_response_not_found — "
+                    f"retrying with full context ({len(full_input)} items)"
+                )
+                self._clear_previous_response_state()
+                await self.stop_ttfb_metrics()
+                if attempt >= max_attempts - 1:
+                    await self.push_error(
+                        error_msg="previous_response_not_found: retry also failed"
+                    )
+                    return
+            except _ConnectionLimitReachedError:
+                logger.warning(
+                    f"{self}: WebSocket connection limit reached — "
+                    f"reconnecting and retrying with full context ({len(full_input)} items)"
+                )
+                self._clear_previous_response_state()
+                await self.stop_ttfb_metrics()
+                await self._reconnect()
+                if attempt >= max_attempts - 1:
+                    await self.push_error(error_msg="WebSocket connection limit: retry also failed")
+                    return
+            except ConnectionClosed as e:
+                logger.warning(
+                    f"{self}: WebSocket connection closed during inference: {e} — "
+                    f"reconnecting and retrying with full context ({len(full_input)} items)"
+                )
+                self._clear_previous_response_state()
+                self._websocket = None
+                await self.stop_ttfb_metrics()
+                await self._reconnect()
+                if attempt >= max_attempts - 1:
+                    await self.push_error(
+                        error_msg=f"WebSocket connection closed: retry also failed: {e}",
+                        exception=e,
+                    )
+                    return
+
+    async def _receive_response_events(self, context: LLMContext, full_input: list):
+        """Receive and process WebSocket events until the response completes.
+
+        Args:
+            context: The LLM context for the current inference.
+            full_input: The complete input items list (for storing state on success).
+
+        Raises:
+            _PreviousResponseNotFoundError: Server couldn't find previous response.
+            _ConnectionLimitReachedError: 60-minute connection limit reached.
+            ConnectionClosed: WebSocket connection was closed unexpectedly.
+        """
+        function_calls: Dict[str, Dict[str, str]] = {}
+        current_arguments: Dict[str, str] = {}
+
+        while True:
+            raw = await self._websocket.recv()
+            event = json.loads(raw)
+            event_type = event.get("type")
+
+            if event_type == "response.output_text.delta":
+                await self.stop_ttfb_metrics()
+                await self._push_llm_text(event.get("delta", ""))
+
+            elif event_type == "response.output_item.added":
+                await self.stop_ttfb_metrics()
+                item = event.get("item", {})
+                if item.get("type") == "function_call":
+                    item_id = item.get("id", "")
+                    function_calls[item_id] = {
+                        "name": item.get("name", ""),
+                        "call_id": item.get("call_id", ""),
+                        "arguments": "",
+                    }
+                    current_arguments[item_id] = ""
+
+            elif event_type == "response.function_call_arguments.delta":
+                item_id = event.get("item_id", "")
+                if item_id in current_arguments:
+                    current_arguments[item_id] += event.get("delta", "")
+
+            elif event_type == "response.function_call_arguments.done":
+                item_id = event.get("item_id", "")
+                if item_id in function_calls:
+                    function_calls[item_id]["arguments"] = event.get("arguments", "")
+
+            elif event_type == "response.output_item.done":
+                item = event.get("item", {})
+                if item.get("type") == "function_call":
+                    item_id = item.get("id", "")
+                    if item_id in function_calls:
+                        function_calls[item_id]["name"] = item.get("name", "")
+                        function_calls[item_id]["call_id"] = item.get("call_id", "")
+                        function_calls[item_id]["arguments"] = item.get("arguments", "")
+
+            elif event_type == "response.completed":
+                response = event.get("response", {})
+                usage = response.get("usage")
+                if usage:
+                    input_details = usage.get("input_tokens_details") or {}
+                    output_details = usage.get("output_tokens_details") or {}
+                    tokens = LLMTokenUsage(
+                        prompt_tokens=usage.get("input_tokens", 0),
+                        completion_tokens=usage.get("output_tokens", 0),
+                        total_tokens=usage.get("total_tokens", 0),
+                        cache_read_input_tokens=input_details.get("cached_tokens", 0),
+                        reasoning_tokens=output_details.get("reasoning_tokens", 0),
+                    )
+                    await self.start_llm_usage_metrics(tokens)
+
+                self._full_model_name = response.get("model")
+
+                # Store state for next call's previous_response_id optimization
+                response_id = response.get("id")
+                if response_id:
+                    self._store_previous_response_state(response_id, full_input)
+
+                break  # Response complete
+
+            elif event_type in ("response.failed", "response.incomplete"):
+                response = event.get("response", {})
+                status_details = response.get("status_details") or {}
+                error_info = status_details.get("error") or {}
+                error_msg = error_info.get("message", f"Response {event_type.split('.')[-1]}")
+                await self.push_error(error_msg=f"LLM response error: {error_msg}")
+                break
+
+            elif event_type == "error":
+                error = event.get("error", {})
+                code = error.get("code", "")
+                message = error.get("message", "Unknown error")
+
+                if code == "previous_response_not_found":
+                    raise _PreviousResponseNotFoundError(message)
+                elif code == "websocket_connection_limit_reached":
+                    raise _ConnectionLimitReachedError(message)
+                else:
+                    await self.push_error(error_msg=f"WebSocket API error: {message}")
+                    break
+
+        # Process any function calls
+        if function_calls:
+            fc_list = self._process_function_calls(context, function_calls)
+            await self.run_function_calls(fc_list)
+
+
+# ---------------------------------------------------------------------------
+# HTTP variant
+# ---------------------------------------------------------------------------
+
+
+class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
+    """OpenAI Responses API LLM service using HTTP streaming transport.
+
+    Uses server-sent events (SSE) via the OpenAI Python SDK for streaming
+    inference. Each ``_process_context`` call opens a new HTTP connection.
+
+    Example::
+
+        llm = OpenAIResponsesHttpLLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            settings=OpenAIResponsesHttpLLMService.Settings(
+                model="gpt-4.1",
+                system_instruction="You are a helpful assistant.",
+            ),
+        )
+    """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
@@ -300,101 +888,12 @@ class OpenAIResponsesLLMService(LLMService):
 
         # Process any function calls
         if function_calls:
-            fc_list: List[FunctionCallFromLLM] = []
-            for item_id, fc in function_calls.items():
-                try:
-                    arguments = json.loads(fc["arguments"]) if fc["arguments"] else {}
-                except json.JSONDecodeError:
-                    logger.warning(
-                        f"{self}: Failed to parse function call arguments: {fc['arguments']}"
-                    )
-                    arguments = {}
-                fc_list.append(
-                    FunctionCallFromLLM(
-                        context=context,
-                        tool_call_id=fc["call_id"],
-                        function_name=fc["name"],
-                        arguments=arguments,
-                    )
-                )
+            fc_list = self._process_function_calls(context, function_calls)
             await self.run_function_calls(fc_list)
 
-    def _build_response_params(self, invocation_params: OpenAIResponsesLLMInvocationParams) -> dict:
-        """Build parameters for the responses.create() call.
 
-        Args:
-            invocation_params: Parameters derived from the LLM context.
-
-        Returns:
-            Dictionary of parameters for the Responses API call.
-        """
-        params: Dict[str, Any] = {
-            "model": self._settings.model,
-            "stream": True,
-            "store": False,
-            "input": invocation_params["input"],
-        }
-
-        # instructions (set by the adapter when input is non-empty)
-        if "instructions" in invocation_params:
-            params["instructions"] = invocation_params["instructions"]
-
-        # Optional parameters - only include if given
-        if isinstance(self._settings.temperature, (int, float)):
-            params["temperature"] = self._settings.temperature
-
-        if isinstance(self._settings.top_p, (int, float)):
-            params["top_p"] = self._settings.top_p
-
-        if isinstance(self._settings.max_completion_tokens, int):
-            params["max_output_tokens"] = self._settings.max_completion_tokens
-
-        if self._service_tier is not None:
-            params["service_tier"] = self._service_tier
-
-        # Tools
-        tools = invocation_params.get("tools")
-        if tools is not None and not isinstance(tools, type(NOT_GIVEN)):
-            params["tools"] = tools
-
-        # Extra settings
-        params.update(self._settings.extra)
-
-        return params
-
-    async def run_inference(
-        self,
-        context: LLMContext,
-        max_tokens: Optional[int] = None,
-        system_instruction: Optional[str] = None,
-    ) -> Optional[str]:
-        """Run a one-shot, out-of-band inference with the given LLM context.
-
-        Args:
-            context: The LLM context containing conversation history.
-            max_tokens: Optional maximum number of tokens to generate.
-            system_instruction: Optional system instruction for this inference.
-
-        Returns:
-            The LLM's response as a string, or None if no response is generated.
-        """
-        adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
-        effective_instruction = system_instruction or self._settings.system_instruction
-        invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=effective_instruction
-        )
-
-        params = self._build_response_params(invocation_params)
-
-        # Override for non-streaming
-        params["stream"] = False
-
-        if max_tokens is not None:
-            params["max_output_tokens"] = max_tokens
-
-        response = await self._client.responses.create(**params)
-
-        return response.output_text
-
-
-__all__ = ["OpenAIResponsesLLMService", "OpenAIResponsesLLMSettings"]
+__all__ = [
+    "OpenAIResponsesLLMService",
+    "OpenAIResponsesHttpLLMService",
+    "OpenAIResponsesLLMSettings",
+]
