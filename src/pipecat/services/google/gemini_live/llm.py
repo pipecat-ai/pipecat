@@ -828,7 +828,6 @@ class GeminiLiveLLMService(LLMService):
             if self._settings.language
             else "en-US"
         )
-        self._vad_params = self._settings.vad
 
         # Reconnection tracking
         self._consecutive_failures = 0
@@ -1371,8 +1370,13 @@ class GeminiLiveLLMService(LLMService):
                             # track turns, such as local Silero VAD in
                             # combination with the context aggregator default
                             # turn strategies.
-                            logger.debug("Gemini VAD: interrupted signal received")
-                            await self.broadcast_interruption()
+                            if self._settings.vad and self._settings.vad.disabled:
+                                logger.debug(
+                                    "Gemini VAD: interrupted signal received (ignored, VAD disabled)"
+                                )
+                            else:
+                                logger.debug("Gemini VAD: interrupted signal received")
+                                await self.broadcast_interruption()
                         elif message.server_content and message.server_content.model_turn:
                             await self._handle_msg_model_turn(message)
                         elif message.server_content and message.server_content.turn_complete:
