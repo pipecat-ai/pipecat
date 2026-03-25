@@ -687,14 +687,16 @@ class OpenAIRealtimeLLMService(LLMService):
         adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:
-            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+            llm_invocation_params = adapter.get_llm_invocation_params(
+                self._context, system_instruction=self._settings.system_instruction
+            )
 
             # tools given in the context override the tools in the session properties
             if llm_invocation_params["tools"]:
                 settings.tools = llm_invocation_params["tools"]
 
-            # instructions in the context come from an initial "system" message in the
-            # messages list, and override instructions in the session properties
+            # The adapter resolves conflicts between init-provided and
+            # context-provided system instructions (preferring init-provided).
             if llm_invocation_params["system_instruction"]:
                 settings.instructions = llm_invocation_params["system_instruction"]
 

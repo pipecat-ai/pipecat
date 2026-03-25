@@ -607,11 +607,15 @@ class GrokRealtimeLLMService(LLMService):
         adapter: GrokRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:
-            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+            llm_invocation_params = adapter.get_llm_invocation_params(
+                self._context, system_instruction=self._settings.system_instruction
+            )
 
             if llm_invocation_params["tools"]:
                 settings.tools = llm_invocation_params["tools"]
 
+            # The adapter resolves conflicts between init-provided and
+            # context-provided system instructions (preferring init-provided).
             if llm_invocation_params["system_instruction"]:
                 settings.instructions = llm_invocation_params["system_instruction"]
 

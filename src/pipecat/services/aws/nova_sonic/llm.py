@@ -629,7 +629,9 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Read context
         adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
-        llm_connection_params = adapter.get_llm_invocation_params(self._context)
+        llm_connection_params = adapter.get_llm_invocation_params(
+            self._context, system_instruction=self._settings.system_instruction
+        )
 
         # Send prompt start event, specifying tools.
         # Tools from context take priority over self._tools.
@@ -642,12 +644,9 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_prompt_start_event(tools)
 
         # Send system instruction.
-        # Instruction from context takes priority over self._settings.system_instruction.
-        system_instruction = (
-            llm_connection_params["system_instruction"]
-            if llm_connection_params["system_instruction"]
-            else self._settings.system_instruction
-        )
+        # The adapter resolves conflicts between init-provided and
+        # context-provided system instructions (preferring init-provided).
+        system_instruction = llm_connection_params["system_instruction"]
         logger.debug(f"Using system instruction: {system_instruction}")
         if system_instruction:
             await self._send_text_event(text=system_instruction, role=Role.SYSTEM)

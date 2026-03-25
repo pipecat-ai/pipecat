@@ -1080,28 +1080,26 @@ class GeminiLiveLLMService(LLMService):
             # We got our initial context
             self._context = context
 
-            # If context contains system instruction or tools, reconnect in
-            # order to apply them.
-            # (Context-provided system instruction and tools take precedence
-            # over the ones provided at initialization time. Note that we could
-            # do more sophisticated comparisons here, but for now this is
-            # sufficient: we'll assume folks won't mean to provide these
-            # settings both in the context and at initialization time. In a
-            # future change, we could/should implement the ability to swap
-            # these settings at any point).
+            # Reconnect if context changes the effective system instruction
+            # or tools compared to the initial connection (which used the
+            # init-provided values). Note that the determination of "effective"
+            # system instruction is delegated to the adapter, which still
+            # chooses the init-provided value if there is one.
             adapter: GeminiLLMAdapter = self.get_llm_adapter()
-            params = adapter.get_llm_invocation_params(self._context)
+            params = adapter.get_llm_invocation_params(
+                self._context, system_instruction=self._system_instruction_from_init
+            )
             system_instruction = params["system_instruction"]
             tools = params["tools"]
-            if system_instruction and self._system_instruction_from_init:
-                logger.warning(
-                    "System instruction provided both at init time and in context; using context-provided value."
-                )
+            system_instruction_changed = system_instruction != self._system_instruction_from_init
             if tools and self._tools_from_init:
                 logger.warning(
                     "Tools provided both at init time and in context; using context-provided value."
                 )
-            if system_instruction or tools:
+            # For tools we simply check presence rather than diffing against
+            # init-provided tools, assuming that if context provides tools
+            # they warrant a reconnect.
+            if system_instruction_changed or tools:
                 await self._reconnect()
 
             # Initialize our bookkeeping of already-completed tool calls in
@@ -1322,10 +1320,12 @@ class GeminiLiveLLMService(LLMService):
             system_instruction = None
             tools = None
             if self._context:
-                params = adapter.get_llm_invocation_params(self._context)
+                params = adapter.get_llm_invocation_params(
+                    self._context, system_instruction=self._system_instruction_from_init
+                )
                 system_instruction = params["system_instruction"]
                 tools = params["tools"]
-            if not system_instruction:
+            else:
                 system_instruction = self._system_instruction_from_init
             if not tools:
                 tools = adapter.from_standard_tools(self._tools_from_init)
