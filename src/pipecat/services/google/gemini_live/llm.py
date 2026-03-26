@@ -54,8 +54,8 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
     UserImageRawFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -88,6 +88,8 @@ try:
     from google.genai import Client
     from google.genai.live import AsyncSession
     from google.genai.types import (
+        ActivityEnd,
+        ActivityStart,
         AudioTranscriptionConfig,
         AutomaticActivityDetection,
         Blob,
@@ -522,7 +524,7 @@ class GeminiVADParams(BaseModel):
     """Voice Activity Detection parameters for Gemini Live.
 
     Parameters:
-        disabled: Whether to disable VAD. Defaults to None.
+        disabled: Whether to disable VAD. Defaults to None (server-side VAD is enabled).
         start_sensitivity: Sensitivity for speech start detection. Defaults to None.
         end_sensitivity: Sensitivity for speech end detection. Defaults to None.
         prefix_padding_ms: Prefix padding in milliseconds. Defaults to None.
@@ -828,7 +830,7 @@ class GeminiLiveLLMService(LLMService):
             if self._settings.language
             else "en-US"
         )
-        self._vad_params = self._settings.vad
+        self._vad_disabled = bool(self._settings.vad and self._settings.vad.disabled)
 
         # Reconnection tracking
         self._consecutive_failures = 0
@@ -994,12 +996,21 @@ class GeminiLiveLLMService(LLMService):
 
     async def _handle_user_started_speaking(self, frame):
         self._user_is_speaking = True
-        pass
+        if self._vad_disabled and self._session:
+            try:
+                await self._session.send_realtime_input(activity_start=ActivityStart())
+            except Exception as e:
+                await self._handle_send_error(e)
 
     async def _handle_user_stopped_speaking(self, frame):
         self._user_is_speaking = False
         self._user_audio_buffer = bytearray()
         await self.start_ttfb_metrics()
+        if self._vad_disabled and self._session:
+            try:
+                await self._session.send_realtime_input(activity_end=ActivityEnd())
+            except Exception as e:
+                await self._handle_send_error(e)
         if self._needs_initial_turn_complete_message:
             self._needs_initial_turn_complete_message = False
             # NOTE: without this, the model ignores the context it's been
@@ -1049,10 +1060,10 @@ class GeminiLiveLLMService(LLMService):
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
             await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStartedSpeakingFrame):
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):

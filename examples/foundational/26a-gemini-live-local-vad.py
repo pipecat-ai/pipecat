@@ -10,32 +10,26 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantTurnStoppedMessage,
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+    UserTurnStoppedMessage,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, GeminiModalities
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, GeminiVADParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
-
-
-SYSTEM_INSTRUCTION = f"""
-"You are Gemini Chatbot, a friendly, helpful robot.
-
-Your goal is to demonstrate your capabilities in a succinct way.
-
-Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
-
-Respond to what the user said in a creative and helpful way. Keep your responses brief. One or two sentences at most.
-"""
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -59,47 +53,35 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    # KNOWN ISSUE: If using GeminiLiveVertexLLMService, you cannot specify a
-    # modality other than AUDIO (at least not if using the service's default
-    # model, which is a native audio model:
-    # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api/tools#native-audio).
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GeminiLiveLLMService.Settings(
-            system_instruction=SYSTEM_INSTRUCTION,
-            modalities=GeminiModalities.TEXT,
+            voice="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
+            vad=GeminiVADParams(disabled=True),
         ),
-        tools=[{"google_search": {}}, {"code_execution": {}}],
+        # inference_on_context_initialization=False,
     )
 
-    # Optionally, you can set the response modalities via a function
-    # llm.set_model_modalities(
-    #     GeminiMultimodalModalities.TEXT
-    # )
-
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"), voice_id="71a7ad14-091c-4e8e-a314-022ece01c121"
+    context = LLMContext(
+        [
+            {
+                "role": "user",
+                "content": "Say hello. Then ask if I want to hear a joke.",
+            },
+        ],
     )
-
-    messages = [
-        {
-            "role": "developer",
-            "content": 'Start by saying "Hello, I\'m Gemini".',
-        },
-    ]
-
-    # Set up conversation context and management
-    # The context_aggregator will automatically collect conversation context
-    context = LLMContext(messages)
-    # Server-side VAD is enabled by default; no local VAD is added.
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),
             user_aggregator,
             llm,
-            tts,
             transport.output(),
             assistant_aggregator,
         ]
@@ -124,6 +106,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}user: {message.content}"
+        logger.info(f"Transcript: {line}")
+
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}assistant: {message.content}"
+        logger.info(f"Transcript: {line}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
