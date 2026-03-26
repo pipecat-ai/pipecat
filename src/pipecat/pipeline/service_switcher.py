@@ -193,7 +193,8 @@ class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategyManual):
             The newly active service if a switch occurred, or None if no
             other service is available.
         """
-        logger.warning(f"Service {self._active_service.name} reported an error: {error.error}")
+        service_name = error.processor.name if error.processor else self._active_service.name
+        logger.warning(f"Service {service_name} reported an error: {error.error}")
 
         if len(self._services) <= 1:
             logger.error("No other service available to switch to")
@@ -313,8 +314,12 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
                 return
 
         # Let the strategy react to non-fatal errors from the active service.
+        # We check that the error originated from one of our managed services
+        # to avoid reacting to errors that are just propagating upstream
+        # through the pipeline from downstream processors.
         if isinstance(frame, ErrorFrame) and not frame.fatal:
-            await self.strategy.handle_error(frame)
+            if frame.processor and frame.processor in self._services:
+                await self.strategy.handle_error(frame)
 
         await super().push_frame(frame, direction)
 
