@@ -10,8 +10,6 @@ from unittest.mock import patch
 
 from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTSettings
-from pipecat.services.grok.realtime import events as grok_events
-from pipecat.services.grok.realtime.llm import GrokRealtimeLLMSettings
 from pipecat.services.openai.realtime import events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMSettings
 from pipecat.services.settings import (
@@ -23,6 +21,8 @@ from pipecat.services.settings import (
     _NotGiven,
     is_given,
 )
+from pipecat.services.xai.realtime import events as grok_events
+from pipecat.services.xai.realtime.llm import GrokRealtimeLLMSettings
 
 # ---------------------------------------------------------------------------
 # NOT_GIVEN sentinel

@@ -36,9 +36,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.grok.realtime.events import SessionProperties, TurnDetection
-from pipecat.services.grok.realtime.llm import GrokRealtimeLLMService
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.xai.realtime.events import SessionProperties, TurnDetection
+from pipecat.services.xai.realtime.llm import GrokRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -192,7 +192,7 @@ Remember, your responses should be short - just one or two sentences usually."""
     )
 
     llm = GrokRealtimeLLMService(
-        api_key=os.getenv("GROK_API_KEY"),
+        api_key=os.getenv("XAI_API_KEY"),
         session_properties=session_properties,
     )
 

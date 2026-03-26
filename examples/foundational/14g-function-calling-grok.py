@@ -26,8 +26,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.grok.llm import GrokLLMService
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.xai.llm import GrokLLMService
 from pipecat.services.xai.tts import XAIHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -65,7 +65,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = XAIHttpTTSService(
-            api_key=os.getenv("GROK_API_KEY"),
+            api_key=os.getenv("XAI_API_KEY"),
             aiohttp_session=session,
             settings=XAIHttpTTSService.Settings(
                 voice="eve",
@@ -73,7 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         llm = GrokLLMService(
-            api_key=os.getenv("GROK_API_KEY"),
+            api_key=os.getenv("XAI_API_KEY"),
             settings=GrokLLMService.Settings(
                 system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
             ),
