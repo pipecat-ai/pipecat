@@ -1361,9 +1361,9 @@ class GeminiLiveLLMService(LLMService):
                         self._check_and_reset_failure_counter()
 
                         # server_content fields are NOT mutually exclusive —
-                        # Gemini 3.x can bundle e.g. model_turn and
-                        # output_transcription on the same message — so check
-                        # each field independently.
+                        # Gemini 3.x can bundle multiple content fields and
+                        # turn_complete on the same message, so process the
+                        # content-bearing fields before closing the turn.
                         sc = message.server_content
                         if sc and sc.interrupted:
                             # NOTE: while the service triggers interruptions in
@@ -1380,18 +1380,25 @@ class GeminiLiveLLMService(LLMService):
                             await self.broadcast_interruption()
                         if sc and sc.model_turn:
                             await self._handle_msg_model_turn(message)
+                        if sc and sc.input_transcription:
+                            await self._handle_msg_input_transcription(message)
+                        if sc and sc.output_transcription:
+                            await self._handle_msg_output_transcription(message)
+                        if (
+                            sc
+                            and sc.grounding_metadata
+                            and not sc.model_turn
+                            and not sc.output_transcription
+                        ):
+                            # model_turn/output_transcription already defer
+                            # bundled grounding metadata to turn_complete.
+                            await self._handle_msg_grounding_metadata(message)
                         if sc and sc.turn_complete:
                             if not message.usage_metadata:
                                 logger.warning("Received turn_complete without usage_metadata")
                             await self._handle_msg_turn_complete(message)
                             if message.usage_metadata:
                                 await self._handle_msg_usage_metadata(message)
-                        if sc and sc.input_transcription:
-                            await self._handle_msg_input_transcription(message)
-                        if sc and sc.output_transcription:
-                            await self._handle_msg_output_transcription(message)
-                        if sc and sc.grounding_metadata:
-                            await self._handle_msg_grounding_metadata(message)
                         if message.tool_call:
                             await self._handle_msg_tool_call(message)
                         if message.session_resumption_update:
