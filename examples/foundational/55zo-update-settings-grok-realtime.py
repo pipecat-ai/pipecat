@@ -50,7 +50,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    llm = GrokRealtimeLLMService(api_key=os.getenv("GROK_API_KEY"))
+    llm = GrokRealtimeLLMService(api_key=os.getenv("XAI_API_KEY"))
 
     messages = [
         {

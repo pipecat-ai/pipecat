@@ -192,7 +192,7 @@ Remember, your responses should be short - just one or two sentences usually."""
     )
 
     llm = GrokRealtimeLLMService(
-        api_key=os.getenv("GROK_API_KEY"),
+        api_key=os.getenv("XAI_API_KEY"),
         session_properties=session_properties,
     )
 
