@@ -435,6 +435,7 @@ class AsyncAITTSService(WebsocketTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Close the Async AI context when the bot is interrupted."""
         await self._close_context(context_id)
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Close the Async AI context after all audio has been played.
@@ -444,6 +445,7 @@ class AsyncAITTSService(WebsocketTTSService):
         ``close_context: True`` to free server-side resources.
         """
         await self._close_context(context_id)
+        await super().on_audio_context_completed(context_id)
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:

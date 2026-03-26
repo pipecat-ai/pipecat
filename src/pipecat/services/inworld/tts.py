@@ -800,6 +800,7 @@ class InworldTTSService(WebsocketTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Callback invoked when an audio context has been interrupted."""
         await self._close_context(context_id)
+        await super().on_audio_context_interrupted(context_id)
 
     def _get_websocket(self):
         """Get the websocket for the Inworld WebSocket TTS service.

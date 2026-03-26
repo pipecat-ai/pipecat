@@ -731,6 +731,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Close the ElevenLabs context when the bot is interrupted."""
         await self._close_context(context_id)
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Close the ElevenLabs context after all audio has been played.
@@ -740,6 +741,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         ``close_context: True`` to free server-side resources.
         """
         await self._close_context(context_id)
+        await super().on_audio_context_completed(context_id)
 
     async def _receive_messages(self):
         """Handle incoming WebSocket messages from ElevenLabs."""

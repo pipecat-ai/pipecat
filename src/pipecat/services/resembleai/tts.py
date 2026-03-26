@@ -258,6 +258,7 @@ class ResembleAITTSService(WebsocketTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Stop metrics when the bot is interrupted."""
         await self.stop_all_metrics()
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Stop metrics after the Resemble AI context finishes playing.
@@ -266,7 +267,7 @@ class ResembleAITTSService(WebsocketTTSService):
         ``audio_end`` message (handled in ``_process_messages``), after which
         the server-side context is already closed.
         """
-        pass
+        await super().on_audio_context_completed(context_id)
 
     async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio and finalize the current context."""

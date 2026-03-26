@@ -516,6 +516,7 @@ class RimeTTSService(WebsocketTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Clear the Rime speech queue and stop metrics when the bot is interrupted."""
         await self._close_context(context_id)
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Clear server-side state and stop metrics after the Rime context finishes playing.
@@ -525,6 +526,7 @@ class RimeTTSService(WebsocketTTSService):
         any residual server-side state once all audio has been delivered.
         """
         await self._close_context(context_id)
+        await super().on_audio_context_completed(context_id)
 
     def _calculate_word_times(self, words: list, starts: list, ends: list) -> list:
         """Calculate word timing pairs with proper spacing and punctuation.

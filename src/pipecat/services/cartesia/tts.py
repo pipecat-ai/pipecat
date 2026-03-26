@@ -574,6 +574,7 @@ class CartesiaTTSService(WebsocketTTSService):
         if context_id:
             cancel_msg = json.dumps({"context_id": context_id, "cancel": True})
             await self._get_websocket().send(cancel_msg)
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Close the Cartesia context after all audio has been played.
@@ -582,7 +583,7 @@ class CartesiaTTSService(WebsocketTTSService):
         done once it has sent its ``done`` message, which is handled in
         ``_process_messages``.
         """
-        pass
+        await super().on_audio_context_completed(context_id)
 
     async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio and finalize the current context.
