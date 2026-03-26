@@ -583,20 +583,36 @@ class AnthropicLLMService(LLMService):
                 # data embedded in messages that we do other processing for, above.
                 if hasattr(event, "usage"):
                     prompt_tokens += (
-                        event.usage.input_tokens if hasattr(event.usage, "input_tokens") else 0
+                        event.usage.input_tokens
+                        if (
+                            hasattr(event.usage, "input_tokens")
+                            and event.usage.input_tokens is not None
+                        )
+                        else 0
                     )
                     completion_tokens += (
-                        event.usage.output_tokens if hasattr(event.usage, "output_tokens") else 0
+                        event.usage.output_tokens
+                        if (
+                            hasattr(event.usage, "output_tokens")
+                            and event.usage.output_tokens is not None
+                        )
+                        else 0
                     )
                 elif hasattr(event, "message") and hasattr(event.message, "usage"):
                     prompt_tokens += (
                         event.message.usage.input_tokens
-                        if hasattr(event.message.usage, "input_tokens")
+                        if (
+                            hasattr(event.message.usage, "input_tokens")
+                            and event.message.usage.input_tokens is not None
+                        )
                         else 0
                     )
                     completion_tokens += (
                         event.message.usage.output_tokens
-                        if hasattr(event.message.usage, "output_tokens")
+                        if (
+                            hasattr(event.message.usage, "output_tokens")
+                            and event.message.usage.output_tokens is not None
+                        )
                         else 0
                     )
                     cache_creation_input_tokens += (
