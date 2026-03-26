@@ -113,6 +113,45 @@ class Mem0MemoryService(FrameProcessor):
         self.last_query = None
         logger.info(f"Initialized Mem0MemoryService with {user_id=}, {agent_id=}, {run_id=}")
 
+    async def get_memories(self) -> List[Dict[str, Any]]:
+        """Retrieve all stored memories for the configured user/agent/run IDs.
+
+        This is a convenience method for accessing memories outside the pipeline,
+        e.g. to build a personalized greeting at connection time. It wraps the
+        blocking Mem0 ``get_all()`` call in a background thread.
+
+        Returns:
+            List of memory dictionaries. Each dict contains at least a
+            ``"memory"`` key with the memory text. Returns an empty list on
+            error.
+        """
+        try:
+            if isinstance(self.memory_client, Memory):
+                params = {
+                    "user_id": self.user_id,
+                    "agent_id": self.agent_id,
+                    "run_id": self.run_id,
+                }
+                params = {k: v for k, v in params.items() if v is not None}
+                memories = await asyncio.to_thread(lambda: self.memory_client.get_all(**params))
+            else:
+                id_pairs = [
+                    ("user_id", self.user_id),
+                    ("agent_id", self.agent_id),
+                    ("run_id", self.run_id),
+                ]
+                clauses = [{name: value} for name, value in id_pairs if value is not None]
+                filters = {"OR": clauses} if clauses else {}
+                memories = await asyncio.to_thread(
+                    lambda: self.memory_client.get_all(filters=filters)
+                )
+
+            results = memories.get("results", []) if isinstance(memories, dict) else memories
+            return results
+        except Exception as e:
+            logger.error(f"Error retrieving memories from Mem0: {e}")
+            return []
+
     async def _store_messages(self, messages: List[Dict[str, Any]]):
         """Store messages in Mem0.
 
