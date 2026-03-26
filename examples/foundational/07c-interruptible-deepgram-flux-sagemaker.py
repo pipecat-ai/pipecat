@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.llm import AWSBedrockLLMService, AWSBedrockLLMSettings
-from pipecat.services.deepgram.sagemaker.flux_stt import DeepgramFluxSageMakerSTTService
+from pipecat.services.deepgram.flux.sagemaker.stt import DeepgramFluxSageMakerSTTService
 from pipecat.services.deepgram.sagemaker.tts import DeepgramSageMakerTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
