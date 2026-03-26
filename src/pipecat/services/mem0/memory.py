@@ -253,10 +253,15 @@ class Mem0MemoryService(FrameProcessor):
                         break
 
                 if latest_user_message:
+                    # Filter to only user/assistant messages — Mem0 API
+                    # doesn't accept other roles (system, developer, etc.)
+                    messages_to_store = [
+                        m for m in context_messages if m.get("role") in ("user", "assistant")
+                    ]
                     # Enhance context with memories before passing it downstream
                     await self._enhance_context_with_memories(context, latest_user_message)
                     # Store the conversation in Mem0 as a background task
-                    self.create_task(self._store_messages(context_messages), name="mem0_store")
+                    self.create_task(self._store_messages(messages_to_store), name="mem0_store")
 
                 # If we received an LLMMessagesFrame, create a new one with the enhanced messages
                 if messages is not None:
