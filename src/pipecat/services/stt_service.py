@@ -650,6 +650,8 @@ class SegmentedSTTService(STTService):
             await self._handle_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
+        elif isinstance(frame, InterruptionFrame):
+            self._audio_buffer.clear()
 
     async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._user_speaking = True
