@@ -313,12 +313,10 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             if frame.service_name != self.strategy.active_service.name:
                 return
 
-        # Let the strategy react to non-fatal errors from the active service.
-        # We check that the error originated from one of our managed services
-        # to avoid reacting to errors that are just propagating upstream
-        # through the pipeline from downstream processors.
+        # Let the strategy react to non-fatal errors from the active service,
+        # ignoring errors just propagating upstream from other processors.
         if isinstance(frame, ErrorFrame) and not frame.fatal:
-            if frame.processor and frame.processor in self._services:
+            if frame.processor and frame.processor == self.strategy.active_service:
                 await self.strategy.handle_error(frame)
 
         await super().push_frame(frame, direction)
