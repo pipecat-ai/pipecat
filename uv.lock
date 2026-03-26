@@ -3514,19 +3514,20 @@ wheels = [
 
 [[package]]
 name = "mem0ai"
-version = "0.1.115"
+version = "1.0.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openai" },
     { name = "posthog" },
+    { name = "protobuf" },
     { name = "pydantic" },
     { name = "pytz" },
     { name = "qdrant-client" },
     { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/72/2a/ccf4a8b79a4e67d3a2475599ff8276d3bdccce5c5da2e14deb449e7dfb1a/mem0ai-0.1.115.tar.gz", hash = "sha256:147a6593604188acd30281c40171112aed9f16e196fa528627430c15e00f1e32", size = 115605, upload-time = "2025-07-24T09:49:10.467Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/a6/292b42445cf2f5fb2207d523e31a823c10d5da2e939ece78dac0800edfb1/mem0ai-1.0.8.tar.gz", hash = "sha256:9af38c30b0250b3401f58a6004debf1f84f976b43fc4c6d830700c42b75af54c", size = 198898, upload-time = "2026-03-26T16:54:59.058Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/d5/55a5504077c175f4ff18259672df6fd0eae863236d730c87677d6de43f9a/mem0ai-0.1.115-py3-none-any.whl", hash = "sha256:29310bd5bcab644f7a4dbf87bd1afd878eb68458a2fb36cfcbf20bdff46fbdaf", size = 178065, upload-time = "2025-07-24T09:49:08.54Z" },
+    { url = "https://files.pythonhosted.org/packages/85/b6/46f94bfa5863e86a1f3f77815728529d2e5b3851e259c611182e2c8c81ea/mem0ai-1.0.8-py3-none-any.whl", hash = "sha256:4852f403d213e5cb463454940f92211eadb6e38c75f2f1ec17f279033d3ba194", size = 296802, upload-time = "2026-03-26T16:54:57.356Z" },
 ]
 
 [[package]]
@@ -4922,7 +4923,7 @@ requires-dist = [
     { name = "loguru", specifier = "~=0.7.3" },
     { name = "markdown", specifier = ">=3.7,<4" },
     { name = "mcp", extras = ["cli"], marker = "extra == 'mcp'", specifier = ">=1.11.0,<2" },
-    { name = "mem0ai", marker = "extra == 'mem0'", specifier = "~=0.1.94" },
+    { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=1.0.8,<2" },
     { name = "mlx-whisper", marker = "extra == 'mlx-whisper'", specifier = "~=0.4.2" },
     { name = "nltk", specifier = ">=3.9.4,<4" },
     { name = "noisereduce", marker = "extra == 'noisereduce'", specifier = "~=3.0.3" },
