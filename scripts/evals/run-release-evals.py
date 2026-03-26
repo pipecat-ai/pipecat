@@ -184,6 +184,7 @@ TESTS_14 = [
     ("14p-function-calling-gemini-vertex-ai.py", EVAL_WEATHER),
     ("14q-function-calling-qwen.py", EVAL_WEATHER),
     ("14r-function-calling-aws.py", EVAL_WEATHER),
+    ("14s-function-calling-sambanova.py", EVAL_WEATHER),
     ("14r-function-calling-aws.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14v-function-calling-openai.py", EVAL_WEATHER),
     ("14w-function-calling-mistral.py", EVAL_WEATHER),
