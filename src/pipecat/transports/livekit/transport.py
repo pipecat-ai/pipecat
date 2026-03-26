@@ -27,7 +27,9 @@ from pipecat.frames.frames import (
     CancelFrame,
     ClientConnectedFrame,
     EndFrame,
+    Frame,
     ImageRawFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
@@ -879,6 +881,21 @@ class LiveKitOutputTransport(BaseOutputTransport):
         """
         await super().cancel(frame)
         await self._client.disconnect()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames, clearing the LiveKit AudioSource buffer on interruption.
+
+        When an InterruptionFrame arrives, any audio already submitted to the
+        LiveKit AudioSource (but not yet played out) is cleared immediately so
+        the bot stops speaking without delay.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame) and self._client._audio_source is not None:
+            self._client._audio_source.clear_queue()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.
