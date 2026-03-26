@@ -577,7 +577,11 @@ class DeepgramSTTService(STTService):
             Frame: None (transcription results come via WebSocket callbacks).
         """
         if self._connection:
-            await self._connection.send_media(audio)
+            try:
+                await self._connection.send_media(audio)
+            except Exception as e:
+                logger.warning(f"{self}: send_media failed, connection will reconnect: {e}")
+                self._connection = None
         yield None
 
     def _build_connect_kwargs(self) -> dict:
