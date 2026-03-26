@@ -1509,6 +1509,20 @@ class InterruptibleTTSService(WebsocketTTSService):
             await self._disconnect()
             await self._connect()
 
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream with TTS-specific handling.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        # This prevents a race condition in cases where run_tts has been invoked but the
+        # BotStartedSpeakingFrame has not yet been received, which could allow stale audio to leak through.
+        if isinstance(frame, TTSStartedFrame):
+            self._bot_speaking = True
+
+        await super().push_frame(frame, direction)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with bot speaking state tracking.
 
