@@ -468,6 +468,36 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         return changed
 
+    def _build_query_string(self) -> str:
+        """Build query string from current settings and init-only connection config."""
+        params = [
+            f"model={self._settings.model}",
+            f"sample_rate={self.sample_rate}",
+            f"encoding={self._encoding}",
+        ]
+
+        if self._settings.eager_eot_threshold is not None:
+            params.append(f"eager_eot_threshold={self._settings.eager_eot_threshold}")
+
+        if self._settings.eot_threshold is not None:
+            params.append(f"eot_threshold={self._settings.eot_threshold}")
+
+        if self._settings.eot_timeout_ms is not None:
+            params.append(f"eot_timeout_ms={self._settings.eot_timeout_ms}")
+
+        if self._mip_opt_out is not None:
+            params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
+
+        # Add keyterm parameters (can have multiple)
+        for keyterm in self._settings.keyterm:
+            params.append(urlencode({"keyterm": keyterm}))
+
+        # Add tag parameters (can have multiple)
+        for tag_value in self._tag:
+            params.append(urlencode({"tag": tag_value}))
+
+        return "&".join(params)
+
     async def start(self, frame: StartFrame):
         """Start the Deepgram Flux STT service.
 
@@ -478,34 +508,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             frame: The start frame containing initialization parameters and metadata.
         """
         await super().start(frame)
-
-        url_params = [
-            f"model={self._settings.model}",
-            f"sample_rate={self.sample_rate}",
-            f"encoding={self._encoding}",
-        ]
-
-        if self._settings.eager_eot_threshold is not None:
-            url_params.append(f"eager_eot_threshold={self._settings.eager_eot_threshold}")
-
-        if self._settings.eot_threshold is not None:
-            url_params.append(f"eot_threshold={self._settings.eot_threshold}")
-
-        if self._settings.eot_timeout_ms is not None:
-            url_params.append(f"eot_timeout_ms={self._settings.eot_timeout_ms}")
-
-        if self._mip_opt_out is not None:
-            url_params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
-
-        # Add keyterm parameters (can have multiple)
-        for keyterm in self._settings.keyterm:
-            url_params.append(urlencode({"keyterm": keyterm}))
-
-        # Add tag parameters (can have multiple)
-        for tag_value in self._tag:
-            url_params.append(urlencode({"tag": tag_value}))
-
-        self._websocket_url = f"{self._url}?{'&'.join(url_params)}"
+        self._websocket_url = f"{self._url}?{self._build_query_string()}"
         await self._connect()
 
     async def stop(self, frame: EndFrame):

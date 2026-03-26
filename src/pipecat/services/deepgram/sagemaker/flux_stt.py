@@ -32,7 +32,6 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
 from pipecat.services.deepgram.flux.stt import (
     DeepgramFluxSTTSettings,
@@ -176,106 +175,6 @@ class DeepgramFluxSageMakerSTTService(STTService):
         self._register_event_handler("on_eager_end_of_turn")
         self._register_event_handler("on_update")
 
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
-
-        Returns:
-            True, as Deepgram Flux SageMaker service supports metrics generation.
-        """
-        return True
-
-    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta.
-
-        Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
-        eot_timeout_ms) are sent to Deepgram via a Configure message.
-        Other fields are stored but cannot be applied to the active connection.
-        """
-        changed = await super()._update_settings(delta)
-
-        if not changed:
-            return changed
-
-        configure_fields = changed.keys() & self._CONFIGURE_FIELDS
-        if configure_fields and self._client and self._client.is_active:
-            await self._send_configure(configure_fields)
-
-        self._warn_unhandled_updated_settings(changed.keys() - self._CONFIGURE_FIELDS)
-
-        return changed
-
-    async def _send_configure(self, fields: set[str]):
-        """Send a Configure control message to update settings mid-stream.
-
-        Args:
-            fields: Set of changed field names to include in the message.
-        """
-        message: dict[str, Any] = {"type": "Configure"}
-
-        if "keyterm" in fields:
-            message["keyterms"] = self._settings.keyterm
-
-        thresholds: dict[str, Any] = {}
-        if "eot_threshold" in fields:
-            thresholds["eot_threshold"] = self._settings.eot_threshold
-        if "eager_eot_threshold" in fields:
-            thresholds["eager_eot_threshold"] = self._settings.eager_eot_threshold
-        if "eot_timeout_ms" in fields:
-            thresholds["eot_timeout_ms"] = self._settings.eot_timeout_ms
-        if thresholds:
-            message["thresholds"] = thresholds
-
-        logger.debug(f"{self}: sending Configure message: {message}")
-        await self._client.send_json(message)
-
-    async def start(self, frame: StartFrame):
-        """Start the Deepgram Flux SageMaker STT service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-        await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Deepgram Flux SageMaker STT service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Deepgram Flux SageMaker STT service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
-
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Send audio data to Deepgram Flux for transcription.
-
-        Args:
-            audio: Raw audio bytes to transcribe.
-
-        Yields:
-            Frame: None (transcription results come via BiDi stream callbacks).
-        """
-        if not self._connection_established_event.is_set():
-            yield None
-            return
-
-        if self._client and self._client.is_active:
-            try:
-                self._last_stt_time = time.monotonic()
-                await self._client.send_audio_chunk(audio)
-            except Exception as e:
-                yield ErrorFrame(error=f"Unknown error occurred: {e}")
-        yield None
-
     def _build_query_string(self) -> str:
         """Build query string from current settings and init-only connection config."""
         params = []
@@ -356,10 +255,7 @@ class DeepgramFluxSageMakerSTTService(STTService):
         if self._client and self._client.is_active:
             logger.debug("Disconnecting from Deepgram Flux on SageMaker...")
 
-            try:
-                await self._client.send_json({"type": "CloseStream"})
-            except Exception as e:
-                logger.warning(f"Failed to send CloseStream message: {e}")
+            await self._send_close_stream()
 
             if self._watchdog_task and not self._watchdog_task.done():
                 await self.cancel_task(self._watchdog_task)
@@ -391,6 +287,7 @@ class DeepgramFluxSageMakerSTTService(STTService):
         """
         while self._client and self._client.is_active:
             now = time.monotonic()
+            # More than 500 ms without sending new audio to Flux
             if self._user_is_speaking and self._last_stt_time and now - self._last_stt_time > 0.5:
                 logger.warning("Sending silence to Flux to prevent dangling task")
                 try:
@@ -398,7 +295,155 @@ class DeepgramFluxSageMakerSTTService(STTService):
                 except Exception as e:
                     logger.warning(f"Failed to send silence: {e}")
                 self._last_stt_time = time.monotonic()
+            # check every 100ms
             await asyncio.sleep(0.1)
+
+    async def _send_close_stream(self) -> None:
+        """Sends a CloseStream control message to the Deepgram Flux SageMaker endpoint.
+
+        This signals to the server that no more audio data will be sent.
+        """
+        try:
+            if self._client and self._client.is_active:
+                logger.debug("Sending CloseStream message to Deepgram Flux on SageMaker")
+                await self._client.send_json({"type": "CloseStream"})
+        except Exception as e:
+            await self.push_error(error_msg=f"Error sending CloseStream: {e}", exception=e)
+
+    async def _send_configure(self, fields: set[str]):
+        """Send a Configure control message to update settings mid-stream.
+
+        Args:
+            fields: Set of changed field names to include in the message.
+        """
+        message: dict[str, Any] = {"type": "Configure"}
+
+        if "keyterm" in fields:
+            message["keyterms"] = self._settings.keyterm
+
+        thresholds: dict[str, Any] = {}
+        if "eot_threshold" in fields:
+            thresholds["eot_threshold"] = self._settings.eot_threshold
+        if "eager_eot_threshold" in fields:
+            thresholds["eager_eot_threshold"] = self._settings.eager_eot_threshold
+        if "eot_timeout_ms" in fields:
+            thresholds["eot_timeout_ms"] = self._settings.eot_timeout_ms
+        if thresholds:
+            message["thresholds"] = thresholds
+
+        logger.debug(f"{self}: sending Configure message: {message}")
+        await self._client.send_json(message)
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Deepgram Flux SageMaker service supports metrics generation.
+        """
+        return True
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Configure-able fields (keyterm, eot_threshold, eager_eot_threshold,
+        eot_timeout_ms) are sent to Deepgram via a Configure message.
+        Other fields are stored but cannot be applied to the active connection.
+        """
+        changed = await super()._update_settings(delta)
+
+        if not changed:
+            return changed
+
+        configure_fields = changed.keys() & self._CONFIGURE_FIELDS
+        if configure_fields and self._client and self._client.is_active:
+            await self._send_configure(configure_fields)
+
+        self._warn_unhandled_updated_settings(changed.keys() - self._CONFIGURE_FIELDS)
+
+        return changed
+
+    async def start(self, frame: StartFrame):
+        """Start the Deepgram Flux SageMaker STT service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the Deepgram Flux SageMaker STT service.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the Deepgram Flux SageMaker STT service.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Send audio data to Deepgram Flux for transcription.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            Frame: None (transcription results come via BiDi stream callbacks).
+        """
+        if not self._connection_established_event.is_set():
+            return
+
+        if self._client and self._client.is_active:
+            try:
+                self._last_stt_time = time.monotonic()
+                await self._client.send_audio_chunk(audio)
+            except Exception as e:
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+        yield None
+
+    async def start_metrics(self):
+        """Start TTFB and processing metrics collection."""
+        # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
+        # Ideally, TTFB should measure the time from when a user starts speaking
+        # until we receive the first transcript. However, Deepgram Flux delivers
+        # both the "user started speaking" event and the first transcript simultaneously,
+        # making this timing measurement meaningless in this context.
+        # await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
+    def _validate_message(self, data: Dict[str, Any]) -> bool:
+        """Validate basic message structure from Deepgram Flux.
+
+        Args:
+            data: The parsed JSON message data to validate.
+
+        Returns:
+            True if the message structure is valid, False otherwise.
+        """
+        if not isinstance(data, dict):
+            logger.warning("Message is not a dictionary")
+            return False
+
+        if "type" not in data:
+            logger.warning("Message missing 'type' field")
+            return False
+
+        return True
 
     async def _process_responses(self):
         """Process streaming responses from Deepgram Flux on SageMaker."""
@@ -426,25 +471,6 @@ class DeepgramFluxSageMakerSTTService(STTService):
         finally:
             logger.debug("Response processor stopped")
 
-    def _validate_message(self, data: Dict[str, Any]) -> bool:
-        """Validate basic message structure from Deepgram Flux.
-
-        Args:
-            data: The parsed JSON message data to validate.
-
-        Returns:
-            True if the message structure is valid, False otherwise.
-        """
-        if not isinstance(data, dict):
-            logger.warning("Message is not a dictionary")
-            return False
-
-        if "type" not in data:
-            logger.warning("Message missing 'type' field")
-            return False
-
-        return True
-
     async def _handle_message(self, data: Dict[str, Any]):
         """Handle a parsed message from Deepgram Flux.
 
@@ -466,12 +492,9 @@ class DeepgramFluxSageMakerSTTService(STTService):
 
         match flux_message_type:
             case FluxMessageType.RECEIVE_CONNECTED:
-                logger.info("Connected to Flux on SageMaker - ready to stream audio")
-                self._connection_established_event.set()
+                await self._handle_connection_established()
             case FluxMessageType.RECEIVE_FATAL_ERROR:
-                error_msg = data.get("error") or data.get("message") or data.get("description")
-                logger.error(f"Fatal error from Deepgram Flux: {error_msg} (full: {data})")
-                await self.push_error(error_msg=f"Fatal error: {error_msg or 'Unknown error'}")
+                await self._handle_fatal_error(data)
             case FluxMessageType.TURN_INFO:
                 await self._handle_turn_info(data)
             case FluxMessageType.CONFIGURE_SUCCESS:
@@ -483,11 +506,45 @@ class DeepgramFluxSageMakerSTTService(STTService):
                 logger.warning(f"{self}: {error_msg}")
                 await self.push_error(error_msg=error_msg)
 
+    async def _handle_connection_established(self):
+        """Handle successful connection establishment to Deepgram Flux.
+
+        This event is fired when the WebSocket connection to Deepgram Flux
+        is successfully established and ready to receive audio data for
+        transcription processing.
+        """
+        logger.info("Connected to Flux - ready to stream audio")
+        # Notify connection is established
+        self._connection_established_event.set()
+
+    async def _handle_fatal_error(self, data: Dict[str, Any]):
+        """Handle fatal error messages from Deepgram Flux.
+
+        Fatal errors indicate unrecoverable issues with the connection or
+        configuration that require intervention. These errors will cause
+        the connection to be terminated.
+
+        Args:
+            data: The error message data containing error details.
+
+        Raises:
+            Exception: Always raises to trigger error handling in the parent service.
+        """
+        error_msg = data.get("error", "Unknown error")
+        deepgram_error = f"Fatal error: {error_msg}"
+        logger.error(deepgram_error)
+        # Error will be handled inside WebsocketService->_receive_task_handler
+        raise Exception(deepgram_error)
+
     async def _handle_turn_info(self, data: Dict[str, Any]):
         """Handle TurnInfo events from Deepgram Flux.
 
+        TurnInfo messages contain various turn-based events that indicate
+        the state of speech processing, including turn boundaries, interim
+        results, and turn finalization events.
+
         Args:
-            data: The TurnInfo message data containing event type and transcript.
+            data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
         event = data.get("event")
         transcript = data.get("transcript", "")
@@ -513,21 +570,34 @@ class DeepgramFluxSageMakerSTTService(STTService):
     async def _handle_start_of_turn(self, transcript: str):
         """Handle StartOfTurn events from Deepgram Flux.
 
+        StartOfTurn events are fired when Deepgram Flux detects the beginning
+        of a new speaking turn. This triggers bot interruption to stop any
+        ongoing speech synthesis and signals the start of user speech detection.
+
+        The service will:
+        - Send a BotInterruptionFrame upstream to stop bot speech
+        - Send a UserStartedSpeakingFrame downstream to notify other components
+        - Start metrics collection for measuring response times
+
         Args:
-            transcript: Maybe the first few words of the turn.
+            transcript: maybe the first few words of the turn.
         """
         logger.debug("User started speaking")
         self._user_is_speaking = True
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
             await self.broadcast_interruption()
-        await self.start_processing_metrics()
+        await self.start_metrics()
         await self._call_event_handler("on_start_of_turn", transcript)
         if transcript:
             logger.trace(f"Start of turn transcript: {transcript}")
 
     async def _handle_turn_resumed(self, event: str):
         """Handle TurnResumed events from Deepgram Flux.
+
+        TurnResumed events indicate that speech has resumed after a brief pause
+        within the same turn. This is primarily used for logging and debugging
+        purposes and doesn't trigger any significant processing changes.
 
         Args:
             event: The event type string for logging purposes.
@@ -540,6 +610,7 @@ class DeepgramFluxSageMakerSTTService(STTService):
 
         Return None if the data is missing or invalid.
         """
+        # Example: Assume transcript_data has a list of words with confidence
         words = transcript_data.get("words")
         if not words or not isinstance(words, list):
             return None
@@ -553,16 +624,30 @@ class DeepgramFluxSageMakerSTTService(STTService):
     async def _handle_end_of_turn(self, transcript: str, data: Dict[str, Any]):
         """Handle EndOfTurn events from Deepgram Flux.
 
+        EndOfTurn events are fired when Deepgram Flux determines that a speaking
+        turn has concluded, either due to sufficient silence or end-of-turn
+        confidence thresholds being met. This provides the final transcript
+        for the completed turn.
+
+        The service will:
+        - Create and send a final TranscriptionFrame with the complete transcript
+        - Trigger transcription handling with tracing for metrics
+        - Stop processing metrics collection
+        - Send a UserStoppedSpeakingFrame to signal turn completion
+
         Args:
             transcript: The final transcript text for the completed turn.
-            data: The TurnInfo message data.
+            data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
         logger.debug("User stopped speaking")
         self._user_is_speaking = False
 
+        # Compute the average confidence
         average_confidence = self._calculate_average_confidence(data)
 
         if not self._settings.min_confidence or average_confidence > self._settings.min_confidence:
+            # EndOfTurn means Flux has determined the turn is complete,
+            # so this TranscriptionFrame is always finalized
             await self.push_frame(
                 TranscriptionFrame(
                     transcript,
@@ -586,11 +671,37 @@ class DeepgramFluxSageMakerSTTService(STTService):
     async def _handle_eager_end_of_turn(self, transcript: str, data: Dict[str, Any]):
         """Handle EagerEndOfTurn events from Deepgram Flux.
 
+        EagerEndOfTurn events are fired when the end-of-turn confidence reaches the
+        EagerEndOfTurn threshold but hasn't yet reached the full end-of-turn threshold.
+        These provide interim transcripts that can be used for faster response
+        generation while still allowing the user to continue speaking.
+
+        EagerEndOfTurn events enable more responsive conversational AI by allowing
+        the LLM to start processing likely final transcripts before the turn
+        is definitively ended.
+
         Args:
-            transcript: The interim transcript text.
-            data: The TurnInfo message data.
+            transcript: The interim transcript text that triggered the EagerEndOfTurn event.
+            data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
         logger.trace(f"EagerEndOfTurn - {transcript}")
+        # Deepgram's EagerEndOfTurn feature enables lower-latency voice agents by sending
+        # medium-confidence transcripts before EndOfTurn certainty, allowing LLM processing to
+        # begin early.
+        #
+        # However, if speech resumes or the transcripts differ from the final EndOfTurn, the
+        # EagerEndOfTurn response should be cancelled to avoid incorrect or partial responses.
+        #
+        # Pipecat doesn't yet provide built-in Gate/control mechanisms to:
+        # 1. Start LLM/TTS processing early on EagerEndOfTurn events
+        # 2. Cancel in-flight processing when TurnResumed occurs
+        #
+        # By pushing EagerEndOfTurn transcripts as InterimTranscriptionFrame, we enable
+        # developers to implement custom EagerEndOfTurn handling in their applications while
+        # maintaining compatibility with existing interim transcription workflows.
+        #
+        # TODO: Implement proper EagerEndOfTurn support with cancellable processing pipeline
+        # that can start response generation on EagerEndOfTurn and cancel or confirm it.
         await self.push_frame(
             InterimTranscriptionFrame(
                 transcript,
@@ -605,16 +716,23 @@ class DeepgramFluxSageMakerSTTService(STTService):
     async def _handle_update(self, transcript: str):
         """Handle Update events from Deepgram Flux.
 
+        Update events provide incremental transcript updates during an ongoing
+        turn. These events allow for real-time display of transcription progress
+        and can be used to provide visual feedback to users about what's being
+        recognized.
+
+        The service stops TTFB (Time To First Byte) metrics when the first
+        substantial update is received, indicating successful processing start.
+
         Args:
             transcript: The current partial transcript text for the ongoing turn.
         """
         if transcript:
             logger.trace(f"Update event: {transcript}")
+            # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
+            # Ideally, TTFB should measure the time from when a user starts speaking
+            # until we receive the first transcript. However, Deepgram Flux delivers
+            # both the "user started speaking" event and the first transcript simultaneously,
+            # making this timing measurement meaningless in this context.
+            # await self.stop_ttfb_metrics()
             await self._call_event_handler("on_update", transcript)
-
-    @traced_stt
-    async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass
