@@ -1120,6 +1120,9 @@ class TTSService(AIService):
     async def reset_word_timestamps(self):
         """Reset word timestamp tracking."""
         self._initial_word_timestamp = -1
+        # Discard any pre-audio word timestamps from the interrupted turn so they
+        # cannot be flushed into the next context after the audio baseline resets.
+        self._initial_word_times = []
 
     async def add_word_timestamps(
         self, word_times: List[Tuple[str, float]], context_id: Optional[str] = None
