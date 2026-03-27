@@ -417,6 +417,68 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         )
         await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
 
+    async def test_task_heartbeat_timeout_event(self):
+        """Verify on_heartbeat_timeout fires when heartbeats are blocked."""
+
+        class HeartbeatBlocker(FrameProcessor):
+            """Drops HeartbeatFrames so they never reach the sink."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if not isinstance(frame, HeartbeatFrame):
+                    await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([HeartbeatBlocker()])
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True,
+                heartbeats_period_secs=0.1,
+                heartbeat_monitor_secs=0.2,
+            ),
+            cancel_on_heartbeat_timeout=False,
+            cancel_on_idle_timeout=False,
+        )
+
+        heartbeat_timeout = False
+
+        @task.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(task: PipelineTask):
+            nonlocal heartbeat_timeout
+            heartbeat_timeout = True
+            await task.cancel()
+
+        await task.queue_frame(TextFrame(text="Hello!"))
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+        assert heartbeat_timeout
+
+    async def test_task_heartbeat_timeout_cancel(self):
+        """Verify cancel_on_heartbeat_timeout cancels the pipeline."""
+
+        class HeartbeatBlocker(FrameProcessor):
+            """Drops HeartbeatFrames so they never reach the sink."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if not isinstance(frame, HeartbeatFrame):
+                    await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([HeartbeatBlocker()])
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True,
+                heartbeats_period_secs=0.1,
+                heartbeat_monitor_secs=0.2,
+            ),
+            cancel_on_heartbeat_timeout=True,
+            cancel_on_idle_timeout=False,
+        )
+
+        await task.queue_frame(TextFrame(text="Hello!"))
+        # Pipeline should cancel automatically when heartbeat timeout is detected.
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+
     async def test_idle_task_event_handler_no_frames(self):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])

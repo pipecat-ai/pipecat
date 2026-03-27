@@ -122,6 +122,9 @@ class PipelineParams(BaseModel):
         enable_heartbeats: Whether to enable heartbeat monitoring.
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
+        heartbeat_monitor_secs: Timeout (in seconds) for the heartbeat monitor. If a
+            heartbeat frame is not received within this period, a timeout is detected.
+            Defaults to ``heartbeats_period_secs * 10``.
         heartbeats_period_secs: Period between heartbeats in seconds.
         interruption_strategies: [deprecated] Strategies for bot interruption behavior.
 
@@ -146,6 +149,7 @@ class PipelineParams(BaseModel):
     enable_heartbeats: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
+    heartbeat_monitor_secs: Optional[float] = None
     heartbeats_period_secs: float = HEARTBEAT_SECS
     interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
     observers: List[BaseObserver] = Field(default_factory=list)
@@ -166,6 +170,9 @@ class PipelineTask(BasePipelineTask):
 
     - on_frame_reached_upstream: Called when upstream frames reach the source
     - on_frame_reached_downstream: Called when downstream frames reach the sink
+    - on_heartbeat_timeout: Called when a heartbeat frame is not received within the
+          configured timeout (``heartbeat_monitor_secs``). Use this to emit metrics,
+          trigger alerts, or cancel the pipeline on stuck pipelines.
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
     - on_pipeline_started: Called when pipeline starts with StartFrame
     - on_pipeline_stopped: [deprecated] Called when pipeline stops with StopFrame
@@ -201,6 +208,10 @@ class PipelineTask(BasePipelineTask):
         async def on_frame_reached_upstream(task, frame):
             ...
 
+        @task.event_handler("on_heartbeat_timeout")
+        async def on_heartbeat_timeout(task):
+            ...
+
         @task.event_handler("on_idle_timeout")
         async def on_pipeline_idle_timeout(task):
             ...
@@ -224,6 +235,7 @@ class PipelineTask(BasePipelineTask):
         *,
         params: Optional[PipelineParams] = None,
         additional_span_attributes: Optional[dict] = None,
+        cancel_on_heartbeat_timeout: bool = False,
         cancel_on_idle_timeout: bool = True,
         cancel_timeout_secs: float = CANCEL_TIMEOUT_SECS,
         check_dangling_tasks: bool = True,
@@ -246,6 +258,8 @@ class PipelineTask(BasePipelineTask):
             params: Configuration parameters for the pipeline.
             additional_span_attributes: Optional dictionary of attributes to propagate as
                 OpenTelemetry conversation span attributes.
+            cancel_on_heartbeat_timeout: Whether the pipeline task should be cancelled
+                if the heartbeat timeout is reached.
             cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
                 the idle timeout is reached.
             cancel_timeout_secs: Timeout (in seconds) to wait for cancellation to happen
@@ -269,6 +283,7 @@ class PipelineTask(BasePipelineTask):
         super().__init__()
         self._params = params or PipelineParams()
         self._additional_span_attributes = additional_span_attributes or {}
+        self._cancel_on_heartbeat_timeout = cancel_on_heartbeat_timeout
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
         self._cancel_timeout_secs = cancel_timeout_secs
         self._check_dangling_tasks = check_dangling_tasks
@@ -411,6 +426,7 @@ class PipelineTask(BasePipelineTask):
         self._reached_downstream_types: Set[Type[Frame]] = set()
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
+        self._register_event_handler("on_heartbeat_timeout")
         self._register_event_handler("on_idle_timeout")
         self._register_event_handler("on_pipeline_started")
         self._register_event_handler("on_pipeline_stopped")
@@ -960,21 +976,45 @@ class PipelineTask(BasePipelineTask):
         """Monitor heartbeat frames for processing time and timeout detection.
 
         This task monitors heartbeat frames. If a heartbeat frame has not
-        been received for a long period a warning will be logged. It also logs
-        the time that a heartbeat frame takes to processes, that is how long it
-        takes for the heartbeat frame to traverse all the pipeline.
+        been received for a long period a warning will be logged and the
+        ``on_heartbeat_timeout`` event will be fired. It also logs the time
+        that a heartbeat frame takes to process, that is how long it takes
+        for the heartbeat frame to traverse all the pipeline.
         """
-        wait_time = HEARTBEAT_MONITOR_SECS
-        while True:
+        wait_time = (
+            self._params.heartbeat_monitor_secs
+            if self._params.heartbeat_monitor_secs is not None
+            else self._params.heartbeats_period_secs * 10
+        )
+        running = True
+        while running:
             try:
                 frame = await asyncio.wait_for(self._heartbeat_queue.get(), timeout=wait_time)
                 process_time = (self._clock.get_time() - frame.timestamp) / 1_000_000_000
                 logger.trace(f"{self}: heartbeat frame processed in {process_time} seconds")
                 self._heartbeat_queue.task_done()
             except asyncio.TimeoutError:
-                logger.warning(
-                    f"{self}: heartbeat frame not received for more than {wait_time} seconds"
-                )
+                running = await self._heartbeat_timeout_detected(wait_time)
+
+    async def _heartbeat_timeout_detected(self, wait_time: float) -> bool:
+        """Handle heartbeat timeout detection and optional cancellation.
+
+        Args:
+            wait_time: The timeout period that was exceeded.
+
+        Returns:
+            Whether the monitor should continue running.
+        """
+        if self._cancelled:
+            return False
+
+        logger.warning(f"{self}: heartbeat frame not received for more than {wait_time} seconds")
+        await self._call_event_handler("on_heartbeat_timeout")
+        if self._cancel_on_heartbeat_timeout:
+            logger.warning(f"{self}: heartbeat timeout detected, cancelling pipeline task...")
+            await self.cancel()
+            return False
+        return True
 
     async def _idle_monitor_handler(self):
         """Monitor pipeline activity and detect idle conditions.
