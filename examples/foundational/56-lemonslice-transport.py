@@ -65,7 +65,7 @@ async def main():
         tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY", ""),
             settings=ElevenLabsTTSService.Settings(
-                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+                voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
             ),
         )
 
