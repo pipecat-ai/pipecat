@@ -834,7 +834,13 @@ class BaseOutputTransport(FrameProcessor):
                 if isinstance(frame, TTSStoppedFrame) and self._clock_flush_event is not None:
                     logger.debug(f"{self._transport} audio queue signalling clock queue flush")
                     self._clock_flush_event.set()
-                    await self._clock_drained_event.wait()
+                    try:
+                        await asyncio.wait_for(self._clock_drained_event.wait(), timeout=BOT_VAD_STOP_FALLBACK_SECS)
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            f"{self._transport} timed out waiting for clock queue to drain, "
+                            "pushing TTSStoppedFrame downstream anyway"
+                        )
                     self._clock_flush_event = None
                     self._clock_drained_event = None
 
