@@ -359,6 +359,16 @@ class BaseOutputTransport(FrameProcessor):
             await sender.handle_mixer_control_frame(frame)
         elif isinstance(frame, TTSStoppedFrame):
             await sender.handle_sync_frame(frame)
+            if frame.pts:
+                # The frame goes into both queues. Create fresh events to keep
+                # the queues in sync: the audio task signals _clock_flush_event
+                # to trigger an immediate drain; the clock task signals
+                # _clock_drained_event once the drain is complete so the audio
+                # task knows it can safely push TTSStoppedFrame downstream.
+                # This way we can keep audio and words in sync.
+                sender._clock_flush_event = asyncio.Event()
+                sender._clock_drained_event = asyncio.Event()
+                await sender.handle_timed_frame(frame)
         elif frame.pts:
             await sender.handle_timed_frame(frame)
         else:
@@ -430,6 +440,22 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_task: Optional[asyncio.Task] = None
             self._video_task: Optional[asyncio.Task] = None
             self._clock_task: Optional[asyncio.Task] = None
+
+            # When a TTSStoppedFrame has a pts it is enqueued in both the
+            # audio_queue and the clock_queue. These two events keep the queues
+            # in sync around that frame:
+            #
+            # _clock_flush_event  – set by the audio task once all preceding
+            #   audio has been sent, telling the clock task to stop waiting on
+            #   timestamps and drain every pending frame immediately.
+            #
+            # _clock_drained_event – set by the clock task once it has drained
+            #   all frames up to and including the TTSStoppedFrame, telling the
+            #   audio task it is safe to push the TTSStoppedFrame downstream.
+            #   This guarantees that all timed frames arrive before the stop
+            #   signal regardless of which queue wins the race.
+            self._clock_flush_event: Optional[asyncio.Event] = None
+            self._clock_drained_event: Optional[asyncio.Event] = None
 
         @property
         def sample_rate(self) -> int:
@@ -800,6 +826,18 @@ class BaseOutputTransport(FrameProcessor):
                     await self._send_silence(self._params.audio_out_end_silence_secs)
                     break
 
+                # If this TTSStoppedFrame is also in the clock queue, signal
+                # the clock task to drain immediately and then wait for it to
+                # confirm all timed frames have been pushed downstream before
+                # pushing TTSStoppedFrame here. This keeps the audio queue as
+                # the single owner of the downstream push for this frame.
+                if isinstance(frame, TTSStoppedFrame) and self._clock_flush_event is not None:
+                    logger.debug(f"{self._transport} audio queue signalling clock queue flush")
+                    self._clock_flush_event.set()
+                    await self._clock_drained_event.wait()
+                    self._clock_flush_event = None
+                    self._clock_drained_event = None
+
                 # Handle frame.
                 await self._handle_frame(frame)
 
@@ -951,13 +989,44 @@ class BaseOutputTransport(FrameProcessor):
                 # If we have a frame we check it's presentation timestamp. If it
                 # has already passed we process it, otherwise we wait until it's
                 # time to process it.
+                #
+                # When a TTSStoppedFrame with a pts is in flight, this queue and
+                # the audio_queue are kept in sync: the audio task signals
+                # _clock_flush_event as soon as all preceding audio has been
+                # sent, which wakes up the wait below early so every pending
+                # clock-queue frame is delivered immediately instead of stalling
+                # until its timestamp arrives.
                 if running:
                     current_time = self._transport.get_clock().get_time()
                     if timestamp > current_time:
                         wait_time = nanoseconds_to_seconds(timestamp - current_time)
-                        await asyncio.sleep(wait_time)
+                        if self._clock_flush_event:
+                            # Race between the natural timestamp and a drain
+                            # signal from the audio task. If the audio task sets
+                            # the event first, we fall through immediately so
+                            # this frame (and all subsequent ones up to the
+                            # TTSStoppedFrame) are processed without delay.
+                            try:
+                                await asyncio.wait_for(
+                                    asyncio.shield(self._clock_flush_event.wait()),
+                                    timeout=wait_time,
+                                )
+                                logger.debug(
+                                    f"{self._transport} clock queue flushed: delivering {frame} immediately"
+                                )
+                            except asyncio.TimeoutError:
+                                pass
+                        else:
+                            await asyncio.sleep(wait_time)
 
-                    # Push frame downstream.
-                    await self._transport.push_frame(frame)
+                    # If this is the TTSStoppedFrame, signal the audio task that
+                    # the drain is complete. The audio task owns the downstream
+                    # push for this frame, so skip it here.
+                    if isinstance(frame, TTSStoppedFrame) and self._clock_drained_event is not None:
+                        logger.debug(f"{self._transport} clock queue drained, handing off TTSStoppedFrame to audio queue")
+                        self._clock_drained_event.set()
+                    else:
+                        # Push frame downstream.
+                        await self._transport.push_frame(frame)
 
                 self._clock_queue.task_done()
