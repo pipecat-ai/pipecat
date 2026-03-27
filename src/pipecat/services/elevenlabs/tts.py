@@ -620,18 +620,6 @@ class ElevenLabsTTSService(WebsocketTTSService):
         msg = {"context_id": flush_id, "flush": True}
         await self._websocket.send(json.dumps(msg))
 
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push a frame and handle state changes.
-
-        Args:
-            frame: The frame to push.
-            direction: The direction to push the frame.
-        """
-        await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)], self.get_active_audio_context_id())
-
     async def _connect(self):
         await super()._connect()
 
@@ -743,6 +731,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Close the ElevenLabs context when the bot is interrupted."""
         await self._close_context(context_id)
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Close the ElevenLabs context after all audio has been played.
@@ -752,6 +741,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         ``close_context: True`` to free server-side resources.
         """
         await self._close_context(context_id)
+        await super().on_audio_context_completed(context_id)
 
     async def _receive_messages(self):
         """Handle incoming WebSocket messages from ElevenLabs."""
@@ -1130,10 +1120,6 @@ class ElevenLabsHttpTTSService(TTSService):
         if isinstance(frame, (InterruptionFrame, TTSStoppedFrame)):
             # Reset timing on interruption or stop
             self._reset_state()
-
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)])
-
         elif isinstance(frame, LLMFullResponseEndFrame):
             # End of turn - reset previous text
             self._previous_text = ""

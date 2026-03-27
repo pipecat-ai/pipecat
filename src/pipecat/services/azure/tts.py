@@ -611,8 +611,6 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._reset_state()
-            if isinstance(frame, TTSStoppedFrame) and self._current_context_id:
-                await self.add_word_timestamps([("Reset", 0)], self._current_context_id)
 
     def _reset_state(self):
         """Reset TTS state between turns."""

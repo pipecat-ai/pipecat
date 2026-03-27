@@ -516,6 +516,7 @@ class RimeTTSService(WebsocketTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Clear the Rime speech queue and stop metrics when the bot is interrupted."""
         await self._close_context(context_id)
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Clear server-side state and stop metrics after the Rime context finishes playing.
@@ -525,6 +526,7 @@ class RimeTTSService(WebsocketTTSService):
         any residual server-side state once all audio has been delivered.
         """
         await self._close_context(context_id)
+        await super().on_audio_context_completed(context_id)
 
     def _calculate_word_times(self, words: list, starts: list, ends: list) -> list:
         """Calculate word timing pairs with proper spacing and punctuation.
@@ -603,18 +605,6 @@ class RimeTTSService(WebsocketTTSService):
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Error: {msg['message']}")
                 self.reset_active_audio_context()
-
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push frame and handle end-of-turn conditions.
-
-        Args:
-            frame: The frame to push.
-            direction: The direction to push the frame.
-        """
-        await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)])
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
