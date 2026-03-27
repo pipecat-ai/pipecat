@@ -1474,7 +1474,7 @@ wheels = [
 
 [[package]]
 name = "deepgram-sdk"
-version = "6.0.1"
+version = "6.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1483,9 +1483,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/73/46/6dc45de574d766a20853452d7beccf17cb0cfeb685a0f03460f1fe49b48e/deepgram_sdk-6.0.1.tar.gz", hash = "sha256:88558a43d6173a861c8b6d6491b9ee8805679fb09fb81ef51eeb6871dad77767", size = 176743, upload-time = "2026-02-24T13:52:17.163Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/5c/3cea6888343ae4c90ddb2640371e270b2406e3cc66f76e33c67282559ef5/deepgram_sdk-6.1.0.tar.gz", hash = "sha256:2eb124fd120be733e8297173b7201aa4375a86cd174854aaa5e2d036ba122515", size = 201973, upload-time = "2026-03-26T20:06:06.961Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/58/a4/53b9075816edc566694aed014d9864febedf232677b74f5d30bdde64b5de/deepgram_sdk-6.0.1-py3-none-any.whl", hash = "sha256:1b33d621b1c0b1d7a6a7b46fdc393aef4212e670521fada99764f5fb3f9d55fd", size = 490751, upload-time = "2026-02-24T13:52:15.998Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/85/4ad495bc08de200618b9e9eb17930e1863032ee3d2cfec1c4b0c7e5b8bbf/deepgram_sdk-6.1.0-py3-none-any.whl", hash = "sha256:5501c77ae64b7e496fef7d17111f8323dfb46af42b4e511eec9d998d593a9769", size = 576143, upload-time = "2026-03-26T20:06:05.407Z" },
 ]
 
 [[package]]
@@ -4902,7 +4902,7 @@ requires-dist = [
     { name = "camb-sdk", marker = "extra == 'camb'", specifier = ">=1.5.4,<2" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
     { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.27.0" },
-    { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = ">=6.0.1,<7" },
+    { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = ">=6.1.0,<7" },
     { name = "docstring-parser", specifier = ">=0.16,<1" },
     { name = "einops", marker = "extra == 'moondream'", specifier = "~=0.8.0" },
     { name = "fastapi", marker = "extra == 'runner'", specifier = ">=0.115.6,<1" },
