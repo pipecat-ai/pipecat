@@ -278,6 +278,10 @@ TESTS_53 = [
     ("53-concurrent-llm-evaluation.py", EVAL_SIMPLE_MATH),
 ]
 
+TESTS_56 = [
+    ("56-lemonslice-transport.py", EVAL_SIMPLE_MATH),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_12,
@@ -295,6 +299,7 @@ TESTS = [
     *TESTS_50,
     *TESTS_51,
     *TESTS_53,
+    *TESTS_56,
 ]
 
 
