@@ -835,7 +835,9 @@ class BaseOutputTransport(FrameProcessor):
                     logger.debug(f"{self._transport} audio queue signalling clock queue flush")
                     self._clock_flush_event.set()
                     try:
-                        await asyncio.wait_for(self._clock_drained_event.wait(), timeout=BOT_VAD_STOP_FALLBACK_SECS)
+                        await asyncio.wait_for(
+                            self._clock_drained_event.wait(), timeout=BOT_VAD_STOP_FALLBACK_SECS
+                        )
                     except asyncio.TimeoutError:
                         logger.warning(
                             f"{self._transport} timed out waiting for clock queue to drain, "
@@ -1029,7 +1031,9 @@ class BaseOutputTransport(FrameProcessor):
                     # the drain is complete. The audio task owns the downstream
                     # push for this frame, so skip it here.
                     if isinstance(frame, TTSStoppedFrame) and self._clock_drained_event is not None:
-                        logger.debug(f"{self._transport} clock queue drained, handing off TTSStoppedFrame to audio queue")
+                        logger.debug(
+                            f"{self._transport} clock queue drained, handing off TTSStoppedFrame to audio queue"
+                        )
                         self._clock_drained_event.set()
                     else:
                         # Push frame downstream.
