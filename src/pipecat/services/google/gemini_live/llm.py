@@ -787,6 +787,13 @@ class GeminiLiveLLMService(LLMService):
         if settings is not None:
             default_settings.apply_update(settings)
 
+        # Warn if user requested TEXT modality
+        if default_settings.modalities == GeminiModalities.TEXT:
+            logger.warning(
+                f"Modality {default_settings.modalities.value!r} may not be supported by recent "
+                "Gemini Live models."
+            )
+
         super().__init__(
             base_url=base_url,
             settings=default_settings,
@@ -921,6 +928,10 @@ class GeminiLiveLLMService(LLMService):
         Args:
             modalities: The modalities to use for responses.
         """
+        if modalities == GeminiModalities.TEXT:
+            logger.warning(
+                f"Modality {modalities.value!r} may not be supported by recent Gemini Live models."
+            )
         self._settings.modalities = modalities
 
     def set_language(self, language: Language):
