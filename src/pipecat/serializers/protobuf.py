@@ -68,6 +68,11 @@ class ProtobufFrameSerializer(FrameSerializer):
             params: Configuration parameters.
         """
         super().__init__(params)
+        # The base serializer defaults to filtering out RTVI protocol messages
+        # to avoid sending them over telephony media streams. ProtobufFrameSerializer
+        # is used by WebSocket transports, which are the delivery channel for
+        # these messages, so we disable the filter.
+        self._params.ignore_rtvi_messages = False
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize a frame to Protocol Buffer binary format.
