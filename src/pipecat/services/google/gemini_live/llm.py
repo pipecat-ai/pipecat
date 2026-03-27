@@ -1238,6 +1238,14 @@ class GeminiLiveLLMService(LLMService):
             self._end_frame_deferral_timeout_task.cancel()
         self._end_frame_deferral_timeout_task = None
 
+    def _get_history_config(self) -> Optional[HistoryConfig]:
+        """Return the history config for the Live API connection.
+
+        Subclasses can override this to disable history config (e.g. Vertex AI
+        does not support it).
+        """
+        return HistoryConfig(initial_history_in_client_content=True)
+
     async def _connect(self, session_resumption_handle: Optional[str] = None):
         """Establish client connection to Gemini Live API."""
         if self._session:
@@ -1273,8 +1281,12 @@ class GeminiLiveLLMService(LLMService):
                 input_audio_transcription=AudioTranscriptionConfig(),
                 output_audio_transcription=AudioTranscriptionConfig(),
                 session_resumption=SessionResumptionConfig(handle=session_resumption_handle),
-                history_config=HistoryConfig(initial_history_in_client_content=True),
             )
+
+            # Add history config, if supported (not supported by Vertex)
+            history_config = self._get_history_config()
+            if history_config:
+                config.history_config = history_config
 
             # Add context window compression to configuration, if enabled
             cwc = self._settings.context_window_compression or {}
