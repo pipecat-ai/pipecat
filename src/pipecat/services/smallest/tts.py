@@ -12,12 +12,11 @@ Waves API for real-time text-to-speech synthesis.
 
 import asyncio
 import base64
+import importlib.metadata
 import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator, Optional
-
-import importlib.metadata
 
 from loguru import logger
 

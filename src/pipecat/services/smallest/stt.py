@@ -13,13 +13,12 @@ This module provides a STT service using Smallest AI's Waves API:
 """
 
 import asyncio
+import importlib.metadata
 import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import urlencode
-
-import importlib.metadata
 
 from loguru import logger
 
