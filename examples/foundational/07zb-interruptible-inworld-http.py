@@ -61,7 +61,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             streaming=True,
             settings=InworldHttpTTSService.Settings(
                 voice="Ashley",
-                model="inworld-tts-1",
             ),
             # Set to False for non-streaming mode or True for streaming mode.
         )

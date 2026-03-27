@@ -56,7 +56,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("INWORLD_API_KEY", ""),
         settings=InworldTTSService.Settings(
             voice="Ashley",
-            model="inworld-tts-1",
             temperature=1.1,
         ),
     )
