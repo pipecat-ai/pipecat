@@ -290,7 +290,7 @@ class InworldRealtimeLLMService(LLMService):
             start_audio_paused: Whether to start with audio input paused.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        default_model = llm_model or "openai/gpt-4.1-nano"
+        default_model = llm_model or "openai/gpt-4.1-mini"
         default_voice = voice or "Clive"
 
         default_settings = self.Settings(

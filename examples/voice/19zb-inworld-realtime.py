@@ -17,6 +17,7 @@ Features:
 - Built-in semantic VAD (voice activity detection)
 - Streaming user transcription
 - Text and audio input
+- Function calling (tool use)
 
 Requirements:
     - INWORLD_API_KEY environment variable set
@@ -32,6 +33,8 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
@@ -48,11 +51,34 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
+
+
+# --- Function Calling (Tool Use) ---
+
+
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "Pizza King"})
+
+
+restaurant_function = FunctionSchema(
+    name="get_restaurant_recommendation",
+    description="Get a restaurant recommendation",
+    properties={
+        "location": {
+            "type": "string",
+            "description": "The city and state, e.g. San Francisco, CA",
+        },
+    },
+    required=["location"],
+)
+
+tools = ToolsSchema(standard_tools=[restaurant_function])
 
 
 # --- Transport Configuration ---
@@ -80,9 +106,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Create the Inworld Realtime LLM service.
     # Common params (llm_model, voice, tts_model, stt_model) are top-level.
     # For full control, use settings=InworldRealtimeLLMService.Settings(session_properties=...)
+    #
+    # llm_model can be any supported model or an Inworld Router.
+    # See: https://docs.inworld.ai/router/introduction
     llm = InworldRealtimeLLMService(
         api_key=os.getenv("INWORLD_API_KEY"),
-        llm_model="openai/gpt-4.1-nano",
+        llm_model="openai/gpt-4.1-mini",
         voice="Sarah",
         settings=InworldRealtimeLLMService.Settings(
             system_instruction="""You are a helpful and friendly AI assistant powered by Inworld.
@@ -94,9 +123,12 @@ Always be helpful and proactive in offering assistance.""",
         ),
     )
 
-    # Create context with initial message
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+
+    # Create context with initial message and tools
     context = LLMContext(
         [{"role": "user", "content": "Say hello and introduce yourself!"}],
+        tools,
     )
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
