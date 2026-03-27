@@ -51,6 +51,12 @@ async def end_conversation(params: FunctionCallParams):
     await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
 
+# NOTE: we can ask the model to say something *after* the call to
+# end_conversation because GeminiLiveLLMService defers processing EndFrames
+# until after the bot finishes its current turn. With Gemini 3.1 Flash Live,
+# the model won't reliably report ending its turn until after it says something
+# following the tool call, which is why the system instruction is structured
+# the way it is.
 system_instruction = """
 You are a helpful assistant who can answer questions and use tools.
 
@@ -59,9 +65,10 @@ You have three tools available to you:
 2. get_restaurant_recommendation: Use this tool to get a restaurant recommendation in a specific location.
 3. end_conversation: Use this tool to gracefully end the conversation.
 
-After you've responded to the user three times, do two things, in order:
-1. Politely let them know that that's all the time you have today and say goodbye.
-2. *WITHOUT WAITING FOR THE USER TO RESPOND*, call the end_conversation tool to gracefully end the conversation.
+After you've responded to the user three times, do the following:
+1. Politely let them know that that's all the time you have today (but don't say "goodbye" yet).
+2. Then immediately call the end_conversation function. *DO NOT FORGET TO DO THIS STEP.*
+3. After the tool reports success, say goodbye.
 """
 
 
