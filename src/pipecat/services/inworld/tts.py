@@ -997,10 +997,6 @@ class InworldTTSService(WebsocketTTSService):
             # Handle context created confirmation
             if "contextCreated" in result:
                 logger.trace(f"{self}: Context created on server: {ctx_id}")
-            # If the context isn't available recreate it (handles race conditions during interruption recovery).
-            elif ctx_id and not self.audio_context_available(ctx_id):
-                logger.trace(f"{self}: Recreating audio context for current context: {ctx_id}")
-                await self.create_audio_context(ctx_id)
 
             # Process audio chunk
             audio_chunk = result.get("audioChunk", {})
@@ -1148,7 +1144,7 @@ class InworldTTSService(WebsocketTTSService):
         Returns:
             An asynchronous generator of frames.
         """
-        logger.debug(f"{self}: Generating WebSocket TTS [{text}]")
+        logger.debug(f"{self}: Generating WebSocket TTS [{text}, for context: {context_id}]")
 
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
