@@ -1403,6 +1403,7 @@ class TTSService(AIService):
                 logger.trace(f"{self} time out on audio context {context_id}")
                 if should_push_stop_frame and self._push_stop_frames:
                     await self.push_frame(TTSStoppedFrame(context_id=context_id))
+                    should_push_stop_frame = False
                 break
 
         if should_push_stop_frame and self._push_stop_frames:
