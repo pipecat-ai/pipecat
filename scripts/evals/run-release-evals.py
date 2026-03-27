@@ -321,11 +321,18 @@ async def main(args: argparse.Namespace):
         log_level=log_level,
     )
 
-    # Parse test config: (test, prompt, eval, user_speaks_first)
-    for test_config in TESTS:
-        test, eval_config = test_config
+    concurrency = args.concurrency
+    semaphore = asyncio.Semaphore(concurrency)
 
-        await runner.run_eval(test, eval_config)
+    async def run_with_semaphore(test: str, eval_config: EvalConfig):
+        async with semaphore:
+            await runner.run_eval(test, eval_config)
+
+    tasks = []
+    for test, eval_config in TESTS:
+        tasks.append(asyncio.create_task(run_with_semaphore(test, eval_config)))
+
+    await asyncio.gather(*tasks)
 
     runner.print_results()
 
@@ -333,6 +340,13 @@ async def main(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipecat Eval Runner")
     parser.add_argument("--audio", "-a", action="store_true", help="Record audio for each test")
+    parser.add_argument(
+        "--concurrency",
+        "-c",
+        type=int,
+        default=3,
+        help="Max number of evals to run concurrently (default: 3)",
+    )
     parser.add_argument("--name", "-n", help="Name for the current runner (e.g. 'v.0.0.68')")
     parser.add_argument("--pattern", "-p", help="Only run tests that match the pattern")
     parser.add_argument("--verbose", "-v", action="count", default=0)
