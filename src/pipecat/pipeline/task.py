@@ -52,7 +52,7 @@ from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
 HEARTBEAT_SECS = 1.0
-HEARTBEAT_MONITOR_SECS = HEARTBEAT_SECS * 10
+HEARTBEAT_MONITOR_SECS = 10.0
 
 IDLE_TIMEOUT_SECS = 300
 
@@ -111,6 +111,8 @@ class PipelineParams(BaseModel):
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
         heartbeats_period_secs: Period between heartbeats in seconds.
+        heartbeats_monitor_secs: Timeout (in seconds) before warning about
+            missed heartbeats. Defaults to 10 seconds.
         interruption_strategies: Strategies for bot interruption behavior.
         observers: [deprecated] Use `observers` arg in `PipelineTask` class.
 
@@ -131,6 +133,7 @@ class PipelineParams(BaseModel):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     heartbeats_period_secs: float = HEARTBEAT_SECS
+    heartbeats_monitor_secs: Optional[float] = HEARTBEAT_MONITOR_SECS 
     interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
     observers: List[BaseObserver] = Field(default_factory=list)
     report_only_initial_ttfb: bool = False
@@ -804,9 +807,9 @@ class PipelineTask(BasePipelineTask):
         the time that a heartbeat frame takes to processes, that is how long it
         takes for the heartbeat frame to traverse all the pipeline.
         """
-        wait_time = HEARTBEAT_MONITOR_SECS
         while True:
             try:
+                wait_time = self._params.heartbeats_monitor_secs
                 frame = await asyncio.wait_for(self._heartbeat_queue.get(), timeout=wait_time)
                 process_time = (self._clock.get_time() - frame.timestamp) / 1_000_000_000
                 logger.trace(f"{self}: heartbeat frame processed in {process_time} seconds")
