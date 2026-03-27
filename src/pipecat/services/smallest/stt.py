@@ -19,7 +19,11 @@ from enum import Enum
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import urlencode
 
+import importlib.metadata
+
 from loguru import logger
+
+_PIPECAT_VERSION = importlib.metadata.version("pipecat-ai")
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -313,7 +317,11 @@ class SmallestSTTService(WebsocketSTTService):
 
             self._websocket = await websocket_connect(
                 ws_url,
-                additional_headers={"Authorization": f"Bearer {self._api_key}"},
+                additional_headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "X-Source": "pipecat",
+                    "X-Pipecat-Version": _PIPECAT_VERSION,
+                },
             )
             await self._call_event_handler("on_connected")
             logger.debug("Connected to Smallest STT")
