@@ -1223,7 +1223,7 @@ class TTSService(AIService):
             logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
             await self._audio_contexts[context_id].put(frame)
         else:
-            logger.warning(f"{self} unable to append audio to context {context_id}")
+            logger.debug(f"{self} unable to append audio to context {context_id}")
 
     async def remove_audio_context(self, context_id: str):
         """Remove an existing audio context.
