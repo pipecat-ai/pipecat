@@ -65,12 +65,25 @@ Once your PR is submitted, post in the `#community-integrations` Discord channel
 
 #### Websocket-based Services
 
+**Base class:** `WebsocketSTTService`
+
+**Use for:** Services where you manage the websocket connection directly. Combines `STTService` with `WebsocketService` for automatic reconnection and keepalive support.
+
+**Examples:**
+
+- [CartesiaSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/cartesia/stt.py)
+- [ElevenLabsRealtimeSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/elevenlabs/stt.py)
+
+#### SDK-based Streaming Services
+
 **Base class:** `STTService`
+
+**Use for:** Streaming services where the provider's Python SDK manages the connection internally.
 
 **Examples:**
 
 - [DeepgramSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/deepgram/stt.py)
-- [SpeechmaticsSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/speechmatics/stt.py)
+- [GoogleSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/google/stt.py)
 
 #### File-based Services
 
@@ -108,55 +121,59 @@ Once your PR is submitted, post in the `#community-integrations` Discord channel
 
 #### Key requirements:
 
-- **Frame sequence:** Output must follow this frame sequence pattern:
-  - `LLMFullResponseStartFrame` - Signals the start of an LLM response
-  - `LLMTextFrame` - Contains LLM content, typically streamed as tokens
-  - `LLMFullResponseEndFrame` - Signals the end of an LLM response
+- **`_process_context(self, context: LLMContext)`** — The main method that processes an LLM context and generates a response. Each LLM service overrides `process_frame` to extract context from `LLMContextFrame` and calls `_process_context`.
 
-- **Context aggregation:** Implement context aggregation to collect user and assistant content:
-  - Aggregators come in pairs with a `user()` instance and `assistant()` instance
-  - Context must adhere to the `LLMContext` universal format
-  - Aggregators should handle adding messages, function calls, and images to the context
+- **`adapter_class`** — Class attribute pointing to a `BaseLLMAdapter` subclass. Defaults to `OpenAILLMAdapter`. Non-OpenAI services must implement their own adapter (see `src/pipecat/adapters/base_llm_adapter.py`) with methods:
+  - `get_llm_invocation_params(context)` — Extract provider-specific params from universal context
+  - `to_provider_tools_format(tools_schema)` — Convert standard tools to provider format
+  - `get_messages_for_logging(context)` — Format messages for logging
+  - Reference adapters: `src/pipecat/adapters/services/` (anthropic, gemini, bedrock, etc.)
+
+- **Frame sequence:** Output must follow this frame sequence pattern:
+  - `LLMFullResponseStartFrame` — Signals the start of an LLM response
+  - `LLMTextFrame` — Contains LLM content, typically streamed as tokens
+  - `LLMFullResponseEndFrame` — Signals the end of an LLM response
+
+- **Thought frames (reasoning models):** If the model supports extended thinking / chain-of-thought, emit thought frames alongside the response:
+  - `LLMThoughtStartFrame` — Signals the start of a thought
+  - `LLMThoughtTextFrame` — Contains thought content, streamed as tokens
+  - `LLMThoughtEndFrame` — Signals the end of a thought
+
+- **Context aggregation** is handled by the framework via `LLMContext` + `LLMContextAggregatorPair`. The LLM service just processes context it receives — no need to implement aggregators.
 
 ### TTS (Text-to-Speech) Services
 
-#### AudioContextWordTTSService
+#### WebsocketTTSService
 
-**Use for:** Websocket-based services supporting word/timestamp alignment
+**Use for:** Websocket-based streaming services (with or without word timestamps)
 
-**Example:**
+**Examples:**
 
 - [CartesiaTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/cartesia/tts.py)
+- [ElevenLabsTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/elevenlabs/tts.py)
 
 #### InterruptibleTTSService
 
-**Use for:** Websocket-based services without word/timestamp alignment, requiring disconnection on interruption
+**Use for:** Websocket-based services without word timestamps that reconnect on interruption (e.g. don't support a context ID or interruption message)
 
 **Example:**
 
 - [SarvamTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/sarvam/tts.py)
 
-#### WordTTSService
-
-**Use for:** HTTP-based services supporting word/timestamp alignment
-
-**Example:**
-
-- [ElevenLabsHttpTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/elevenlabs/tts.py)
-
 #### TTSService
 
-**Use for:** HTTP-based services without word/timestamp alignment
+**Use for:** HTTP-based services (word timestamps are supported in the base class)
 
-**Example:**
+**Examples:**
 
 - [GoogleHttpTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/google/tts.py)
+- [OpenAITTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/openai/tts.py)
 
 #### Key requirements:
 
-- For websocket services, use asyncio WebSocket implementation (required for v13+ support)
+- For websocket services, use asyncio WebSocket implementation
 - Handle idle service timeouts with keepalives
-- TTSServices push both audio (`TTSRawAudioFrame`) and text (`TTSTextFrame`) frames
+- TTS services push both audio (`TTSAudioRawFrame`) and text (`TTSTextFrame`) frames
 
 ### Telephony Serializers
 
@@ -200,9 +217,9 @@ Vision services process images and provide analysis such as descriptions, object
 
 #### Key requirements:
 
-- Must implement `run_vision` method that takes an `LLMContext` and returns an `AsyncGenerator[Frame, None]`
-- The method processes the latest image in the context and yields frames with analysis results
-- Typically yields `TextFrame` objects containing descriptions or answers
+- Must implement `run_vision` method that takes a `UserImageRawFrame` and returns an `AsyncGenerator[Frame, None]`
+- The method processes the image frame and yields frames with analysis results
+- Must yield the frame sequence: `VisionFullResponseStartFrame`, `VisionTextFrame`, `VisionFullResponseEndFrame`
 
 ## Implementation Guidelines
 
@@ -381,7 +398,7 @@ Note that `self.sample_rate` is a `@property` set in the TTSService base class, 
 
 Use Pipecat's tracing decorators:
 
-- **STT:** `@traced_stt` - decorate a function that handles `transcript`, `is_final`, `language` as args
+- **STT:** `@traced_stt` - decorate `_handle_transcription(self, transcript, is_final, language)` (the standard method name convention)
 - **LLM:** `@traced_llm` - decorate the `_process_context()` method
 - **TTS:** `@traced_tts` - decorate the `run_tts()` method
 
@@ -403,17 +420,15 @@ For REST-based communication, use aiohttp. Pipecat includes this as a required d
 - Wrap API calls in appropriate try/catch blocks
 - Handle rate limits and network failures gracefully
 - Provide meaningful error messages
-- When errors occur, raise exceptions AND push `ErrorFrame`s to notify the pipeline:
+- When errors occur, raise exceptions AND push errors to notify the pipeline:
 
 ```python
-from pipecat.frames.frames import ErrorFrame
-
 try:
     # Your API call
     result = await self._make_api_call()
 except Exception as e:
-    # Push error frame to pipeline
-    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+    # Push error upstream to notify the pipeline
+    await self.push_error(f"{self} error: {e}", exception=e)
     # Raise or handle as appropriate
     raise
 ```
