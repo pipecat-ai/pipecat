@@ -53,16 +53,15 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
     Event handlers available (in addition to base events):
 
-    - on_speech_started(service): Deepgram detected start of speech
-    - on_utterance_end(service): Deepgram detected end of utterance
-    - on_end_of_turn(service): Deepgram detected end of turn (EOT)
-    - on_eager_end_of_turn(service): Deepgram predicted end of turn (EagerEOT)
+    - on_start_of_turn(service, transcript): Deepgram detected start of speech
+    - on_end_of_turn(service, transcript): Deepgram detected end of turn (EOT)
+    - on_eager_end_of_turn(service, transcript): Deepgram predicted end of turn (EagerEOT)
     - on_turn_resumed(service): User resumed speaking after EagerEOT
 
     Example::
 
         @stt.event_handler("on_end_of_turn")
-        async def on_end_of_turn(service):
+        async def on_end_of_turn(service, transcript):
             ...
     """
 

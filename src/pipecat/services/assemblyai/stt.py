@@ -129,6 +129,16 @@ class AssemblyAISTTService(WebsocketSTTService):
     Provides real-time speech transcription using AssemblyAI's WebSocket API.
     Supports both interim and final transcriptions with configurable parameters
     for audio processing and connection management.
+
+    Event handlers available (in addition to WebsocketSTTService events):
+
+    - on_end_of_turn(service, transcript): Called when AssemblyAI detects end of turn.
+
+    Example::
+
+        @service.event_handler("on_end_of_turn")
+        async def on_end_of_turn(service, transcript):
+            ...
     """
 
     Settings = AssemblyAISTTSettings
@@ -302,6 +312,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._chunk_size_bytes = 0
 
         self._user_speaking = False
+
+        self._register_event_handler("on_end_of_turn")
 
     def _configure_pipecat_turn_mode(self, settings: Settings, is_u3_pro: bool):
         """Configure settings for Pipecat turn detection mode.
@@ -741,6 +753,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
                 await self._trace_transcription(transcript_text, True, language)
                 await self.stop_processing_metrics()
+                await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
                 await self.push_frame(
                     InterimTranscriptionFrame(
@@ -774,6 +787,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # above, so ordering is preserved) and upstream.
                 await self.broadcast_frame(UserStoppedSpeakingFrame)
                 self._user_speaking = False
+                await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
                 await self.push_frame(
                     InterimTranscriptionFrame(
