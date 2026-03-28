@@ -23,7 +23,7 @@ try:
     from strands import Agent
     from strands.multiagent.graph import Graph
 except ModuleNotFoundError as e:
-    logger.exception("In order to use Strands Agents, you need to `pip install strands-agents`.")
+    logger.error("In order to use Strands Agents, you need to `pip install strands-agents`.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -143,7 +143,7 @@ class StrandsAgentsProcessor(FrameProcessor):
         except GeneratorExit:
             logger.warning(f"{self} generator was closed prematurely")
         except Exception as e:
-            logger.exception(f"{self} an unknown error occurred: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             if ttfb_tracking:
                 await self.stop_ttfb_metrics()

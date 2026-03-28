@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -18,7 +18,7 @@ import io
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -39,8 +39,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    LLMTextFrame,
-    LLMUpdateSettingsFrame,
     UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -57,6 +55,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -72,17 +71,40 @@ except ModuleNotFoundError as e:
 
 
 @dataclass
+class AWSBedrockLLMSettings(LLMSettings):
+    """Settings for AWSBedrockLLMService.
+
+    Parameters:
+        stop_sequences: List of strings that stop generation.
+        latency: Performance mode - "standard" or "optimized".
+        additional_model_request_fields: Additional model-specific parameters.
+    """
+
+    stop_sequences: List[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latency: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    additional_model_request_fields: Dict[str, Any] | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+
+@dataclass
 class AWSBedrockContextAggregatorPair:
     """Container for AWS Bedrock context aggregators.
 
     Provides convenient access to both user and assistant context aggregators
     for AWS Bedrock LLM operations.
 
+    .. deprecated:: 0.0.99
+        `AWSBedrockContextAggregatorPair` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         _user: The user context aggregator instance.
         _assistant: The assistant context aggregator instance.
     """
 
+    # Aggregators handle deprecation warnings
     _user: "AWSBedrockUserContextAggregator"
     _assistant: "AWSBedrockAssistantContextAggregator"
 
@@ -109,6 +131,11 @@ class AWSBedrockLLMContext(OpenAILLMContext):
     Extends OpenAI LLM context to handle AWS Bedrock's specific message format
     and system message handling. Manages conversion between OpenAI and Bedrock
     message formats.
+
+    .. deprecated:: 0.0.99
+        `AWSBedrockLLMContext` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(
@@ -127,6 +154,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
             tool_choice: Tool selection strategy or specific tool choice.
             system: System message content for AWS Bedrock.
         """
+        # Super handles deprecation warning
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self.system = system
 
@@ -343,7 +371,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                     tool_result_content = [{"json": content_json}]
                 else:
                     tool_result_content = [{"text": message["content"]}]
-            except:
+            except (json.JSONDecodeError, ValueError, AttributeError):
                 tool_result_content = [{"text": message["content"]}]
 
             return {
@@ -589,11 +617,17 @@ class AWSBedrockUserContextAggregator(LLMUserContextAggregator):
     Handles aggregation of user messages and frames for AWS Bedrock format.
     Inherits all functionality from the base LLM user context aggregator.
 
+    .. deprecated:: 0.0.99
+        `AWSBedrockUserContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Args:
         context: The LLM context to aggregate messages into.
         params: Configuration parameters for the aggregator.
     """
 
+    # Super handles deprecation warning
     pass
 
 
@@ -603,10 +637,17 @@ class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
     Handles aggregation of assistant responses and function calls for AWS Bedrock
     format, including tool use and tool result handling.
 
+    .. deprecated:: 0.0.99
+        `AWSBedrockAssistantContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Args:
         context: The LLM context to aggregate messages into.
         params: Configuration parameters for the aggregator.
     """
+
+    # Super handles deprecation warning
 
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         """Handle function call in progress frame.
@@ -650,7 +691,7 @@ class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
             frame: The function call result frame to handle.
         """
         if frame.result:
-            result = json.dumps(frame.result)
+            result = json.dumps(frame.result, ensure_ascii=False)
             await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
         else:
             await self._update_function_call_result(
@@ -705,11 +746,18 @@ class AWSBedrockLLMService(LLMService):
     vision capabilities.
     """
 
+    Settings = AWSBedrockLLMSettings
+    _settings: Settings
+
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AWSBedrockLLMAdapter
 
     class InputParams(BaseModel):
         """Input parameters for AWS Bedrock LLM service.
+
+        .. deprecated:: 0.0.105
+            Use ``AWSBedrockLLMService.Settings`` instead. Pass settings directly via the
+            ``settings`` parameter of :class:`AWSBedrockLLMService`.
 
         Parameters:
             max_tokens: Maximum number of tokens to generate.
@@ -730,12 +778,14 @@ class AWSBedrockLLMService(LLMService):
     def __init__(
         self,
         *,
-        model: str,
+        model: Optional[str] = None,
         aws_access_key: Optional[str] = None,
         aws_secret_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
-        aws_region: str = "us-east-1",
+        aws_region: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
+        stop_sequences: Optional[List[str]] = None,
         client_config: Optional[Config] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
@@ -745,19 +795,78 @@ class AWSBedrockLLMService(LLMService):
 
         Args:
             model: The AWS Bedrock model identifier to use.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSBedrockLLMService.Settings(model=...)`` instead.
+
             aws_access_key: AWS access key ID. If None, uses default credentials.
             aws_secret_key: AWS secret access key. If None, uses default credentials.
             aws_session_token: AWS session token for temporary credentials.
             aws_region: AWS region for the Bedrock service.
             params: Model parameters and configuration.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSBedrockLLMService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings for this service.  When both
+                deprecated parameters and *settings* are provided, *settings*
+                values take precedence.
+            stop_sequences: List of strings that stop generation.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSBedrockLLMService.Settings(stop_sequences=...)`` instead.
+
             client_config: Custom boto3 client configuration.
             retry_timeout_secs: Request timeout in seconds for retry logic.
             retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        super().__init__(**kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="us.amazon.nova-lite-v1:0",
+            system_instruction=None,
+            max_tokens=None,
+            temperature=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            stop_sequences=None,
+            latency=None,
+            additional_model_request_fields={},
+        )
 
-        params = params or AWSBedrockLLMService.InputParams()
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if stop_sequences is not None:
+            self._warn_init_param_moved_to_settings("stop_sequences", "stop_sequences")
+            default_settings.stop_sequences = stop_sequences
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                default_settings.max_tokens = params.max_tokens
+                default_settings.temperature = params.temperature
+                default_settings.top_p = params.top_p
+                if params.stop_sequences:
+                    default_settings.stop_sequences = params.stop_sequences
+                default_settings.latency = params.latency
+                if isinstance(params.additional_model_request_fields, dict):
+                    default_settings.additional_model_request_fields = (
+                        params.additional_model_request_fields
+                    )
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
 
         # Initialize the AWS Bedrock client
         if not client_config:
@@ -778,20 +887,12 @@ class AWSBedrockLLMService(LLMService):
             "config": client_config,
         }
 
-        self.set_model_name(model)
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._settings = {
-            "max_tokens": params.max_tokens,
-            "temperature": params.temperature,
-            "top_p": params.top_p,
-            "latency": params.latency,
-            "additional_model_request_fields": params.additional_model_request_fields
-            if isinstance(params.additional_model_request_fields, dict)
-            else {},
-        }
 
-        logger.info(f"Using AWS Bedrock model: {model}")
+        logger.info(f"Using AWS Bedrock model: {self._settings.model}")
+        if self._settings.system_instruction:
+            logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
@@ -811,44 +912,60 @@ class AWSBedrockLLMService(LLMService):
             Dictionary containing only the inference parameters that are not None.
         """
         inference_config = {}
-        if self._settings["max_tokens"] is not None:
-            inference_config["maxTokens"] = self._settings["max_tokens"]
-        if self._settings["temperature"] is not None:
-            inference_config["temperature"] = self._settings["temperature"]
-        if self._settings["top_p"] is not None:
-            inference_config["topP"] = self._settings["top_p"]
+        if self._settings.max_tokens is not None:
+            inference_config["maxTokens"] = self._settings.max_tokens
+        if self._settings.temperature is not None:
+            inference_config["temperature"] = self._settings.temperature
+        if self._settings.top_p is not None:
+            inference_config["topP"] = self._settings.top_p
+        if self._settings.stop_sequences:
+            inference_config["stopSequences"] = self._settings.stop_sequences
         return inference_config
 
-    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+    async def run_inference(
+        self,
+        context: LLMContext | OpenAILLMContext,
+        max_tokens: Optional[int] = None,
+        system_instruction: Optional[str] = None,
+    ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
         messages = []
         system = []
+        effective_instruction = system_instruction or self._settings.system_instruction
         if isinstance(context, LLMContext):
             adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
-            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
+                context, system_instruction=effective_instruction
+            )
             messages = params["messages"]
-            system = params["system"]  # [{"text": "system message"}]
+            system = params["system"]  # [{"text": "system message"}] or None
         else:
             context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
             messages = context.messages
             system = getattr(context, "system", None)  # [{"text": "system message"}]
 
-        # Determine if we're using Claude or Nova based on model ID
-        model_id = self.model_name
-
-        # Prepare request parameters
+        # Prepare request parameters using the same method as streaming
         inference_config = self._build_inference_config()
 
+        # Override maxTokens if provided
+        if max_tokens is not None:
+            inference_config["maxTokens"] = max_tokens
+
         request_params = {
-            "modelId": model_id,
+            "modelId": self._settings.model,
             "messages": messages,
+            "additionalModelRequestFields": self._settings.additional_model_request_fields,
         }
 
         if inference_config:
@@ -926,14 +1043,20 @@ class AWSBedrockLLMService(LLMService):
             the user and one for the assistant, encapsulated in an
             AWSBedrockContextAggregatorPair.
 
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
         if isinstance(context, OpenAILLMContext):
             context = AWSBedrockLLMContext.from_openai_context(context)
 
+        # Aggregators handle deprecation warnings
         user = AWSBedrockUserContextAggregator(context, params=user_params)
         assistant = AWSBedrockAssistantContextAggregator(context, params=assistant_params)
+
         return AWSBedrockContextAggregatorPair(_user=user, _assistant=assistant)
 
     def _create_no_op_tool(self):
@@ -957,7 +1080,9 @@ class AWSBedrockLLMService(LLMService):
         # Universal LLMContext
         if isinstance(context, LLMContext):
             adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
-            params = adapter.get_llm_invocation_params(context)
+            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
+                context, system_instruction=self._settings.system_instruction
+            )
             return params
 
         # AWS Bedrock-specific context
@@ -997,9 +1122,9 @@ class AWSBedrockLLMService(LLMService):
 
             # Prepare request parameters
             request_params = {
-                "modelId": self.model_name,
+                "modelId": self._settings.model,
                 "messages": messages,
-                "additionalModelRequestFields": self._settings["additional_model_request_fields"],
+                "additionalModelRequestFields": self._settings.additional_model_request_fields,
             }
 
             # Only add inference config if it has parameters
@@ -1044,8 +1169,8 @@ class AWSBedrockLLMService(LLMService):
                 request_params["toolConfig"] = tool_config
 
             # Add performance config if latency is specified
-            if self._settings["latency"] in ["standard", "optimized"]:
-                request_params["performanceConfig"] = {"latency": self._settings["latency"]}
+            if self._settings.latency in ["standard", "optimized"]:
+                request_params["performanceConfig"] = {"latency": self._settings.latency}
 
             # Log request params with messages redacted for logging
             if isinstance(context, LLMContext):
@@ -1078,7 +1203,7 @@ class AWSBedrockLLMService(LLMService):
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"]["delta"]
                         if "text" in delta:
-                            await self.push_frame(LLMTextFrame(delta["text"]))
+                            await self._push_llm_text(delta["text"])
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
                             # Handle partial JSON for tool use
@@ -1136,7 +1261,7 @@ class AWSBedrockLLMService(LLMService):
         except (ReadTimeoutError, asyncio.TimeoutError):
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
@@ -1170,8 +1295,6 @@ class AWSBedrockLLMService(LLMService):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
             context = AWSBedrockLLMContext.from_messages(frame.messages)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 

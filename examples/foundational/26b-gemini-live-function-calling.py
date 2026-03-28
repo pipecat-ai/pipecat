@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -13,14 +13,11 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import LLMAssistantAggregatorParams
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -59,36 +56,20 @@ You have three tools available to you:
 """
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events. This doesn't really
-        # matter because we can only use the Multimodal Live API's phrase
-        # endpointing, for now.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events. This doesn't really
-        # matter because we can only use the Multimodal Live API's phrase
-        # endpointing, for now.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events. This doesn't really
-        # matter because we can only use the Multimodal Live API's phrase
-        # endpointing, for now.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
 }
 
@@ -134,7 +115,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_instruction,
+        settings=GeminiLiveLLMService.Settings(
+            system_instruction=system_instruction,
+        ),
         tools=tools,
     )
 
@@ -145,22 +128,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # than as arguments to GeminiLiveLLMService, but note that doing so will
     # trigger a (fast) reconnection when the GeminiLiveLLMService first
     # receives the context (i.e. when we send the LLMRunFrame below).
-    context = LLMContext(
-        [
-            # {"role": "system", "content": system_instruction},
-            {"role": "user", "content": "Say hello."},
-        ],
-        # tools,
-    )
-    context_aggregator = LLMContextAggregatorPair(context)
+    context = LLMContext()
+    # Server-side VAD is enabled by default; no local VAD is added.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -177,6 +155,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

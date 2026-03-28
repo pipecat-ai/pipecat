@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -87,19 +87,44 @@ class TTSUsageMetricsData(MetricsData):
     value: int
 
 
-class SmartTurnMetricsData(MetricsData):
-    """Metrics data for smart turn predictions.
+class TextAggregationMetricsData(MetricsData):
+    """Text aggregation time metrics data.
+
+    Measures the time from the first LLM token to the first complete sentence,
+    representing the latency cost of sentence aggregation in the TTS pipeline.
+
+    Parameters:
+        value: Aggregation time in seconds.
+    """
+
+    value: float
+
+
+class TurnMetricsData(MetricsData):
+    """Metrics data for turn detection predictions.
 
     Parameters:
         is_complete: Whether the turn is predicted to be complete.
         probability: Confidence probability of the turn completion prediction.
-        inference_time_ms: Time taken for inference in milliseconds.
-        server_total_time_ms: Total server processing time in milliseconds.
-        e2e_processing_time_ms: End-to-end processing time in milliseconds.
+        e2e_processing_time_ms: End-to-end processing time in milliseconds,
+            measured from VAD speech-to-silence transition to turn completion.
     """
 
     is_complete: bool
     probability: float
-    inference_time_ms: float
-    server_total_time_ms: float
     e2e_processing_time_ms: float
+
+
+class SmartTurnMetricsData(TurnMetricsData):
+    """Metrics data for smart turn predictions.
+
+    .. deprecated:: 0.0.104
+        Use :class:`TurnMetricsData` instead. This class will be removed in a future version.
+
+    Parameters:
+        inference_time_ms: Time taken for inference in milliseconds.
+        server_total_time_ms: Total server processing time in milliseconds.
+    """
+
+    inference_time_ms: float = 0.0
+    server_total_time_ms: float = 0.0

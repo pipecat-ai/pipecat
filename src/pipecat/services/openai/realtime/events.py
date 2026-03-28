@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -217,16 +217,22 @@ class ItemContent(BaseModel):
     """Content within a conversation item.
 
     Parameters:
-        type: Content type (text, audio, input_text, input_audio, output_text, or output_audio).
+        type: Content type (text, audio, input_text, input_audio, input_image, output_text, or output_audio).
         text: Text content for text-based items.
         audio: Base64-encoded audio data for audio items.
         transcript: Transcribed text for audio items.
+        image_url: Base64-encoded image data as a data URI for input_image items.
+        detail: Detail level for image processing ("auto", "low", or "high").
     """
 
-    type: Literal["text", "audio", "input_text", "input_audio", "output_text", "output_audio"]
+    type: Literal[
+        "text", "audio", "input_text", "input_audio", "input_image", "output_text", "output_audio"
+    ]
     text: Optional[str] = None
     audio: Optional[str] = None  # base64-encoded audio
     transcript: Optional[str] = None
+    image_url: Optional[str] = None  # base64-encoded image as data URI
+    detail: Optional[Literal["auto", "low", "high"]] = None
 
 
 class ConversationItem(BaseModel):
@@ -996,16 +1002,13 @@ class TokenDetails(BaseModel):
         image_tokens: Number of image tokens used (for input only).
     """
 
+    model_config = ConfigDict(extra="allow")
+
     cached_tokens: Optional[int] = 0
     text_tokens: Optional[int] = 0
     audio_tokens: Optional[int] = 0
     cached_tokens_details: Optional[CachedTokensDetails] = None
     image_tokens: Optional[int] = 0
-
-    class Config:
-        """Pydantic configuration for TokenDetails."""
-
-        extra = "allow"
 
 
 class Usage(BaseModel):

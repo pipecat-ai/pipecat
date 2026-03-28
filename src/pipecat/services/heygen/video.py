@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,7 +12,8 @@ audio/video streaming capabilities through the HeyGen API.
 """
 
 import asyncio
-from typing import Optional
+from dataclasses import dataclass
+from typing import Optional, Union
 
 import aiohttp
 from loguru import logger
@@ -37,12 +38,26 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
-from pipecat.services.heygen.api import NewSessionRequest
-from pipecat.services.heygen.client import HEY_GEN_SAMPLE_RATE, HeyGenCallbacks, HeyGenClient
+from pipecat.services.heygen.api_interactive_avatar import NewSessionRequest
+from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
+from pipecat.services.heygen.client import (
+    HEY_GEN_SAMPLE_RATE,
+    HeyGenCallbacks,
+    HeyGenClient,
+    ServiceType,
+)
+from pipecat.services.settings import ServiceSettings
 from pipecat.transports.base_transport import TransportParams
 
 # Using the same values that we do in the BaseOutputTransport
 AVATAR_VAD_STOP_SECS = 0.35
+
+
+@dataclass
+class HeyGenVideoSettings(ServiceSettings):
+    """Settings for the HeyGen video service."""
+
+    pass
 
 
 class HeyGenVideoService(AIService):
@@ -67,12 +82,17 @@ class HeyGenVideoService(AIService):
             Defaults to using the "Shawn_Therapist_public" avatar with "v2" version.
     """
 
+    Settings = HeyGenVideoSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
         api_key: str,
         session: aiohttp.ClientSession,
-        session_request: NewSessionRequest = NewSessionRequest(avatar_id="Shawn_Therapist_public"),
+        session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
+        service_type: Optional[ServiceType] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ) -> None:
         """Initialize the HeyGen video service.
@@ -80,10 +100,17 @@ class HeyGenVideoService(AIService):
         Args:
             api_key: HeyGen API key for authentication
             session: HTTP client session for API requests
-            session_request: Configuration for the HeyGen session (default: uses Shawn_Therapist_public avatar)
+            session_request: Configuration for the HeyGen session
+            service_type: Service type for the avatar session
+            settings: Runtime-updatable settings. HeyGen has no model concept, so this
+                is primarily used for the ``extra`` dict.
             **kwargs: Additional arguments passed to parent AIService
         """
-        super().__init__(**kwargs)
+        default_settings = ServiceSettings(model=None)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
         self._api_key = api_key
         self._session = session
         self._client: Optional[HeyGenClient] = None
@@ -91,6 +118,7 @@ class HeyGenVideoService(AIService):
         self._resampler = create_stream_resampler()
         self._is_interrupting = False
         self._session_request = session_request
+        self._service_type = service_type
         self._other_participant_has_joined = False
         self._event_id = None
         self._audio_chunk_size = 0
@@ -117,7 +145,9 @@ class HeyGenVideoService(AIService):
                 audio_out_sample_rate=HEY_GEN_SAMPLE_RATE,
             ),
             session_request=self._session_request,
+            service_type=self._service_type,
             callbacks=HeyGenCallbacks(
+                on_connected=self._on_connected,
                 on_participant_connected=self._on_participant_connected,
                 on_participant_disconnected=self._on_participant_disconnected,
             ),
@@ -133,6 +163,10 @@ class HeyGenVideoService(AIService):
         await super().cleanup()
         await self._client.cleanup()
         self._client = None
+
+    async def _on_connected(self):
+        """Handle bot connected to LiveKit room."""
+        logger.info("HeyGen bot connected to LiveKit room")
 
     async def _on_participant_connected(self, participant_id: str):
         """Handle participant connected events."""

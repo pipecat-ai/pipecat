@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,7 +10,7 @@ import base64
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from loguru import logger
 
@@ -47,19 +47,30 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for AWS Bedrock."""
         return "aws"
 
-    def get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, system_instruction: Optional[str] = None
+    ) -> AWSBedrockLLMInvocationParams:
         """Get AWS Bedrock-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings
+                or ``run_inference``.
 
         Returns:
             Dictionary of parameters for invoking AWS Bedrock's LLM API.
         """
-        messages = self._from_universal_context_messages(self.get_messages(context))
+        converted = self._from_universal_context_messages(
+            self.get_messages(context), system_instruction=system_instruction
+        )
+        effective_system = self._resolve_system_instruction(
+            converted.system,
+            system_instruction,
+            discard_context_system=True,
+        )
         return {
-            "system": messages.system,
-            "messages": messages.messages,
+            "system": [{"text": effective_system}] if effective_system else None,
+            "messages": converted.messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
             # To avoid refactoring in AWSBedrockLLMService, we just pass through tool_choice.
@@ -96,32 +107,36 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
 
     @dataclass
     class ConvertedMessages:
-        """Container for Anthropic-formatted messages converted from universal context."""
+        """Container for Bedrock-formatted messages converted from universal context."""
 
         messages: List[dict[str, Any]]
         system: Optional[str]
 
     def _from_universal_context_messages(
-        self, universal_context_messages: List[LLMContextMessage]
+        self,
+        universal_context_messages: List[LLMContextMessage],
+        *,
+        system_instruction: Optional[str] = None,
     ) -> ConvertedMessages:
         system = None
-        messages = []
 
-        # First, map messages using self._from_universal_context_message(m)
+        # Extract initial system message from universal messages BEFORE conversion,
+        # so the helper works with standard message format (not provider-specific).
+        remaining = list(universal_context_messages)
+        if remaining and not isinstance(remaining[0], LLMSpecificMessage):
+            system = self._extract_initial_system(remaining, system_instruction=system_instruction)
+
+        # Convert remaining messages to Bedrock format
+        messages = []
         try:
-            messages = [self._from_universal_context_message(m) for m in universal_context_messages]
+            messages = [self._from_universal_context_message(m) for m in remaining]
         except Exception as e:
             logger.error(f"Error mapping messages: {e}")
 
-        # See if we should pull the system message out of our messages list
-        if messages and messages[0]["role"] == "system":
-            system = messages[0]["content"]
-            messages.pop(0)
-
-        # Convert any subsequent "system"-role messages to "user"-role
-        # messages, as AWS Bedrock doesn't support system input messages.
+        # Convert any subsequent "system"/"developer"-role messages to "user"-role
+        # messages, as AWS Bedrock doesn't support system or developer input messages.
         for message in messages:
-            if message["role"] == "system":
+            if message["role"] in ("system", "developer"):
                 message["role"] = "user"
 
         # Merge consecutive messages with the same role.
@@ -209,7 +224,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                     tool_result_content = [{"json": content_json}]
                 else:
                     tool_result_content = [{"text": message["content"]}]
-            except:
+            except (json.JSONDecodeError, ValueError, AttributeError):
                 tool_result_content = [{"text": message["content"]}]
 
             return {
@@ -257,14 +272,15 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                 # handle image_url -> image conversion
                 if item["type"] == "image_url":
                     if item["image_url"]["url"].startswith("data:"):
+                        # Extract format from data URL (format: "data:image/jpeg;base64,...")
+                        url = item["image_url"]["url"]
+                        mime_type = url.split(":")[1].split(";")[0]
+                        # Bedrock expects format like "jpeg", "png" etc., not "image/jpeg"
+                        image_format = mime_type.split("/")[1]
                         new_item = {
                             "image": {
-                                "format": "jpeg",
-                                "source": {
-                                    "bytes": base64.b64decode(
-                                        item["image_url"]["url"].split(",")[1]
-                                    )
-                                },
+                                "format": image_format,
+                                "source": {"bytes": base64.b64decode(url.split(",")[1])},
                             }
                         }
                         new_content.append(new_item)

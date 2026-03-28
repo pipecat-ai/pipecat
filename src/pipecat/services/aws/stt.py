@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,12 +10,12 @@ This module provides a WebSocket-based connection to AWS Transcribe for real-tim
 speech-to-text transcription with support for multiple languages and audio formats.
 """
 
-import asyncio
 import json
 import os
 import random
 import string
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -29,13 +29,14 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
-from pipecat.services.stt_service import STTService
+from pipecat.services.settings import STTSettings
+from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
+from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
-    import websockets
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
@@ -44,7 +45,14 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class AWSTranscribeSTTService(STTService):
+@dataclass
+class AWSTranscribeSTTSettings(STTSettings):
+    """Settings for AWSTranscribeSTTService."""
+
+    pass
+
+
+class AWSTranscribeSTTService(WebsocketSTTService):
     """AWS Transcribe Speech-to-Text service using WebSocket streaming.
 
     Provides real-time speech transcription using AWS Transcribe's streaming API.
@@ -52,15 +60,20 @@ class AWSTranscribeSTTService(STTService):
     final transcription results.
     """
 
+    Settings = AWSTranscribeSTTSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
         api_key: Optional[str] = None,
         aws_access_key_id: Optional[str] = None,
         aws_session_token: Optional[str] = None,
-        region: Optional[str] = "us-east-1",
-        sample_rate: int = 16000,
-        language: Language = Language.EN,
+        region: Optional[str] = None,
+        sample_rate: Optional[int] = None,
+        language: Optional[Language] = None,
+        settings: Optional[Settings] = None,
+        ttfs_p99_latency: Optional[float] = AWS_TRANSCRIBE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the AWS Transcribe STT service.
@@ -69,28 +82,50 @@ class AWSTranscribeSTTService(STTService):
             api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
             aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
             aws_session_token: AWS session token for temporary credentials. If None, uses AWS_SESSION_TOKEN environment variable.
-            region: AWS region for the service. Defaults to "us-east-1".
-            sample_rate: Audio sample rate in Hz. Must be 8000 or 16000. Defaults to 16000.
-            language: Language for transcription. Defaults to English.
+            region: AWS region for the service.
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline sample rate.
+                AWS Transcribe only supports 8000 or 16000 Hz; other values are
+                clamped to 16000 Hz at connect time.
+            language: Language for transcription.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=AWSTranscribeSTTService.Settings(language=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(**kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            language=Language.EN,
+        )
 
-        self._settings = {
-            "sample_rate": sample_rate,
-            "language": language,
-            "media_encoding": "linear16",  # AWS expects raw PCM
-            "number_of_channels": 1,
-            "show_speaker_label": False,
-            "enable_channel_identification": False,
-        }
+        # 2. Apply direct init arg overrides (deprecated)
+        if language is not None:
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
 
-        # Validate sample rate - AWS Transcribe only supports 8000 Hz or 16000 Hz
-        if sample_rate not in [8000, 16000]:
-            logger.warning(
-                f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. Converting from {sample_rate} Hz to 16000 Hz."
-            )
-            self._settings["sample_rate"] = 16000
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        # Init-only connection config (not runtime-updatable).
+        self._media_encoding = "linear16"
+        self._number_of_channels = 1
+        self._show_speaker_label = False
+        self._enable_channel_identification = False
 
         self._credentials = {
             "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
@@ -99,10 +134,15 @@ class AWSTranscribeSTTService(STTService):
             "region": region or os.getenv("AWS_REGION", "us-east-1"),
         }
 
-        self._ws_client = None
-        self._connection_lock = asyncio.Lock()
-        self._connecting = False
         self._receive_task = None
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as AWS Transcribe STT supports metrics generation.
+        """
+        return True
 
     def get_service_encoding(self, encoding: str) -> str:
         """Convert internal encoding format to AWS Transcribe format.
@@ -118,35 +158,24 @@ class AWSTranscribeSTTService(STTService):
         }
         return encoding_map.get(encoding, encoding)
 
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect if anything changed."""
+        changed = await super()._update_settings(delta)
+
+        if changed and self._websocket:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
+
     async def start(self, frame: StartFrame):
         """Initialize the connection when the service starts.
 
         Args:
             frame: Start frame signaling service initialization.
-
-        Raises:
-            RuntimeError: If WebSocket connection cannot be established after retries.
         """
         await super().start(frame)
-        logger.info("Starting AWS Transcribe service...")
-        retry_count = 0
-        max_retries = 3
-
-        while retry_count < max_retries:
-            try:
-                await self._connect()
-                if self._ws_client and self._ws_client.state is State.OPEN:
-                    logger.info("Successfully established WebSocket connection")
-                    return
-                logger.warning("WebSocket connection not established after connect")
-            except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
-                retry_count += 1
-                if retry_count < max_retries:
-                    await asyncio.sleep(1)  # Wait before retrying
-
-        raise RuntimeError("Failed to establish WebSocket connection after multiple attempts")
+        await self._connect()
 
     async def stop(self, frame: EndFrame):
         """Stop the service and disconnect from AWS Transcribe.
@@ -175,145 +204,139 @@ class AWSTranscribeSTTService(STTService):
         Yields:
             ErrorFrame: If processing fails or connection issues occur.
         """
-        try:
-            # Ensure WebSocket is connected
-            if not self._ws_client or self._ws_client.state is State.CLOSED:
-                logger.debug("WebSocket not connected, attempting to reconnect...")
-                try:
-                    await self._connect()
-                except Exception as e:
-                    logger.error(f"{self} exception: {e}")
-                    yield ErrorFrame(error=f"{self} error: {e}")
-                    return
-
-            # Format the audio data according to AWS event stream format
-            event_message = build_event_message(audio)
-
-            # Send the formatted event message
+        if self._websocket and self._websocket.state is State.OPEN:
             try:
-                await self._ws_client.send(event_message)
+                # Format the audio data according to AWS event stream format
+                event_message = build_event_message(audio)
+
+                # Send the formatted event message
+                await self._websocket.send(event_message)
                 # Start metrics after first chunk sent
                 await self.start_processing_metrics()
-                await self.start_ttfb_metrics()
-            except websockets.exceptions.ConnectionClosed as e:
-                logger.warning(f"Connection closed while sending: {e}")
-                await self._disconnect()
-                # Don't yield error here - we'll retry on next frame
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
-                await self._disconnect()
+                yield ErrorFrame(error=f"Error sending audio: {e}")
 
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
-            await self._disconnect()
+        yield None
 
     async def _connect(self):
-        """Connect to AWS Transcribe with connection state management."""
-        if self._ws_client and self._ws_client.state is State.OPEN and self._receive_task:
-            logger.debug(f"{self} Already connected")
-            return
+        """Connect to the AWS Transcribe service.
 
-        async with self._connection_lock:
-            if self._connecting:
-                logger.debug(f"{self} Connection already in progress")
-                return
+        Establishes websocket connection and starts receive task.
+        """
+        await super()._connect()
 
-            try:
-                self._connecting = True
-                logger.debug(f"{self} Starting connection process...")
+        await self._connect_websocket()
 
-                if self._ws_client:
-                    await self._disconnect()
-
-                language_code = self.language_to_service_language(
-                    Language(self._settings["language"])
-                )
-                if not language_code:
-                    raise ValueError(f"Unsupported language: {self._settings['language']}")
-
-                # Generate random websocket key
-                websocket_key = "".join(
-                    random.choices(
-                        string.ascii_uppercase + string.ascii_lowercase + string.digits, k=20
-                    )
-                )
-
-                # Add required headers
-                additional_headers = {
-                    "Origin": "https://localhost",
-                    "Sec-WebSocket-Key": websocket_key,
-                    "Sec-WebSocket-Version": "13",
-                    "Connection": "keep-alive",
-                }
-
-                # Get presigned URL
-                presigned_url = get_presigned_url(
-                    region=self._credentials["region"],
-                    credentials={
-                        "access_key": self._credentials["aws_access_key_id"],
-                        "secret_key": self._credentials["aws_secret_access_key"],
-                        "session_token": self._credentials["aws_session_token"],
-                    },
-                    language_code=language_code,
-                    media_encoding=self.get_service_encoding(
-                        self._settings["media_encoding"]
-                    ),  # Convert to AWS format
-                    sample_rate=self._settings["sample_rate"],
-                    number_of_channels=self._settings["number_of_channels"],
-                    enable_partial_results_stabilization=True,
-                    partial_results_stability="high",
-                    show_speaker_label=self._settings["show_speaker_label"],
-                    enable_channel_identification=self._settings["enable_channel_identification"],
-                )
-
-                logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
-
-                # Connect with the required headers and settings
-                self._ws_client = await websocket_connect(
-                    presigned_url,
-                    additional_headers=additional_headers,
-                    subprotocols=["mqtt"],
-                    ping_interval=None,
-                    ping_timeout=None,
-                    compression=None,
-                )
-
-                logger.debug(f"{self} WebSocket connected, starting receive task...")
-
-                # Start receive task
-                self._receive_task = self.create_task(self._receive_loop())
-
-                logger.info(f"{self} Successfully connected to AWS Transcribe")
-
-                await self._call_event_handler("on_connected")
-            except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
-                await self._disconnect()
-                raise
-
-            finally:
-                self._connecting = False
+        if self._websocket and not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
-        """Disconnect from AWS Transcribe."""
+        """Disconnect from the AWS Transcribe service.
+
+        Sends end-stream message and cleans up.
+        """
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        try:
-            if self._ws_client and self._ws_client.state is State.OPEN:
-                # Send end-stream message
+        # Send end-stream message before closing
+        if self._websocket and self._websocket.state is State.OPEN:
+            try:
                 end_stream = {"message-type": "event", "event": "end"}
-                await self._ws_client.send(json.dumps(end_stream))
-            await self._ws_client.close()
+                await self._websocket.send(json.dumps(end_stream))
+            except Exception as e:
+                await self.push_error(error_msg=f"Error sending end-stream: {e}", exception=e)
+
+        await self._disconnect_websocket()
+
+    async def _connect_websocket(self):
+        """Establish the websocket connection to AWS Transcribe."""
+        try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+
+            logger.debug("Connecting to AWS Transcribe WebSocket")
+
+            language_code = self._settings.language
+            if not language_code:
+                raise ValueError(f"Unsupported language: {language_code}")
+
+            # Validate sample rate — AWS Transcribe only supports 8000 or 16000 Hz
+            connect_sample_rate = self.sample_rate
+            if connect_sample_rate not in (8000, 16000):
+                logger.warning(
+                    f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. "
+                    f"Converting from {connect_sample_rate} Hz to 16000 Hz."
+                )
+                connect_sample_rate = 16000
+
+            # Generate random websocket key
+            websocket_key = "".join(
+                random.choices(
+                    string.ascii_uppercase + string.ascii_lowercase + string.digits, k=20
+                )
+            )
+
+            # Add required headers
+            additional_headers = {
+                "Origin": "https://localhost",
+                "Sec-WebSocket-Key": websocket_key,
+                "Sec-WebSocket-Version": "13",
+                "Connection": "keep-alive",
+            }
+
+            # Get presigned URL
+            presigned_url = get_presigned_url(
+                region=self._credentials["region"],
+                credentials={
+                    "access_key": self._credentials["aws_access_key_id"],
+                    "secret_key": self._credentials["aws_secret_access_key"],
+                    "session_token": self._credentials["aws_session_token"],
+                },
+                language_code=language_code,
+                media_encoding=self.get_service_encoding(
+                    self._media_encoding
+                ),  # Convert to AWS format
+                sample_rate=connect_sample_rate,
+                number_of_channels=self._number_of_channels,
+                enable_partial_results_stabilization=True,
+                partial_results_stability="high",
+                show_speaker_label=self._show_speaker_label,
+                enable_channel_identification=self._enable_channel_identification,
+            )
+
+            logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
+
+            # Connect with the required headers and settings
+            self._websocket = await websocket_connect(
+                presigned_url,
+                additional_headers=additional_headers,
+                subprotocols=["mqtt"],
+                ping_interval=None,
+                ping_timeout=None,
+                compression=None,
+            )
+
+            await self._call_event_handler("on_connected")
+            logger.info(f"{self} Successfully connected to AWS Transcribe")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(
+                error_msg=f"Unable to connect to AWS Transcribe: {e}", exception=e
+            )
+            raise
+
+    async def _disconnect_websocket(self):
+        """Close the websocket connection to AWS Transcribe."""
+        try:
+            if self._websocket:
+                logger.debug("Disconnecting from AWS Transcribe WebSocket")
+                await self._websocket.close()
+        except Exception as e:
+            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
-            self._ws_client = None
+            self._websocket = None
             await self._call_event_handler("on_disconnected")
 
     def language_to_service_language(self, language: Language) -> str | None:
@@ -477,16 +500,26 @@ class AWSTranscribeSTTService(STTService):
     ):
         pass
 
-    async def _receive_loop(self):
-        """Background task to receive and process messages from AWS Transcribe."""
-        while True:
-            if not self._ws_client or self._ws_client.state is State.CLOSED:
-                logger.warning(f"{self} WebSocket closed in receive loop")
-                break
+    def _get_websocket(self):
+        """Get the current WebSocket connection.
 
+        Returns:
+            The WebSocket connection.
+
+        Raises:
+            Exception: If WebSocket is not connected.
+        """
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
+    async def _receive_messages(self):
+        """Receive and process websocket messages.
+
+        Continuously processes messages from the websocket connection.
+        """
+        async for response in self._get_websocket():
             try:
-                response = await self._ws_client.recv()
-
                 headers, payload = decode_event(response)
 
                 if headers.get(":message-type") == "event":
@@ -500,21 +533,20 @@ class AWSTranscribeSTTService(STTService):
                             is_final = not result.get("IsPartial", True)
 
                             if transcript:
-                                await self.stop_ttfb_metrics()
                                 if is_final:
                                     await self.push_frame(
                                         TranscriptionFrame(
                                             transcript,
                                             self._user_id,
                                             time_now_iso8601(),
-                                            self._settings["language"],
+                                            self._settings.language,
                                             result=result,
                                         )
                                     )
                                     await self._handle_transcription(
                                         transcript,
                                         is_final,
-                                        self._settings["language"],
+                                        self._settings.language,
                                     )
                                     await self.stop_processing_metrics()
                                 else:
@@ -523,21 +555,15 @@ class AWSTranscribeSTTService(STTService):
                                             transcript,
                                             self._user_id,
                                             time_now_iso8601(),
-                                            self._settings["language"],
+                                            self._settings.language,
                                             result=result,
                                         )
                                     )
                 elif headers.get(":message-type") == "exception":
                     error_msg = payload.get("Message", "Unknown error")
-                    logger.error(f"{self} Exception from AWS: {error_msg}")
-                    await self.push_frame(ErrorFrame(f"AWS Transcribe error: {error_msg}"))
+                    await self.push_error(error_msg=f"AWS Transcribe error: {error_msg}")
                 else:
                     logger.debug(f"{self} Other message type received: {headers}")
                     logger.debug(f"{self} Payload: {payload}")
-            except websockets.exceptions.ConnectionClosed as e:
-                logger.error(f"{self} WebSocket connection closed in receive loop: {e}")
-                break
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
-                break
+                logger.warning(f"Error processing message: {e}")

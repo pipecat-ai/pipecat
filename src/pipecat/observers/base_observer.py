@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -98,5 +98,13 @@ class BaseObserver(BaseObject):
 
         Args:
             data: The event data containing details about the frame transfer.
+        """
+        pass
+
+    async def on_pipeline_started(self):
+        """Called when the pipeline has fully started.
+
+        Fired after the ``StartFrame`` has been processed by all processors
+        in the pipeline, including nested ``ParallelPipeline`` branches.
         """
         pass

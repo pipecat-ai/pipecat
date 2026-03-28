@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -27,7 +27,7 @@ try:
 
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Silero VAD, you need to `pip install pipecat-ai[silero]`.")
+    logger.error("In order to use Silero VAD, you need to `pip install pipecat-ai`.")
     raise Exception(f"Missing module(s): {e}")
 
 

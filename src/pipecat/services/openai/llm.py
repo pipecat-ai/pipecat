@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,6 +9,8 @@
 import json
 from dataclasses import dataclass
 from typing import Any, Optional
+
+from openai import NOT_GIVEN
 
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
@@ -30,11 +32,17 @@ from pipecat.services.openai.base_llm import BaseOpenAILLMService
 class OpenAIContextAggregatorPair:
     """Pair of OpenAI context aggregators for user and assistant messages.
 
+    .. deprecated:: 0.0.99
+        `OpenAIContextAggregatorPair` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         _user: User context aggregator for processing user messages.
         _assistant: Assistant context aggregator for processing assistant messages.
     """
 
+    # Aggregators handle deprecation warnings
     _user: "OpenAIUserContextAggregator"
     _assistant: "OpenAIAssistantContextAggregator"
 
@@ -63,21 +71,80 @@ class OpenAILLMService(BaseOpenAILLMService):
     context aggregator creation.
     """
 
+    Settings = BaseOpenAILLMService.Settings
+
     def __init__(
         self,
         *,
-        model: str = "gpt-4.1",
+        model: Optional[str] = None,
+        service_tier: Optional[str] = None,
         params: Optional[BaseOpenAILLMService.InputParams] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize OpenAI LLM service.
 
         Args:
             model: The OpenAI model name to use. Defaults to "gpt-4.1".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMService.Settings(model=...)`` instead.
+
+            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             params: Input parameters for model configuration.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAILLMService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent BaseOpenAILLMService.
         """
-        super().__init__(model=model, params=params, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="gpt-4.1",
+            system_instruction=None,
+            frequency_penalty=NOT_GIVEN,
+            presence_penalty=NOT_GIVEN,
+            seed=NOT_GIVEN,
+            temperature=NOT_GIVEN,
+            top_p=NOT_GIVEN,
+            top_k=None,
+            max_tokens=NOT_GIVEN,
+            max_completion_tokens=NOT_GIVEN,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            extra={},
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        # Handle service_tier from deprecated params
+        if params is not None and not settings and params.service_tier is not NOT_GIVEN:
+            service_tier = service_tier or params.service_tier
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                default_settings.frequency_penalty = params.frequency_penalty
+                default_settings.presence_penalty = params.presence_penalty
+                default_settings.seed = params.seed
+                default_settings.temperature = params.temperature
+                default_settings.top_p = params.top_p
+                default_settings.max_tokens = params.max_tokens
+                default_settings.max_completion_tokens = params.max_completion_tokens
+                if isinstance(params.extra, dict):
+                    default_settings.extra = params.extra
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(service_tier=service_tier, settings=default_settings, **kwargs)
 
     def create_context_aggregator(
         self,
@@ -101,10 +168,17 @@ class OpenAILLMService(BaseOpenAILLMService):
             the user and one for the assistant, encapsulated in an
             OpenAIContextAggregatorPair.
 
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         context.set_llm_adapter(self.get_llm_adapter())
+
+        # Aggregators handle deprecation warnings
         user = OpenAIUserContextAggregator(context, params=user_params)
         assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
+
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
 
@@ -113,8 +187,14 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
 
     Handles aggregation of user messages for OpenAI LLM services.
     Inherits all functionality from the base LLMUserContextAggregator.
+
+    .. deprecated:: 0.0.99
+        `OpenAIUserContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
+    # Super handles deprecation warning
     pass
 
 
@@ -124,7 +204,14 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
     Handles aggregation of assistant messages for OpenAI LLM services,
     with specialized support for OpenAI's function calling format,
     tool usage tracking, and image message handling.
+
+    .. deprecated:: 0.0.99
+        `OpenAIAssistantContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
+
+    # Super handles deprecation warning
 
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         """Handle a function call in progress.
@@ -168,7 +255,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             frame: Frame containing the function call result.
         """
         if frame.result:
-            result = json.dumps(frame.result)
+            result = json.dumps(frame.result, ensure_ascii=False)
             await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
         else:
             await self._update_function_call_result(

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,10 +9,12 @@ import unittest
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
-    FunctionCallInProgressFrame,
+    FunctionCallFromLLM,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -148,54 +150,59 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_returned_frames,
         )
 
-    # TODO: Revisit once we figure out how to test SystemFrames and DataFrames
-    # async def test_function_call_strategy(self):
-    #     filter = STTMuteFilter(config=STTMuteConfig(strategies={STTMuteStrategy.FUNCTION_CALL}))
+    async def test_function_call_strategy(self):
+        filter = STTMuteFilter(config=STTMuteConfig(strategies={STTMuteStrategy.FUNCTION_CALL}))
 
-    #     frames_to_send = [
-    #         VADUserStartedSpeakingFrame(),  # Should pass through initially
-    #         UserStartedSpeakingFrame(),  # Should pass through initially
-    #         VADUserStoppedSpeakingFrame(),
-    #         UserStoppedSpeakingFrame(),
-    #         FunctionCallInProgressFrame(
-    #             function_name="get_weather",
-    #             tool_call_id="call_123",
-    #             arguments='{"location": "San Francisco"}',
-    #         ),  # Start function call
-    #         VADUserStartedSpeakingFrame(),  # Should be suppressed
-    #         UserStartedSpeakingFrame(),  # Should be suppressed
-    #         VADUserStoppedSpeakingFrame(),  # Should be suppressed
-    #         UserStoppedSpeakingFrame(),  # Should be suppressed
-    #         FunctionCallResultFrame(
-    #             function_name="get_weather",
-    #             tool_call_id="call_123",
-    #             arguments='{"location": "San Francisco"}',
-    #             result={"temperature": 22},
-    #         ),  # End function call
-    #         VADUserStartedSpeakingFrame(),  # Should pass through again
-    #         UserStartedSpeakingFrame(),  # Should pass through again
-    #         VADUserStoppedSpeakingFrame(),
-    #         UserStoppedSpeakingFrame(),
-    #     ]
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),  # Should pass through initially
+            UserStartedSpeakingFrame(),  # Should pass through initially
+            VADUserStoppedSpeakingFrame(),  # Should pass through initially
+            UserStoppedSpeakingFrame(),  # Should pass through initially
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="get_weather",
+                        tool_call_id="call_123",
+                        arguments='{"location": "San Francisco"}',
+                        context=None,
+                    )
+                ]
+            ),  # Start function call
+            VADUserStartedSpeakingFrame(),  # Should be suppressed
+            UserStartedSpeakingFrame(),  # Should be suppressed
+            VADUserStoppedSpeakingFrame(),  # Should be suppressed
+            UserStoppedSpeakingFrame(),  # Should be suppressed
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="call_123",
+                arguments='{"location": "San Francisco"}',
+                result={"temperature": 22},
+            ),  # End function call
+            SleepFrame(),
+            VADUserStartedSpeakingFrame(),  # Should pass through again
+            UserStartedSpeakingFrame(),  # Should pass through again
+            VADUserStoppedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+        ]
 
-    #     expected_returned_frames = [
-    #         VADUserStartedSpeakingFrame,
-    #         UserStartedSpeakingFrame,
-    #         VADUserStoppedSpeakingFrame,
-    #         UserStoppedSpeakingFrame,
-    #         FunctionCallInProgressFrame,
-    #         FunctionCallResultFrame,
-    #         VADUserStartedSpeakingFrame,
-    #         UserStartedSpeakingFrame,
-    #         VADUserStoppedSpeakingFrame,
-    #         UserStoppedSpeakingFrame,
-    #     ]
+        expected_returned_frames = [
+            VADUserStartedSpeakingFrame,
+            UserStartedSpeakingFrame,
+            VADUserStoppedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+            FunctionCallsStartedFrame,
+            FunctionCallResultFrame,
+            VADUserStartedSpeakingFrame,
+            UserStartedSpeakingFrame,
+            VADUserStoppedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+        ]
 
-    #     await run_test(
-    #         filter,
-    #         frames_to_send=frames_to_send,
-    #         expected_down_frames=expected_returned_frames,
-    #     )
+        await run_test(
+            filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
 
     async def test_mute_until_first_bot_complete_strategy(self):
         filter = STTMuteFilter(
@@ -320,3 +327,28 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_returned_frames,
         )
+
+    async def test_interruption_frame_suppressed_when_muted(self):
+        """Test that InterruptionFrame is suppressed when the filter is muted."""
+        filter = STTMuteFilter(config=STTMuteConfig(strategies={STTMuteStrategy.ALWAYS}))
+
+        frames_to_send = [
+            BotStartedSpeakingFrame(),
+            InterruptionFrame(),
+            BotStoppedSpeakingFrame(),
+        ]
+
+        expected_returned_frames = [
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+        ]
+
+        await run_test(
+            filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

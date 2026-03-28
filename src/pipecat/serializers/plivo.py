@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,7 +11,6 @@ import json
 from typing import Optional
 
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
@@ -27,7 +26,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 
 
 class PlivoFrameSerializer(FrameSerializer):
@@ -42,13 +41,14 @@ class PlivoFrameSerializer(FrameSerializer):
     credentials to be provided.
     """
 
-    class InputParams(BaseModel):
+    class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for PlivoFrameSerializer.
 
         Parameters:
             plivo_sample_rate: Sample rate used by Plivo, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             auto_hang_up: Whether to automatically terminate call on EndFrame.
+            ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
         plivo_sample_rate: int = 8000
@@ -72,11 +72,12 @@ class PlivoFrameSerializer(FrameSerializer):
             auth_token: Plivo auth token (required for auto hang-up).
             params: Configuration parameters.
         """
+        super().__init__(params or PlivoFrameSerializer.InputParams())
+
         self._stream_id = stream_id
         self._call_id = call_id
         self._auth_id = auth_id
         self._auth_token = auth_token
-        self._params = params or PlivoFrameSerializer.InputParams()
 
         self._plivo_sample_rate = self._params.plivo_sample_rate
         self._sample_rate = 0  # Pipeline input rate
@@ -84,15 +85,6 @@ class PlivoFrameSerializer(FrameSerializer):
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
-
-    @property
-    def type(self) -> FrameSerializerType:
-        """Gets the serializer type.
-
-        Returns:
-            The serializer type, either TEXT or BINARY.
-        """
-        return FrameSerializerType.TEXT
 
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
@@ -149,6 +141,8 @@ class PlivoFrameSerializer(FrameSerializer):
 
             return json.dumps(answer)
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if self.should_ignore_frame(frame):
+                return None
             return json.dumps(frame.message)
 
         # Return None for unhandled frames
@@ -199,7 +193,7 @@ class PlivoFrameSerializer(FrameSerializer):
                         )
 
         except Exception as e:
-            logger.exception(f"Failed to hang up Plivo call: {e}")
+            logger.error(f"Failed to hang up Plivo call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Plivo WebSocket data to Pipecat frames.

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,10 +12,7 @@ from dotenv import load_dotenv
 from google.genai.types import Content, Part
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -32,7 +29,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -48,7 +48,7 @@ load_dotenv(override=True)
 
 marker = "|----|"
 system_message = f"""
-You are a helpful LLM in a WebRTC call. Your goals are to be helpful and brief in your responses.
+You are a helpful LLM in a voice call. Your goals are to be helpful and brief in your responses.
 
 You are expert at transcribing audio to text. You will receive a mixture of audio and text input. When
 asked to transcribe what the user said, output an exact, word-for-word transcription.
@@ -96,7 +96,7 @@ class UserAudioCollector(FrameProcessor):
             self._user_speaking = True
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
-            self._context.add_audio_frames_message(audio_frames=self._audio_frames)
+            await self._context.add_audio_frames_message(audio_frames=self._audio_frames)
             await self._user_context_aggregator.push_frame(LLMRunFrame())
 
         elif isinstance(frame, InputAudioRawFrame):
@@ -193,27 +193,20 @@ class TranscriptionContextFixup(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -223,31 +216,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        model="gemini-2.5-flash",
-        # turn on thinking if you want it
-        # params=GoogleLLMService.InputParams(extra={"thinking_config": {"thinking_budget": 4096}}),
+        settings=GoogleLLMService.Settings(
+            model="gemini-2.5-flash",
+            system_instruction=system_message,
+            # force a certain amount of thinking if you want it
+            # thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
+        ),
     )
 
     tts = GoogleTTSService(
-        voice_id="en-US-Chirp3-HD-Charon",
+        settings=GoogleTTSService.Settings(
+            voice="en-US-Chirp3-HD-Charon",
+            language=Language.EN_US,
+        ),
         params=GoogleTTSService.InputParams(language=Language.EN_US),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
-    messages = [
-        {
-            "role": "system",
-            "content": system_message,
-        },
-        {
-            "role": "user",
-            "content": "Start by saying hello.",
-        },
-    ]
-
-    context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(context)
-    audio_collector = UserAudioCollector(context, context_aggregator.user())
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
+    audio_collector = UserAudioCollector(context, user_aggregator)
     pull_transcript_out_of_llm_output = TranscriptExtractor(context)
     fixup_context_messages = TranscriptionContextFixup(context)
 
@@ -255,12 +246,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),  # Transport user input
             audio_collector,
-            context_aggregator.user(),  # User responses
+            user_aggregator,  # User responses
             llm,  # LLM
             pull_transcript_out_of_llm_output,
             tts,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            assistant_aggregator,  # Assistant spoken responses
             fixup_context_messages,
         ]
     )
@@ -278,7 +269,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -17,6 +17,7 @@ from loguru import logger
 
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.frames.frames import (
+    AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -53,6 +54,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
+from pipecat.services.settings import LLMSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -90,6 +92,13 @@ class CurrentAudioResponse:
     total_size: int = 0
 
 
+@dataclass
+class OpenAIRealtimeBetaLLMSettings(LLMSettings):
+    """Settings for OpenAIRealtimeBetaLLMService."""
+
+    pass
+
+
 class OpenAIRealtimeBetaLLMService(LLMService):
     """OpenAI Realtime Beta LLM service providing real-time audio and text communication.
 
@@ -102,6 +111,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     management, and real-time transcription.
     """
 
+    Settings = OpenAIRealtimeBetaLLMSettings
+    _settings: Settings
+
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
     adapter_class = OpenAIRealtimeLLMAdapter
 
@@ -109,9 +121,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gpt-4o-realtime-preview-2025-06-03",
+        model: Optional[str] = None,
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
+        settings: Optional[Settings] = None,
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
         **kwargs,
@@ -120,11 +133,16 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
         Args:
             api_key: OpenAI API key for authentication.
-            model: OpenAI model name. Defaults to "gpt-4o-realtime-preview-2025-06-03".
+            model: OpenAI model name.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAIRealtimeBetaLLMService.Settings(model=...)`` instead.
+
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.openai.com/v1/realtime".
             session_properties: Configuration properties for the realtime session.
                 If None, uses default SessionProperties.
+            settings: Runtime-updatable settings for this service.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             send_transcription_frames: Whether to emit transcription frames. Defaults to True.
             **kwargs: Additional arguments passed to parent LLMService.
@@ -138,16 +156,39 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 stacklevel=2,
             )
 
-        full_url = f"{base_url}?model={model}"
-        super().__init__(base_url=full_url, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="gpt-4o-realtime-preview-2025-06-03",
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        # 3. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        full_url = f"{base_url}?model={default_settings.model}"
+        super().__init__(
+            base_url=full_url,
+            settings=default_settings,
+            **kwargs,
+        )
 
         self.api_key = api_key
         self.base_url = full_url
-        self.set_model_name(model)
-
-        self._session_properties: events.SessionProperties = (
-            session_properties or events.SessionProperties()
-        )
+        self._session_properties = session_properties or events.SessionProperties()
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
         self._websocket = None
@@ -341,6 +382,16 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
+        # Backward-compatible dict path: frame.settings contains SessionProperties
+        # fields, not our Settings fields, so we construct SessionProperties
+        # directly. The frame.delta path falls through to super, which calls
+        # _update_settings → our override handles the rest.
+        if isinstance(frame, LLMUpdateSettingsFrame) and frame.delta is None:
+            self._session_properties = events.SessionProperties(**frame.settings)
+            await self._send_session_update()
+            await self.push_frame(frame, direction)
+            return
+
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
@@ -376,11 +427,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             await self._handle_messages_append(frame)
         elif isinstance(frame, RealtimeMessagesUpdateFrame):
             self._context = frame.context
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            self._session_properties = events.SessionProperties(**frame.settings)
-            await self._update_settings()
         elif isinstance(frame, LLMSetToolsFrame):
-            await self._update_settings()
+            await self._send_session_update()
         elif isinstance(frame, RealtimeFunctionCallResultFrame):
             await self._handle_function_call_result(frame.result_frame)
 
@@ -393,7 +441,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         item = events.ConversationItem(
             type="function_call_output",
             call_id=frame.tool_call_id,
-            output=json.dumps(frame.result),
+            output=json.dumps(frame.result, ensure_ascii=False),
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 
@@ -424,7 +472,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
 
     async def _disconnect(self):
@@ -440,7 +488,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 self._receive_task = None
             self._disconnecting = False
         except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
 
     async def _ws_send(self, realtime_message):
         try:
@@ -449,14 +497,19 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         except Exception as e:
             if self._disconnecting:
                 return
-            logger.error(f"Error sending message to websocket: {e}")
             # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just
             # treat a send-side error as fatal.
-            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}"))
+            await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
-    async def _update_settings(self):
+    async def _update_settings(self, delta):
+        """Apply a settings delta."""
+        changed = await super()._update_settings(delta)
+        self._warn_unhandled_updated_settings(changed.keys())
+        return changed
+
+    async def _send_session_update(self):
         settings = self._session_properties
         # tools given in the context override the tools in the session properties
         if self._context and self._context.tools:
@@ -503,15 +556,21 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "error":
                 if not await self._maybe_handle_evt_retrieve_conversation_item_error(evt):
-                    await self._handle_evt_error(evt)
-                    # errors are fatal, so exit the receive loop
-                    return
+                    if evt.error.code in (
+                        "response_cancel_not_active",
+                        "conversation_already_has_active_response",
+                    ):
+                        logger.debug(f"{self} {evt.error.message}")
+                    else:
+                        await self._handle_evt_error(evt)
+                        # errors are fatal, so exit the receive loop
+                        return
 
     @traced_openai_realtime(operation="llm_setup")
     async def _handle_evt_session_created(self, evt):
         # session.created is received right after connecting. Send a message
         # to configure the session properties.
-        await self._update_settings()
+        await self._send_session_update()
 
     async def _handle_evt_session_updated(self, evt):
         # If this is our first context frame, run the LLM
@@ -525,6 +584,14 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         # note: ttfb is faster by 1/2 RTT than ttfb as measured for other services, since we're getting
         # this event from the server
         await self.stop_ttfb_metrics()
+
+        if self._current_audio_response and self._current_audio_response.item_id != evt.item_id:
+            logger.warning(
+                f"Received a new audio delta for an already completed audio response before receiving the BotStoppedSpeakingFrame."
+            )
+            logger.debug("Forcing previous audio response to None")
+            self._current_audio_response = None
+
         if not self._current_audio_response:
             self._current_audio_response = CurrentAudioResponse(
                 item_id=evt.item_id,
@@ -652,17 +719,17 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
-            await self.push_frame(TTSTextFrame(evt.delta))
+            await self.push_frame(TTSTextFrame(evt.delta, aggregated_by=AggregationType.SENTENCE))
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
-        await self.push_interruption_task_frame_and_wait()
-        await self.push_frame(UserStartedSpeakingFrame())
+        await self.broadcast_frame(UserStartedSpeakingFrame)
+        await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame())
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):
         """Maybe handle an error event related to retrieving a conversation item.
@@ -685,7 +752,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
-        await self.push_error(ErrorFrame(error=f"Error: {evt}"))
+        await self.push_error(error_msg=f"Error: {evt}")
 
     async def _handle_assistant_output(self, output):
         # We haven't seen intermixed audio and function_call items in the same response. But let's
@@ -742,7 +809,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             self._context.llm_needs_initial_messages = False
 
         if self._context.llm_needs_settings_update:
-            await self._update_settings()
+            await self._send_session_update()
             self._context.llm_needs_settings_update = False
 
         logger.debug(f"Creating response: {self._context.get_messages_for_logging()}")

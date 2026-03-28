@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -877,14 +877,11 @@ class TokenDetails(BaseModel):
         audio_tokens: Number of audio tokens used. Defaults to 0.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     cached_tokens: Optional[int] = 0
     text_tokens: Optional[int] = 0
     audio_tokens: Optional[int] = 0
-
-    class Config:
-        """Pydantic configuration for TokenDetails."""
-
-        extra = "allow"
 
 
 class Usage(BaseModel):

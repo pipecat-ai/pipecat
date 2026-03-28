@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,6 +10,7 @@ This module provides common functionality for services implementing the Whisper 
 interface, including language mapping, metrics generation, and error handling.
 """
 
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -17,10 +18,26 @@ from openai import AsyncOpenAI
 from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.stt_latency import WHISPER_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+
+
+@dataclass
+class BaseWhisperSTTSettings(STTSettings):
+    """Settings for BaseWhisperSTTService.
+
+    Parameters:
+        prompt: Optional text to guide the model's style or continue
+            a previous segment.
+        temperature: Sampling temperature between 0 and 1.
+    """
+
+    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 def language_to_whisper_language(language: Language) -> Optional[str]:
@@ -105,60 +122,106 @@ class BaseWhisperSTTService(SegmentedSTTService):
     including metrics generation and error handling.
     """
 
+    Settings = BaseWhisperSTTSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
-        model: str,
+        model: Optional[str] = None,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        language: Optional[Language] = Language.EN,
+        language: Optional[Language] = None,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         include_prob_metrics: bool = False,
+        push_empty_transcripts: bool = False,
+        settings: Optional[Settings] = None,
+        ttfs_p99_latency: Optional[float] = WHISPER_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Whisper STT service.
 
         Args:
             model: Name of the Whisper model to use.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=BaseWhisperSTTService.Settings(model=...)`` instead.
+
             api_key: Service API key. Defaults to None.
             base_url: Service API base URL. Defaults to None.
-            language: Language of the audio input. Defaults to English.
+            language: Language of the audio input.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=BaseWhisperSTTService.Settings(language=...)`` instead.
+
             prompt: Optional text to guide the model's style or continue a previous segment.
-            temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=BaseWhisperSTTService.Settings(prompt=...)`` instead.
+
+            temperature: Sampling temperature between 0 and 1.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=BaseWhisperSTTService.Settings(temperature=...)`` instead.
+
             include_prob_metrics: If True, enables probability metrics in API response.
                 Each service implements this differently (see child classes).
                 Defaults to False.
+            push_empty_transcripts: - If true, allow empty `TranscriptionFrame` frames to be
+                pushed downstream instead of discarding them. This is intended for situations
+                where VAD fires even though the user did not speak. In these cases, it is
+                useful to know that nothing was transcribed so that the agent can resume
+                speaking, instead of waiting longer for a transcription.
+                Defaults to False.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        super().__init__(**kwargs)
-        self.set_model_name(model)
-        self._client = self._create_client(api_key, base_url)
-        self._language = self.language_to_service_language(language or Language.EN)
-        self._prompt = prompt
-        self._temperature = temperature
-        self._include_prob_metrics = include_prob_metrics
+        # --- 1. Hardcoded defaults ---
+        default_settings = self.Settings(
+            model=None,
+            language=None,
+            prompt=None,
+            temperature=None,
+        )
 
-        self._settings = {
-            "base_url": base_url,
-            "language": self._language,
-            "prompt": self._prompt,
-            "temperature": self._temperature,
-        }
+        # --- 2. Deprecated direct-arg overrides ---
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if language is not None:
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
+        if prompt is not None:
+            self._warn_init_param_moved_to_settings("prompt", "prompt")
+            default_settings.prompt = prompt
+        if temperature is not None:
+            self._warn_init_param_moved_to_settings("temperature", "temperature")
+            default_settings.temperature = temperature
+
+        # --- 3. (no params object for this service) ---
+
+        # --- 4. Settings delta (canonical API, always wins) ---
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=default_settings,
+            **kwargs,
+        )
+        self._client = self._create_client(api_key, base_url)
+        self._include_prob_metrics = include_prob_metrics
+        self._push_empty_transcripts = push_empty_transcripts
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
-    async def set_model(self, model: str):
-        """Set the model name for transcription.
-
-        Args:
-            model: The name of the model to use.
-        """
-        self.set_model_name(model)
-
     def can_generate_metrics(self) -> bool:
-        """Indicates whether this service can generate metrics.
+        """Whether this service can generate processing metrics.
 
         Returns:
             bool: True, as this service supports metric generation.
@@ -175,15 +238,6 @@ class BaseWhisperSTTService(SegmentedSTTService):
             str or None: The corresponding service language code, or None if not supported.
         """
         return language_to_whisper_language(language)
-
-    async def set_language(self, language: Language):
-        """Set the language for transcription.
-
-        Args:
-            language: The Language enum value to use for transcription.
-        """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._language = self.language_to_service_language(language)
 
     @traced_stt
     async def _handle_transcription(
@@ -204,17 +258,18 @@ class BaseWhisperSTTService(SegmentedSTTService):
         """
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
 
             response = await self._transcribe(audio)
 
-            await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
 
             text = response.text.strip()
 
-            if text:
-                await self._handle_transcription(text, True, self._language)
+            if not text:
+                logger.warning("Received empty transcription from API")
+
+            if text or self._push_empty_transcripts:
+                await self._handle_transcription(text, True, self._settings.language)
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(
                     text,
@@ -222,12 +277,9 @@ class BaseWhisperSTTService(SegmentedSTTService):
                     time_now_iso8601(),
                     result=response,
                 )
-            else:
-                logger.warning("Received empty transcription from API")
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
     async def _transcribe(self, audio: bytes) -> Transcription:
         """Transcribe audio data to text.

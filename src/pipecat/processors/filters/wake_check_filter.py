@@ -1,10 +1,13 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Wake phrase detection filter for Pipecat transcription processing.
+
+.. deprecated:: 0.0.106
+    Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead.
 
 This module provides a frame processor that filters transcription frames,
 only allowing them through after wake phrases have been detected. Includes
@@ -13,17 +16,23 @@ keepalive functionality to maintain conversation flow after wake detection.
 
 import re
 import time
+import warnings
 from enum import Enum
 from typing import List
 
 from loguru import logger
 
-from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class WakeCheckFilter(FrameProcessor):
     """Frame processor that filters transcription frames based on wake phrase detection.
+
+    .. deprecated:: 0.0.106
+        Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead,
+        which integrates with the user turn strategy system and supports configurable
+        timeouts and single-activation mode.
 
     This filter monitors transcription frames for configured wake phrases and only
     passes frames through after a wake phrase has been detected. Maintains a
@@ -65,12 +74,21 @@ class WakeCheckFilter(FrameProcessor):
     def __init__(self, wake_phrases: List[str], keepalive_timeout: float = 3):
         """Initialize the wake phrase filter.
 
+        .. deprecated:: 0.0.106
+            Use :class:`~pipecat.turns.user_start.WakePhraseUserTurnStartStrategy` instead.
+
         Args:
             wake_phrases: List of wake phrases to detect in transcriptions.
             keepalive_timeout: Duration in seconds to keep passing frames after
                 wake detection. Defaults to 3 seconds.
         """
         super().__init__()
+        warnings.warn(
+            "WakeCheckFilter is deprecated since v0.0.106. "
+            "Use WakePhraseUserTurnStartStrategy instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._participant_states = {}
         self._keepalive_timeout = keepalive_timeout
         self._wake_patterns = []
@@ -126,6 +144,4 @@ class WakeCheckFilter(FrameProcessor):
             else:
                 await self.push_frame(frame, direction)
         except Exception as e:
-            error_msg = f"Error in wake word filter: {e}"
-            logger.exception(error_msg)
-            await self.push_error(ErrorFrame(error_msg))
+            await self.push_error(error_msg=f"Error in wake word filter: {e}", exception=e)

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,7 +9,7 @@
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from anthropic import NOT_GIVEN, NotGiven
 from anthropic.types.message_param import MessageParam
@@ -48,24 +48,36 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         return "anthropic"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, enable_prompt_caching: bool
+        self,
+        context: LLMContext,
+        enable_prompt_caching: bool,
+        system_instruction: Optional[str] = None,
     ) -> AnthropicLLMInvocationParams:
         """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
             enable_prompt_caching: Whether prompt caching should be enabled.
+            system_instruction: Optional system instruction from service settings
+                or ``run_inference``.
 
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
         """
-        messages = self._from_universal_context_messages(self.get_messages(context))
+        converted = self._from_universal_context_messages(
+            self.get_messages(context), system_instruction=system_instruction
+        )
+        system = self._resolve_system_instruction(
+            converted.system if converted.system is not NOT_GIVEN else None,
+            system_instruction,
+            discard_context_system=True,
+        )
         return {
-            "system": messages.system,
+            "system": system if system is not None else NOT_GIVEN,
             "messages": (
-                self._with_cache_control_markers(messages.messages)
+                self._with_cache_control_markers(converted.messages)
                 if enable_prompt_caching
-                else messages.messages
+                else converted.messages
             ),
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
@@ -94,6 +106,8 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     for item in msg["content"]:
                         if item["type"] == "image":
                             item["source"]["data"] = "..."
+                        if item["type"] == "thinking" and item.get("signature"):
+                            item["signature"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 
@@ -105,33 +119,34 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         system: str | NotGiven
 
     def _from_universal_context_messages(
-        self, universal_context_messages: List[LLMContextMessage]
+        self,
+        universal_context_messages: List[LLMContextMessage],
+        *,
+        system_instruction: Optional[str] = None,
     ) -> ConvertedMessages:
         system = NOT_GIVEN
-        messages = []
 
-        # First, map messages using self._from_universal_context_message(m)
+        # Extract initial system message from universal messages BEFORE conversion,
+        # so the helper works with standard message format (not provider-specific).
+        remaining = list(universal_context_messages)
+        if remaining and not isinstance(remaining[0], LLMSpecificMessage):
+            extracted = self._extract_initial_system(
+                remaining, system_instruction=system_instruction
+            )
+            if extracted is not None:
+                system = extracted
+
+        # Convert remaining messages to Anthropic format
+        messages = []
         try:
-            messages = [self._from_universal_context_message(m) for m in universal_context_messages]
+            messages = [self._from_universal_context_message(m) for m in remaining]
         except Exception as e:
             logger.error(f"Error mapping messages: {e}")
 
-        # See if we should pull the system message out of our messages list.
-        if messages and messages[0]["role"] == "system":
-            if len(messages) == 1:
-                # If we have only have a system message in the list, all we can really do
-                # without introducing too much magic is change the role to "user".
-                messages[0]["role"] = "user"
-            else:
-                # If we have more than one message, we'll pull the system message out of the
-                # list.
-                system = messages[0]["content"]
-                messages.pop(0)
-
-        # Convert any subsequent "system"-role messages to "user"-role
-        # messages, as Anthropic doesn't support system input messages.
+        # Convert any subsequent "system"/"developer"-role messages to "user"-role
+        # messages, as Anthropic doesn't support system or developer input messages.
         for message in messages:
-            if message["role"] == "system":
+            if message["role"] in ("system", "developer"):
                 message["role"] = "user"
 
         # Merge consecutive messages with the same role.
@@ -165,8 +180,43 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:
         if isinstance(message, LLMSpecificMessage):
-            return copy.deepcopy(message.message)
+            return self._from_anthropic_specific_message(message)
         return self._from_standard_message(message)
+
+    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam:
+        """Convert LLMSpecificMessage to Anthropic format.
+
+        Anthropic-specific messages may either be special thought messages that
+        need to be handled in a special way, or messages already in Anthropic
+        format.
+
+        Args:
+            message: Anthropic-specific message.
+        """
+        # Handle special case of thought messages.
+        # These can be converted to standalone "assistant" messages; later
+        # these thinking messages will be properly merged into the assistant
+        # response messages before the context is sent to Anthropic for the
+        # next turn.
+        if (
+            isinstance(message.message, dict)
+            and message.message.get("type") == "thought"
+            and (text := message.message.get("text"))
+            and (signature := message.message.get("signature"))
+        ):
+            return {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": text,
+                        "signature": signature,
+                    }
+                ],
+            }
+
+        # Fall back to assuming that the message is already in Anthropic format
+        return copy.deepcopy(message.message)
 
     def _from_standard_message(self, message: LLMStandardMessage) -> MessageParam:
         """Convert standard universal context message to Anthropic format.
@@ -246,11 +296,14 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 # handle image_url -> image conversion
                 if item["type"] == "image_url":
                     if item["image_url"]["url"].startswith("data:"):
+                        # Extract MIME type from data URL (format: "data:image/jpeg;base64,...")
+                        url = item["image_url"]["url"]
+                        mime_type = url.split(":")[1].split(";")[0]
                         item["type"] = "image"
                         item["source"] = {
                             "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": item["image_url"]["url"].split(",")[1],
+                            "media_type": mime_type,
+                            "data": url.split(",")[1],
                         }
                         del item["image_url"]
                     elif item["image_url"]["url"].startswith("http"):

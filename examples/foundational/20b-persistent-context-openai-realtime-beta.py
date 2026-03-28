@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -31,7 +31,6 @@ from pipecat.services.openai_realtime_beta import (
     SessionProperties,
     TurnDetection,
 )
-from pipecat.services.openai_realtime_beta.events import AudioConfiguration, AudioInput
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -120,7 +119,7 @@ tools = [
     {
         "type": "function",
         "name": "save_conversation",
-        "description": "Save the current conversatione. Use this function to persist the current conversation to external storage.",
+        "description": "Save the current conversation. Use this function to persist the current conversation to external storage.",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -155,9 +154,8 @@ tools = [
 ]
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -183,16 +181,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     session_properties = SessionProperties(
-        audio=AudioConfiguration(
-            input=AudioInput(
-                transcription=InputAudioTranscription(),
-                # Set openai TurnDetection parameters. Not setting this at all will turn it
-                # on by default
-                turn_detection=TurnDetection(silence_duration_ms=1000),
-                # Or set to False to disable openai turn detection and use transport VAD
-                # turn_detection=False,
-            )
-        ),
+        input_audio_transcription=InputAudioTranscription(),
+        # Set openai TurnDetection parameters. Not setting this at all will turn
+        # it on by default
+        turn_detection=TurnDetection(silence_duration_ms=1000),
+        # Or set to False to disable openai turn detection and use transport VAD
+        # turn_detection=False,
         # tools=tools,
         instructions="""Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
 
@@ -213,7 +207,6 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     llm = OpenAIRealtimeBetaLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         session_properties=session_properties,
-        start_audio_paused=False,
     )
 
     # you can either register a single function for all function calls, or specific functions

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -57,16 +57,16 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -158,27 +158,20 @@ async def query_knowledge_base(params: FunctionCallParams):
     await params.result_callback(response.text)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -190,12 +183,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="f9836c6e-a0bd-460e-9d3c-f7299fa60f94",  # Southern Lady
+        settings=CartesiaTTSService.Settings(
+            voice="f9836c6e-a0bd-460e-9d3c-f7299fa60f94",  # Southern Lady
+        ),
     )
 
+    system_prompt = """\
+You are a helpful assistant who converses with a user and answers questions.
+
+You have access to the tool, query_knowledge_base, that allows you to query the knowledge base for the answer to the user's question.
+
+Your response will be turned into speech so use only simple words and punctuation.
+"""
+
     llm = GoogleLLMService(
-        model=VOICE_MODEL,
         api_key=os.getenv("GOOGLE_API_KEY"),
+        settings=GoogleLLMService.Settings(
+            model=VOICE_MODEL,
+            system_instruction=system_prompt,
+        ),
     )
     llm.register_function("query_knowledge_base", query_knowledge_base)
 
@@ -212,30 +218,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     tools = ToolsSchema(standard_tools=[query_function])
 
-    system_prompt = """\
-You are a helpful assistant who converses with a user and answers questions.
-
-You have access to the tool, query_knowledge_base, that allows you to query the knowledge base for the answer to the user's question.
-
-Your response will be turned into speech so use only simple words and punctuation.
-"""
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "Greet the user."},
-    ]
-
-    context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(context)
+    context = LLMContext(tools=tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             tts,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
     task = PipelineTask(
@@ -251,6 +248,9 @@ Your response will be turned into speech so use only simple words and punctuatio
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Start conversation - empty prompt to let LLM follow system instructions
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

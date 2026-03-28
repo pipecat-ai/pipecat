@@ -1,46 +1,73 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Frame serialization interfaces for Pipecat."""
 
-from abc import ABC, abstractmethod
-from enum import Enum
+from abc import abstractmethod
+from typing import Optional
 
-from pipecat.frames.frames import Frame, StartFrame
+from pydantic import BaseModel
 
-
-class FrameSerializerType(Enum):
-    """Enumeration of supported frame serialization formats.
-
-    Parameters:
-        BINARY: Binary serialization format for compact representation.
-        TEXT: Text-based serialization format for human-readable output.
-    """
-
-    BINARY = "binary"
-    TEXT = "text"
+import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.frames.frames import (
+    Frame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
+    StartFrame,
+)
+from pipecat.utils.base_object import BaseObject
 
 
-class FrameSerializer(ABC):
+class FrameSerializer(BaseObject):
     """Abstract base class for frame serialization implementations.
 
     Defines the interface for converting frames to/from serialized formats
-    for transmission or storage. Subclasses must implement serialization
-    type detection and the core serialize/deserialize methods.
+    for transmission or storage. Subclasses must implement the core
+    serialize/deserialize methods.
     """
 
-    @property
-    @abstractmethod
-    def type(self) -> FrameSerializerType:
-        """Get the serialization type supported by this serializer.
+    class InputParams(BaseModel):
+        """Base configuration parameters for FrameSerializer.
+
+        Parameters:
+            ignore_rtvi_messages: Whether to ignore RTVI protocol messages during serialization.
+                Defaults to True to prevent RTVI messages from being sent to external transports.
+        """
+
+        ignore_rtvi_messages: bool = True
+
+    def __init__(self, params: Optional[InputParams] = None, **kwargs):
+        """Initialize the FrameSerializer.
+
+        Args:
+            params: Configuration parameters.
+            **kwargs: Additional arguments passed to BaseObject (e.g., name).
+        """
+        super().__init__(**kwargs)
+        self._params = params or FrameSerializer.InputParams()
+
+    def should_ignore_frame(self, frame: Frame) -> bool:
+        """Check if a frame should be ignored during serialization.
+
+        This method filters out RTVI protocol messages when ignore_rtvi_messages is enabled.
+        Subclasses can override this to add additional filtering logic.
+
+        Args:
+            frame: The frame to check.
 
         Returns:
-            The FrameSerializerType indicating binary or text format.
+            True if the frame should be ignored, False otherwise.
         """
-        pass
+        if (
+            self._params.ignore_rtvi_messages
+            and isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame))
+            and frame.message.get("label") == RTVI.MESSAGE_LABEL
+        ):
+            return True
+        return False
 
     async def setup(self, frame: StartFrame):
         """Initialize the serializer with startup configuration.

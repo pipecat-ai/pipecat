@@ -1,12 +1,18 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Observer for measuring user-to-bot response latency."""
+"""Observer for measuring user-to-bot response latency.
+
+.. deprecated:: 0.0.102
+    This module is deprecated. Use :class:`UserBotLatencyObserver` directly
+    with its ``on_latency_measured`` event handler instead.
+"""
 
 import time
+import warnings
 from statistics import mean
 
 from loguru import logger
@@ -15,8 +21,8 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     CancelFrame,
     EndFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
@@ -27,6 +33,10 @@ class UserBotLatencyLogObserver(BaseObserver):
 
     This helps measure how quickly the AI services respond by tracking
     conversation turn timing and logging latency metrics.
+
+    .. deprecated:: 0.0.102
+        This class is deprecated. Use :class:`UserBotLatencyObserver` directly
+        with its ``on_latency_measured`` event handler for custom logging.
     """
 
     def __init__(self):
@@ -34,9 +44,19 @@ class UserBotLatencyLogObserver(BaseObserver):
 
         Sets up tracking for processed frames and user speech timing
         to calculate response latencies.
+
+        .. deprecated:: 0.0.102
+            This class is deprecated. Use :class:`UserBotLatencyObserver`
+            directly with its ``on_latency_measured`` event handler.
         """
+        warnings.warn(
+            "UserBotLatencyLogObserver is deprecated and will be removed in a future version. "
+            "Use UserBotLatencyObserver directly with its on_latency_measured event handler instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__()
-        self._processed_frames = set()
+        self._user_bot_latency_processed_frames = set()
         self._user_stopped_time = 0
         self._latencies = []
 
@@ -51,15 +71,15 @@ class UserBotLatencyLogObserver(BaseObserver):
             return
 
         # Skip already processed frames
-        if data.frame.id in self._processed_frames:
+        if data.frame.id in self._user_bot_latency_processed_frames:
             return
 
-        self._processed_frames.add(data.frame.id)
+        self._user_bot_latency_processed_frames.add(data.frame.id)
 
-        if isinstance(data.frame, UserStartedSpeakingFrame):
+        if isinstance(data.frame, VADUserStartedSpeakingFrame):
             self._user_stopped_time = 0
-        elif isinstance(data.frame, UserStoppedSpeakingFrame):
-            self._user_stopped_time = time.time()
+        elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
+            self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
         elif isinstance(data.frame, (EndFrame, CancelFrame)):
             self._log_summary()
         elif isinstance(data.frame, BotStartedSpeakingFrame) and self._user_stopped_time:

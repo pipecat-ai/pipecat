@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,10 +7,8 @@
 """OpenAI LLM adapter for Pipecat."""
 
 import copy
-import json
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
-from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
     ChatCompletionMessageParam,
@@ -53,17 +51,46 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for OpenAI."""
         return "openai"
 
-    def get_llm_invocation_params(self, context: LLMContext) -> OpenAILLMInvocationParams:
+    def get_llm_invocation_params(
+        self,
+        context: LLMContext,
+        *,
+        system_instruction: Optional[str] = None,
+        convert_developer_to_user: bool,
+    ) -> OpenAILLMInvocationParams:
         """Get OpenAI-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings
+                or ``run_inference``. If provided, prepended as a system message.
+            convert_developer_to_user: If True, convert "developer"-role messages
+                to "user"-role messages. Used by OpenAI-compatible services that
+                don't support the "developer" role.
 
         Returns:
             Dictionary of parameters for OpenAI's ChatCompletion API.
         """
+        messages = self._from_universal_context_messages(
+            self.get_messages(context), convert_developer_to_user=convert_developer_to_user
+        )
+
+        if system_instruction:
+            # Detect initial system message for warning purposes (don't extract)
+            initial_content = (
+                messages[0].get("content", "")
+                if messages and messages[0].get("role") == "system"
+                else None
+            )
+            self._resolve_system_instruction(
+                initial_content,
+                system_instruction,
+                discard_context_system=False,
+            )
+            messages = [{"role": "system", "content": system_instruction}] + messages
+
         return {
-            "messages": self._from_universal_context_messages(self.get_messages(context)),
+            "messages": messages,
             # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
             "tool_choice": context.tool_choice,
@@ -113,7 +140,10 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         return msgs
 
     def _from_universal_context_messages(
-        self, messages: List[LLMContextMessage]
+        self,
+        messages: List[LLMContextMessage],
+        *,
+        convert_developer_to_user: bool,
     ) -> List[ChatCompletionMessageParam]:
         result = []
         for message in messages:
@@ -123,6 +153,12 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             else:
                 # Standard message, pass through unchanged
                 result.append(message)
+
+        if convert_developer_to_user:
+            for msg in result:
+                if msg.get("role") == "developer":
+                    msg["role"] = "user"
+
         return result
 
     def _from_standard_tool_choice(

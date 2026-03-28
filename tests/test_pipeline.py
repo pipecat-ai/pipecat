@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -97,6 +97,34 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
             pipeline,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+        )
+
+    async def test_parallel_internal_frames_buffered_during_start(self):
+        """Frames pushed by internal processors during StartFrame processing
+        should be buffered and only released after StartFrame synchronization
+        completes."""
+
+        class EmitOnStartProcessor(FrameProcessor):
+            """Pushes a TextFrame when it receives a StartFrame."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                await self.push_frame(frame, direction)
+                if isinstance(frame, StartFrame):
+                    await self.push_frame(TextFrame(text="from start"))
+
+        pipeline = ParallelPipeline([EmitOnStartProcessor()], [IdentityFilter()])
+
+        frames_to_send = [TextFrame(text="Hello!")]
+
+        # StartFrame should come first, then the TextFrame emitted during
+        # StartFrame processing, then the regular TextFrame.
+        expected_down_frames = [StartFrame, TextFrame, TextFrame]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            ignore_start=False,
         )
 
 
@@ -266,6 +294,63 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         assert upstream_received
         assert downstream_received
+
+    async def test_task_queue_frame_upstream(self):
+        upstream_received = False
+
+        pipeline = Pipeline([IdentityFilter()])
+        task = PipelineTask(pipeline, cancel_on_idle_timeout=False)
+        task.set_reached_upstream_filter((TextFrame,))
+
+        @task.event_handler("on_frame_reached_upstream")
+        async def on_frame_reached_upstream(task, frame):
+            nonlocal upstream_received
+            if isinstance(frame, TextFrame) and frame.text == "Hello Upstream!":
+                upstream_received = True
+
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame):
+            await task.queue_frame(TextFrame(text="Hello Upstream!"), FrameDirection.UPSTREAM)
+
+        try:
+            await asyncio.wait_for(
+                task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
+                timeout=1.0,
+            )
+        except asyncio.TimeoutError:
+            pass
+
+        assert upstream_received
+
+    async def test_task_queue_frames_upstream(self):
+        upstream_texts = []
+
+        pipeline = Pipeline([IdentityFilter()])
+        task = PipelineTask(pipeline, cancel_on_idle_timeout=False)
+        task.set_reached_upstream_filter((TextFrame,))
+
+        @task.event_handler("on_frame_reached_upstream")
+        async def on_frame_reached_upstream(task, frame):
+            if isinstance(frame, TextFrame):
+                upstream_texts.append(frame.text)
+
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame):
+            await task.queue_frames(
+                [TextFrame(text="First"), TextFrame(text="Second")],
+                FrameDirection.UPSTREAM,
+            )
+
+        try:
+            await asyncio.wait_for(
+                task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
+                timeout=1.0,
+            )
+        except asyncio.TimeoutError:
+            pass
+
+        assert "First" in upstream_texts
+        assert "Second" in upstream_texts
 
     async def test_task_heartbeats(self):
         heartbeats_counter = 0
@@ -570,3 +655,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         except asyncio.CancelledError:
             assert error_received
+
+
+if __name__ == "__main__":
+    unittest.main()

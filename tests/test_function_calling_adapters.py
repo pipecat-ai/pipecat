@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -204,3 +204,7 @@ class TestFunctionAdapters(unittest.TestCase):
             }
         ]
         assert AWSBedrockLLMAdapter().to_provider_tools_format(self.tools_def) == expected
+
+
+if __name__ == "__main__":
+    unittest.main()

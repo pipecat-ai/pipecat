@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024–2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -28,7 +28,7 @@ def check_env_variables() -> bool:
         "CARTESIA_API_KEY",
         "DEEPGRAM_API_KEY",
         "OPENAI_API_KEY",
-        "DAILY_SAMPLE_ROOM_URL",
+        "DAILY_ROOM_URL",
     ]
     for env in required_envs:
         if not os.getenv(env):

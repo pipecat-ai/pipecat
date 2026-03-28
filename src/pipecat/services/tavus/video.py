@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,6 +11,7 @@ avatar functionality through Tavus's streaming API.
 """
 
 import asyncio
+from dataclasses import dataclass
 from typing import Optional
 
 import aiohttp
@@ -34,7 +35,15 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
+from pipecat.services.settings import ServiceSettings
 from pipecat.transports.tavus.transport import TavusCallbacks, TavusParams, TavusTransportClient
+
+
+@dataclass
+class TavusVideoSettings(ServiceSettings):
+    """Settings for the Tavus video service."""
+
+    pass
 
 
 class TavusVideoService(AIService):
@@ -50,6 +59,9 @@ class TavusVideoService(AIService):
     - User room: Contains the Pipecat Bot and the user
     """
 
+    Settings = TavusVideoSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
@@ -57,6 +69,7 @@ class TavusVideoService(AIService):
         replica_id: str,
         persona_id: str = "pipecat-stream",
         session: aiohttp.ClientSession,
+        settings: Optional[Settings] = None,
         **kwargs,
     ) -> None:
         """Initialize the Tavus video service.
@@ -66,9 +79,15 @@ class TavusVideoService(AIService):
             replica_id: ID of the Tavus voice replica to use for speech synthesis.
             persona_id: ID of the Tavus persona. Defaults to "pipecat-stream" for Pipecat TTS voice.
             session: Async HTTP session used for communication with Tavus.
+            settings: Runtime-updatable settings. Tavus has no model concept, so this
+                is primarily used for the ``extra`` dict.
             **kwargs: Additional arguments passed to the parent AIService class.
         """
-        super().__init__(**kwargs)
+        default_settings = ServiceSettings(model=None)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
         self._api_key = api_key
         self._session = session
         self._replica_id = replica_id
@@ -94,6 +113,7 @@ class TavusVideoService(AIService):
         """
         await super().setup(setup)
         callbacks = TavusCallbacks(
+            on_joined=self._on_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
         )
@@ -118,6 +138,10 @@ class TavusVideoService(AIService):
         await super().cleanup()
         await self._client.cleanup()
         self._client = None
+
+    async def _on_joined(self, data):
+        """Handle bot joined the Daily room."""
+        logger.info("Tavus bot joined Daily room")
 
     async def _on_participant_left(self, participant, reason):
         """Handle participant leaving the session."""
@@ -190,7 +214,9 @@ class TavusVideoService(AIService):
         await super().start(frame)
         await self._client.start(frame)
         if self._transport_destination:
-            await self._client.register_audio_destination(self._transport_destination)
+            await self._client.register_audio_destination(
+                self._transport_destination, auto_silence=False
+            )
         await self._create_send_task()
 
     async def stop(self, frame: EndFrame):

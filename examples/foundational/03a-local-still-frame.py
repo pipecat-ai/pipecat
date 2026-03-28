@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -37,7 +37,9 @@ async def main():
         )
 
         imagegen = FalImageGenService(
-            params=FalImageGenService.InputParams(image_size="square_hd"),
+            settings=FalImageGenService.Settings(
+                image_size="square_hd",
+            ),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )

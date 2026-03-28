@@ -1,10 +1,12 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Azure OpenAI Realtime LLM service implementation."""
+
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -18,6 +20,13 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class AzureRealtimeLLMSettings(OpenAIRealtimeLLMService.Settings):
+    """Settings for AzureRealtimeLLMService."""
+
+    pass
+
+
 class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
     """Azure OpenAI Realtime LLM service with Azure-specific authentication.
 
@@ -25,6 +34,9 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
     using Azure's authentication headers and endpoint format. Provides the same
     real-time audio and text communication capabilities as the base OpenAI service.
     """
+
+    Settings = AzureRealtimeLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -61,5 +73,5 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"initialization error: {e}", exception=e)
             self._websocket = None

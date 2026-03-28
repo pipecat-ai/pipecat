@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,13 +14,15 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.transcript_processor import TranscriptProcessor
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -33,7 +35,10 @@ from pipecat.services.openai.realtime.events import (
     SemanticTurnDetection,
     SessionProperties,
 )
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from pipecat.services.openai.realtime.llm import (
+    OpenAIRealtimeLLMService,
+    OpenAIRealtimeLLMSettings,
+)
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -90,24 +95,20 @@ restaurant_function = FunctionSchema(
 tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -115,21 +116,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    session_properties = SessionProperties(
-        audio=AudioConfiguration(
-            input=AudioInput(
-                transcription=InputAudioTranscription(),
-                # Set openai TurnDetection parameters. Not setting this at all will turn it
-                # on by default
-                turn_detection=SemanticTurnDetection(),
-                # Or set to False to disable openai turn detection and use transport VAD
-                # turn_detection=False,
-                noise_reduction=InputAudioNoiseReduction(type="near_field"),
-            )
-        ),
-        output_modalities=["text"],
-        # tools=tools,
-        instructions="""You are a helpful and friendly AI.
+    llm = OpenAIRealtimeLLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAIRealtimeLLMSettings(
+            system_instruction="""You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human
 things in the real world. Your voice and personality should be warm and engaging, with a lively and
@@ -147,17 +137,29 @@ You have access to the following tools:
 - get_restaurant_recommendation: Get a restaurant recommendation for a given location.
 
 Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
-    )
-
-    llm = OpenAIRealtimeLLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        session_properties=session_properties,
-        start_audio_paused=False,
+            session_properties=SessionProperties(
+                audio=AudioConfiguration(
+                    input=AudioInput(
+                        transcription=InputAudioTranscription(),
+                        # Set openai TurnDetection parameters. Not setting this at all will turn it
+                        # on by default
+                        turn_detection=SemanticTurnDetection(),
+                        # Or set to False to disable openai turn detection and use transport VAD
+                        # turn_detection=False,
+                        noise_reduction=InputAudioNoiseReduction(type="near_field"),
+                    )
+                ),
+                output_modalities=["text"],
+                # tools=tools,
+            ),
+        ),
     )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     # you can either register a single function for all function calls, or specific functions
@@ -165,28 +167,27 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
-    transcript = TranscriptProcessor()
-
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
     context = LLMContext(
-        [{"role": "user", "content": "Say hello!"}],
+        [{"role": "developer", "content": "Say hello!"}],
         tools,
     )
 
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            context_aggregator.user(),
-            transcript.user(),  # LLM pushes TranscriptionFrames upstream
+            user_aggregator,
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            transcript.assistant(),  # After the transcript output, to time with the audio output
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -209,15 +210,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
-
-    # Register event handler for transcript updates
-    @transcript.event_handler("on_transcript_update")
-    async def on_transcript_update(processor, frame):
-        for msg in frame.messages:
-            if isinstance(msg, TranscriptionMessage):
-                timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
-                line = f"{timestamp}{msg.role}: {msg.content}"
-                logger.info(f"Transcript: {line}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

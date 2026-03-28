@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -244,3 +244,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             "bold and italic",
             "Text filtering should be re-enabled",
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

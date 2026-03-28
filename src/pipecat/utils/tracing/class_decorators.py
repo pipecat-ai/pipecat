@@ -1,11 +1,16 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 # Portions Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Base OpenTelemetry tracing decorators and utilities for Pipecat.
+
+.. deprecated:: 0.0.103
+    This module is unused and will be removed in a future release.
+    Service tracing is handled by the decorators in
+    :mod:`pipecat.utils.tracing.service_decorators`.
 
 This module provides class and method level tracing capabilities
 similar to the original NVIDIA implementation.
@@ -16,7 +21,15 @@ import contextlib
 import enum
 import functools
 import inspect
+import warnings
 from typing import Callable, Optional, TypeVar
+
+warnings.warn(
+    "pipecat.utils.tracing.class_decorators is deprecated and will be removed in a future "
+    "release. Use pipecat.utils.tracing.service_decorators instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from pipecat.utils.tracing.setup import is_tracing_available
 

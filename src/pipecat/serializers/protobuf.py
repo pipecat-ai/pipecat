@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,6 +8,7 @@
 
 import dataclasses
 import json
+from typing import Optional
 
 from loguru import logger
 
@@ -22,7 +23,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 
 
 @dataclasses.dataclass
@@ -60,18 +61,18 @@ class ProtobufFrameSerializer(FrameSerializer):
     }
     DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 
-    def __init__(self):
-        """Initialize the Protobuf frame serializer."""
-        pass
+    def __init__(self, params: Optional[FrameSerializer.InputParams] = None):
+        """Initialize the Protobuf frame serializer.
 
-    @property
-    def type(self) -> FrameSerializerType:
-        """Get the serializer type.
-
-        Returns:
-            FrameSerializerType.BINARY indicating binary serialization format.
+        Args:
+            params: Configuration parameters.
         """
-        return FrameSerializerType.BINARY
+        super().__init__(params)
+        # The base serializer defaults to filtering out RTVI protocol messages
+        # to avoid sending them over telephony media streams. ProtobufFrameSerializer
+        # is used by WebSocket transports, which are the delivery channel for
+        # these messages, so we disable the filter.
+        self._params.ignore_rtvi_messages = False
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize a frame to Protocol Buffer binary format.
@@ -84,6 +85,8 @@ class ProtobufFrameSerializer(FrameSerializer):
         """
         # Wrapping this messages as a JSONFrame to send
         if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if self.should_ignore_frame(frame):
+                return None
             frame = MessageFrame(
                 data=json.dumps(frame.message),
             )
@@ -135,7 +138,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         if "pts" in args_dict:
             del args_dict["pts"]
 
-        # Special handling for MessageFrame -> OutputTransportMessageUrgentFrame
+        # Special handling for MessageFrame -> InputTransportMessageFrame
         if class_name == MessageFrame:
             try:
                 msg = json.loads(args_dict["data"])

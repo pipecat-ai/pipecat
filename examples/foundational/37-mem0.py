@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -24,14 +24,14 @@ Example usage (run from pipecat root directory):
     $ python examples/foundational/37-mem0.py
 
 Requirements:
-    - OpenAI API key (for GPT-4o-mini)
+    - OpenAI API key
     - ElevenLabs API key (for text-to-speech)
     - Daily API key (for video/audio transport)
     - Mem0 API key (for cloud-based memory storage)
     - [Optional] Anthropic API key (if using Claude with local config)
 
     Environment variables (set in .env or in your terminal using `export`):
-        DAILY_SAMPLE_ROOM_URL=daily_sample_room_url
+        DAILY_ROOM_URL=daily_room_url
         DAILY_API_KEY=daily_api_key
         OPENAI_API_KEY=openai_api_key
         ELEVENLABS_API_KEY=elevenlabs_api_key
@@ -42,22 +42,20 @@ The bot runs as part of a pipeline that processes audio frames and manages the c
 """
 
 import os
-from typing import Union
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -70,58 +68,35 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
-try:
-    from mem0 import Memory, MemoryClient  # noqa: F401
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Mem0, you need to `pip install mem0ai`. Also, set the environment variable MEM0_API_KEY."
-    )
-    raise Exception(f"Missing module: {e}")
 
-
-async def get_initial_greeting(
-    memory_client: Union[MemoryClient, Memory], user_id: str, agent_id: str, run_id: str
-) -> str:
+async def get_initial_greeting(memory_service: Mem0MemoryService) -> str:
     """Fetch all memories for the user and create a personalized greeting.
 
+    Args:
+        memory_service: The Mem0 memory service instance.
+
     Returns:
-        A personalized greeting based on user memories
+        A personalized greeting based on user memories.
     """
     try:
-        if isinstance(memory_client, Memory):
-            filters = {"user_id": user_id, "agent_id": agent_id, "run_id": run_id}
-            filters = {k: v for k, v in filters.items() if v is not None}
-            memories = memory_client.get_all(**filters)
-        else:
-            # Create filters based on available IDs
-            id_pairs = [("user_id", user_id), ("agent_id", agent_id), ("run_id", run_id)]
-            clauses = [{name: value} for name, value in id_pairs if value is not None]
-            filters = {"AND": clauses} if clauses else {}
-
-            # Get all memories for this user
-            memories = memory_client.get_all(filters=filters, version="v2", output_format="v1.1")
-
-        if not memories or len(memories) == 0:
-            logger.debug(f"!!! No memories found for this user. {memories}")
+        results = await memory_service.get_memories()
+        if not results:
+            logger.debug("No memories found for this user.")
             return "Hello! It's nice to meet you. How can I help you today?"
 
         # Create a personalized greeting based on memories
         greeting = "Hello! It's great to see you again. "
+        greeting += "Based on our previous conversations, I remember: "
+        for i, memory in enumerate(results[:3], 1):
+            memory_content = memory.get("memory", "")
+            # Keep memory references brief
+            if len(memory_content) > 100:
+                memory_content = memory_content[:97] + "..."
+            greeting += f"{memory_content} "
 
-        # Add some personalization based on memories (limit to 3 memories for brevity)
-        if len(memories) > 0:
-            greeting += "Based on our previous conversations, I remember: "
-            for i, memory in enumerate(memories["results"][:3], 1):
-                memory_content = memory.get("memory", "")
-                # Keep memory references brief
-                if len(memory_content) > 100:
-                    memory_content = memory_content[:97] + "..."
-                greeting += f"{memory_content} "
+        greeting += "How can I help you today?"
 
-            greeting += "How can I help you today?"
-
-        logger.debug(f"Created personalized greeting from {len(memories)} memories")
+        logger.debug(f"Created personalized greeting from {len(results)} memories")
         return greeting
 
     except Exception as e:
@@ -129,27 +104,20 @@ async def get_initial_greeting(
         return "Hello! How can I help you today?"
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -174,7 +142,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize text-to-speech service
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY"),
-        voice_id="pNInz6obpgDQGcFmaJgB",
+        settings=ElevenLabsTTSService.Settings(
+            voice="pNInz6obpgDQGcFmaJgB",
+        ),
     )
 
     # =====================================================================
@@ -229,37 +199,36 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # )
 
     # Initialize LLM service
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
-
-    messages = [
-        {
-            "role": "system",
-            "content": """You are a personal assistant. You can remember things about the person you are talking to.
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
+            system_instruction="""You are a personal assistant. You can remember things about the person you are talking to.
                         Some Guidelines:
                         - Make sure your responses are friendly yet short and concise.
                         - If the user asks you to remember something, make sure to remember it.
                         - Greet the user by their name if you know about it.
                     """,
-        },
-    ]
+        ),
+    )
 
     # Set up conversation context and management
     # The context_aggregator will automatically collect conversation context
-    context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(context)
-    rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),
-            rtvi,
             stt,
-            context_aggregator.user(),
+            user_aggregator,
             memory,
             llm,
             tts,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -270,26 +239,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        observers=[RTVIObserver(rtvi)],
     )
-
-    @rtvi.event_handler("on_client_ready")
-    async def on_client_ready(rtvi):
-        await rtvi.set_bot_ready()
-        # Get personalized greeting based on user memories. Can pass agent_id and run_id as per requirement of the application to manage short term memory or agent specific memory.
-        greeting = await get_initial_greeting(
-            memory_client=memory.memory_client, user_id=USER_ID, agent_id=None, run_id=None
-        )
-
-        # Add the greeting as an assistant message to start the conversation
-        context.add_message({"role": "assistant", "content": greeting})
-
-        # Queue the context frame to start the conversation
-        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        # Get personalized greeting based on user memories
+        greeting = await get_initial_greeting(memory)
+
+        # Add the greeting as an assistant message to start the conversation
+        context.add_message({"role": "developer", "content": greeting})
+
+        # Queue the context frame to start the conversation
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

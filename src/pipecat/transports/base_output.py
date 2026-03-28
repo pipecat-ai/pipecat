@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -23,6 +23,7 @@ from pipecat.audio.dtmf.utils import load_dtmf_audio
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.utils import create_stream_resampler, is_silence
 from pipecat.frames.frames import (
+    AssistantImageRawFrame,
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -43,12 +44,15 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
     TTSAudioRawFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import nanoseconds_to_seconds
 
 BOT_VAD_STOP_SECS = 0.35
+# Only used as a fallback
+BOT_VAD_STOP_FALLBACK_SECS = 3
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -236,6 +240,18 @@ class BaseOutputTransport(FrameProcessor):
         else:
             await self._write_dtmf_audio(frame)
 
+    async def write_transport_frame(self, frame: Frame):
+        """Handle a queued frame after preceding audio has been sent.
+
+        Override in transport subclasses to handle custom frame types that
+        flow through the audio queue. Called by the media sender after the
+        frame has waited for any preceding audio to finish.
+
+        Args:
+            frame: The frame to handle.
+        """
+        pass
+
     def _supports_native_dtmf(self) -> bool:
         """Override in transport implementations that support native DTMF.
 
@@ -335,8 +351,14 @@ class BaseOutputTransport(FrameProcessor):
             await sender.handle_audio_frame(frame)
         elif isinstance(frame, (OutputImageRawFrame, SpriteFrame)):
             await sender.handle_image_frame(frame)
+            if isinstance(frame, AssistantImageRawFrame):
+                # This will push it further, to be handled by the assistant
+                # aggregator, say
+                await sender.handle_sync_frame(frame)
         elif isinstance(frame, MixerControlFrame):
             await sender.handle_mixer_control_frame(frame)
+        elif isinstance(frame, TTSStoppedFrame):
+            await sender.handle_sync_frame(frame)
         elif frame.pts:
             await sender.handle_timed_frame(frame)
         else:
@@ -395,10 +417,12 @@ class BaseOutputTransport(FrameProcessor):
 
             # Indicates if the bot is currently speaking.
             self._bot_speaking = False
+            # Indicates if TTS audio has been received since the last stop.
+            self._tts_audio_received = False
             # Last time a BotSpeakingFrame was pushed.
             self._bot_speaking_frame_time = 0
             # How often a BotSpeakingFrame should be pushed (value should be
-            # lower than the audio chunks).
+            # greater than the audio chunks to have any effect).
             self._bot_speaking_frame_period = 0.2
             # Last time the bot actually spoke.
             self._bot_speech_last_time = 0
@@ -493,17 +517,19 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 _: The start interruption frame (unused).
             """
-            if not self._transport.interruptions_allowed:
+            if not self._transport._allow_interruptions:
                 return
 
             # Cancel tasks.
             await self._cancel_audio_task()
             await self._cancel_clock_task()
             await self._cancel_video_task()
+
             # Create tasks.
             self._create_video_task()
             self._create_clock_task()
             self._create_audio_task()
+
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
 
@@ -543,7 +569,11 @@ class BaseOutputTransport(FrameProcessor):
             if not self._params.video_out_enabled:
                 return
 
-            if self._params.video_out_is_live and isinstance(frame, OutputImageRawFrame):
+            if isinstance(frame, OutputImageRawFrame) and frame.sync_with_audio:
+                # Route through the audio queue so the image is only
+                # displayed after all preceding audio has been sent.
+                await self._audio_queue.put(frame)
+            elif self._params.video_out_is_live and isinstance(frame, OutputImageRawFrame):
                 await self._video_queue.put(frame)
             elif isinstance(frame, OutputImageRawFrame):
                 await self._set_video_image(frame)
@@ -596,6 +626,8 @@ class BaseOutputTransport(FrameProcessor):
             if self._bot_speaking:
                 return
 
+            self._bot_speaking = True
+
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
             )
@@ -604,15 +636,25 @@ class BaseOutputTransport(FrameProcessor):
             downstream_frame.transport_destination = self._destination
             upstream_frame = BotStartedSpeakingFrame()
             upstream_frame.transport_destination = self._destination
+
+            # Setting the siblings id
+            upstream_frame.broadcast_sibling_id = downstream_frame.id
+            downstream_frame.broadcast_sibling_id = upstream_frame.id
+
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
-
-            self._bot_speaking = True
 
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
             if not self._bot_speaking:
                 return
+
+            self._bot_speaking = False
+            self._tts_audio_received = False
+
+            # Clean audio buffer (there could be tiny left overs if not multiple
+            # to our output chunk size).
+            self._audio_buffer = bytearray()
 
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
@@ -622,14 +664,13 @@ class BaseOutputTransport(FrameProcessor):
             downstream_frame.transport_destination = self._destination
             upstream_frame = BotStoppedSpeakingFrame()
             upstream_frame.transport_destination = self._destination
+
+            # Setting the siblings id
+            upstream_frame.broadcast_sibling_id = downstream_frame.id
+            downstream_frame.broadcast_sibling_id = upstream_frame.id
+
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
-
-            self._bot_speaking = False
-
-            # Clean audio buffer (there could be tiny left overs if not multiple
-            # to our output chunk size).
-            self._audio_buffer = bytearray()
 
         async def _bot_currently_speaking(self):
             """Handle bot speaking event."""
@@ -637,8 +678,7 @@ class BaseOutputTransport(FrameProcessor):
 
             diff_time = time.time() - self._bot_speaking_frame_time
             if diff_time >= self._bot_speaking_frame_period:
-                await self._transport.push_frame(BotSpeakingFrame())
-                await self._transport.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+                await self._transport.broadcast_frame(BotSpeakingFrame)
                 self._bot_speaking_frame_time = time.time()
 
             self._bot_speech_last_time = time.time()
@@ -654,6 +694,9 @@ class BaseOutputTransport(FrameProcessor):
         async def _handle_bot_speech(self, frame: Frame):
             # TTS case.
             if isinstance(frame, TTSAudioRawFrame):
+                # We will only trigger bot stopped speaking based on the TTSStoppedFrame,
+                # if we have received audio from TTS
+                self._tts_audio_received = True
                 await self._bot_currently_speaking()
             # Speech stream case.
             elif isinstance(frame, SpeechOutputAudioRawFrame):
@@ -675,6 +718,14 @@ class BaseOutputTransport(FrameProcessor):
                 await self._transport.send_message(frame)
             elif isinstance(frame, OutputDTMFFrame):
                 await self._transport.write_dtmf(frame)
+            elif isinstance(frame, TTSStoppedFrame):
+                # We will only trigger bot stopped speaking based on the TTSStoppedFrame,
+                # if we have received audio from TTS
+                if self._tts_audio_received:
+                    logger.debug("Bot stopped speaking based on TTSStoppedFrame")
+                    await self._bot_stopped_speaking()
+            else:
+                await self._transport.write_transport_frame(frame)
 
         def _next_frame(self) -> AsyncGenerator[Frame, None]:
             """Generate the next frame for audio processing.
@@ -692,7 +743,7 @@ class BaseOutputTransport(FrameProcessor):
                         yield frame
                         self._audio_queue.task_done()
                     except asyncio.TimeoutError:
-                        # Notify the bot stopped speaking upstream if necessary.
+                        # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
                         await self._bot_stopped_speaking()
 
             async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
@@ -707,7 +758,7 @@ class BaseOutputTransport(FrameProcessor):
                         yield frame
                         self._audio_queue.task_done()
                     except asyncio.QueueEmpty:
-                        # Notify the bot stopped speaking upstream if necessary.
+                        # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
                         diff_time = time.time() - last_frame_time
                         if diff_time > vad_stop_secs:
                             await self._bot_stopped_speaking()
@@ -725,9 +776,9 @@ class BaseOutputTransport(FrameProcessor):
                         await asyncio.sleep(0)
 
             if self._mixer:
-                return with_mixer(BOT_VAD_STOP_SECS)
+                return with_mixer(BOT_VAD_STOP_FALLBACK_SECS)
             else:
-                return without_mixer(BOT_VAD_STOP_SECS)
+                return without_mixer(BOT_VAD_STOP_FALLBACK_SECS)
 
         async def _send_silence(self, secs: int):
             if secs <= 0:
@@ -753,7 +804,7 @@ class BaseOutputTransport(FrameProcessor):
                 await self._handle_frame(frame)
 
                 # If we are not able to write to the transport we shouldn't
-                # pushb downstream.
+                # push downstream.
                 push_downstream = True
 
                 # Try to send audio to the transport.

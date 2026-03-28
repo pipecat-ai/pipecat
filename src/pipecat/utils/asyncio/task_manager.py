@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,6 +12,7 @@ comprehensive monitoring and cleanup capabilities.
 """
 
 import asyncio
+import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Coroutine, Dict, Optional, Sequence
@@ -156,13 +157,15 @@ class TaskManager(BaseTaskManager):
 
         async def run_coroutine():
             try:
-                await coroutine
+                return await coroutine
             except asyncio.CancelledError:
                 logger.trace(f"{name}: task cancelled")
                 # Re-raise the exception to ensure the task is cancelled.
                 raise
             except Exception as e:
-                logger.exception(f"{name}: unexpected exception: {e}")
+                tb = traceback.extract_tb(e.__traceback__)
+                last = tb[-1]
+                logger.error(f"{name} unexpected exception ({last.filename}:{last.lineno}): {e}")
 
         if not self._params:
             raise Exception("TaskManager is not setup: unable to get event loop")
@@ -197,9 +200,17 @@ class TaskManager(BaseTaskManager):
             # Here are sure the task is cancelled properly.
             pass
         except Exception as e:
-            logger.exception(f"{name}: unexpected exception while cancelling task: {e}")
+            tb = traceback.extract_tb(e.__traceback__)
+            last = tb[-1]
+            logger.error(
+                f"{name} unexpected exception while cancelling task ({last.filename}:{last.lineno}): {e}"
+            )
         except BaseException as e:
-            logger.critical(f"{name}: fatal base exception while cancelling task: {e}")
+            tb = traceback.extract_tb(e.__traceback__)
+            last = tb[-1]
+            logger.critical(
+                f"{name} fatal base exception while cancelling task ({last.filename}:{last.lineno}): {e}"
+            )
             raise
 
     def current_tasks(self) -> Sequence[asyncio.Task]:

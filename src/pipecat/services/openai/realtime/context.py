@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -113,6 +113,11 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
     Extends the standard OpenAI LLM context to support real-time session properties,
     instruction management, and conversion between standard message formats and
     realtime conversation items.
+
+    .. deprecated:: 0.0.99
+        `OpenAIRealtimeLLMContext` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(self, messages=None, tools=None, **kwargs):
@@ -123,6 +128,7 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
             tools: Available function tools. Defaults to None.
             **kwargs: Additional arguments passed to parent OpenAILLMContext.
         """
+        # Super handles deprecation warning
         super().__init__(messages=messages, tools=tools, **kwargs)
         self.__setup_local()
 
@@ -267,10 +273,17 @@ class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
     Handles user input frames and generates appropriate context updates
     for the realtime conversation, including message updates and tool settings.
 
+    .. deprecated:: 0.0.99
+        `OpenAIRealtimeUserContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Args:
         context: The OpenAI realtime LLM context.
         **kwargs: Additional arguments passed to parent aggregator.
     """
+
+    # Super handles deprecation warning
 
     async def process_frame(
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
@@ -311,10 +324,17 @@ class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator)
     Handles assistant output frames from the realtime service, filtering
     out duplicate text frames and managing function call results.
 
+    .. deprecated:: 0.0.99
+        `OpenAIRealtimeAssistantContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Args:
         context: The OpenAI realtime LLM context.
         **kwargs: Additional arguments passed to parent aggregator.
     """
+
+    # Super handles deprecation warning
 
     # The LLMAssistantContextAggregator uses TextFrames to aggregate the LLM output,
     # but the OpenAIRealtimeLLMService pushes LLMTextFrames and TTSTextFrames. We

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -152,6 +152,10 @@ class MessagesConfig(BaseModel):
 class GladiaInputParams(BaseModel):
     """Configuration parameters for the Gladia STT service.
 
+    .. deprecated:: 0.0.105
+        Use ``settings=GladiaSTTService.Settings(...)`` for runtime-updatable
+        fields and direct init parameters for encoding/bit_depth/channels.
+
     Parameters:
         encoding: Audio encoding format
         bit_depth: Audio bit depth
@@ -169,6 +173,9 @@ class GladiaInputParams(BaseModel):
         pre_processing: Audio pre-processing options
         realtime_processing: Real-time processing features
         messages_config: WebSocket message filtering options
+        enable_vad: Enable VAD to trigger end of utterance detection. This should be used
+            without any other VAD enabled in the agent and will emit the speaker started
+            and stopped frames. Defaults to False.
     """
 
     encoding: Optional[str] = "wav/pcm"
@@ -182,3 +189,4 @@ class GladiaInputParams(BaseModel):
     pre_processing: Optional[PreProcessingConfig] = None
     realtime_processing: Optional[RealtimeProcessingConfig] = None
     messages_config: Optional[MessagesConfig] = None
+    enable_vad: bool = False

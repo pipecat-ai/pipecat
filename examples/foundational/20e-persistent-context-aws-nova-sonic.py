@@ -21,8 +21,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
@@ -105,15 +107,26 @@ async def load_conversation(params: FunctionCallParams):
         try:
             with open(filename, "r") as file:
                 messages = json.load(file)
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
-                    }
-                )
+                # HACK: if using the older Nova Sonic (pre-2) model, you need a special way of
+                # triggering the first assistant response. The call to trigger_assistant_response(),
+                # commented out below, is part of this.
+                # messages.append(
+                #     {
+                #         "role": "developer",
+                #         "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
+                #     }
+                # )
+                # If the last message isn't from the user, add a message asking for a recap
+                if messages and messages[-1].get("role") != "user":
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "Can you catch me up on what we were talking about?",
+                        }
+                    )
                 params.context.set_messages(messages)
                 await params.llm.reset_conversation()
-                await params.llm.trigger_assistant_response()
+                # await params.llm.trigger_assistant_response()
         except Exception as e:
             await params.result_callback({"success": False, "error": str(e)})
 
@@ -173,24 +186,20 @@ tools = ToolsSchema(
 )
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -199,23 +208,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     # Specify initial system instruction.
-    # HACK: note that, for now, we need to inject a special bit of text into this instruction to
-    # allow the first assistant response to be programmatically triggered (which happens in the
-    # on_client_connected handler, below)
     system_instruction = (
         "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
         "the transcripts of a natural real-time conversation. Keep your responses short, generally "
         "two or three sentences for chatty scenarios. "
-        f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
+        # HACK: if using the older Nova Sonic (pre-2) model, note that you need to inject a special
+        # bit of text into this instruction to allow the first assistant response to be
+        # programmatically triggered (which happens in the on_client_connected handler)
+        # f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
     )
 
     llm = AWSNovaSonicLLMService(
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),  # as of 2025-05-06, us-east-1 is the only supported region
-        voice_id="tiffany",  # matthew, tiffany, amy
-        # you could choose to pass instruction here rather than via context
-        # system_instruction=system_instruction,
+        settings=AWSNovaSonicLLMService.Settings(
+            voice="tiffany",  # matthew, tiffany, amy
+            system_instruction=system_instruction,
+        ),
         # you could choose to pass tools here rather than via context
         # tools=tools
     )
@@ -225,21 +235,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = LLMContext(
-        messages=[
-            {"role": "system", "content": f"{system_instruction}"},
-        ],
-        tools=tools,
+    context = LLMContext(tools=tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
-    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            context_aggregator.user(),
+            user_aggregator,
             llm,  # LLM
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -256,11 +264,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
-        # HACK: for now, we need this special way of triggering the first assistant response in AWS
-        # Nova Sonic. Note that this trigger requires a special corresponding bit of text in the
-        # system instruction. In the future, simply queueing the context frame should be sufficient.
-        await llm.trigger_assistant_response()
+        # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
+        # triggering the first assistant response. Note that this trigger requires a special
+        # corresponding bit of text in the system instruction.
+        # await llm.trigger_assistant_response()
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

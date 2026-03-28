@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -17,10 +17,7 @@ from loguru import logger
 from mcp import StdioServerParameters
 from PIL import Image
 
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
@@ -31,7 +28,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -64,11 +64,14 @@ class UrlToImageProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     def extract_url(self, text: str):
-        data = json.loads(text)
-        if "artObject" in data:
-            return data["artObject"]["webImage"]["url"]
-        if "artworks" in data and len(data["artworks"]):
-            return data["artworks"][0]["webImage"]["url"]
+        try:
+            data = json.loads(text)
+            if "artObject" in data:
+                return data["artObject"]["webImage"]["url"]
+            if "artworks" in data and len(data["artworks"]):
+                return data["artworks"][0]["webImage"]["url"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
 
         return None
 
@@ -88,9 +91,25 @@ class UrlToImageProcessor(FrameProcessor):
             logger.error(error_msg)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# full list of tools available from rijksmuseum MCP:
+# - get_artwork_details
+# - get_artwork_image
+# - get_user_sets
+# - get_user_set_details
+# - open_image_in_browser
+# - get_artist_timeline
+
+mcp_tools_filter = ["get_artwork_details", "get_artwork_image", "open_image_in_browser"]
+
+
+def open_image_output_filter(output: str):
+    pattern = r"Successfully opened image in browser: "
+    text_to_print = re.sub(pattern, "", output)
+    print(f"🖼️ link to high resolution artwork: {text_to_print}")
+
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -98,8 +117,6 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -107,8 +124,6 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -122,11 +137,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            settings=CartesiaTTSService.Settings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
         )
 
+        system_prompt = f"""
+        You are a helpful LLM in a voice call.
+        Your goal is to demonstrate your capabilities in a succinct way.
+        You have access to tools to search the Rijksmuseum collection.
+        Offer, for example, to show a floral still life, use the `search_artwork` tool.
+        The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
+        Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
+        Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
+        Respond to what the user said in a creative and helpful way.
+        Don't overexplain what you are doing.
+        Just respond with short sentences when you are carrying out tool calls.
+        """
+
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            settings=AnthropicLLMService.Settings(
+                system_instruction=system_prompt,
+            ),
         )
 
         try:
@@ -136,7 +169,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     # https://github.com/r-huijts/rijksmuseum-mcp
                     args=["-y", "mcp-server-rijksmuseum"],
                     env={"RIJKSMUSEUM_API_KEY": os.getenv("RIJKSMUSEUM_API_KEY")},
-                )
+                ),
+                # Optional
+                tools_filter=mcp_tools_filter,  # Optional
+                tools_output_filters={"open_image_in_browser": open_image_output_filter},
             )
         except Exception as e:
             logger.error(f"error setting up mcp")
@@ -151,34 +187,22 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             logger.error(f"error registering tools")
             logger.exception("error trace:")
 
-        system = f"""
-        You are a helpful LLM in a WebRTC call.
-        Your goal is to demonstrate your capabilities in a succinct way.
-        You have access to tools to search the Rijksmuseum collection.
-        Offer, for example, to show the earliest Rembrandt work from the museum. Use the `search_artwork` tool.
-        The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
-        Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
-        Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
-        Respond to what the user said in a creative and helpful way.
-        Don't overexplain what you are doing.
-        Just respond with short sentences when you are carrying out tool calls.
-        """
-
-        messages = [{"role": "system", "content": system}]
-
-        context = LLMContext(messages, tools)
-        context_aggregator = LLMContextAggregatorPair(context)
+        context = LLMContext(tools=tools)
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        )
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 stt,
-                context_aggregator.user(),  # User spoken responses
+                user_aggregator,  # User spoken responses
                 llm,  # LLM
                 tts,  # TTS
                 mcp_image,  # URL image -> output
                 transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses and tool context
+                assistant_aggregator,  # Assistant spoken responses and tool context
             ]
         )
 
