@@ -149,7 +149,7 @@ class PipelineParams(BaseModel):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     heartbeats_period_secs: float = HEARTBEAT_SECS
-    heartbeats_monitor_secs: Optional[float] = HEARTBEAT_MONITOR_SECS
+    heartbeats_monitor_secs: float = HEARTBEAT_MONITOR_SECS
     interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
     observers: List[BaseObserver] = Field(default_factory=list)
     report_only_initial_ttfb: bool = False
