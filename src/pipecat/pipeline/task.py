@@ -967,9 +967,9 @@ class PipelineTask(BasePipelineTask):
         the time that a heartbeat frame takes to processes, that is how long it
         takes for the heartbeat frame to traverse all the pipeline.
         """
+        wait_time = self._params.heartbeats_monitor_secs
         while True:
             try:
-                wait_time = self._params.heartbeats_monitor_secs
                 frame = await asyncio.wait_for(self._heartbeat_queue.get(), timeout=wait_time)
                 process_time = (self._clock.get_time() - frame.timestamp) / 1_000_000_000
                 logger.trace(f"{self}: heartbeat frame processed in {process_time} seconds")
