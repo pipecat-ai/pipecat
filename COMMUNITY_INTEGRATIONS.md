@@ -225,6 +225,17 @@ Vision services process images and provide analysis such as descriptions, object
 
 ### Naming Conventions
 
+#### Package and Repository Naming
+
+Use the `pipecat-{vendor}` naming convention for your PyPI package and repository:
+
+- `pipecat-{vendor}` — for single-service integrations (e.g., `pipecat-deepdub`)
+- `pipecat-{vendor}-{type}` — when a vendor offers multiple service types (e.g., `pipecat-upliftai-stt`, `pipecat-upliftai-tts`)
+
+This convention makes community packages easily discoverable via PyPI search and clearly identifies them as part of the Pipecat ecosystem.
+
+#### Class Naming
+
 - **STT:** `VendorSTTService`
 - **LLM:** `VendorLLMService`
 - **TTS:**
@@ -406,8 +417,9 @@ Use Pipecat's tracing decorators:
 
 ### Packaging and Distribution
 
+- Name your package `pipecat-{vendor}` (see [Naming Conventions](#naming-conventions))
 - Use [uv](https://docs.astral.sh/uv/) for packaging (encouraged)
-- Consider releasing to PyPI for easier installation
+- Publish to PyPI for easier installation
 - Follow semantic versioning principles
 - Maintain a changelog
 
