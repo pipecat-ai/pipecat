@@ -81,7 +81,7 @@ inworld = []
 koala = [ "pvkoala~=2.0.3" ]
 kokoro = [ "kokoro-onnx>=0.5.0,<1", "requests>=2.32.5,<3" ]
 krisp = [ "pipecat-ai-krisp~=0.4.0" ]
-langchain = [ "langchain~=0.3.28", "langchain-community~=0.3.31", "langchain-openai~=0.3.29" ]
+langchain = [ "langchain>=1.2.13,<2", "langchain-community>=0.4.1,<1", "langchain-openai>=1.1.12,<2" ]
 lemonslice = [ "pipecat-ai[daily]" ]
 livekit = [ "livekit>=1.0.13,<2", "livekit-api>=1.0.5,<2", "tenacity>=8.2.3,<10.0.0", "pyjwt>=2.12.0,<3" ]
 lmnt = [ "pipecat-ai[websockets-base]" ]
@@ -177,6 +177,14 @@ where = ["src"]
 ]
 "pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
 "pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx"]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "langchain" },
+        { extra = "openpipe" },
+    ],
+]
 
 [tool.pytest.ini_options]
 addopts = "--verbose"
