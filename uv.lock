@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -4252,22 +4252,6 @@ wheels = [
 ]
 
 [[package]]
-name = "openpipe"
-version = "5.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "anthropic" },
-    { name = "attrs" },
-    { name = "httpx" },
-    { name = "openai" },
-    { name = "python-dateutil" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/7c/34/b487bc0ff60d3ed634e6f7bc34b5138f04e6ae319cc6578001822df93901/openpipe-5.0.0.tar.gz", hash = "sha256:040acc526fece42ba505fcedd8cd584f42482c9bd01f16b2538c9ea9c82882f4", size = 98910, upload-time = "2025-07-31T01:36:29.482Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7a/5e/516010c25a32884a87e1f8303a292f3981fa382cc7570a9ed88fb28681d5/openpipe-5.0.0-py3-none-any.whl", hash = "sha256:c04af7afb4d9bcd52e1250757dd93d0e0ed19c9ff4b524f131dd94aadf4c1a9b", size = 439951, upload-time = "2025-07-31T01:36:28.003Z" },
-]
-
-[[package]]
 name = "opentelemetry-api"
 version = "1.40.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4781,9 +4765,6 @@ nvidia = [
 openai = [
     { name = "websockets" },
 ]
-openpipe = [
-    { name = "openpipe" },
-]
 piper = [
     { name = "piper-tts" },
     { name = "requests" },
@@ -4933,7 +4914,6 @@ requires-dist = [
     { name = "onnxruntime", specifier = "~=1.23.2" },
     { name = "openai", specifier = ">=1.74.0,<3" },
     { name = "opencv-python", marker = "extra == 'webrtc'", specifier = ">=4.11.0.86,<5" },
-    { name = "openpipe", marker = "extra == 'openpipe'", specifier = ">=4.50.0,<6" },
     { name = "opentelemetry-api", marker = "extra == 'tracing'", specifier = ">=1.33.0,<2" },
     { name = "opentelemetry-instrumentation", marker = "extra == 'tracing'", specifier = ">=0.54b0,<1" },
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.33.0,<2" },
@@ -4996,7 +4976,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1,<16.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "nebius", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "kokoro", "krisp", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "novita", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "piper", "qwen", "remote-smart-turn", "resembleai", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper", "xai"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "kokoro", "krisp", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nebius", "neuphonic", "noisereduce", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "piper", "qwen", "remote-smart-turn", "resembleai", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper", "xai"]
 
 [package.metadata.requires-dev]
 dev = [
