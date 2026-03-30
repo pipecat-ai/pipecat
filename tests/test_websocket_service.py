@@ -4,13 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Tests for WebsocketService quick failure detection."""
+"""Tests for WebsocketService reconnection and lifecycle behavior."""
 
-import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from websockets.exceptions import ConnectionClosedError
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.frames import Close
 
 from pipecat.frames.frames import ErrorFrame
@@ -45,10 +44,135 @@ def report_error():
     return AsyncMock()
 
 
+@pytest.fixture(autouse=True)
+def _no_sleep():
+    """Patch asyncio.sleep globally to avoid real backoff waits."""
+    with patch("pipecat.services.websocket_service.asyncio.sleep", new_callable=AsyncMock):
+        yield
+
+
+# ---------------------------------------------------------------------------
+# Receive loop — how each exception type is handled
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_connection_closed_ok_exits_cleanly(service, report_error):
+    """ConnectionClosedOK exits the loop with no error and no reconnection."""
+    service._receive_messages_impl = AsyncMock(
+        side_effect=ConnectionClosedOK(Close(1000, "Normal closure"), None)
+    )
+    service._try_reconnect = AsyncMock()
+
+    await service._receive_task_handler(report_error)
+
+    report_error.assert_not_called()
+    service._try_reconnect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_connection_closed_error_triggers_reconnect(service, report_error):
+    """ConnectionClosedError triggers reconnection; loop continues after success."""
+    call_count = 0
+
+    async def fail_then_exit():
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise ConnectionClosedError(Close(1006, "Abnormal closure"), None)
+        service._disconnecting = True
+
+    service._receive_messages_impl = AsyncMock(side_effect=fail_then_exit)
+    service._try_reconnect = AsyncMock(return_value=True)
+
+    await service._receive_task_handler(report_error)
+
+    assert call_count == 2
+    service._try_reconnect.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_graceful_server_close_triggers_reconnect(service, report_error):
+    """Normal return from _receive_messages (server close frame) triggers reconnection."""
+    call_count = 0
+
+    async def return_then_exit():
+        nonlocal call_count
+        call_count += 1
+        if call_count > 1:
+            service._disconnecting = True
+
+    service._receive_messages_impl = AsyncMock(side_effect=return_then_exit)
+    service._try_reconnect = AsyncMock(return_value=True)
+
+    await service._receive_task_handler(report_error)
+
+    assert call_count == 2
+    service._try_reconnect.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_general_exception_triggers_reconnect(service, report_error):
+    """A general exception in _receive_messages triggers reconnection."""
+    call_count = 0
+
+    async def fail_then_exit():
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("something broke")
+        service._disconnecting = True
+
+    service._receive_messages_impl = AsyncMock(side_effect=fail_then_exit)
+    service._try_reconnect = AsyncMock(return_value=True)
+
+    await service._receive_task_handler(report_error)
+
+    assert call_count == 2
+    service._try_reconnect.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Exponential backoff — server unreachable
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reconnect_succeeds_on_later_attempt(service, report_error):
+    """_try_reconnect retries and succeeds on a later attempt."""
+    service._reconnect_websocket = AsyncMock(
+        side_effect=[ConnectionError("fail"), ConnectionError("fail"), True]
+    )
+
+    result = await service._try_reconnect(report_error=report_error)
+
+    assert result is True
+    assert service._reconnect_websocket.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_reconnect_exhausted_emits_non_fatal_error(service, report_error):
+    """Exhausting all retries returns False and emits a non-fatal ErrorFrame."""
+    service._reconnect_websocket = AsyncMock(side_effect=ConnectionError("Connection refused"))
+
+    result = await service._try_reconnect(report_error=report_error)
+
+    assert result is False
+    assert service._reconnect_websocket.call_count == 3
+    final_error = report_error.call_args_list[-1][0][0]
+    assert isinstance(final_error, ErrorFrame)
+    assert final_error.fatal is False
+    assert "Connection refused" in final_error.error
+
+
+# ---------------------------------------------------------------------------
+# Quick failure detection — accept then immediately close
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
 async def test_quick_failures_emit_error(service, report_error):
-    """Connections that fail immediately after being established should emit an error
-    after MAX_CONSECUTIVE_QUICK_FAILURES consecutive quick failures."""
+    """Connections failing immediately after establishment emit error after 3 cycles."""
     call_count = 0
 
     async def fail_immediately():
@@ -57,14 +181,11 @@ async def test_quick_failures_emit_error(service, report_error):
         raise ConnectionClosedError(Close(1008, "Invalid API key"), None)
 
     service._receive_messages_impl = AsyncMock(side_effect=fail_immediately)
-    # Mock _try_reconnect to succeed (handshake passes but connection dies right away)
     service._try_reconnect = AsyncMock(return_value=True)
 
     await service._receive_task_handler(report_error)
 
-    # Should have called _receive_messages MAX_RAPID_FAILURES times
     assert call_count == service._MAX_CONSECUTIVE_QUICK_FAILURES
-    # Should have emitted a fatal error
     report_error.assert_called_once()
     error_frame = report_error.call_args[0][0]
     assert isinstance(error_frame, ErrorFrame)
@@ -74,110 +195,79 @@ async def test_quick_failures_emit_error(service, report_error):
 
 @pytest.mark.asyncio
 async def test_stable_connection_resets_quick_failure_counter(service, report_error):
-    """A connection that survives beyond the threshold should reset the quick failure counter."""
+    """A stable connection resets the quick failure counter; needs 3 new failures to trigger."""
     call_count = 0
 
-    async def fail_then_stable_then_fail():
+    async def always_fail():
         nonlocal call_count
         call_count += 1
-        if call_count <= 2:
-            # First two calls: quick failures
-            raise ConnectionClosedError(Close(1006, "Abnormal closure"), None)
-        elif call_count == 3:
-            # Third call: simulate a stable connection by advancing time past threshold
-            raise ConnectionClosedError(Close(1006, "Abnormal closure"), None)
-        else:
-            # Fourth and beyond: quick failures again
-            raise ConnectionClosedError(Close(1006, "Abnormal closure"), None)
+        raise ConnectionClosedError(Close(1006, "Abnormal closure"), None)
 
-    service._receive_messages_impl = AsyncMock(side_effect=fail_then_stable_then_fail)
+    service._receive_messages_impl = AsyncMock(side_effect=always_fail)
     service._try_reconnect = AsyncMock(return_value=True)
 
-    # Patch time.monotonic to control timing
     base_time = 1000.0
     time_values = iter(
         [
-            # Call 1: set _last_connect_time
+            # Call 1: set _last_connect_time, check in _maybe_try_reconnect (quick) -> count=1
             base_time,
-            # Call 1: check in _maybe_try_reconnect (rapid: 0s elapsed)
             base_time,
-            # Call 2: set _last_connect_time
+            # Call 2: quick -> count=2
             base_time + 1.0,
-            # Call 2: check in _maybe_try_reconnect (rapid: 0s elapsed)
             base_time + 1.0,
-            # Call 3: set _last_connect_time
+            # Call 3: stable (10s elapsed) -> count=0
             base_time + 2.0,
-            # Call 3: check in _maybe_try_reconnect (stable: 10s elapsed)
             base_time + 12.0,
-            # Call 4: set _last_connect_time
+            # Call 4: quick -> count=1
             base_time + 13.0,
-            # Call 4: check in _maybe_try_reconnect (rapid: 0s elapsed)
             base_time + 13.0,
-            # Call 5: set _last_connect_time
+            # Call 5: quick -> count=2
             base_time + 14.0,
-            # Call 5: check in _maybe_try_reconnect (rapid: 0s elapsed)
             base_time + 14.0,
-            # Call 6: set _last_connect_time
+            # Call 6: quick -> count=3 -> error emitted, loop stops
             base_time + 15.0,
-            # Call 6: check in _maybe_try_reconnect (rapid: 0s elapsed)
             base_time + 15.0,
         ]
     )
 
     with patch("pipecat.services.websocket_service.time") as mock_time:
         mock_time.monotonic = lambda: next(time_values)
-
         await service._receive_task_handler(report_error)
 
-    # After the stable connection (call 3), counter resets to 0.
-    # Then calls 4, 5, 6 are quick failures (counter: 1, 2, 3) -> error emitted
     assert call_count == 6
     report_error.assert_called_once()
     error_frame = report_error.call_args[0][0]
     assert error_frame.fatal is False
 
 
+# ---------------------------------------------------------------------------
+# Lifecycle and guards
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
-async def test_graceful_close_counts_toward_quick_failures(service, report_error):
-    """A _receive_messages that returns normally (graceful close) should also count
-    toward quick failures if it happens immediately."""
-    call_count = 0
+async def test_disconnect_prevents_reconnection(service, report_error):
+    """After _disconnect(), errors exit the loop without reconnecting or emitting errors."""
+    await service._disconnect()
 
-    async def return_immediately():
-        nonlocal call_count
-        call_count += 1
-
-    service._receive_messages_impl = AsyncMock(side_effect=return_immediately)
-    service._try_reconnect = AsyncMock(return_value=True)
+    service._receive_messages_impl = AsyncMock(
+        side_effect=ConnectionClosedError(Close(1006, "Abnormal closure"), None)
+    )
+    service._try_reconnect = AsyncMock()
 
     await service._receive_task_handler(report_error)
 
-    assert call_count == service._MAX_CONSECUTIVE_QUICK_FAILURES
-    report_error.assert_called_once()
-    error_frame = report_error.call_args[0][0]
-    assert isinstance(error_frame, ErrorFrame)
-    assert error_frame.fatal is False
-
-
-@pytest.mark.asyncio
-async def test_connect_resets_quick_failure_counter(service):
-    """Calling _connect() should reset the quick failure counter."""
-    service._quick_failure_count = 5
-    await service._connect()
-    assert service._quick_failure_count == 0
-
-
-@pytest.mark.asyncio
-async def test_intentional_disconnect_skips_quick_failure_logic(service, report_error):
-    """When _disconnecting is True, quick failure detection should not run."""
-    service._disconnecting = True
-    service._quick_failure_count = 0
-    service._last_connect_time = time.monotonic()
-
-    result = await service._maybe_try_reconnect("test error", report_error)
-
-    assert result is False
-    # Counter should not have been incremented
-    assert service._quick_failure_count == 0
-    # No error frame should have been emitted
     report_error.assert_not_called()
+    service._try_reconnect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_connect_resets_state(service):
+    """_connect() resets _disconnecting and _quick_failure_count."""
+    service._disconnecting = True
+    service._quick_failure_count = 5
+
+    await service._connect()
+
+    assert service._disconnecting is False
+    assert service._quick_failure_count == 0
