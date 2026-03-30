@@ -229,34 +229,6 @@ class SendTextData(BaseModel):
     options: Optional[SendTextOptions] = None
 
 
-class AppendToContextData(BaseModel):
-    """Data format for appending messages to the context.
-
-    Contains the role, content, and whether to run the message immediately.
-
-    .. deprecated:: 0.0.85
-        The RTVI message, append-to-context, has been deprecated. Use send-text
-        or custom client and server messages instead.
-    """
-
-    role: Literal["user", "assistant"] | str
-    content: Any
-    run_immediately: bool = False
-
-
-class AppendToContext(BaseModel):
-    """RTVI message format to append content to the LLM context.
-
-    .. deprecated:: 0.0.85
-        The RTVI message, append-to-context, has been deprecated. Use send-text
-        or custom client and server messages instead.
-    """
-
-    label: MessageLiteral = MESSAGE_LABEL
-    type: Literal["append-to-context"] = "append-to-context"
-    data: AppendToContextData
-
-
 class LLMFunctionCallStartMessageData(BaseModel):
     """Data for LLM function call start notification.
 
