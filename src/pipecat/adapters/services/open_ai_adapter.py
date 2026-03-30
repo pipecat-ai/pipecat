@@ -134,6 +134,9 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                                 item["image_url"]["url"] = "data:image/..."
                         if item["type"] == "input_audio":
                             item["input_audio"]["data"] = "..."
+                        if item["type"] == "file":
+                            if item["file"]["file_data"].startswith("data:"):
+                                item["file"]["file_data"] = "data:..."
             if "mime_type" in msg and msg["mime_type"].startswith("image/"):
                 msg["data"] = "..."
             msgs.append(msg)

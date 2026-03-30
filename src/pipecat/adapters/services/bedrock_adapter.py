@@ -102,6 +102,8 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                     for item in msg["content"]:
                         if item.get("image"):
                             item["image"]["source"]["bytes"] = "..."
+                        if item.get("type") == "file":
+                            item["file"]["file_data"] = "data:..."
             messages_for_logging.append(msg)
         return messages_for_logging
 

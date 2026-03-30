@@ -95,6 +95,9 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
                             item["audio"] = "..."
                         if item.get("type") == "audio":
                             item["audio"] = "..."
+                        if item.get("type") == "file":
+                            if item["file"]["file_data"].startswith("data:"):
+                                item["file"]["file_data"] = "data:..."
             msgs.append(msg)
         return msgs
 

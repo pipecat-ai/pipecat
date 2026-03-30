@@ -1151,6 +1151,8 @@ class AnthropicLLMContext(OpenAILLMContext):
                     for item in msg["content"]:
                         if item["type"] == "image":
                             item["source"]["data"] = "..."
+                        if item["type"] == "file":
+                            item["file"]["file_data"] = "data:..."
             msgs.append(msg)
         return msgs
 
