@@ -93,28 +93,6 @@ class BaseInputTransport(FrameProcessor):
         # them downstream until we get another `StartFrame`.
         self._paused = False
 
-        if self._params.vad_enabled:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'vad_enabled' is deprecated, use 'audio_in_enabled' and 'vad_analyzer' instead.",
-                    DeprecationWarning,
-                )
-            self._params.audio_in_enabled = True
-
-        if self._params.vad_audio_passthrough:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'vad_audio_passthrough' is deprecated, audio passthrough is now always enabled. Use 'audio_in_passthrough' to disable.",
-                    DeprecationWarning,
-                )
-            self._params.audio_in_passthrough = True
-
         if self._params.turn_analyzer:
             import warnings
 

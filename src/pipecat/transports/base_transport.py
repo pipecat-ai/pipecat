@@ -54,18 +54,6 @@ class TransportParams(BaseModel):
         video_out_color_format: Video output color format string.
         video_out_codec: Preferred video codec for output (e.g., 'VP8', 'H264', 'H265').
         video_out_destinations: List of video output destination identifiers.
-        vad_enabled: Enable Voice Activity Detection (deprecated).
-
-            .. deprecated:: 0.0.66
-               The `vad_enabled` parameter is deprecated, use `audio_in_enabled`
-               and `TransportParams.vad_analyzer` instead.
-
-        vad_audio_passthrough: Enable VAD audio passthrough (deprecated).
-
-            .. deprecated:: 0.0.66
-                The `vad_audio_passthrough` parameter is deprecated, use `audio_in_passthrough`
-                instead.
-
         vad_analyzer: Voice Activity Detection analyzer instance.
 
             .. deprecated:: 0.0.101
@@ -107,8 +95,6 @@ class TransportParams(BaseModel):
     video_out_color_format: str = "RGB"
     video_out_codec: Optional[str] = None
     video_out_destinations: List[str] = Field(default_factory=list)
-    vad_enabled: bool = False
-    vad_audio_passthrough: bool = False
     vad_analyzer: Optional[VADAnalyzer] = None
     turn_analyzer: Optional[BaseTurnAnalyzer] = None
 
