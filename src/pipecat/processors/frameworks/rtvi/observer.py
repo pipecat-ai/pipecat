@@ -94,9 +94,6 @@ class RTVIFunctionCallReportLevel(str, Enum):
 class RTVIObserverParams:
     """Parameters for configuring RTVI Observer behavior.
 
-    .. deprecated:: 0.0.87
-        Parameter `errors_enabled` is deprecated. Error messages are always enabled.
-
     Parameters:
         bot_output_enabled: Indicates if bot output messages should be sent.
         bot_llm_enabled: Indicates if the bot's LLM messages should be sent.
@@ -109,7 +106,6 @@ class RTVIObserverParams:
         user_audio_level_enabled: Indicates if user's audio level messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
         system_logs_enabled: Indicates if system logs should be sent.
-        errors_enabled: [Deprecated] Indicates if errors messages should be sent.
         ignored_sources: List of frame processors whose frames should be silently ignored
             by this observer. Useful for suppressing RTVI messages from secondary pipeline
             branches (e.g. a silent evaluation LLM) that should not be visible to clients.
@@ -153,7 +149,6 @@ class RTVIObserverParams:
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
-    errors_enabled: Optional[bool] = None
     ignored_sources: List[FrameProcessor] = field(default_factory=list)
     skip_aggregator_types: Optional[List[AggregationType | str]] = None
     bot_output_transforms: Optional[
@@ -213,16 +208,6 @@ class RTVIObserver(BaseObserver):
 
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
-
-        if self._params.errors_enabled is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter `errors_enabled` is deprecated. Error messages are always enabled.",
-                    DeprecationWarning,
-                )
 
         self._aggregation_transforms: List[
             Tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
