@@ -635,27 +635,6 @@ class TTSService(AIService):
 
         return changed
 
-    async def say(self, text: str):
-        """Immediately speak the provided text.
-
-        .. deprecated:: 0.0.79
-            Push a `TTSSpeakFrame` instead to ensure frame ordering is maintained.
-
-        Args:
-            text: The text to speak.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`TTSService.say()` is deprecated. Push a `TTSSpeakFrame` instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        await self.queue_frame(TTSSpeakFrame(text))
-
     async def on_turn_context_created(self, context_id: str):
         """Called when a new turn context ID has been created.
 
