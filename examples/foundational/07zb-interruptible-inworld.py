@@ -56,7 +56,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("INWORLD_API_KEY", ""),
         settings=InworldTTSService.Settings(
             voice="Ashley",
-            model="inworld-tts-1",
             temperature=1.1,
         ),
     )
@@ -99,7 +98,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info("Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

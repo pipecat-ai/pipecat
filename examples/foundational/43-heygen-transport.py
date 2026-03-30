@@ -100,7 +100,7 @@ async def main():
             # Kick off the conversation.
             context.add_message(
                 {
-                    "role": "user",
+                    "role": "developer",
                     "content": "Start by saying 'Hello' and then a short greeting.",
                 }
             )

@@ -167,13 +167,13 @@ class UltravoxRealtimeLLMService(LLMService):
     """
 
     Settings = UltravoxRealtimeLLMSettings
-    _settings: UltravoxRealtimeLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         params: Union[AgentInputParams, OneShotInputParams, JoinUrlInputParams],
-        settings: Optional[UltravoxRealtimeLLMSettings] = None,
+        settings: Optional[Settings] = None,
         one_shot_selected_tools: Optional[ToolsSchema] = None,
         **kwargs,
     ):
@@ -188,7 +188,7 @@ class UltravoxRealtimeLLMService(LLMService):
             **kwargs: Additional arguments passed to parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = UltravoxRealtimeLLMSettings(
+        default_settings = self.Settings(
             model=None,
             system_instruction=None,
             temperature=None,
@@ -383,7 +383,7 @@ class UltravoxRealtimeLLMService(LLMService):
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
 
-    async def _update_settings(self, delta: UltravoxRealtimeLLMSettings):
+    async def _update_settings(self, delta: Settings):
         changed = await super()._update_settings(delta)
         if "output_medium" in changed:
             await self._update_output_medium(self._settings.output_medium)

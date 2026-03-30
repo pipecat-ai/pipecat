@@ -143,7 +143,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation with a weather-related prompt
         context.add_message(
             {
-                "role": "user",
+                "role": "developer",
                 "content": "Ask the user what city they'd like to know the weather for.",
             }
         )

@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -211,7 +211,7 @@ class CartesiaTTSService(WebsocketTTSService):
     """
 
     Settings = CartesiaTTSSettings
-    _settings: CartesiaTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Cartesia TTS configuration.
@@ -239,7 +239,7 @@ class CartesiaTTSService(WebsocketTTSService):
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
-        settings: Optional[CartesiaTTSSettings] = None,
+        settings: Optional[Settings] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         aggregate_sentences: Optional[bool] = None,
@@ -252,14 +252,14 @@ class CartesiaTTSService(WebsocketTTSService):
             voice_id: ID of the voice to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaTTSSettings(voice=...)`` instead.
+                    Use ``settings=CartesiaTTSService.Settings(voice=...)`` instead.
 
             cartesia_version: API version string for Cartesia service.
             url: WebSocket URL for Cartesia TTS API.
             model: TTS model to use (e.g., "sonic-3").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaTTSSettings(model=...)`` instead.
+                    Use ``settings=CartesiaTTSService.Settings(model=...)`` instead.
 
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
@@ -267,7 +267,7 @@ class CartesiaTTSService(WebsocketTTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaTTSSettings(...)`` instead.
+                    Use ``settings=CartesiaTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -299,28 +299,28 @@ class CartesiaTTSService(WebsocketTTSService):
         # playout timing of the audio!
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = CartesiaTTSSettings(
+        default_settings = self.Settings(
             model="sonic-3",
             voice=None,
-            language=language_to_cartesia_language(Language.EN),
+            language=Language.EN,
             generation_config=None,
             pronunciation_dict_id=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", CartesiaTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", CartesiaTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", CartesiaTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.generation_config is not None:
                     default_settings.generation_config = params.generation_config
                 if params.pronunciation_dict_id is not None:
@@ -574,6 +574,7 @@ class CartesiaTTSService(WebsocketTTSService):
         if context_id:
             cancel_msg = json.dumps({"context_id": context_id, "cancel": True})
             await self._get_websocket().send(cancel_msg)
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Close the Cartesia context after all audio has been played.
@@ -582,7 +583,7 @@ class CartesiaTTSService(WebsocketTTSService):
         done once it has sent its ``done`` message, which is handled in
         ``_process_messages``.
         """
-        pass
+        await super().on_audio_context_completed(context_id)
 
     async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio and finalize the current context.
@@ -606,7 +607,7 @@ class CartesiaTTSService(WebsocketTTSService):
             ctx_id = msg["context_id"]
             if msg["type"] == "done":
                 await self.stop_ttfb_metrics()
-                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
+                await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                 await self.remove_audio_context(ctx_id)
             elif msg["type"] == "timestamps":
                 # Process the timestamps based on language before adding them
@@ -683,7 +684,7 @@ class CartesiaHttpTTSService(TTSService):
     """
 
     Settings = CartesiaTTSSettings
-    _settings: CartesiaTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Cartesia HTTP TTS configuration.
@@ -712,7 +713,7 @@ class CartesiaHttpTTSService(TTSService):
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
-        settings: Optional[CartesiaTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Cartesia HTTP TTS service.
@@ -722,12 +723,12 @@ class CartesiaHttpTTSService(TTSService):
             voice_id: ID of the voice to use for synthesis.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaTTSSettings(voice=...)`` instead.
+                    Use ``settings=CartesiaHttpTTSService.Settings(voice=...)`` instead.
 
             model: TTS model to use (e.g., "sonic-3").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaTTSSettings(model=...)`` instead.
+                    Use ``settings=CartesiaHttpTTSService.Settings(model=...)`` instead.
 
             base_url: Base URL for Cartesia HTTP API.
             cartesia_version: API version string for Cartesia service.
@@ -739,35 +740,35 @@ class CartesiaHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CartesiaTTSSettings(...)`` instead.
+                    Use ``settings=CartesiaHttpTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = CartesiaTTSSettings(
+        default_settings = self.Settings(
             model="sonic-3",
             voice=None,
-            language=language_to_cartesia_language(Language.EN),
+            language=Language.EN,
             generation_config=None,
             pronunciation_dict_id=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", CartesiaTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if model is not None:
-            _warn_deprecated_param("model", CartesiaTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", CartesiaTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = self.language_to_service_language(params.language)
+                    default_settings.language = params.language
                 if params.generation_config is not None:
                     default_settings.generation_config = params.generation_config
                 if params.pronunciation_dict_id is not None:

@@ -336,8 +336,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         if include_position:
             msg["position"] = self._format_position(self._position)
 
-        if parameters:
-            msg["parameters"] = parameters
+        msg["parameters"] = parameters if parameters is not None else {}
 
         return msg
 

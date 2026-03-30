@@ -58,14 +58,14 @@ async def main():
         llm = GroqLLMService(
             api_key=os.getenv("GROQ_API_KEY"),
             settings=GroqLLMService.Settings(
-                system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+                system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
             ),
         )
 
         tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY", ""),
             settings=ElevenLabsTTSService.Settings(
-                voice="21m00Tcm4TlvDq8ikWAM",  # Public voice ID
+                voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
             ),
         )
 
@@ -103,7 +103,7 @@ async def main():
             # Kick off the conversation.
             context.add_message(
                 {
-                    "role": "user",
+                    "role": "developer",
                     "content": "Start by greeting the user and ask how you can help.",
                 }
             )

@@ -21,7 +21,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -122,7 +125,7 @@ tools = ToolsSchema(
         ),
         FunctionSchema(
             name="save_conversation",
-            description="Save the current conversatione. Use this function to persist the current conversation to external storage.",
+            description="Save the current conversation. Use this function to persist the current conversation to external storage.",
             properties={},
             required=[],
         ),
@@ -153,17 +156,14 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -213,8 +213,11 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = LLMContext([{"role": "user", "content": "Say hello!"}], tools)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    context = LLMContext([{"role": "developer", "content": "Say hello!"}], tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [

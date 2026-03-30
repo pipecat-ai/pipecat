@@ -10,6 +10,7 @@ This module provides integration with Gradium's real-time speech-to-text
 WebSocket API for streaming audio transcription.
 """
 
+import asyncio
 import base64
 import json
 from dataclasses import dataclass, field
@@ -22,13 +23,14 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -43,7 +45,37 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Gradium, you need to `pip install "pipecat-ai[gradium]"`.')
     raise Exception(f"Missing module: {e}")
 
-SAMPLE_RATE = 24000
+# Seconds to wait after a "flushed" message for trailing text tokens to arrive
+# before finalizing the transcription.
+TRANSCRIPT_AGGREGATION_DELAY = 0.1
+
+
+def _input_format_from_encoding(encoding: str, sample_rate: int) -> str:
+    """Build Gradium input_format from encoding type and sample rate.
+
+    For PCM encoding, appends the sample rate (e.g., "pcm_16000").
+    For other encodings (wav, opus), returns the encoding as-is.
+
+    Args:
+        encoding: Base encoding type ("pcm", "wav", or "opus").
+        sample_rate: Audio sample rate in Hz.
+
+    Returns:
+        The full input_format string for the Gradium API.
+    """
+    if encoding == "pcm":
+        match sample_rate:
+            case 8000:
+                return "pcm_8000"
+            case 16000:
+                return "pcm_16000"
+            case 24000:
+                return "pcm_24000"
+        logger.warning(
+            f"GradiumSTTService: unsupported sample rate {sample_rate} for PCM encoding, using pcm_16000"
+        )
+        return "pcm_16000"
+    return encoding
 
 
 def language_to_gradium_language(language: Language) -> Optional[str]:
@@ -89,13 +121,13 @@ class GradiumSTTService(WebsocketSTTService):
     """
 
     Settings = GradiumSTTSettings
-    _settings: GradiumSTTSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Gradium STT API.
 
         .. deprecated:: 0.0.105
-            Use ``settings=GradiumSTTSettings(...)`` instead.
+            Use ``settings=GradiumSTTService.Settings(...)`` instead.
 
         Parameters:
             language: Expected language of the audio (e.g., "en", "es", "fr").
@@ -115,9 +147,11 @@ class GradiumSTTService(WebsocketSTTService):
         *,
         api_key: str,
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
+        encoding: str = "pcm",
+        sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         json_config: Optional[str] = None,
-        settings: Optional[GradiumSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = GRADIUM_TTFS_P99,
         **kwargs,
     ):
@@ -126,10 +160,16 @@ class GradiumSTTService(WebsocketSTTService):
         Args:
             api_key: Gradium API key for authentication.
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
+            encoding: Base audio encoding type. One of "pcm", "wav", or "opus".
+                For PCM, the sample rate is appended automatically from the
+                pipeline's audio_in_sample_rate (e.g., "pcm" becomes "pcm_16000").
+                Defaults to "pcm".
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline
+                sample rate.
             params: Configuration parameters for language and delay settings.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GradiumSTTSettings(...)`` instead.
+                    Use ``settings=GradiumSTTService.Settings(...)`` instead.
 
             json_config: Optional JSON configuration string for additional model settings.
 
@@ -152,8 +192,8 @@ class GradiumSTTService(WebsocketSTTService):
             )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GradiumSTTSettings(
-            model=None,
+        default_settings = self.Settings(
+            model="default",
             language=None,
             delay_in_frames=None,
         )
@@ -162,7 +202,7 @@ class GradiumSTTService(WebsocketSTTService):
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GradiumSTTSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.language = params.language
                 if params.delay_in_frames is not None:
@@ -173,7 +213,7 @@ class GradiumSTTService(WebsocketSTTService):
             default_settings.apply_update(settings)
 
         super().__init__(
-            sample_rate=SAMPLE_RATE,
+            sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             settings=default_settings,
             **kwargs,
@@ -181,19 +221,25 @@ class GradiumSTTService(WebsocketSTTService):
 
         self._api_key = api_key
         self._api_endpoint_base_url = api_endpoint_base_url
+        self._encoding = encoding
         self._websocket = None
         self._json_config = json_config
 
         self._receive_task = None
 
+        self._input_format = ""
+
         self._audio_buffer = bytearray()
         self._chunk_size_ms = 80
         self._chunk_size_bytes = 0
 
-        # Set from the ready message when connecting to the service.
-        # These values are used for flushing transcription.
-        self._delay_in_frames = 0
-        self._frame_size = 0
+        # Accumulates text fragments within a turn. Each "text" message
+        # appends to this list. On "flushed" a short aggregation delay
+        # allows trailing tokens to arrive before the full text is joined
+        # and pushed as a TranscriptionFrame.
+        self._accumulated_text: list[str] = []
+        self._flush_counter = 0
+        self._transcript_aggregation_task: Optional[asyncio.Task] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -207,7 +253,7 @@ class GradiumSTTService(WebsocketSTTService):
         """Apply a settings delta, sync params, and reconnect.
 
         Args:
-            delta: A :class:`STTSettings` (or ``GradiumSTTSettings``) delta.
+            delta: A :class:`STTSettings` (or ``GradiumSTTService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.
@@ -228,6 +274,7 @@ class GradiumSTTService(WebsocketSTTService):
             frame: Start frame to begin processing.
         """
         await super().start(frame)
+        self._input_format = _input_format_from_encoding(self._encoding, self.sample_rate)
         self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
         await self._connect()
 
@@ -249,56 +296,41 @@ class GradiumSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with VAD-specific handling.
+    async def _start_metrics(self):
+        """Start performance metrics collection for transcription processing."""
+        await self.start_processing_metrics()
 
-        When VAD detects the user has stopped speaking, we flush the transcription
-        by sending silence frames. This makes the system more reactive by getting
-        the final transcription faster without closing the connection.
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle speech events.
 
         Args:
             frame: The frame to process.
-            direction: The direction of frame processing.
+            direction: Direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_processing_metrics()
+            await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            await self._flush_transcription()
+            await self._send_flush()
 
-    async def _flush_transcription(self):
-        """Flush the transcription by sending silence frames.
+    async def _send_flush(self):
+        """Send a flush request to process any buffered audio immediately.
 
-        When VAD detects the user stopped speaking, we send delay_in_frames
-        chunks of silence (zeros) to flush the remaining audio from the model's
-        buffer. This allows for faster turn-around without closing the connection.
-
-        From Gradium docs: "feed in delay_in_frames chunks of silence (vectors
-        of zeros). If those are fed in faster than realtime, the API also has
-        a possibility to process them faster."
+        Sends a flush message to tell the server to process buffered audio.
+        The server responds with text fragments followed by a "flushed"
+        acknowledgment, which triggers finalization.
         """
         if not self._websocket or self._websocket.state is not State.OPEN:
             return
 
-        if self._delay_in_frames <= 0:
-            logger.debug("No delay_in_frames set, skipping flush")
-            return
-
-        # Create a silence chunk (zeros) of frame_size samples
-        # Each sample is 2 bytes (16-bit PCM)
-        silence_bytes = bytes(self._frame_size * 2)
-        silence_b64 = base64.b64encode(silence_bytes).decode("utf-8")
-
-        logger.debug(f"Flushing Gradium STT with {self._delay_in_frames} silence frames")
-
-        for _ in range(self._delay_in_frames):
-            msg = {"type": "audio", "audio": silence_b64}
-            try:
-                await self._websocket.send(json.dumps(msg))
-            except Exception as e:
-                logger.warning(f"Failed to send silence frame: {e}")
-                break
+        self._flush_counter += 1
+        flush_id = str(self._flush_counter)
+        msg = {"type": "flush", "flush_id": flush_id}
+        try:
+            await self._websocket.send(json.dumps(msg))
+        except Exception as e:
+            logger.warning(f"Failed to send flush: {e}")
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process audio data for speech-to-text conversion.
@@ -353,7 +385,8 @@ class GradiumSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             setup_msg = {
                 "type": "setup",
-                "input_format": "pcm",
+                "model_name": self._settings.model,
+                "input_format": self._input_format,
             }
             # Build json_config: start with deprecated json_config, then override with params
             json_config = {}
@@ -375,13 +408,7 @@ class GradiumSTTService(WebsocketSTTService):
             if ready_msg["type"] != "ready":
                 raise Exception(f"unexpected first message type {ready_msg['type']}")
 
-            # Store delay_in_frames and frame_size for silence flushing
-            self._delay_in_frames = ready_msg.get("delay_in_frames", 0)
-            self._frame_size = ready_msg.get("frame_size", 1920)
-            logger.debug(
-                f"Connected to Gradium STT (delay_in_frames={self._delay_in_frames}, "
-                f"frame_size={self._frame_size})"
-            )
+            logger.debug("Connected to Gradium STT")
 
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -389,6 +416,13 @@ class GradiumSTTService(WebsocketSTTService):
 
     async def _disconnect(self):
         await super()._disconnect()
+
+        if self._transcript_aggregation_task:
+            await self.cancel_task(self._transcript_aggregation_task)
+            self._transcript_aggregation_task = None
+
+        self._accumulated_text.clear()
+        self._flush_counter = 0
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
@@ -412,41 +446,75 @@ class GradiumSTTService(WebsocketSTTService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _process_messages(self):
+    async def _receive_messages(self):
         async for message in self._get_websocket():
             try:
-                data = json.loads(message)
-                await self._process_response(data)
+                msg = json.loads(message)
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message: {message}")
+                continue
 
-    async def _receive_messages(self):
-        while True:
-            await self._process_messages()
-            logger.debug(f"{self} Gradium connection was disconnected (timeout?), reconnecting")
-            await self._connect_websocket()
-
-    async def _process_response(self, msg):
-        type_ = msg.get("type", "")
-        if type_ == "text":
-            await self._handle_text(msg["text"])
-        elif type_ == "end_of_stream":
-            await self._handle_end_of_stream()
-        elif type_ == "error":
-            await self.push_error(error_msg=f"Error: {msg}")
-
-    async def _handle_end_of_stream(self):
-        """Handle termination message."""
-        logger.debug("Received end_of_stream message from server")
+            type_ = msg.get("type", "")
+            if type_ == "text":
+                await self._handle_text(msg["text"])
+            elif type_ == "flushed":
+                await self._handle_flushed()
+            elif type_ == "end_of_stream":
+                logger.debug("Received end_of_stream message from server")
+            elif type_ == "error":
+                await self.push_error(error_msg=f"Error: {msg}")
 
     async def _handle_text(self, text: str):
-        """Handle transcription results."""
+        """Handle streaming transcription fragment.
+
+        Accumulates text and pushes an InterimTranscriptionFrame with the
+        full accumulated text so far.
+        """
+        self._accumulated_text.append(text)
+        accumulated = " ".join(self._accumulated_text)
+        await self.push_frame(
+            InterimTranscriptionFrame(
+                text=accumulated,
+                user_id=self._user_id,
+                timestamp=time_now_iso8601(),
+                language=self._settings.language,
+            )
+        )
+        await self.stop_processing_metrics()
+
+    async def _handle_flushed(self):
+        """Handle flush completion by starting a transcript aggregation timer.
+
+        The "flushed" message confirms that buffered audio has been processed,
+        but text tokens may still arrive after this point. A short timer allows
+        trailing tokens to accumulate before finalizing the transcription.
+        """
+        if self._transcript_aggregation_task:
+            await self.cancel_task(self._transcript_aggregation_task)
+        self._transcript_aggregation_task = self.create_task(
+            self._transcript_aggregation_handler(), "transcript_aggregation"
+        )
+
+    async def _transcript_aggregation_handler(self):
+        """Wait for trailing tokens then finalize the accumulated transcription."""
+        await asyncio.sleep(TRANSCRIPT_AGGREGATION_DELAY)
+        await self._finalize_accumulated_text()
+
+    async def _finalize_accumulated_text(self):
+        """Join accumulated text, push TranscriptionFrame, and clear state."""
+        if not self._accumulated_text:
+            return
+        self._transcript_aggregation_task = None
+
+        text = " ".join(self._accumulated_text)
+        self._accumulated_text.clear()
+        logger.debug(f"Final transcription: [{text}]")
         await self.push_frame(
             TranscriptionFrame(
                 text,
                 self._user_id,
                 time_now_iso8601(),
+                self._settings.language,
             )
         )
-        await self._trace_transcription(text, is_final=True, language=None)
-        await self.stop_processing_metrics()
+        await self._trace_transcription(text, is_final=True, language=self._settings.language)

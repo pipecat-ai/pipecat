@@ -74,7 +74,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
         location=os.getenv("GOOGLE_CLOUD_LOCATION"),
         settings=GoogleVertexLLMService.Settings(
-            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
     # You can aslo register a function_name of None to get all functions
@@ -105,7 +105,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     messages = [
         {
-            "role": "user",
+            "role": "developer",
             "content": "Start a conversation with 'Hey there' to get the current weather.",
         },
     ]

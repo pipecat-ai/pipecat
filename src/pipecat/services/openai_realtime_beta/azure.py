@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from .openai import OpenAIRealtimeBetaLLMService, OpenAIRealtimeBetaLLMSettings
+from .openai import OpenAIRealtimeBetaLLMService
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -24,7 +24,7 @@ except ModuleNotFoundError as e:
 
 
 @dataclass
-class AzureRealtimeBetaLLMSettings(OpenAIRealtimeBetaLLMSettings):
+class AzureRealtimeBetaLLMSettings(OpenAIRealtimeBetaLLMService.Settings):
     """Settings for AzureRealtimeBetaLLMService."""
 
     pass
@@ -43,7 +43,7 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
     """
 
     Settings = AzureRealtimeBetaLLMSettings
-    _settings: AzureRealtimeBetaLLMSettings
+    _settings: Settings
 
     def __init__(
         self,

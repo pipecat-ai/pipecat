@@ -52,7 +52,7 @@ async def main():
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful LLM. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
 
@@ -82,7 +82,7 @@ async def main():
         ),
     )
 
-    context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
+    context.add_message({"role": "developer", "content": "Please introduce yourself to the user."})
     await task.queue_frames([LLMRunFrame()])
 
     runner = PipelineRunner()

@@ -612,7 +612,7 @@ class RTVIObserver(BaseObserver):
 
             # Handle OpenAI format (original implementation)
             elif isinstance(message, dict):
-                if message["role"] == "user":
+                if message.get("role") == "user":
                     content = message["content"]
                     if isinstance(content, list):
                         text = " ".join(item["text"] for item in content if "text" in item)

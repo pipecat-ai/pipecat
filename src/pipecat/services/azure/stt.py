@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import STTSettings, _warn_deprecated_param
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -67,7 +67,7 @@ class AzureSTTService(STTService):
     """
 
     Settings = AzureSTTSettings
-    _settings: AzureSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -78,7 +78,7 @@ class AzureSTTService(STTService):
         sample_rate: Optional[int] = None,
         private_endpoint: Optional[str] = None,
         endpoint_id: Optional[str] = None,
-        settings: Optional[AzureSTTSettings] = None,
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = AZURE_TTFS_P99,
         **kwargs,
     ):
@@ -91,7 +91,7 @@ class AzureSTTService(STTService):
             language: Language for speech recognition. Defaults to English (US).
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AzureSTTSettings(language=...)`` instead.
+                    Use ``settings=AzureSTTService.Settings(language=...)`` instead.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             private_endpoint: Private endpoint for STT behind firewall.
@@ -104,15 +104,15 @@ class AzureSTTService(STTService):
             **kwargs: Additional arguments passed to parent STTService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AzureSTTSettings(
+        default_settings = self.Settings(
             model=None,
-            language=language_to_azure_language(Language.EN_US),
+            language=Language.EN_US,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if language is not None and language != Language.EN_US:
-            _warn_deprecated_param("language", AzureSTTSettings, "language")
-            default_settings.language = language_to_azure_language(language)
+            self._warn_init_param_moved_to_settings("language", "language")
+            default_settings.language = language
 
         # 3. (No step 3, as there's no params object to apply)
 

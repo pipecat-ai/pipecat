@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -52,13 +52,13 @@ class GroqTTSService(TTSService):
     """
 
     Settings = GroqTTSSettings
-    _settings: GroqTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Groq TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=GroqTTSSettings(...)`` instead.
+            Use ``settings=GroqTTSService.Settings(...)`` instead.
 
         Parameters:
             language: Language for speech synthesis. Defaults to English.
@@ -79,7 +79,7 @@ class GroqTTSService(TTSService):
         model_name: Optional[str] = None,
         voice_id: Optional[str] = None,
         sample_rate: Optional[int] = GROQ_SAMPLE_RATE,
-        settings: Optional[GroqTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize Groq TTS service.
@@ -90,17 +90,17 @@ class GroqTTSService(TTSService):
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GroqTTSSettings(...)`` instead.
+                    Use ``settings=GroqTTSService.Settings(...)`` instead.
 
             model_name: TTS model to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GroqTTSSettings(model=...)`` instead.
+                    Use ``settings=GroqTTSService.Settings(model=...)`` instead.
 
             voice_id: Voice identifier to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=GroqTTSSettings(voice=...)`` instead.
+                    Use ``settings=GroqTTSService.Settings(voice=...)`` instead.
 
             sample_rate: Audio sample rate. Must be 48000 Hz for Groq TTS.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -111,7 +111,7 @@ class GroqTTSService(TTSService):
             logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = GroqTTSSettings(
+        default_settings = self.Settings(
             model="canopylabs/orpheus-v1-english",
             voice="autumn",
             language="en",
@@ -120,15 +120,15 @@ class GroqTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model_name is not None:
-            _warn_deprecated_param("model_name", GroqTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model_name", "model")
             default_settings.model = model_name
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", GroqTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", GroqTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.language = str(params.language) if params.language else "en"
                 default_settings.speed = params.speed

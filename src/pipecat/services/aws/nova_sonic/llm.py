@@ -27,8 +27,8 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     AggregationType,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -60,7 +60,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -150,7 +150,7 @@ class Params(BaseModel):
     """Configuration parameters for AWS Nova Sonic.
 
     .. deprecated:: 0.0.105
-        Use ``settings=AWSNovaSonicLLMSettings(...)`` for inference settings
+        Use ``settings=AWSNovaSonicLLMService.Settings(...)`` for inference settings
         and ``audio_config=AudioConfig(...)`` for audio configuration.
 
     Parameters:
@@ -247,7 +247,7 @@ class AWSNovaSonicLLMService(LLMService):
     """
 
     Settings = AWSNovaSonicLLMSettings
-    _settings: AWSNovaSonicLLMSettings
+    _settings: Settings
 
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
     adapter_class = AWSNovaSonicLLMAdapter
@@ -263,7 +263,7 @@ class AWSNovaSonicLLMService(LLMService):
         voice_id: str = "matthew",
         params: Optional[Params] = None,
         audio_config: Optional[AudioConfig] = None,
-        settings: Optional[AWSNovaSonicLLMSettings] = None,
+        settings: Optional[Settings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
         send_transcription_frames: bool = True,
@@ -282,7 +282,7 @@ class AWSNovaSonicLLMService(LLMService):
             model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSNovaSonicLLMSettings(model=...)`` instead.
+                    Use ``settings=AWSNovaSonicLLMService.Settings(model=...)`` instead.
 
             voice_id: Voice ID for speech synthesis.
                 Note that some voices are designed for use with a specific language.
@@ -291,12 +291,12 @@ class AWSNovaSonicLLMService(LLMService):
                 - Nova Sonic (the older model): see https://docs.aws.amazon.com/nova/latest/userguide/available-voices.html.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSNovaSonicLLMSettings(voice=...)`` instead.
+                    Use ``settings=AWSNovaSonicLLMService.Settings(voice=...)`` instead.
 
             params: Model parameters for audio configuration and inference.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSNovaSonicLLMSettings(...)`` for inference
+                    Use ``settings=AWSNovaSonicLLMService.Settings(...)`` for inference
                     settings and ``audio_config=AudioConfig(...)`` for audio
                     configuration.
 
@@ -308,7 +308,7 @@ class AWSNovaSonicLLMService(LLMService):
             system_instruction: System-level instruction for the model.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AWSNovaSonicLLMSettings(system_instruction=...)`` instead.
+                    Use ``settings=AWSNovaSonicLLMService.Settings(system_instruction=...)`` instead.
             tools: Available tools/functions for the model to use.
             send_transcription_frames: Whether to emit transcription frames.
 
@@ -319,7 +319,7 @@ class AWSNovaSonicLLMService(LLMService):
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AWSNovaSonicLLMSettings(
+        default_settings = self.Settings(
             model="amazon.nova-2-sonic-v1:0",
             system_instruction=None,
             voice="matthew",
@@ -337,15 +337,13 @@ class AWSNovaSonicLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model != "amazon.nova-2-sonic-v1:0":
-            _warn_deprecated_param("model", AWSNovaSonicLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id != "matthew":
-            _warn_deprecated_param("voice_id", AWSNovaSonicLLMSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
         if system_instruction is not None:
-            _warn_deprecated_param(
-                "system_instruction", AWSNovaSonicLLMSettings, "system_instruction"
-            )
+            self._warn_init_param_moved_to_settings("system_instruction", "system_instruction")
             default_settings.system_instruction = system_instruction
 
         # 3. Apply params overrides — only if settings not provided
@@ -356,7 +354,7 @@ class AWSNovaSonicLLMService(LLMService):
                 warnings.simplefilter("always")
                 warnings.warn(
                     "The `params` parameter is deprecated. "
-                    "Use `settings=AWSNovaSonicLLMSettings(...)` for inference settings "
+                    "Use `settings=self.Settings(...)` for inference settings "
                     "(temperature, max_tokens, top_p, endpointing_sensitivity) "
                     "and `audio_config=AudioConfig(...)` for audio configuration "
                     "(sample rates, sample sizes, channel counts).",
@@ -426,18 +424,16 @@ class AWSNovaSonicLLMService(LLMService):
         self._input_audio_content_name: Optional[str] = None
         self._content_being_received: Optional[CurrentContent] = None
         self._assistant_is_responding = False
-        self._may_need_repush_assistant_text = False
         self._ready_to_send_context = False
-        self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
         self._waiting_for_trigger_transcription = False
         self._disconnecting = False
         self._connected_time: Optional[float] = None
         self._wants_connection = False
         self._user_text_buffer = ""
-        self._assistant_text_buffer = ""
         self._completed_tool_calls = set()
         self._audio_input_started = False
+        self._pending_speculative_text: Optional[str] = None
 
         file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
@@ -447,7 +443,7 @@ class AWSNovaSonicLLMService(LLMService):
     # settings
     #
 
-    async def _update_settings(self, delta: AWSNovaSonicLLMSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply a settings delta.
 
         Settings are stored but not applied to the active connection.
@@ -507,11 +503,13 @@ class AWSNovaSonicLLMService(LLMService):
     async def reset_conversation(self):
         """Reset the conversation state while preserving context.
 
-        Handles bot stopped speaking event, disconnects from the service,
-        and reconnects with the preserved context.
+        Cleans up any in-progress assistant response, disconnects from the
+        service, and reconnects with the preserved context.
         """
         logger.debug("Resetting conversation")
-        await self._handle_bot_stopped_speaking(delay_to_catch_trailing_assistant_text=False)
+        if self._assistant_is_responding:
+            self._assistant_is_responding = False
+            await self._report_assistant_response_ended()
 
         # Grab context to carry through disconnect/reconnect
         context = self._context
@@ -542,8 +540,6 @@ class AWSNovaSonicLLMService(LLMService):
             await self._handle_context(context)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._handle_bot_stopped_speaking(delay_to_catch_trailing_assistant_text=True)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption_frame()
 
@@ -571,49 +567,8 @@ class AWSNovaSonicLLMService(LLMService):
 
         await self._send_user_audio_event(frame.audio)
 
-    async def _handle_bot_stopped_speaking(self, delay_to_catch_trailing_assistant_text: bool):
-        # Protect against back-to-back BotStoppedSpeaking calls, which I've observed
-        if self._handling_bot_stopped_speaking:
-            return
-        self._handling_bot_stopped_speaking = True
-
-        async def finalize_assistant_response():
-            if self._assistant_is_responding:
-                # Consider the assistant finished with their response (possibly after a short delay,
-                # to allow for any trailing FINAL assistant text block to come in that need to make
-                # it into context).
-                #
-                # TODO: ideally we could base this solely on the LLM output events, but I couldn't
-                # figure out a reliable way to determine when we've gotten our last FINAL text block
-                # after the LLM is done talking.
-                #
-                # First I looked at stopReason, but it doesn't seem like the last FINAL text block
-                # is reliably marked END_TURN (sometimes the *first* one is, but not the last...
-                # bug?)
-                #
-                # Then I considered schemes where we tally or match up SPECULATIVE text blocks with
-                # FINAL text blocks to know how many or which FINAL blocks to expect, but user
-                # interruptions throw a wrench in these schemes: depending on the exact timing of
-                # the interruption, we should or shouldn't expect some FINAL blocks.
-                if delay_to_catch_trailing_assistant_text:
-                    # This delay length is a balancing act between "catching" trailing assistant
-                    # text that is quite delayed but not waiting so long that user text comes in
-                    # first and results in a bit of context message order scrambling.
-                    await asyncio.sleep(1.25)
-                self._assistant_is_responding = False
-                await self._report_assistant_response_ended()
-
-            self._handling_bot_stopped_speaking = False
-
-        # Finalize the assistant response, either now or after a delay
-        if delay_to_catch_trailing_assistant_text:
-            self.create_task(finalize_assistant_response())
-        else:
-            await finalize_assistant_response()
-
     async def _handle_interruption_frame(self):
-        if self._assistant_is_responding:
-            self._may_need_repush_assistant_text = True
+        pass
 
     #
     # LLM communication: lifecycle
@@ -674,7 +629,9 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Read context
         adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
-        llm_connection_params = adapter.get_llm_invocation_params(self._context)
+        llm_connection_params = adapter.get_llm_invocation_params(
+            self._context, system_instruction=self._settings.system_instruction
+        )
 
         # Send prompt start event, specifying tools.
         # Tools from context take priority over self._tools.
@@ -687,12 +644,9 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_prompt_start_event(tools)
 
         # Send system instruction.
-        # Instruction from context takes priority over self._settings.system_instruction.
-        system_instruction = (
-            llm_connection_params["system_instruction"]
-            if llm_connection_params["system_instruction"]
-            else self._settings.system_instruction
-        )
+        # The adapter resolves conflicts between init-provided and
+        # context-provided system instructions (preferring init-provided).
+        system_instruction = llm_connection_params["system_instruction"]
         logger.debug(f"Using system instruction: {system_instruction}")
         if system_instruction:
             await self._send_text_event(text=system_instruction, role=Role.SYSTEM)
@@ -773,17 +727,15 @@ class AWSNovaSonicLLMService(LLMService):
             self._input_audio_content_name = None
             self._content_being_received = None
             self._assistant_is_responding = False
-            self._may_need_repush_assistant_text = False
             self._ready_to_send_context = False
-            self._handling_bot_stopped_speaking = False
             self._triggering_assistant_response = False
             self._waiting_for_trigger_transcription = False
             self._disconnecting = False
             self._connected_time = None
             self._user_text_buffer = ""
-            self._assistant_text_buffer = ""
             self._completed_tool_calls = set()
             self._audio_input_started = False
+            self._pending_speculative_text = None
 
             logger.info("Finished disconnecting")
         except Exception as e:
@@ -1046,7 +998,9 @@ class AWSNovaSonicLLMService(LLMService):
                     "toolResult": {
                         "promptName": self._prompt_name,
                         "contentName": content_name,
-                        "content": json.dumps(result) if isinstance(result, dict) else result,
+                        "content": json.dumps(result, ensure_ascii=False)
+                        if isinstance(result, dict)
+                        else result,
                     }
                 }
             }
@@ -1153,10 +1107,11 @@ class AWSNovaSonicLLMService(LLMService):
         self._content_being_received = content
 
         if content.role == Role.ASSISTANT:
-            if content.type == ContentType.AUDIO:
-                # Note that an assistant response can comprise of multiple audio blocks
-                if not self._assistant_is_responding:
-                    # The assistant has started responding.
+            if content.type == ContentType.TEXT:
+                if (
+                    content.text_stage == TextStage.SPECULATIVE
+                    and not self._assistant_is_responding
+                ):
                     self._assistant_is_responding = True
                     await self._report_user_transcription_ended()  # Consider user turn over
                     await self._report_assistant_response_started()
@@ -1232,18 +1187,30 @@ class AWSNovaSonicLLMService(LLMService):
 
         if content.role == Role.ASSISTANT:
             if content.type == ContentType.TEXT:
-                # Ignore non-final text, and the "interrupted" message (which isn't meaningful text)
-                if content.text_stage == TextStage.FINAL and stop_reason != "INTERRUPTED":
-                    if self._assistant_is_responding:
-                        # Text added to the ongoing assistant response
-                        await self._report_assistant_response_text_added(content.text_content)
+                if stop_reason != "INTERRUPTED":
+                    if content.text_stage == TextStage.SPECULATIVE:
+                        await self._report_llm_text(content.text_content)
+                elif self._assistant_is_responding:
+                    # TEXT INTERRUPTED with no audio means the user interrupted
+                    # before audio started. End the response here since no AUDIO
+                    # contentEnd will arrive.
+                    self._assistant_is_responding = False
+                    await self._report_assistant_response_ended()
+            elif content.type == ContentType.AUDIO:
+                # Emit deferred TTSTextFrame after all audio chunks have been sent
+                await self._report_tts_text()
+                if stop_reason in ("END_TURN", "INTERRUPTED"):
+                    # END_TURN: normal completion. INTERRUPTED: user interrupted
+                    # mid-audio. Both mean no more audio for this turn.
+                    self._assistant_is_responding = False
+                    await self._report_assistant_response_ended()
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
                     # User transcription text added
                     await self._report_user_transcription_text_added(content.text_content)
 
-    async def _handle_completion_end_event(self, event_json):
+    async def _handle_completion_end_event(self, _):
         pass
 
     #
@@ -1256,29 +1223,40 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _report_assistant_response_started(self):
         logger.debug("Assistant response started")
-
-        # Report the start of the assistant response.
         await self.push_frame(LLMFullResponseStartFrame())
 
         # Report that equivalent of TTS (this is a speech-to-speech model) started
         await self.push_frame(TTSStartedFrame())
 
-    async def _report_assistant_response_text_added(self, text):
-        if not self._context:  # should never happen
-            return
+    async def _report_llm_text(self, text):
+        """Push speculative assistant text and defer TTSTextFrame.
 
-        logger.debug(f"Assistant response text added: {text}")
+        Speculative text arrives before each audio chunk, providing real-time
+        text that is synchronized with what the bot is saying. LLMTextFrame and
+        AggregatedTextFrame are pushed immediately for real-time text display.
+        TTSTextFrame emission is deferred to audio contentEnd so it aligns with
+        audio playout timing.
+        """
+        logger.debug(f"Assistant speculative text: {text}")
 
-        # Report the text of the assistant response.
-        await self._push_assistant_response_text_frames(text)
+        llm_text_frame = LLMTextFrame(text)
+        llm_text_frame.append_to_context = False
+        await self.push_frame(llm_text_frame)
 
-        # HACK: here we're also buffering the assistant text ourselves as a
-        # backup rather than relying solely on the assistant context aggregator
-        # to do it, because the text arrives from Nova Sonic only after all the
-        # assistant audio frames have been pushed, meaning that if an
-        # interruption frame were to arrive we would lose all of it (the text
-        # frames sitting in the queue would be wiped).
-        self._assistant_text_buffer += text
+        aggregated_text_frame = AggregatedTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        aggregated_text_frame.append_to_context = False
+        await self.push_frame(aggregated_text_frame)
+
+        self._pending_speculative_text = text
+
+    async def _report_tts_text(self):
+        if self._pending_speculative_text:
+            tts_text_frame = TTSTextFrame(
+                self._pending_speculative_text, aggregated_by=AggregationType.SENTENCE
+            )
+            tts_text_frame.includes_inter_frame_spaces = True
+            await self.push_frame(tts_text_frame)
+            self._pending_speculative_text = None
 
     async def _report_assistant_response_ended(self):
         if not self._context:  # should never happen
@@ -1286,53 +1264,11 @@ class AWSNovaSonicLLMService(LLMService):
 
         logger.debug("Assistant response ended")
 
-        # If an interruption frame arrived while the assistant was responding
-        # we may have lost all of the assistant text (see HACK, above), so
-        # re-push it downstream to the aggregator now.
-        if self._may_need_repush_assistant_text:
-            # Just in case, check that assistant text hasn't already made it
-            # into the context (sometimes it does, despite the interruption).
-            messages = self._context.get_messages()
-            last_message = messages[-1] if messages else None
-            if (
-                not last_message
-                or last_message.get("role") != "assistant"
-                or last_message.get("content") != self._assistant_text_buffer
-            ):
-                # We also need to re-push the LLMFullResponseStartFrame since the
-                # TTSTextFrame would be ignored otherwise (the interruption frame
-                # would have cleared the assistant aggregator state).
-                await self.push_frame(LLMFullResponseStartFrame())
-                await self._push_assistant_response_text_frames(self._assistant_text_buffer)
-            self._may_need_repush_assistant_text = False
-
         # Report the end of the assistant response.
         await self.push_frame(LLMFullResponseEndFrame())
 
         # Report that equivalent of TTS (this is a speech-to-speech model) stopped.
         await self.push_frame(TTSStoppedFrame())
-
-        # Clear out the buffered assistant text
-        self._assistant_text_buffer = ""
-
-    async def _push_assistant_response_text_frames(self, text: str):
-        # In a typical "cascade" LLM + TTS setup, LLMTextFrames would not
-        # proceed beyond the TTS service. Therefore, since a speech-to-speech
-        # service like Nova Sonic combines both LLM and TTS functionality, you
-        # would think we wouldn't need to push LLMTextFrames at all. However,
-        # RTVI relies on LLMTextFrames being pushed to trigger its
-        # "bot-llm-text" event. So here we push an LLMTextFrame, too, but avoid
-        # appending it to context to avoid context message duplication.
-
-        # Push LLMTextFrame
-        llm_text_frame = LLMTextFrame(text)
-        llm_text_frame.append_to_context = False
-        await self.push_frame(llm_text_frame)
-
-        # Push TTSTextFrame
-        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
-        tts_text_frame.includes_inter_frame_spaces = True
-        await self.push_frame(tts_text_frame)
 
     #
     # user transcription reporting
@@ -1361,6 +1297,12 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _report_user_transcription_ended(self):
         if not self._context:  # should never happen
+            return
+
+        # Nothing to report if no user speech was transcribed (e.g. the prompt
+        # was text-only, which is the case on the first user turn when the bot
+        # starts the conversation).
+        if not self._user_text_buffer:
             return
 
         logger.debug(f"User transcription ended")

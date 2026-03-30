@@ -151,7 +151,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 LLMMessagesAppendFrame(
                     messages=[
                         {
-                            "role": "user",
+                            "role": "developer",
                             "content": f"Greet the user and introduce yourself. Don't use emojis.",
                         }
                     ],

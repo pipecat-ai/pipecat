@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
 
 
 @dataclass
@@ -71,13 +71,13 @@ class FalImageGenService(ImageGenService):
     """
 
     Settings = FalImageGenSettings
-    _settings: FalImageGenSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Fal.ai image generation.
 
         .. deprecated:: 0.0.105
-            Use ``settings=FalImageGenSettings(...)`` instead.
+            Use ``settings=FalImageGenService.Settings(...)`` instead.
 
         Parameters:
             seed: Random seed for reproducible generation. If None, uses random seed.
@@ -97,7 +97,7 @@ class FalImageGenService(ImageGenService):
         enable_safety_checker: bool = True
         format: str = "png"
 
-    _settings: FalImageGenSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -106,7 +106,7 @@ class FalImageGenService(ImageGenService):
         aiohttp_session: aiohttp.ClientSession,
         model: Optional[str] = None,
         key: Optional[str] = None,
-        settings: Optional[FalImageGenSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the FalImageGenService.
@@ -115,13 +115,13 @@ class FalImageGenService(ImageGenService):
             params: Input parameters for image generation configuration.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=FalImageGenSettings(...)`` instead.
+                    Use ``settings=FalImageGenService.Settings(...)`` instead.
 
             aiohttp_session: HTTP client session for downloading generated images.
             model: The Fal.ai model to use for generation. Defaults to "fal-ai/fast-sdxl".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=FalImageGenSettings(model=...)`` instead.
+                    Use ``settings=FalImageGenService.Settings(model=...)`` instead.
 
             key: Optional API key for Fal.ai. If provided, sets FAL_KEY environment variable.
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -129,7 +129,7 @@ class FalImageGenService(ImageGenService):
             **kwargs: Additional arguments passed to parent ImageGenService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = FalImageGenSettings(
+        default_settings = self.Settings(
             model="fal-ai/fast-sdxl",
             seed=None,
             num_inference_steps=8,
@@ -142,11 +142,11 @@ class FalImageGenService(ImageGenService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", FalImageGenSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         if params is not None:
-            _warn_deprecated_param("params", FalImageGenSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.seed = params.seed
                 default_settings.num_inference_steps = params.num_inference_steps

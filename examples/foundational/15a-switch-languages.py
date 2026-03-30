@@ -112,7 +112,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities. Respond to what the user said in a creative and helpful way. Your output should not include non-alphanumeric characters. You can speak the following languages: 'English' and 'Spanish'.",
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way. You can speak the following languages: 'English' and 'Spanish'.",
         ),
     )
     llm.register_function("switch_language", tts.switch_language)
@@ -162,7 +162,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message(
             {
-                "role": "user",
+                "role": "developer",
                 "content": f"Please introduce yourself to the user and let them know the languages you speak. Your initial responses should be in {tts.current_language}.",
             }
         )

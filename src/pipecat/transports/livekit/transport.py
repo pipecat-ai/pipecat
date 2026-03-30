@@ -27,7 +27,9 @@ from pipecat.frames.frames import (
     CancelFrame,
     ClientConnectedFrame,
     EndFrame,
+    Frame,
     ImageRawFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
@@ -388,7 +390,16 @@ class LiveKitTransportClient:
             await self._audio_source.capture_frame(audio_frame)
             return True
         except Exception as e:
-            logger.error(f"Error publishing audio: {e}")
+            # When using an audio mixer, the base output transport's
+            # with_mixer() generator continuously yields frames (mixed with
+            # background audio) even when no TTS audio is queued. During
+            # interruptions, the audio task is cancelled and recreated, but
+            # there is a brief window where the native LiveKit AudioSource
+            # rejects capture_frame() with an InvalidState error. This is a
+            # transient condition — the mixer will produce a new frame within
+            # milliseconds, so we silently drop these frames.
+            if "InvalidState" not in str(e):
+                logger.error(f"Error publishing audio: {e}")
             return False
 
     def get_participants(self) -> List[str]:
@@ -870,6 +881,21 @@ class LiveKitOutputTransport(BaseOutputTransport):
         """
         await super().cancel(frame)
         await self._client.disconnect()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames, clearing the LiveKit AudioSource buffer on interruption.
+
+        When an InterruptionFrame arrives, any audio already submitted to the
+        LiveKit AudioSource (but not yet played out) is cleared immediately so
+        the bot stops speaking without delay.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame) and self._client._audio_source is not None:
+            self._client._audio_source.clear_queue()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.

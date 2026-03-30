@@ -189,6 +189,7 @@ class LemonSliceTransportClient:
                 on_dialout_stopped=partial(self._on_handle_callback, "on_dialout_stopped"),
                 on_dialout_error=partial(self._on_handle_callback, "on_dialout_error"),
                 on_dialout_warning=partial(self._on_handle_callback, "on_dialout_warning"),
+                on_dtmf_event=partial(self._on_handle_callback, "on_dtmf_event"),
                 on_participant_joined=self._callbacks.on_participant_joined,
                 on_participant_left=self._callbacks.on_participant_left,
                 on_participant_updated=partial(self._on_handle_callback, "on_participant_updated"),

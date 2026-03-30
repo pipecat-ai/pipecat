@@ -104,7 +104,7 @@ async def run_bot(pipecat_transport):
 
     messages = [
         {
-            "role": "user",
+            "role": "developer",
             "content": "Start by greeting the user warmly and introducing yourself.",
         }
     ]

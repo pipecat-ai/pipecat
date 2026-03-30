@@ -122,8 +122,8 @@ async def load_conversation(params: FunctionCallParams):
         await params.result_callback({"success": False, "error": str(e)})
 
 
-system_instruction = """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your
-capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that
+system_instruction = """You are a helpful assistant in a voice conversation. Your goal is to demonstrate your
+capabilities in a succinct way. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep responses concise. Respond to what the user said in a creative
 can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative
 and helpful way.
 
@@ -303,7 +303,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message(
             {
-                "role": "user",
+                "role": "developer",
                 "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
             }
         )

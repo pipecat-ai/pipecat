@@ -12,17 +12,12 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import EndTaskFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -56,6 +51,12 @@ async def end_conversation(params: FunctionCallParams):
     await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
 
+# NOTE: we can ask the model to say something *after* the call to
+# end_conversation because GeminiLiveLLMService defers processing EndFrames
+# until after the bot finishes its current turn. With Gemini 3.1 Flash Live,
+# the model won't reliably report ending its turn until after it says something
+# following the tool call, which is why the system instruction is structured
+# the way it is.
 system_instruction = """
 You are a helpful assistant who can answer questions and use tools.
 
@@ -64,9 +65,10 @@ You have three tools available to you:
 2. get_restaurant_recommendation: Use this tool to get a restaurant recommendation in a specific location.
 3. end_conversation: Use this tool to gracefully end the conversation.
 
-After you've responded to the user three times, do two things, in order:
-1. Politely let them know that that's all the time you have today and say goodbye.
-2. *WITHOUT WAITING FOR THE USER TO RESPOND*, call the end_conversation tool to gracefully end the conversation.
+After you've responded to the user three times, do the following:
+1. Politely let them know that that's all the time you have today (but don't say "goodbye" yet).
+2. Then immediately call the end_conversation function. *DO NOT FORGET TO DO THIS STEP.*
+3. After the tool reports success, say goodbye.
 """
 
 
@@ -143,18 +145,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("end_conversation", end_conversation)
 
     context = LLMContext(
-        [{"role": "user", "content": "Say hello."}],
+        [{"role": "developer", "content": "Say hello."}],
     )
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(
-            # Set stop_secs to something roughly similar to the internal setting
-            # of the Multimodal Live api, just to align events. This doesn't
-            # really matter because we can only use the Multimodal Live API's
-            # phrase endpointing, for now.
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5))
-        ),
-    )
+    # Server-side VAD is enabled by default; no local VAD is added.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

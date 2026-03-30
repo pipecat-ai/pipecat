@@ -48,7 +48,7 @@ load_dotenv(override=True)
 
 marker = "|----|"
 system_message = f"""
-You are a helpful LLM in a WebRTC call. Your goals are to be helpful and brief in your responses.
+You are a helpful LLM in a voice call. Your goals are to be helpful and brief in your responses.
 
 You are expert at transcribing audio to text. You will receive a mixture of audio and text input. When
 asked to transcribe what the user said, output an exact, word-for-word transcription.
@@ -269,7 +269,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "user", "content": "Please introduce yourself to the user."})
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

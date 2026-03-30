@@ -274,7 +274,15 @@ class OutputImageRawFrame(DataFrame, ImageRawFrame):
     An image that will be shown by the transport. If the transport supports
     multiple video destinations (e.g. multiple video tracks) the destination
     name can be specified in transport_destination.
+
+    Parameters:
+        sync_with_audio: If True, the image is queued with audio frames so
+            it is only displayed after all preceding audio has been sent.
+            Defaults to False (image is displayed immediately when the output
+            transport receives it).
     """
+
+    sync_with_audio: bool = field(default=False, init=False)
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -1001,7 +1009,8 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
     specify where the DTMF keypress should be sent.
     """
 
-    pass
+    def __str__(self):
+        return f"{self.name}(tone: {self.button})"
 
 
 #
@@ -1658,7 +1667,8 @@ class AssistantImageRawFrame(OutputImageRawFrame):
 class InputDTMFFrame(DTMFFrame, SystemFrame):
     """DTMF keypress input frame from transport."""
 
-    pass
+    def __str__(self):
+        return f"{self.name}(tone: {self.button.value})"
 
 
 @dataclass
@@ -1742,7 +1752,7 @@ class ServiceSwitcherRequestMetadataFrame(ControlFrame):
 
 
 @dataclass
-class TaskFrame(SystemFrame):
+class TaskFrame(ControlFrame):
     """Base frame for task frames.
 
     This is a base class for frames that are meant to be sent and handled
@@ -1756,7 +1766,21 @@ class TaskFrame(SystemFrame):
 
 
 @dataclass
-class EndTaskFrame(TaskFrame):
+class TaskSystemFrame(SystemFrame):
+    """Base frame for task system frames.
+
+    This is a base class for frames that are meant to be sent and handled
+    upstream by the pipeline task. This might result in a corresponding frame
+    sent downstream (e.g. `InterruptionTaskFrame` / `InterruptionFrame` or
+    `EndTaskFrame` / `EndFrame`).
+
+    """
+
+    pass
+
+
+@dataclass
+class EndTaskFrame(TaskFrame, UninterruptibleFrame):
     """Frame to request graceful pipeline task closure.
 
     This is used to notify the pipeline task that the pipeline should be
@@ -1774,7 +1798,20 @@ class EndTaskFrame(TaskFrame):
 
 
 @dataclass
-class CancelTaskFrame(TaskFrame):
+class StopTaskFrame(TaskFrame, UninterruptibleFrame):
+    """Frame to request pipeline task stop while keeping processors running.
+
+    This is used to notify the pipeline task that it should be stopped as
+    soon as possible (flushing all the queued frames) but that the pipeline
+    processors should be kept in a running state. This frame should be pushed
+    upstream.
+    """
+
+    pass
+
+
+@dataclass
+class CancelTaskFrame(TaskSystemFrame):
     """Frame to request immediate pipeline task cancellation.
 
     This is used to notify the pipeline task that the pipeline should be
@@ -1792,20 +1829,7 @@ class CancelTaskFrame(TaskFrame):
 
 
 @dataclass
-class StopTaskFrame(TaskFrame):
-    """Frame to request pipeline task stop while keeping processors running.
-
-    This is used to notify the pipeline task that it should be stopped as
-    soon as possible (flushing all the queued frames) but that the pipeline
-    processors should be kept in a running state. This frame should be pushed
-    upstream.
-    """
-
-    pass
-
-
-@dataclass
-class InterruptionTaskFrame(TaskFrame):
+class InterruptionTaskFrame(TaskSystemFrame):
     """Frame indicating the pipeline should be interrupted.
 
     This frame should be pushed upstream to indicate the pipeline should be
@@ -2154,10 +2178,15 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
 
         delta: :class:`~pipecat.services.settings.ServiceSettings` delta-mode
             object describing the fields to change.
+
+        service: Optional target service instance. When provided, only that
+            service will apply the settings; other services will forward the
+            frame unchanged.
     """
 
     settings: Mapping[str, Any] = field(default_factory=dict)
     delta: Optional["ServiceSettings"] = None
+    service: Optional["FrameProcessor"] = None
 
 
 @dataclass

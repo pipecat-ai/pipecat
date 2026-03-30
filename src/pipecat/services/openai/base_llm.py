@@ -69,13 +69,22 @@ class BaseOpenAILLMService(LLMService):
     """
 
     Settings = OpenAILLMSettings
-    _settings: OpenAILLMSettings
+    _settings: Settings
+
+    supports_developer_role: bool = True
+    """Whether this service's API supports the "developer" message role.
+
+    OpenAI's native API supports it, but some OpenAI-compatible services
+    (e.g. Cerebras) do not. Subclasses that don't support it should set
+    this to ``False``, which causes the adapter to convert "developer"
+    messages to "user" messages before sending them to the API.
+    """
 
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=OpenAILLMSettings(...)`` instead of
+            Use ``settings=BaseOpenAILLMService.Settings(...)`` instead of
             ``params=InputParams(...)``.
 
         Parameters:
@@ -119,7 +128,7 @@ class BaseOpenAILLMService(LLMService):
         default_headers: Optional[Mapping[str, str]] = None,
         service_tier: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[OpenAILLMSettings] = None,
+        settings: Optional[Settings] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
         **kwargs,
@@ -130,7 +139,7 @@ class BaseOpenAILLMService(LLMService):
             model: The OpenAI model name to use (e.g., "gpt-4.1", "gpt-4o").
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=BaseOpenAILLMService.Settings(model=...)`` instead.
 
             api_key: OpenAI API key. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
@@ -141,7 +150,7 @@ class BaseOpenAILLMService(LLMService):
             params: Input parameters for model configuration and behavior.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(...)`` instead.
+                    Use ``settings=BaseOpenAILLMService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
@@ -150,8 +159,8 @@ class BaseOpenAILLMService(LLMService):
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAILLMSettings(
-            model="gpt-4o",
+        default_settings = self.Settings(
+            model="gpt-4.1",
             system_instruction=None,
             frequency_penalty=NOT_GIVEN,
             presence_penalty=NOT_GIVEN,
@@ -327,18 +336,6 @@ class BaseOpenAILLMService(LLMService):
 
         params.update(self._settings.extra)
 
-        # Prepend system instruction from constructor
-        if self._settings.system_instruction:
-            messages = params.get("messages", [])
-            if messages and messages[0].get("role") == "system":
-                logger.warning(
-                    f"{self}: Both system_instruction and a system message in context are set."
-                    " Using system_instruction."
-                )
-            params["messages"] = [
-                {"role": "system", "content": self._settings.system_instruction}
-            ] + messages
-
         return params
 
     async def run_inference(
@@ -359,10 +356,13 @@ class BaseOpenAILLMService(LLMService):
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
+        effective_instruction = system_instruction or self._settings.system_instruction
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
             invocation_params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
-                context
+                context,
+                system_instruction=effective_instruction,
+                convert_developer_to_user=not self.supports_developer_role,
             )
         else:
             invocation_params = OpenAILLMInvocationParams(
@@ -375,16 +375,6 @@ class BaseOpenAILLMService(LLMService):
         # Override for non-streaming
         params["stream"] = False
         params.pop("stream_options", None)
-
-        # Prepend system instruction if provided
-        if system_instruction is not None:
-            messages = params.get("messages", [])
-            if messages and messages[0].get("role") == "system":
-                logger.warning(
-                    f"{self}: Both system_instruction and a system message in context are set."
-                    " Using system_instruction."
-                )
-            params["messages"] = [{"role": "system", "content": system_instruction}] + messages
 
         # Override max_tokens if provided
         if max_tokens is not None:
@@ -441,7 +431,11 @@ class BaseOpenAILLMService(LLMService):
             f"{self}: Generating chat from universal context {adapter.get_messages_for_logging(context)}"
         )
 
-        params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
+        params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
+            context,
+            system_instruction=self._settings.system_instruction,
+            convert_developer_to_user=not self.supports_developer_role,
+        )
         chunks = await self.get_chat_completions(params)
 
         return chunks
@@ -534,7 +528,7 @@ class BaseOpenAILLMService(LLMService):
                     tool_call = chunk.choices[0].delta.tool_calls[0]
                     if tool_call.index != func_idx:
                         functions_list.append(function_name)
-                        arguments_list.append(arguments)
+                        arguments_list.append(arguments or "{}")
                         tool_id_list.append(tool_call_id)
                         function_name = ""
                         arguments = ""
@@ -551,8 +545,10 @@ class BaseOpenAILLMService(LLMService):
 
                 # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
                 # we need to get LLMTextFrame for the transcript
-                elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
-                    "transcript"
+                elif (
+                    hasattr(chunk.choices[0].delta, "audio")
+                    and chunk.choices[0].delta.audio
+                    and chunk.choices[0].delta.audio.get("transcript")
                 ):
                     await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
@@ -560,10 +556,10 @@ class BaseOpenAILLMService(LLMService):
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
-        if function_name and arguments:
+        if function_name:
             # added to the list as last function name and arguments not added to the list
             functions_list.append(function_name)
-            arguments_list.append(arguments)
+            arguments_list.append(arguments or "{}")
             tool_id_list.append(tool_call_id)
 
             function_calls = []

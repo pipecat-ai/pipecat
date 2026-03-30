@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     URLImageRawFrame,
 )
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
 
 
 @dataclass
@@ -49,7 +49,7 @@ class OpenAIImageGenService(ImageGenService):
     """
 
     Settings = OpenAIImageGenSettings
-    _settings: OpenAIImageGenSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -61,7 +61,7 @@ class OpenAIImageGenService(ImageGenService):
             Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"]
         ] = None,
         model: Optional[str] = None,
-        settings: Optional[OpenAIImageGenSettings] = None,
+        settings: Optional[Settings] = None,
     ):
         """Initialize the OpenAI image generation service.
 
@@ -72,29 +72,29 @@ class OpenAIImageGenService(ImageGenService):
             image_size: Target size for generated images. Defaults to "1024x1024".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAIImageGenSettings(image_size=...)`` instead.
+                    Use ``settings=OpenAIImageGenService.Settings(image_size=...)`` instead.
 
             model: DALL-E model to use for generation. Defaults to "dall-e-3".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAIImageGenSettings(model=...)`` instead.
+                    Use ``settings=OpenAIImageGenService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = OpenAIImageGenSettings(
+        default_settings = self.Settings(
             model="dall-e-3",
             image_size=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", OpenAIImageGenSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         if image_size is not None:
-            _warn_deprecated_param("image_size", OpenAIImageGenSettings, "image_size")
+            self._warn_init_param_moved_to_settings("image_size", "image_size")
             default_settings.image_size = image_size
 
         # 4. Apply settings delta (canonical API, always wins)

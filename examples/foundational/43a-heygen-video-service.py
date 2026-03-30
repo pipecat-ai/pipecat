@@ -133,7 +133,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             # Kick off the conversation.
             context.add_message(
                 {
-                    "role": "user",
+                    "role": "developer",
                     "content": "Start by saying 'Hello' and then a short greeting.",
                 }
             )

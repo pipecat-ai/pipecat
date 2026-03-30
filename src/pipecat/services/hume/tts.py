@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -79,13 +79,13 @@ class HumeTTSService(TTSService):
     """
 
     Settings = HumeTTSSettings
-    _settings: HumeTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Optional synthesis parameters for Hume TTS.
 
         .. deprecated:: 0.0.105
-            Use ``settings=HumeTTSSettings(...)`` instead.
+            Use ``settings=HumeTTSService.Settings(...)`` instead.
 
         Parameters:
             description: Natural-language acting directions (up to 100 characters).
@@ -104,7 +104,7 @@ class HumeTTSService(TTSService):
         voice_id: Optional[str] = None,
         params: Optional[InputParams] = None,
         sample_rate: Optional[int] = HUME_SAMPLE_RATE,
-        settings: Optional[HumeTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ) -> None:
         """Initialize the HumeTTSService.
@@ -114,12 +114,12 @@ class HumeTTSService(TTSService):
             voice_id: ID of the voice to use. Only voice IDs are supported; voice names are not.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=HumeTTSSettings(voice=...)`` instead.
+                    Use ``settings=HumeTTSService.Settings(voice=...)`` instead.
 
             params: Optional synthesis controls (acting instructions, speed, trailing silence).
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=HumeTTSSettings(...)`` instead.
+                    Use ``settings=HumeTTSService.Settings(...)`` instead.
 
             sample_rate: Output sample rate for emitted PCM frames. Defaults to 48_000 (Hume).
             settings: Runtime-updatable settings. When provided alongside deprecated
@@ -136,7 +136,7 @@ class HumeTTSService(TTSService):
             )
 
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = HumeTTSSettings(
+        default_settings = self.Settings(
             model=None,
             voice=None,
             language=None,  # Not applicable here
@@ -147,12 +147,12 @@ class HumeTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", HumeTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", HumeTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.description = params.description
                 default_settings.speed = params.speed
@@ -235,14 +235,11 @@ class HumeTTSService(TTSService):
             # Reset timing on interruption or stop
             self._reset_state()
 
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)])
-
     async def update_setting(self, key: str, value: Any) -> None:
         """Runtime updates via key/value pair.
 
         .. deprecated:: 0.0.104
-            Use ``TTSUpdateSettingsFrame(delta=HumeTTSSettings(...))`` instead.
+            Use ``TTSUpdateSettingsFrame(delta=HumeTTSService.Settings(...))`` instead.
 
         Args:
             key: The name of the setting to update. Recognized keys are:
@@ -256,7 +253,7 @@ class HumeTTSService(TTSService):
             warnings.simplefilter("always")
             warnings.warn(
                 "'update_setting' is deprecated, use "
-                "'TTSUpdateSettingsFrame(delta=HumeTTSSettings(...))' instead.",
+                "'TTSUpdateSettingsFrame(delta=self.Settings(...))' instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -274,7 +271,7 @@ class HumeTTSService(TTSService):
                 kwargs["speed"] = None if value is None else float(value)
             elif key_l == "trailing_silence":
                 kwargs["trailing_silence"] = None if value is None else float(value)
-            await self._update_settings(HumeTTSSettings(**kwargs))
+            await self._update_settings(self.Settings(**kwargs))
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:

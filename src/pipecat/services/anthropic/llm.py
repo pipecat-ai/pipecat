@@ -58,7 +58,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven, _warn_deprecated_param, is_given
+from pipecat.services.settings import LLMSettings, _NotGiven, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -98,18 +98,20 @@ class AnthropicLLMSettings(LLMSettings):
     """
 
     enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    thinking: AnthropicThinkingConfig | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    thinking: Union["AnthropicLLMService.ThinkingConfig", _NotGiven] = field(
+        default_factory=lambda: _NOT_GIVEN
+    )
 
     @classmethod
     def from_mapping(cls, settings):
         """Convert a plain dict to settings, coercing thinking dicts.
 
         For backward compatibility, a ``thinking`` value that is a plain dict
-        is converted to a :class:`AnthropicThinkingConfig`.
+        is converted to a :class:`AnthropicLLMService.ThinkingConfig`.
         """
         instance = super().from_mapping(settings)
         if is_given(instance.thinking) and isinstance(instance.thinking, dict):
-            instance.thinking = AnthropicThinkingConfig(**instance.thinking)
+            instance.thinking = AnthropicLLMService.ThinkingConfig(**instance.thinking)
         return instance
 
 
@@ -160,7 +162,7 @@ class AnthropicLLMService(LLMService):
     """
 
     Settings = AnthropicLLMSettings
-    _settings: AnthropicLLMSettings
+    _settings: Settings
 
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AnthropicLLMAdapter
@@ -172,7 +174,7 @@ class AnthropicLLMService(LLMService):
         """Input parameters for Anthropic model inference.
 
         .. deprecated:: 0.0.105
-            Use ``AnthropicLLMSettings`` instead. Pass settings directly via the
+            Use ``AnthropicLLMService.Settings`` instead. Pass settings directly via the
             ``settings`` parameter of :class:`AnthropicLLMService`.
 
         Parameters:
@@ -199,7 +201,9 @@ class AnthropicLLMService(LLMService):
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        thinking: Optional[AnthropicThinkingConfig] = Field(default_factory=lambda: NOT_GIVEN)
+        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(
+            default_factory=lambda: NOT_GIVEN
+        )
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
         def model_post_init(self, __context):
@@ -220,7 +224,7 @@ class AnthropicLLMService(LLMService):
         api_key: str,
         model: Optional[str] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[AnthropicLLMSettings] = None,
+        settings: Optional[Settings] = None,
         client=None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
@@ -233,12 +237,12 @@ class AnthropicLLMService(LLMService):
             model: Model name to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AnthropicLLMSettings(model=...)`` instead.
+                    Use ``settings=AnthropicLLMService.Settings(model=...)`` instead.
 
             params: Optional model parameters for inference.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=AnthropicLLMSettings(...)`` instead.
+                    Use ``settings=AnthropicLLMService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings for this service.  When both
                 deprecated parameters and *settings* are provided, *settings*
@@ -249,7 +253,7 @@ class AnthropicLLMService(LLMService):
             **kwargs: Additional arguments passed to parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = AnthropicLLMSettings(
+        default_settings = self.Settings(
             model="claude-sonnet-4-6",
             system_instruction=None,
             max_tokens=4096,
@@ -268,12 +272,12 @@ class AnthropicLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", AnthropicLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", AnthropicLLMSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 default_settings.max_tokens = params.max_tokens
                 default_settings.temperature = params.temperature
@@ -366,10 +370,13 @@ class AnthropicLLMService(LLMService):
         messages = []
         system = NOT_GIVEN
         tools = []
+        effective_instruction = system_instruction or self._settings.system_instruction
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
             invocation_params = adapter.get_llm_invocation_params(
-                context, enable_prompt_caching=self._settings.enable_prompt_caching
+                context,
+                enable_prompt_caching=self._settings.enable_prompt_caching,
+                system_instruction=effective_instruction,
             )
             messages = invocation_params["messages"]
             system = invocation_params["system"]
@@ -379,15 +386,6 @@ class AnthropicLLMService(LLMService):
             messages = context.messages
             system = getattr(context, "system", NOT_GIVEN)
             tools = context.tools or []
-
-        # Override system instruction if provided
-        if system_instruction is not None:
-            if system and system is not NOT_GIVEN:
-                logger.warning(
-                    f"{self}: Both system_instruction and a system message in context are set."
-                    " Using system_instruction."
-                )
-            system = system_instruction
 
         # Build params using the same method as streaming completions
         params = {
@@ -456,15 +454,10 @@ class AnthropicLLMService(LLMService):
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
             params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(
-                context, enable_prompt_caching=self._settings.enable_prompt_caching
+                context,
+                enable_prompt_caching=self._settings.enable_prompt_caching,
+                system_instruction=self._settings.system_instruction,
             )
-            if self._settings.system_instruction:
-                if params["system"] is not NOT_GIVEN:
-                    logger.warning(
-                        f"{self}: Both system_instruction and a system message in context are"
-                        " set. Using system_instruction."
-                    )
-                params["system"] = self._settings.system_instruction
             return params
 
         # Anthropic-specific context
@@ -1242,7 +1235,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             frame: Frame containing function call result.
         """
         if frame.result:
-            result = json.dumps(frame.result)
+            result = json.dumps(frame.result, ensure_ascii=False)
             await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
         else:
             await self._update_function_call_result(

@@ -60,7 +60,7 @@ class TavusVideoService(AIService):
     """
 
     Settings = TavusVideoSettings
-    _settings: TavusVideoSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -69,7 +69,7 @@ class TavusVideoService(AIService):
         replica_id: str,
         persona_id: str = "pipecat-stream",
         session: aiohttp.ClientSession,
-        settings: Optional[TavusVideoSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ) -> None:
         """Initialize the Tavus video service.
@@ -214,7 +214,9 @@ class TavusVideoService(AIService):
         await super().start(frame)
         await self._client.start(frame)
         if self._transport_destination:
-            await self._client.register_audio_destination(self._transport_destination)
+            await self._client.register_audio_destination(
+                self._transport_destination, auto_silence=False
+            )
         await self._create_send_task()
 
     async def stop(self, frame: EndFrame):

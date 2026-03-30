@@ -51,11 +51,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.grok.realtime.events import (
-    SessionProperties,
-)
-from pipecat.services.grok.realtime.llm import GrokRealtimeLLMService
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.xai.realtime.events import SessionProperties
+from pipecat.services.xai.realtime.llm import GrokRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -172,23 +170,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     session_properties = SessionProperties(
         # Voice options: Ara, Rex, Sal, Eve, Leo
         voice="Ara",
-        # System instructions
-        instructions="""You are a helpful and friendly AI assistant powered by Grok.
-
-You have access to several tools:
-- Weather information
-- Current time
-- Restaurant recommendations
-- Web search (built-in)
-- X/Twitter search (built-in)
-
-Your voice and personality should be warm and engaging. Keep your responses
-concise and conversational since this is a voice interaction.
-
-If the user asks about current events or news, use web search.
-If they ask about what people are saying on social media, use X search.
-
-Always be helpful and proactive in offering assistance.""",
         # Grok-specific built-in tools can be added here:
         # tools=[
         #     WebSearchTool(),  # Enable web search
@@ -198,8 +179,24 @@ Always be helpful and proactive in offering assistance.""",
 
     # Create the Grok Realtime LLM service
     llm = GrokRealtimeLLMService(
-        api_key=os.getenv("GROK_API_KEY"),
+        api_key=os.getenv("XAI_API_KEY"),
         settings=GrokRealtimeLLMService.Settings(
+            system_instruction="""You are a helpful and friendly AI assistant powered by Grok.
+
+    You have access to several tools:
+    - Weather information
+    - Current time
+    - Restaurant recommendations
+    - Web search (built-in)
+    - X/Twitter search (built-in)
+
+    Your voice and personality should be warm and engaging. Keep your responses
+    concise and conversational since this is a voice interaction.
+
+    If the user asks about current events or news, use web search.
+    If they ask about what people are saying on social media, use X search.
+
+    Always be helpful and proactive in offering assistance.""",
             session_properties=session_properties,
         ),
     )
@@ -211,7 +208,7 @@ Always be helpful and proactive in offering assistance.""",
 
     # Create context with initial message and tools
     context = LLMContext(
-        [{"role": "user", "content": "Say hello and introduce yourself!"}],
+        [{"role": "developer", "content": "Say hello and introduce yourself!"}],
         tools,
     )
 

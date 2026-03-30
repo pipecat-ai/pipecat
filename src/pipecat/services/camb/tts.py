@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -138,10 +138,13 @@ class CambTTSSettings(TTSSettings):
     """Settings for CambTTSService.
 
     Parameters:
+        voice: Camb.ai voice ID. Overrides ``TTSSettings.voice`` (str) because
+            Camb.ai uses integer voice IDs.
         user_instructions: Custom instructions for mars-instruct model only.
             Ignored for other models. Max 1000 characters.
     """
 
+    voice: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     user_instructions: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -158,24 +161,31 @@ class CambTTSService(TTSService):
     Example::
 
         # Basic usage with mars-flash (fast)
-        tts = CambTTSService(api_key="your-api-key", model="mars-flash")
+        tts = CambTTSService(
+            api_key="your-api-key",
+            settings=CambTTSService.Settings(
+                model="mars-flash"
+            )
+        )
 
         # High quality with mars-pro
         tts = CambTTSService(
             api_key="your-api-key",
-            voice_id=12345,
-            model="mars-pro",
+            settings=CambTTSService.Settings(
+                voice=12345,
+                model="mars-pro",
+            )
         )
     """
 
     Settings = CambTTSSettings
-    _settings: CambTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Camb.ai TTS configuration.
 
         .. deprecated:: 0.0.105
-            Use ``settings=CambTTSSettings(...)`` instead.
+            Use ``settings=CambTTSService.Settings(...)`` instead.
 
         Parameters:
             language: Language for synthesis (BCP-47 format). Defaults to English.
@@ -200,7 +210,7 @@ class CambTTSService(TTSService):
         timeout: float = 60.0,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        settings: Optional[CambTTSSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Camb.ai TTS service.
@@ -210,12 +220,12 @@ class CambTTSService(TTSService):
             voice_id: Voice ID to use.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CambTTSSettings(voice=...)`` instead.
+                    Use ``settings=CambTTSService.Settings(voice=...)`` instead.
 
             model: TTS model to use. Options: "mars-flash" (fast), "mars-pro" (high quality).
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CambTTSSettings(model=...)`` instead.
+                    Use ``settings=CambTTSService.Settings(model=...)`` instead.
 
             timeout: Request timeout in seconds. Defaults to 60.0 (minimum recommended
                 by Camb.ai).
@@ -223,14 +233,14 @@ class CambTTSService(TTSService):
             params: Additional voice parameters. If None, uses defaults.
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=CambTTSSettings(...)`` instead.
+                    Use ``settings=CambTTSService.Settings(...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = CambTTSSettings(
+        default_settings = self.Settings(
             model="mars-flash",
             voice=147320,
             language="en-us",
@@ -239,20 +249,18 @@ class CambTTSService(TTSService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", CambTTSSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
         if voice_id is not None:
-            _warn_deprecated_param("voice_id", CambTTSSettings, "voice")
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
-            _warn_deprecated_param("params", CambTTSSettings)
+            self._warn_init_param_moved_to_settings("params")
             if not settings:
                 if params.language is not None:
-                    default_settings.language = (
-                        self.language_to_service_language(params.language) or "en-us"
-                    )
+                    default_settings.language = params.language
                 if params.user_instructions is not None:
                     default_settings.user_instructions = params.user_instructions
 

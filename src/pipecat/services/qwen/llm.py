@@ -11,13 +11,12 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.services.openai.base_llm import OpenAILLMSettings
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
-class QwenLLMSettings(OpenAILLMSettings):
+class QwenLLMSettings(BaseOpenAILLMService.Settings):
     """Settings for QwenLLMService."""
 
     pass
@@ -30,8 +29,12 @@ class QwenLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    # Qwen doesn't support the "developer" message role.
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
+
     Settings = QwenLLMSettings
-    _settings: QwenLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
@@ -39,7 +42,7 @@ class QwenLLMService(OpenAILLMService):
         api_key: str,
         base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         model: Optional[str] = None,
-        settings: Optional[QwenLLMSettings] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Qwen LLM service.
@@ -50,18 +53,18 @@ class QwenLLMService(OpenAILLMService):
             model: The model identifier to use. Defaults to "qwen-plus".
 
                 .. deprecated:: 0.0.105
-                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+                    Use ``settings=QwenLLMService.Settings(model=...)`` instead.
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = QwenLLMSettings(model="qwen-plus")
+        default_settings = self.Settings(model="qwen-plus")
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
-            _warn_deprecated_param("model", QwenLLMSettings, "model")
+            self._warn_init_param_moved_to_settings("model", "model")
             default_settings.model = model
 
         # 3. (No step 3, as there's no params object to apply)

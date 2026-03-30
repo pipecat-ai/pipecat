@@ -43,6 +43,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     StartFrame,
+    SystemFrame,
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -155,7 +156,7 @@ class TTSService(AIService):
         # if True, TTSService will push TTSStartedFrames and create audio contexts automatically
         push_start_frame: bool = False,
         # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
-        stop_frame_timeout_s: float = 2.0,
+        stop_frame_timeout_s: float = 3.0,
         # if True, TTSService will push silence audio frames after TTSStoppedFrame
         push_silence_after_stop: bool = False,
         # if push_silence_after_stop is True, send this amount of audio silence
@@ -245,6 +246,26 @@ class TTSService(AIService):
             **kwargs,
         )
 
+        # Convert Language enum to service-specific format at init time.
+        # Runtime updates are handled by _update_settings(), but init-time
+        # settings bypass that path and need explicit conversion.
+        # Raw strings (e.g. "de-DE") are first converted to Language enums
+        # so they go through the same resolution logic.
+        if isinstance(self._settings.language, str) and not isinstance(
+            self._settings.language, Language
+        ):
+            try:
+                self._settings.language = Language(self._settings.language)
+            except ValueError:
+                logger.debug(
+                    f"Language string '{self._settings.language}' is not a recognized "
+                    f"Language code. It will be passed to the service as-is."
+                )
+        if isinstance(self._settings.language, Language):
+            converted = self.language_to_service_language(self._settings.language)
+            if converted is not None:
+                self._settings.language = converted
+
         # Resolve text_aggregation_mode from the new param or deprecated aggregate_sentences
         if aggregate_sentences is not None:
             import warnings
@@ -312,9 +333,6 @@ class TTSService(AIService):
 
         self._resampler = create_stream_resampler()
 
-        self._stop_frame_task: Optional[asyncio.Task] = None
-        self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
-
         self._processing_text: bool = False
         self._tts_contexts: Dict[str, TTSContext] = {}
         self._streamed_text: str = ""
@@ -324,7 +342,7 @@ class TTSService(AIService):
         self._initial_word_timestamp: int = -1
         self._initial_word_times: List[Tuple[str, float, Optional[str]]] = []
         # PTS of the last word frame pushed via _add_word_timestamps, used to assign
-        # correct PTS to sentinel frames ("TTSStoppedFrame", "Reset") that follow.
+        # correct PTS to TTSStoppedFrame and LLMFullResponseEndFrame.
         self._word_last_pts: int = 0
         self._llm_response_started: bool = False
         self._reuse_context_id_within_turn: bool = reuse_context_id_within_turn
@@ -525,8 +543,6 @@ class TTSService(AIService):
         """
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
-        if self._push_stop_frames and not self._stop_frame_task:
-            self._stop_frame_task = self.create_task(self._stop_frame_handler())
         self._create_audio_context_task()
 
     async def stop(self, frame: EndFrame):
@@ -536,13 +552,10 @@ class TTSService(AIService):
             frame: The end frame.
         """
         await super().stop(frame)
-        if self._stop_frame_task:
-            await self.cancel_task(self._stop_frame_task)
-            self._stop_frame_task = None
         if self._audio_context_task:
-            # Indicate no more audio contexts are available; this will end the
-            # task cleanly after all contexts have been processed.
-            await self._contexts_queue.put(None)
+            # Sentinel None shuts down the serialization queue once all
+            # pending contexts and frames have been processed.
+            await self._serialization_queue.put(None)
             await self._audio_context_task
             self._audio_context_task = None
 
@@ -553,9 +566,6 @@ class TTSService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        if self._stop_frame_task:
-            await self.cancel_task(self._stop_frame_task)
-            self._stop_frame_task = None
         await self._stop_audio_context_task()
 
     def add_text_transformer(
@@ -602,7 +612,20 @@ class TTSService(AIService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        # Translate language *before* applying so the stored value is canonical
+        # Translate language *before* applying so the stored value is canonical.
+        # Raw strings are first converted to Language enums for proper resolution.
+        if (
+            is_given(delta.language)
+            and isinstance(delta.language, str)
+            and not isinstance(delta.language, Language)
+        ):
+            try:
+                delta.language = Language(delta.language)
+            except ValueError:
+                logger.debug(
+                    f"Language string '{delta.language}' is not a recognized "
+                    f"Language code. It will be passed to the service as-is."
+                )
         if is_given(delta.language) and isinstance(delta.language, Language):
             converted = self.language_to_service_language(delta.language)
             if converted is not None:
@@ -633,6 +656,18 @@ class TTSService(AIService):
 
         await self.queue_frame(TTSSpeakFrame(text))
 
+    async def on_turn_context_created(self, context_id: str):
+        """Called when a new turn context ID has been created.
+
+        Override to perform provider-specific setup (e.g., eagerly opening a
+        server-side context) before text starts flowing. This is called from
+        ``process_frame`` when an ``LLMFullResponseStartFrame`` or ``TTSSpeakFrame`` arrives.
+
+        Args:
+            context_id: The newly created turn context ID.
+        """
+        pass
+
     async def on_turn_context_completed(self):
         """Handle the completion of a turn."""
         # For HTTP services they emit the frames synchronously, so close the audio context here
@@ -647,7 +682,12 @@ class TTSService(AIService):
             await self.remove_audio_context(self._turn_context_id)
 
         # Flush any pending audio so the TTS service closes the current context.
-        await self.flush_audio(context_id=self._turn_context_id)
+        # Only flush if the context was actually opened (text reached run_tts).
+        # When an interruption arrives before any text flows, the turn context ID
+        # exists but was never registered via create_audio_context, so flushing
+        # would send a message for a context the provider never opened.
+        if self._turn_context_id and self.audio_context_available(self._turn_context_id):
+            await self.flush_audio(context_id=self._turn_context_id)
 
         # Reset the turn context ID
         self._turn_context_id = None
@@ -685,19 +725,20 @@ class TTSService(AIService):
             self._llm_response_started = True
             # New LLM turn → assign a fresh context ID shared by all sentences
             self._turn_context_id = self.create_context_id()
+            await self.on_turn_context_created(self._turn_context_id)
             await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
-            # We pause processing incoming frames if the LLM response included
-            # text (it might be that it's only a function calling response). We
-            # pause to avoid audio overlapping.
-            await self._maybe_pause_frame_processing()
-
             # Flush any remaining text (including text waiting for lookahead)
             remaining = await self._text_aggregator.flush()
             # Stop the aggregation metric (no-op if already stopped on first sentence).
             await self.stop_text_aggregation_metrics()
             if remaining:
                 await self._push_tts_frames(AggregatedTextFrame(remaining.text, remaining.type))
+
+            # We pause processing incoming frames if the LLM response included
+            # text (it might be that it's only a function calling response). We
+            # pause to avoid audio overlapping.
+            await self._maybe_pause_frame_processing()
 
             # Log accumulated streamed text and emit aggregated usage metric.
             if self._streamed_text:
@@ -709,7 +750,11 @@ class TTSService(AIService):
             self._processing_text = False
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
-                    await self.push_frame(frame, direction)
+                    # Route through the serialization queue so the frame is
+                    # emitted only after the audio context has been fully
+                    # drained (including the final TTSTextFrame).  Pushing
+                    # directly would let it race ahead of queued text frames.
+                    await self._serialization_queue.put(frame)
             else:
                 await self.push_frame(frame, direction)
 
@@ -723,6 +768,7 @@ class TTSService(AIService):
             self._turn_context_id = None
             # Creating a new context_id for the TTS request.
             self._turn_context_id = self.create_context_id()
+            await self.on_turn_context_created(self._turn_context_id)
             # If we are not receiving text from the LLM, we can assume that the SpeakFrame should be automatically added to the context
             push_assistant_aggregation = frame.append_to_context and not self._llm_response_started
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
@@ -738,7 +784,9 @@ class TTSService(AIService):
             self._turn_context_id = saved_turn_context_id
             self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
-            if frame.delta is not None:
+            if frame.service is not None and frame.service is not self:
+                await self.push_frame(frame, direction)
+            elif frame.delta is not None:
                 await self._update_settings(frame.delta)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
@@ -756,7 +804,15 @@ class TTSService(AIService):
             await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
         else:
-            await self.push_frame(frame, direction)
+            if direction == FrameDirection.DOWNSTREAM and not isinstance(frame, SystemFrame):
+                # Route non-system downstream frames through the serialization queue so they
+                # are emitted in the same order they arrive relative to any audio contexts that
+                # are already queued (e.g. a FooFrame sent right after a TTSSpeakFrame must
+                # not overtake the TTSStartedFrame / TTSAudioRawFrame / TTSStoppedFrame
+                # sequence from that speak frame).
+                await self._serialization_queue.put(frame)
+            else:
+                await self.push_frame(frame, direction)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream with TTS-specific handling.
@@ -787,14 +843,6 @@ class TTSService(AIService):
             frame.transport_destination = self._transport_destination
 
         await super().push_frame(frame, direction)
-
-        if self._push_stop_frames and (
-            isinstance(frame, InterruptionFrame)
-            or isinstance(frame, TTSStartedFrame)
-            or isinstance(frame, TTSAudioRawFrame)
-            or isinstance(frame, TTSStoppedFrame)
-        ):
-            await self._stop_frame_queue.put(frame)
 
     async def _stream_audio_frames_from_iterator(
         self,
@@ -959,7 +1007,15 @@ class TTSService(AIService):
         # is spoken, so we set append_to_context to False.
         src_frame.append_to_context = False
         src_frame.context_id = context_id
-        await self.push_frame(src_frame)
+        # Route AggregatedTextFrame through the serialization queue so it is emitted
+        # immediately before the TTSStartedFrame of the audio context it describes,
+        # rather than racing ahead of audio frames from a previous context.
+        if not self.audio_context_available(context_id):
+            await self._serialization_queue.put(src_frame)
+        # Otherwise, if the context already exists, we append the AggregatedTextFrame
+        # to the existing context queue.
+        else:
+            await self.append_to_audio_context(context_id, src_frame)
 
         # Note: Text transformations are meant to only affect the text sent to the TTS for
         # TTS-specific purposes. This allows for explicit TTS modifications (e.g., inserting
@@ -1008,11 +1064,8 @@ class TTSService(AIService):
             # Only override append_to_context if explicitly set
             if append_tts_text_to_context is not None:
                 frame.append_to_context = append_tts_text_to_context
-            # For services using the audio context we are appending to the context, so it preserves the ordering.
-            if self.audio_context_available(context_id):
-                await self.append_to_audio_context(context_id, frame)
-            else:
-                await self.push_frame(frame)
+            # Appending to the context, so it preserves the ordering.
+            await self.append_to_audio_context(context_id, frame)
 
     async def tts_process_generator(
         self, context_id: str, generator: AsyncGenerator[Frame | None, None]
@@ -1043,24 +1096,6 @@ class TTSService(AIService):
 
         self._is_yielding_frames_synchronously = is_yielding_frames
 
-    async def _stop_frame_handler(self):
-        has_started = False
-        context_id = None
-        while True:
-            try:
-                frame = await asyncio.wait_for(
-                    self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
-                )
-                if isinstance(frame, TTSStartedFrame):
-                    context_id = frame.context_id
-                    has_started = True
-                elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-                    has_started = False
-            except asyncio.TimeoutError:
-                if has_started:
-                    await self.push_frame(TTSStoppedFrame(context_id=context_id))
-                    has_started = False
-
     #
     # Word timestamp methods
     #
@@ -1085,6 +1120,9 @@ class TTSService(AIService):
     async def reset_word_timestamps(self):
         """Reset word timestamp tracking."""
         self._initial_word_timestamp = -1
+        # Discard any pre-audio word timestamps from the interrupted turn so they
+        # cannot be flushed into the next context after the audio baseline resets.
+        self._initial_word_times = []
 
     async def add_word_timestamps(
         self, word_times: List[Tuple[str, float]], context_id: Optional[str] = None
@@ -1102,12 +1140,13 @@ class TTSService(AIService):
         """
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
-                await self._audio_contexts[context_id].put(
+                await self.append_to_audio_context(
+                    context_id,
                     _WordTimestampEntry(
                         word=word,
                         timestamp=timestamp,
                         context_id=context_id,
-                    )
+                    ),
                 )
         else:
             await self._add_word_timestamps(word_times=word_times, context_id=context_id)
@@ -1115,48 +1154,31 @@ class TTSService(AIService):
     async def _add_word_timestamps(
         self, word_times: List[Tuple[str, float]], context_id: Optional[str] = None
     ):
-        """Process word timestamps directly, building and pushing frames inline.
+        """Process word timestamps directly, building and pushing TTSTextFrames inline.
 
-        This is the single processing path for all word timestamp events, used both
-        from _handle_audio_context (via _WordTimestampEntry) and from services that
-        do not use audio contexts. Sentinel entries drive control-frame emission:
+        Used both from _handle_audio_context (via _WordTimestampEntry) and from services
+        that do not use audio contexts. Each entry emits a TTSTextFrame with a PTS
+        relative to the baseline established by start_word_timestamps().
 
-        - ("Reset", 0): reset timestamp baseline; emit LLMFullResponseEndFrame if needed.
-        - ("TTSStoppedFrame", 0): emit TTSStoppedFrame.
-        - Any other entry: emit TTSTextFrame with a PTS relative to the baseline.
-
-        When the baseline (_initial_word_timestamp) is not yet set, regular word entries
-        are cached in _initial_word_times and flushed once start_word_timestamps() is
-        called (i.e. when the first audio chunk is received).
+        When the baseline (_initial_word_timestamp) is not yet set, entries are cached
+        in _initial_word_times and flushed once start_word_timestamps() is called
+        (i.e. when the first audio chunk is received).
         """
         for word, timestamp in word_times:
-            if word == "Reset" and timestamp == 0:
-                await self.reset_word_timestamps()
-                if self._llm_response_started:
-                    self._llm_response_started = False
-                    frame = LLMFullResponseEndFrame()
-                    frame.pts = self._word_last_pts
-                    await self.push_frame(frame)
-            elif word == "TTSStoppedFrame" and timestamp == 0:
-                frame = TTSStoppedFrame(context_id=context_id)
-                frame.pts = self._word_last_pts
-                frame.context_id = context_id
-                await self.push_frame(frame)
+            ts_ns = seconds_to_nanoseconds(timestamp)
+            if self._initial_word_timestamp == -1:
+                # Cache until we have audio and can compute PTS.
+                self._initial_word_times.append((word, timestamp, context_id))
             else:
-                ts_ns = seconds_to_nanoseconds(timestamp)
-                if self._initial_word_timestamp == -1:
-                    # Cache until we have audio and can compute PTS.
-                    self._initial_word_times.append((word, timestamp, context_id))
-                else:
-                    # Assumption: word-by-word text frames don't include spaces, so
-                    # we can rely on the default includes_inter_frame_spaces=False
-                    frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
-                    frame.pts = self._initial_word_timestamp + ts_ns
-                    frame.context_id = context_id
-                    if context_id in self._tts_contexts:
-                        frame.append_to_context = self._tts_contexts[context_id].append_to_context
-                    self._word_last_pts = frame.pts
-                    await self.push_frame(frame)
+                # Assumption: word-by-word text frames don't include spaces, so
+                # we can rely on the default includes_inter_frame_spaces=False
+                frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
+                frame.pts = self._initial_word_timestamp + ts_ns
+                frame.context_id = context_id
+                if context_id in self._tts_contexts:
+                    frame.append_to_context = self._tts_contexts[context_id].append_to_context
+                self._word_last_pts = frame.pts
+                await self.push_frame(frame)
 
     #
     # Audio context methods (active when using websocket-based TTS with context management)
@@ -1168,16 +1190,23 @@ class TTSService(AIService):
         Args:
             context_id: Unique identifier for the audio context.
         """
-        await self._contexts_queue.put(context_id)
+        await self._serialization_queue.put(context_id)
         self._audio_contexts[context_id] = asyncio.Queue()
         logger.trace(f"{self} created audio context {context_id}")
 
-    async def append_to_audio_context(self, context_id: str, frame: Frame):
-        """Append audio or control frame to an existing context.
+    async def append_to_audio_context(
+        self, context_id: str, frame: Frame | _WordTimestampEntry | None
+    ):
+        """Append a frame or word-timestamp entry to an existing audio context queue.
+
+        Passing ``None`` signals end-of-context (used by remove_audio_context to mark
+        the queue for deletion). If the context no longer exists but the context_id
+        matches the active turn, the context is transparently recreated before appending.
 
         Args:
-            context_id: The context to append audio to.
-            frame: The audio or control frame to append.
+            context_id: The context to append to.
+            frame: The frame, word-timestamp entry, or ``None`` (end-of-context sentinel)
+                to append.
         """
         if not context_id:
             logger.debug(f"{self} unable to append audio to context: no context ID provided")
@@ -1185,7 +1214,8 @@ class TTSService(AIService):
         if self.audio_context_available(context_id):
             logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
             await self._audio_contexts[context_id].put(frame)
-        elif context_id == self._turn_context_id:
+        # In case the frame is None, we should not recreate the context.
+        elif context_id == self._turn_context_id and frame:
             # Sometimes the HTTP service can take more than 3 seconds without sending any audio
             # So we are now recreating the context id while we are in the same turn
             logger.debug(f"{self} recreating audio context {context_id}")
@@ -1193,7 +1223,7 @@ class TTSService(AIService):
             logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
             await self._audio_contexts[context_id].put(frame)
         else:
-            logger.warning(f"{self} unable to append audio to context {context_id}")
+            logger.debug(f"{self} unable to append audio to context {context_id}")
 
     async def remove_audio_context(self, context_id: str):
         """Remove an existing audio context.
@@ -1206,7 +1236,7 @@ class TTSService(AIService):
             # None. Once we reach None while handling audio we know we can
             # safely remove the context.
             logger.trace(f"{self} marking audio context {context_id} for deletion")
-            await self._audio_contexts[context_id].put(None)
+            await self.append_to_audio_context(context_id, None)
         else:
             logger.warning(f"{self} unable to remove context {context_id}")
 
@@ -1260,7 +1290,14 @@ class TTSService(AIService):
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
-            self._contexts_queue: asyncio.Queue = asyncio.Queue()
+            # Single FIFO queue that serializes everything the TTS service emits downstream.
+            # Items can be:
+            #   str   – an audio context ID: process the per-context audio queue in full before
+            #           moving on (see _handle_audio_context).
+            #   Frame – a non-system downstream frame (e.g. AggregatedTextFrame, FooFrame) that
+            #           must be emitted in-order relative to surrounding audio contexts.
+            #   None  – shutdown sentinel (sent by stop()).
+            self._serialization_queue: asyncio.Queue = asyncio.Queue()
             self._audio_contexts: Dict[str, asyncio.Queue] = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
@@ -1270,13 +1307,26 @@ class TTSService(AIService):
             self._audio_context_task = None
 
     async def _audio_context_task_handler(self):
-        """In this task we process audio contexts in order."""
+        """Drain the serialization queue, preserving downstream frame order.
+
+        The queue carries three kinds of items (see _create_audio_context_task):
+
+        * str  – audio context ID: block until all audio for that context has been
+                 pushed downstream, then call on_audio_context_completed().
+        * Frame – a non-system downstream frame that must be emitted at this exact
+                  position in the output stream (e.g. AggregatedTextFrame preceding
+                  its audio, or an arbitrary frame that arrived between two speak frames).
+        * None – shutdown sentinel; exit the loop once reached.
+        """
         running = True
         while running:
-            context_id = await self._contexts_queue.get()
-            self._playing_context_id = context_id
+            context_value = await self._serialization_queue.get()
+            if isinstance(context_value, Frame):
+                await self.push_frame(context_value)
+            elif isinstance(context_value, str):
+                context_id = context_value
+                self._playing_context_id = context_id
 
-            if context_id:
                 # Process the audio context until the context doesn't have more
                 # audio available (i.e. we find None).
                 await self._handle_audio_context(context_id)
@@ -1288,26 +1338,42 @@ class TTSService(AIService):
             else:
                 running = False
 
-            self._contexts_queue.task_done()
+            self._serialization_queue.task_done()
+
+    async def _maybe_reset_word_timestamps(self):
+        """Reset word-timestamp state and emit LLMFullResponseEndFrame if needed.
+
+        Called at the end of an audio context (either on clean completion timeout or
+        when the context queue is drained). Resets the PTS baseline so the next turn
+        starts fresh. If an LLM response is still marked as in-progress and text frames
+        are not being pushed (which would have already emitted the frame), an
+        LLMFullResponseEndFrame is pushed with the PTS of the last word frame.
+        """
+        await self.reset_word_timestamps()
+        # If self._push_text_frames is True, we have already pushed the original LLMFullResponseEndFrame
+        if self._llm_response_started and not self._push_text_frames:
+            self._llm_response_started = False
+            frame = LLMFullResponseEndFrame()
+            frame.pts = self._word_last_pts
+            await self.push_frame(frame)
 
     async def _handle_audio_context(self, context_id: str):
         """Process items from an audio context queue until it is exhausted."""
-        AUDIO_CONTEXT_TIMEOUT = 3.0
         queue = self._audio_contexts[context_id]
         running = True
         timestamps_started = False
+        should_push_stop_frame = False
         while running:
             try:
-                frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
+                frame = await asyncio.wait_for(queue.get(), timeout=self._stop_frame_timeout_s)
                 if frame is TTSService._CONTEXT_KEEPALIVE:
                     # Context is still in use, reset the timeout.
                     continue
                 elif frame is None:
                     running = False
                 elif isinstance(frame, _WordTimestampEntry):
-                    # _add_word_timestamps is the single processing path: it handles
-                    # sentinel entries ("Reset", "TTSStoppedFrame") and regular words
-                    # inline, keeping all word-frame logic in one place.
+                    # Route word timestamps through _add_word_timestamps so they are
+                    # processed in playback order alongside audio frames.
                     await self._add_word_timestamps(
                         [(frame.word, frame.timestamp)], frame.context_id
                     )
@@ -1320,6 +1386,14 @@ class TTSService(AIService):
                         timestamps_started = True
 
                 if frame:
+                    if isinstance(frame, TTSStartedFrame):
+                        should_push_stop_frame = self._push_stop_frames
+                    elif isinstance(frame, TTSStoppedFrame):
+                        should_push_stop_frame = False
+                        # Setting the last word timestamp as the TTSStoppedFrame PTS
+                        if not frame.pts:
+                            frame.pts = self._word_last_pts
+
                     if isinstance(frame, ErrorFrame):
                         await self.push_error_frame(frame)
                     else:
@@ -1327,7 +1401,14 @@ class TTSService(AIService):
             except asyncio.TimeoutError:
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
+                if should_push_stop_frame and self._push_stop_frames:
+                    await self.push_frame(TTSStoppedFrame(context_id=context_id))
+                    should_push_stop_frame = False
                 break
+
+        if should_push_stop_frame and self._push_stop_frames:
+            await self.push_frame(TTSStoppedFrame(context_id=context_id))
+        await self._maybe_reset_word_timestamps()
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Called when an audio context is cancelled due to an interruption.
@@ -1431,6 +1512,20 @@ class InterruptibleTTSService(WebsocketTTSService):
         if self._bot_speaking:
             await self._disconnect()
             await self._connect()
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream with TTS-specific handling.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        # This prevents a race condition in cases where run_tts has been invoked but the
+        # BotStartedSpeakingFrame has not yet been received, which could allow stale audio to leak through.
+        if isinstance(frame, TTSStartedFrame):
+            self._bot_speaking = True
+
+        await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with bot speaking state tracking.

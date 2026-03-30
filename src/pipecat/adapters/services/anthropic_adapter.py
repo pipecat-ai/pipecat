@@ -9,7 +9,7 @@
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from anthropic import NOT_GIVEN, NotGiven
 from anthropic.types.message_param import MessageParam
@@ -48,24 +48,36 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         return "anthropic"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, enable_prompt_caching: bool
+        self,
+        context: LLMContext,
+        enable_prompt_caching: bool,
+        system_instruction: Optional[str] = None,
     ) -> AnthropicLLMInvocationParams:
         """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
             enable_prompt_caching: Whether prompt caching should be enabled.
+            system_instruction: Optional system instruction from service settings
+                or ``run_inference``.
 
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
         """
-        messages = self._from_universal_context_messages(self.get_messages(context))
+        converted = self._from_universal_context_messages(
+            self.get_messages(context), system_instruction=system_instruction
+        )
+        system = self._resolve_system_instruction(
+            converted.system if converted.system is not NOT_GIVEN else None,
+            system_instruction,
+            discard_context_system=True,
+        )
         return {
-            "system": messages.system,
+            "system": system if system is not None else NOT_GIVEN,
             "messages": (
-                self._with_cache_control_markers(messages.messages)
+                self._with_cache_control_markers(converted.messages)
                 if enable_prompt_caching
-                else messages.messages
+                else converted.messages
             ),
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
@@ -107,33 +119,34 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         system: str | NotGiven
 
     def _from_universal_context_messages(
-        self, universal_context_messages: List[LLMContextMessage]
+        self,
+        universal_context_messages: List[LLMContextMessage],
+        *,
+        system_instruction: Optional[str] = None,
     ) -> ConvertedMessages:
         system = NOT_GIVEN
-        messages = []
 
-        # First, map messages using self._from_universal_context_message(m)
+        # Extract initial system message from universal messages BEFORE conversion,
+        # so the helper works with standard message format (not provider-specific).
+        remaining = list(universal_context_messages)
+        if remaining and not isinstance(remaining[0], LLMSpecificMessage):
+            extracted = self._extract_initial_system(
+                remaining, system_instruction=system_instruction
+            )
+            if extracted is not None:
+                system = extracted
+
+        # Convert remaining messages to Anthropic format
+        messages = []
         try:
-            messages = [self._from_universal_context_message(m) for m in universal_context_messages]
+            messages = [self._from_universal_context_message(m) for m in remaining]
         except Exception as e:
             logger.error(f"Error mapping messages: {e}")
 
-        # See if we should pull the system message out of our messages list.
-        if messages and messages[0]["role"] == "system":
-            if len(messages) == 1:
-                # If we have only have a system message in the list, all we can really do
-                # without introducing too much magic is change the role to "user".
-                messages[0]["role"] = "user"
-            else:
-                # If we have more than one message, we'll pull the system message out of the
-                # list.
-                system = messages[0]["content"]
-                messages.pop(0)
-
-        # Convert any subsequent "system"-role messages to "user"-role
-        # messages, as Anthropic doesn't support system input messages.
+        # Convert any subsequent "system"/"developer"-role messages to "user"-role
+        # messages, as Anthropic doesn't support system or developer input messages.
         for message in messages:
-            if message["role"] == "system":
+            if message["role"] in ("system", "developer"):
                 message["role"] = "user"
 
         # Merge consecutive messages with the same role.

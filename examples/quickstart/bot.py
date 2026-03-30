@@ -63,19 +63,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a friendly AI assistant. Respond naturally and keep your answers conversational.",
+        ),
+    )
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a friendly AI assistant. Respond naturally and keep your answers conversational.",
-        },
-    ]
-
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -105,7 +105,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Say hello and briefly introduce yourself."})
+        context.add_message(
+            {"role": "developer", "content": "Say hello and briefly introduce yourself."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
