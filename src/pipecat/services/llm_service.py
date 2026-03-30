@@ -213,7 +213,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._function_call_timeout_secs = function_call_timeout_secs
         self._filter_incomplete_user_turns: bool = False
         self._base_system_instruction: Optional[str] = None
-        self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
         self._function_call_tasks: Dict[Optional[asyncio.Task], FunctionCallRunnerItem] = {}
@@ -574,7 +573,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self,
         function_name: Optional[str],
         handler: Any,
-        start_callback=None,
         *,
         cancel_on_interruption: bool = True,
         timeout_secs: Optional[float] = None,
@@ -586,12 +584,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 all function calls with a catch-all handler.
             handler: The function handler. Should accept a single FunctionCallParams
                 parameter.
-            start_callback: Legacy callback function (deprecated). Put initialization
-                code at the top of your handler instead.
-
-                .. deprecated:: 0.0.59
-                    The `start_callback` parameter is deprecated and will be removed in a future version.
-
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
             timeout_secs: Optional per-tool timeout in seconds. Overrides the global
@@ -617,17 +609,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             handler_deprecated=handler_deprecated,
             timeout_secs=timeout_secs,
         )
-
-        # Start callbacks are now deprecated.
-        if start_callback:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'start_callback' is deprecated, just put your code on top of the actual function call instead.",
-                    DeprecationWarning,
-                )
-
-            self._start_callbacks[function_name] = start_callback
 
     def register_direct_function(
         self,
@@ -666,8 +647,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             function_name: The name of the function handler to remove.
         """
         del self._functions[function_name]
-        if function_name in self._start_callbacks:
-            del self._start_callbacks[function_name]
 
     def unregister_direct_function(self, handler: Any):
         """Remove a registered direct function handler.
@@ -824,14 +803,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         for runner_item in runner_items:
             await self._sequential_runner_queue.put(runner_item)
 
-    async def _call_start_function(
-        self, context: OpenAILLMContext | LLMContext, function_name: str
-    ):
-        if function_name in self._start_callbacks.keys():
-            await self._start_callbacks[function_name](function_name, self, context)
-        elif None in self._start_callbacks.keys():
-            return await self._start_callbacks[None](function_name, self, context)
-
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
         if runner_item.function_name in self._functions.keys():
             item = self._functions[runner_item.function_name]
@@ -843,9 +814,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         logger.debug(
             f"{self} Calling function [{runner_item.function_name}:{runner_item.tool_call_id}] with arguments {runner_item.arguments}"
         )
-
-        # NOTE(aleix): This needs to be removed after we remove the deprecation.
-        await self._call_start_function(runner_item.context, runner_item.function_name)
 
         # Broadcast function call in-progress. This frame will let our assistant
         # context aggregator know that we are in the middle of a function
