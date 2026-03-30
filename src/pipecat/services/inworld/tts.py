@@ -387,16 +387,16 @@ class InworldHttpTTSService(TTSService):
         Yields:
             An asynchronous generator of frames.
         """
-        buffer = ""
+        buffer = b""
         # Track the duration of this utterance based on the last word's end time
         utterance_duration = 0.0
 
-        async for chunk in response.content.iter_chunked(1024):
-            buffer += chunk.decode("utf-8")
+        async for chunk in response.content.iter_any():
+            buffer += chunk
 
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                line_str = line.strip()
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                line_str = line.decode("utf-8").strip()
 
                 if not line_str:
                     continue
