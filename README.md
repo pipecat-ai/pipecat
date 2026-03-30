@@ -166,7 +166,6 @@ You can get started with Pipecat running on your local machine, then move your a
    ```bash
    uv sync --group dev --all-extras \
      --no-extra gstreamer \
-     --no-extra krisp \
      --no-extra local \
    ```
 
