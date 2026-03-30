@@ -1073,34 +1073,6 @@ class InterruptionFrame(SystemFrame):
 
 
 @dataclass
-class StartInterruptionFrame(InterruptionFrame):
-    """Frame indicating user started speaking (interruption detected).
-
-    .. deprecated:: 0.0.85
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `InterruptionFrame`.
-
-    Emitted by the BaseInputTransport to indicate that a user has started
-    speaking (i.e. is interrupting). This is similar to
-    UserStartedSpeakingFrame except that it should be pushed concurrently
-    with other frames (so the order is not guaranteed).
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "StartInterruptionFrame is deprecated and will be removed in a future version. "
-                "Instead, use InterruptionFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
 class UserStartedSpeakingFrame(SystemFrame):
     """Frame indicating that the user turn has started.
 
@@ -1704,34 +1676,6 @@ class InterruptionTaskFrame(TaskSystemFrame):
     """
 
     pass
-
-
-@dataclass
-class BotInterruptionFrame(InterruptionTaskFrame):
-    """Frame indicating the bot should be interrupted.
-
-    .. deprecated:: 0.0.85
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `InterruptionTaskFrame`.
-
-    Emitted when the bot should be interrupted. This will mainly cause the
-    same actions as if the user interrupted except that the
-    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
-    This frame should be pushed upstream.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "BotInterruptionFrame is deprecated and will be removed in a future version. "
-                "Instead, use InterruptionTaskFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
 
 #
