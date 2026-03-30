@@ -113,7 +113,6 @@ TESTS_07 = [
     ("07f-interruptible-azure-http.py", EVAL_SIMPLE_MATH),
     ("07g-interruptible-openai.py", EVAL_SIMPLE_MATH),
     ("07g-interruptible-openai-http.py", EVAL_SIMPLE_MATH),
-    ("07h-interruptible-openpipe.py", EVAL_SIMPLE_MATH),
     ("07j-interruptible-gladia.py", EVAL_SIMPLE_MATH),
     ("07j-interruptible-gladia-vad.py", EVAL_SIMPLE_MATH),
     ("07k-interruptible-lmnt.py", EVAL_SIMPLE_MATH),
@@ -191,7 +190,6 @@ TESTS_14 = [
     ("14r-function-calling-aws.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14v-function-calling-nebius.py", EVAL_WEATHER),
     ("14w-function-calling-mistral.py", EVAL_WEATHER),
-    ("14x-function-calling-openpipe.py", EVAL_WEATHER),
     ("14y-function-calling-sarvam.py", EVAL_WEATHER),
     ("14z-function-calling-novita.py", EVAL_WEATHER),
     # Video

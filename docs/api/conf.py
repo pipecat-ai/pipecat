@@ -98,7 +98,6 @@ autodoc_mock_imports = [
     "cartesia",
     "camb",
     "sarvamai",
-    "openpipe",
     "openai.types.beta.realtime",
     "langchain_core",
     "langchain_core.messages",
