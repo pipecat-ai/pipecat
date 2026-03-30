@@ -1,6 +1,0 @@
-agent_name = "quickstart"
-secret_set = "quickstart-secrets"
-agent_profile = "agent-1x"
-
-[scaling]
-	min_agents = 1
