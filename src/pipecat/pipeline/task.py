@@ -165,21 +165,6 @@ class PipelineTask(BasePipelineTask):
     - on_frame_reached_downstream: Called when downstream frames reach the sink
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
     - on_pipeline_started: Called when pipeline starts with StartFrame
-    - on_pipeline_stopped: [deprecated] Called when pipeline stops with StopFrame
-
-            .. deprecated:: 0.0.86
-                Use `on_pipeline_finished` instead.
-
-    - on_pipeline_ended: [deprecated] Called when pipeline ends with EndFrame
-
-            .. deprecated:: 0.0.86
-                Use `on_pipeline_finished` instead.
-
-    - on_pipeline_cancelled: [deprecated] Called when pipeline is cancelled with CancelFrame
-
-            .. deprecated:: 0.0.86
-                Use `on_pipeline_finished` instead.
-
     - on_pipeline_finished: Called after the pipeline has reached any terminal state.
           This includes:
 
@@ -400,9 +385,6 @@ class PipelineTask(BasePipelineTask):
         self._register_event_handler("on_frame_reached_downstream")
         self._register_event_handler("on_idle_timeout")
         self._register_event_handler("on_pipeline_started")
-        self._register_event_handler("on_pipeline_stopped")
-        self._register_event_handler("on_pipeline_ended")
-        self._register_event_handler("on_pipeline_cancelled")
         self._register_event_handler("on_pipeline_finished")
         self._register_event_handler("on_pipeline_error")
 
@@ -472,27 +454,6 @@ class PipelineTask(BasePipelineTask):
             Tuple of frame types that trigger the on_frame_reached_downstream event.
         """
         return tuple(self._reached_downstream_types)
-
-    def event_handler(self, event_name: str):
-        """Decorator for registering event handlers.
-
-        Args:
-            event_name: The name of the event to handle.
-
-        Returns:
-            The decorator function that registers the handler.
-        """
-        if event_name in ["on_pipeline_stopped", "on_pipeline_ended", "on_pipeline_cancelled"]:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    f"Event '{event_name}' is deprecated, use 'on_pipeline_finished' instead.",
-                    DeprecationWarning,
-                )
-
-        return super().event_handler(event_name)
 
     def add_observer(self, observer: BaseObserver):
         """Add an observer to monitor pipeline execution.
@@ -748,7 +709,6 @@ class PipelineTask(BasePipelineTask):
                     f"{self}: timeout waiting for {frame} to reach the end of the pipeline (being blocked somewhere?)."
                 )
             finally:
-                await self._call_event_handler("on_pipeline_cancelled", frame)
                 await self._call_event_handler("on_pipeline_finished", frame)
 
         logger.debug(f"{self}: Closing. Waiting for {frame} to reach the end of the pipeline...")
@@ -910,11 +870,9 @@ class PipelineTask(BasePipelineTask):
 
             self._pipeline_start_event.set()
         elif isinstance(frame, EndFrame):
-            await self._call_event_handler("on_pipeline_ended", frame)
             await self._call_event_handler("on_pipeline_finished", frame)
             self._pipeline_end_event.set()
         elif isinstance(frame, StopFrame):
-            await self._call_event_handler("on_pipeline_stopped", frame)
             await self._call_event_handler("on_pipeline_finished", frame)
             self._pipeline_end_event.set()
         elif isinstance(frame, CancelFrame):
