@@ -107,12 +107,12 @@ class WebsocketService(ABC):
                         )
                 wait_time = exponential_backoff_time(attempt)
                 await asyncio.sleep(wait_time)
-            fatal_msg = f"{self} failed to reconnect after {max_retries} attempts"
+            msg = f"{self} failed to reconnect after {max_retries} attempts"
             if last_exception:
-                fatal_msg += f": {last_exception}"
-            logger.error(fatal_msg)
+                msg += f": {last_exception}"
+            logger.error(msg)
             if report_error:
-                await report_error(ErrorFrame(fatal_msg, fatal=True))
+                await report_error(ErrorFrame(msg))
             return False
         finally:
             self._reconnect_in_progress = False
