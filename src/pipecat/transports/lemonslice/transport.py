@@ -54,7 +54,7 @@ class LemonSliceNewSessionRequest(BaseModel):
         idle_timeout: Idle timeout in seconds.
         daily_room_url: Daily room URL to use for the session.
         daily_token: Daily token for authenticating with the room.
-        lemonslice_properties: Additional properties to pass to the session.
+        lemonslice_properties: Additional connection properties to pass to the session.
         api_url: Override the LemonSlice API URL.
     """
 
@@ -139,9 +139,8 @@ class LemonSliceTransportClient:
 
     async def _initialize(self) -> str:
         """Initialize the conversation and return the room URL."""
-        properties = dict(self._session_request.lemonslice_properties or {})
-        if self._session_request.model_extra:
-            properties.update(self._session_request.model_extra)
+        connection_properties = dict(self._session_request.lemonslice_properties or {})
+        extra_properties = self._session_request.model_extra
         response = await self._api.create_session(
             agent_image_url=self._session_request.agent_image_url,
             agent_id=self._session_request.agent_id,
@@ -149,7 +148,8 @@ class LemonSliceTransportClient:
             idle_timeout=self._session_request.idle_timeout,
             daily_room_url=self._session_request.daily_room_url,
             daily_token=self._session_request.daily_token,
-            properties=properties if properties else None,
+            connection_properties=connection_properties if connection_properties else None,
+            extra_properties=extra_properties if extra_properties else None,
             api_url=self._session_request.api_url,
         )
         self._session_id = response["session_id"]
@@ -675,7 +675,7 @@ class LemonSliceTransport(BaseTransport):
     Event handlers available:
 
     - on_client_connected(transport, participant): Participant connected to the session
-    - on_client_disconnected(transport, participant): Participant disconnected from the session
+    - on_client_disconnected(transport, participant, reason): Participant disconnected from the session
     - on_avatar_connected(transport, participant): LemonSlice avatar connected to the session
     - on_avatar_disconnected(transport, participant, reason): LemonSlice avatar disconnected from the session
 
@@ -738,9 +738,9 @@ class LemonSliceTransport(BaseTransport):
         """Handle participant left events."""
         ls_bot_name = await self._client.get_bot_name()
         if participant.get("info", {}).get("userName", "") == ls_bot_name:
-            await self._on_avatar_disconnected(participant)
+            await self._on_avatar_disconnected(participant, reason)
         else:
-            await self._on_client_disconnected(participant)
+            await self._on_client_disconnected(participant, reason)
 
     async def _on_participant_joined(self, participant):
         """Handle participant joined events."""
@@ -800,14 +800,14 @@ class LemonSliceTransport(BaseTransport):
         """Handle avatar connected events."""
         await self._call_event_handler("on_avatar_connected", participant)
 
-    async def _on_avatar_disconnected(self, participant: Any):
+    async def _on_avatar_disconnected(self, participant: Any, reason: str):
         """Handle avatar disconnected events."""
-        await self._call_event_handler("on_avatar_disconnected", participant)
+        await self._call_event_handler("on_avatar_disconnected", participant, reason)
 
     async def _on_client_connected(self, participant: Any):
         """Handle client connected events."""
         await self._call_event_handler("on_client_connected", participant)
 
-    async def _on_client_disconnected(self, participant: Any):
+    async def _on_client_disconnected(self, participant: Any, reason: str):
         """Handle client disconnected events."""
-        await self._call_event_handler("on_client_disconnected", participant)
+        await self._call_event_handler("on_client_disconnected", participant, reason)
