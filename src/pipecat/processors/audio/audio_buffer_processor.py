@@ -60,7 +60,6 @@ class AudioBufferProcessor(FrameProcessor):
         sample_rate: Optional[int] = None,
         num_channels: int = 1,
         buffer_size: int = 0,
-        user_continuous_stream: Optional[bool] = None,
         enable_turn_audio: bool = False,
         **kwargs,
     ):
@@ -70,12 +69,6 @@ class AudioBufferProcessor(FrameProcessor):
             sample_rate: Desired output sample rate. If None, uses source rate.
             num_channels: Number of channels (1 for mono, 2 for stereo). Defaults to 1.
             buffer_size: Size of buffer before triggering events. 0 for no buffering.
-            user_continuous_stream: Controls whether user audio is treated as a continuous
-                stream for buffering purposes.
-
-                .. deprecated:: 0.0.72
-                    This parameter no longer has any effect and will be removed in a future version.
-
             enable_turn_audio: Whether turn audio event handlers should be triggered.
             **kwargs: Additional arguments passed to parent class.
         """
@@ -86,16 +79,6 @@ class AudioBufferProcessor(FrameProcessor):
         self._num_channels = num_channels
         self._buffer_size = buffer_size
         self._enable_turn_audio = enable_turn_audio
-
-        if user_continuous_stream is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter `user_continuous_stream` is deprecated.",
-                    DeprecationWarning,
-                )
 
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
