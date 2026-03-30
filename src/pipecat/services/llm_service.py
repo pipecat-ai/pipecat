@@ -46,7 +46,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
-    UserImageRequestFrame,
 )
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -701,56 +700,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self._run_parallel_function_calls(runner_items)
         else:
             await self._run_sequential_function_calls(runner_items)
-
-    async def request_image_frame(
-        self,
-        user_id: str,
-        *,
-        function_name: Optional[str] = None,
-        tool_call_id: Optional[str] = None,
-        text_content: Optional[str] = None,
-        video_source: Optional[str] = None,
-        timeout: Optional[float] = 10.0,
-    ):
-        """Request an image from a user.
-
-        Pushes a UserImageRequestFrame upstream to request an image from the
-        specified user. The user image can then be processed by the LLM.
-
-        Use this function from a function call if you want the LLM to process
-        the image. If you expect the image to be processed by a vision service,
-        you might want to push a UserImageRequestFrame upstream directly.
-
-        .. deprecated:: 0.0.92
-            This method is deprecated, push a `UserImageRequestFrame` instead.
-
-        Args:
-            user_id: The ID of the user to request an image from.
-            function_name: Optional function name associated with the request.
-            tool_call_id: Optional tool call ID associated with the request.
-            text_content: Optional text content/context for the image request.
-            video_source: Optional video source identifier.
-            timeout: Optional timeout for the requested image to be added to the LLM context.
-
-        """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "Method `request_image_frame()` is deprecated, push a `UserImageRequestFrame` instead.",
-                DeprecationWarning,
-            )
-        await self.push_frame(
-            UserImageRequestFrame(
-                user_id=user_id,
-                text=text_content,
-                append_to_context=True,
-                function_name=function_name,
-                tool_call_id=tool_call_id,
-                # Deprecated fields below.
-                context=text_content,
-            ),
-            FrameDirection.UPSTREAM,
-        )
 
     async def _create_sequential_runner_task(self):
         if not self._sequential_runner_task:
