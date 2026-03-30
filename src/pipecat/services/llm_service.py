@@ -127,7 +127,6 @@ class FunctionCallRegistryItem:
     function_name: Optional[str]
     handler: FunctionCallHandler | "DirectFunctionWrapper"
     cancel_on_interruption: bool
-    handler_deprecated: bool
     timeout_secs: Optional[float] = None
 
 
@@ -590,23 +589,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 ``function_call_timeout_secs`` for this specific function. Defaults to
                 None, which uses the global timeout.
         """
-        signature = inspect.signature(handler)
-        handler_deprecated = len(signature.parameters) > 1
-        if handler_deprecated:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
-                    DeprecationWarning,
-                )
-
         # Registering a function with the function_name set to None will run
         # that handler for all functions
         self._functions[function_name] = FunctionCallRegistryItem(
             function_name=function_name,
             handler=handler,
             cancel_on_interruption=cancel_on_interruption,
-            handler_deprecated=handler_deprecated,
             timeout_secs=timeout_secs,
         )
 
@@ -636,7 +624,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             function_name=wrapper.name,
             handler=wrapper,
             cancel_on_interruption=cancel_on_interruption,
-            handler_deprecated=False,
             timeout_secs=timeout_secs,
         )
 
@@ -889,25 +876,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 )
             else:
                 # Handler is a FunctionCallHandler
-                if item.handler_deprecated:
-                    await item.handler(
-                        runner_item.function_name,
-                        runner_item.tool_call_id,
-                        runner_item.arguments,
-                        self,
-                        runner_item.context,
-                        function_call_result_callback,
-                    )
-                else:
-                    params = FunctionCallParams(
-                        function_name=runner_item.function_name,
-                        tool_call_id=runner_item.tool_call_id,
-                        arguments=runner_item.arguments,
-                        llm=self,
-                        context=runner_item.context,
-                        result_callback=function_call_result_callback,
-                    )
-                    await item.handler(params)
+                params = FunctionCallParams(
+                    function_name=runner_item.function_name,
+                    tool_call_id=runner_item.tool_call_id,
+                    arguments=runner_item.arguments,
+                    llm=self,
+                    context=runner_item.context,
+                    result_callback=function_call_result_callback,
+                )
+                await item.handler(params)
         except Exception as e:
             error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
             logger.error(f"{self} {error_message}")
