@@ -130,11 +130,6 @@ class PipelineParams(BaseModel):
             .. deprecated:: 0.0.99
                 Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
 
-        observers: [deprecated] Use `observers` arg in `PipelineTask` class.
-
-            .. deprecated:: 0.0.58
-                Use the `observers` argument in the `PipelineTask` class instead.
-
         report_only_initial_ttfb: Whether to report only initial time to first byte.
         send_initial_empty_metrics: Whether to send initial empty metrics.
         start_metadata: Additional metadata for pipeline start.
@@ -151,7 +146,6 @@ class PipelineParams(BaseModel):
     heartbeats_period_secs: float = HEARTBEAT_SECS
     heartbeats_monitor_secs: float = HEARTBEAT_MONITOR_SECS
     interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
-    observers: List[BaseObserver] = Field(default_factory=list)
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
     start_metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -280,16 +274,6 @@ class PipelineTask(BasePipelineTask):
         self._enable_tracing = enable_tracing and is_tracing_available()
         self._enable_turn_tracking = enable_turn_tracking
         self._idle_timeout_secs = idle_timeout_secs
-        if self._params.observers:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Field 'observers' is deprecated, use the 'observers' parameter instead.",
-                    DeprecationWarning,
-                )
-            observers = self._params.observers
         observers = observers or []
         self._turn_tracking_observer: Optional[TurnTrackingObserver] = None
         self._user_bot_latency_observer: Optional[UserBotLatencyObserver] = None
