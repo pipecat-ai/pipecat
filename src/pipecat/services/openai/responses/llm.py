@@ -9,6 +9,7 @@
 import asyncio
 import hashlib
 import json
+import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional
@@ -162,7 +163,10 @@ class _BaseOpenAIResponsesLLMService(LLMService):
             **kwargs,
         )
 
-        self._api_key = api_key
+        # Resolve the API key from the environment if not provided. The
+        # AsyncOpenAI HTTP client does this automatically, but the WebSocket
+        # variant connects via raw websockets and needs the key explicitly.
+        self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._service_tier = service_tier
         self._client = self._create_client(
             api_key=api_key,
@@ -390,7 +394,7 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         self._previous_response_output: Optional[list] = None
 
         # Response cancellation state
-        self._current_response_id: Optional[str] = None
+        self._current_response_id: Optional[str] = None  # ID of current non-cancelled response
         self._cancel_pending_response: bool = False
         self._needs_drain: bool = False
 
@@ -448,12 +452,13 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
             await self.stop_all_metrics()
             if self._websocket:
                 await self._websocket.close()
-                self._websocket = None
+        except Exception as e:
+            await self.push_error(error_msg=f"Error disconnecting from WebSocket: {e}", exception=e)
+        finally:
+            self._websocket = None
             self._clear_previous_response_state()
             self._clear_cancellation_state()
             self._disconnecting = False
-        except Exception as e:
-            await self.push_error(error_msg=f"Error disconnecting from WebSocket: {e}", exception=e)
 
     async def _reconnect(self):
         """Reconnect to the WebSocket, clearing previous_response_id state."""
@@ -704,11 +709,10 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
                         f"{self}: Cancelled response terminated with {event_type} — "
                         f"connection is clean"
                     )
-                    self._needs_drain = False
+                    self._clear_cancellation_state()
                     return
-        except asyncio.TimeoutError:
-            logger.warning(f"{self}: Timed out draining cancelled response — reconnecting")
-            self._needs_drain = False
+        except (asyncio.TimeoutError, ConnectionClosed) as e:
+            logger.warning(f"{self}: Error draining cancelled response: {e} — reconnecting")
             await self._reconnect()
 
     # -- frame processing -----------------------------------------------------
