@@ -19,6 +19,11 @@ from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
+try:
+    import boto3
+except ModuleNotFoundError:
+    boto3 = None
+
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -127,11 +132,29 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         self._show_speaker_label = False
         self._enable_channel_identification = False
 
+        aws_access_key_id = aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID")
+        api_key = api_key or os.getenv("AWS_SECRET_ACCESS_KEY")
+        aws_session_token = aws_session_token or os.getenv("AWS_SESSION_TOKEN")
+        region = region or os.getenv("AWS_REGION", "us-east-1")
+
+        # If no explicit credentials provided, fall back to the boto3 credential provider chain
+        if (not aws_access_key_id or not api_key) and boto3 is not None:
+            try:
+                session = boto3.Session(region_name=region)
+                creds = session.get_credentials()
+                if creds:
+                    frozen = creds.get_frozen_credentials()
+                    aws_access_key_id = frozen.access_key
+                    api_key = frozen.secret_key
+                    aws_session_token = frozen.token
+            except Exception as e:
+                logger.error(f"AWSTranscribeSTTService failed to resolve credentials via boto3: {e}")
+
         self._credentials = {
-            "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": api_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
-            "region": region or os.getenv("AWS_REGION", "us-east-1"),
+            "aws_access_key_id": aws_access_key_id,
+            "aws_secret_access_key": api_key,
+            "aws_session_token": aws_session_token,
+            "region": region,
         }
 
         self._receive_task = None
