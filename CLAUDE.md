@@ -10,7 +10,7 @@ Pipecat is an open-source Python framework for building real-time voice and mult
 
 ```bash
 # Setup development environment
-uv sync --group dev --all-extras --no-extra gstreamer --no-extra krisp
+uv sync --group dev --all-extras --no-extra gstreamer
 
 # Install pre-commit hooks
 uv run pre-commit install
