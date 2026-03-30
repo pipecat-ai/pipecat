@@ -110,17 +110,17 @@ async def main():
             await task.queue_frames([LLMRunFrame()])
 
         @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, participant):
-            logger.info("Client disconnected")
+        async def on_client_disconnected(transport, participant, reason):
+            logger.info(f"Client disconnected. Reason: {reason}")
             await task.cancel()
 
         @transport.event_handler("on_avatar_connected")
         async def on_avatar_connected(transport, participant):
-            logger.info(f"Avatar connected")
+            logger.info("Avatar connected")
 
         @transport.event_handler("on_avatar_disconnected")
-        async def on_avatar_disconnected(transport, participant):
-            logger.info(f"Avatar disconnected")
+        async def on_avatar_disconnected(transport, participant, reason):
+            logger.info(f"Avatar disconnected. Reason: {reason}")
 
         runner = PipelineRunner()
 
