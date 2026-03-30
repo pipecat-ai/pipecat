@@ -26,7 +26,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -72,9 +72,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm = OpenAIResponsesLLMService(
+    llm = OpenAIResponsesHttpLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAIResponsesLLMService.Settings(
+        settings=OpenAIResponsesHttpLLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
@@ -86,11 +86,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
-        # Avoid appending this filler message to the LLM context — it would
-        # alter the conversation history and prevent
-        # OpenAIResponsesLLMService's previous_response_id optimization from
-        # matching, forcing a full context resend.
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that.", append_to_context=False))
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     weather_function = FunctionSchema(
         name="get_current_weather",

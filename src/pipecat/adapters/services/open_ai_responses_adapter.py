@@ -85,16 +85,21 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             # OpenAILLMService (system_instruction + empty messages) need the
             # instructions converted to an initial developer message.
             #
-            # NOTE: if/when we support `previous_response_id` and/or
-            # `conversation_id`, we'll need to revisit this logic, as it'll
-            # be legit to provide instructions without input items. Worth
-            # noting that OpenAI's docs suggest these parameters are primarily
-            # for development convenience rather than performance (the model
-            # still processes the full context), and come with the tradeoff
-            # of requiring OpenAI-side 30-day conversation storage, which may
-            # not be desirable for many users. But it could give folks an easy
-            # way to store/switch between conversations without needing to
-            # manage that storage themselves.
+            # NOTE: The service layer (OpenAIResponsesLLMService) internally
+            # manages `previous_response_id` for incremental context delivery
+            # over WebSocket. This runs post-adapter — the adapter always
+            # produces the full input list and the service determines what
+            # subset to send. This empty-input fallback is therefore only
+            # relevant for one-shot or initial calls.
+            #
+            # If we added support for user-provided explicit
+            # `previous_response_id` and/or `conversation_id` (overriding
+            # internal management), we'd need to revisit this logic, as it'd
+            # be legit to provide instructions without input items. Note that
+            # over HTTP, `previous_response_id` requires `store=True` (30-day
+            # OpenAI-side storage), which is why the HTTP variant doesn't use
+            # it. The WebSocket variant avoids this via a connection-local
+            # in-memory cache — see the class docstrings in llm.py.
             if not input_items:
                 params["input"] = [{"role": "developer", "content": system_instruction}]
             else:

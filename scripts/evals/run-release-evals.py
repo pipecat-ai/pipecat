@@ -149,6 +149,7 @@ TESTS_07 = [
     ("07zk-interruptible-resembleai.py", EVAL_SIMPLE_MATH),
     ("07zl-interruptible-smallest.py", EVAL_SIMPLE_MATH),
     ("07-interruptible-openai-responses.py", EVAL_SIMPLE_MATH),
+    ("07-interruptible-openai-responses-http.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
 ]
@@ -156,6 +157,7 @@ TESTS_07 = [
 TESTS_12 = [
     ("12-describe-image-openai.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
     ("12-describe-image-openai-responses.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("12-describe-image-openai-responses-http.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
     ("12a-describe-image-anthropic.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
     ("12b-describe-image-aws.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
     ("12c-describe-image-gemini-flash.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
@@ -170,6 +172,8 @@ TESTS_14 = [
     ("14-function-calling.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14-function-calling-openai-responses.py", EVAL_WEATHER),
     ("14-function-calling-openai-responses.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("14-function-calling-openai-responses-http.py", EVAL_WEATHER),
+    ("14-function-calling-openai-responses-http.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14a-function-calling-anthropic.py", EVAL_WEATHER),
     ("14a-function-calling-anthropic.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14b-function-calling-openai.py", EVAL_WEATHER),
@@ -199,6 +203,7 @@ TESTS_14 = [
     ("14d-function-calling-moondream-video.py", EVAL_VISION_CAMERA),
     ("14d-function-calling-openai-video.py", EVAL_VISION_CAMERA),
     ("14d-function-calling-openai-responses-video.py", EVAL_VISION_CAMERA),
+    ("14d-function-calling-openai-responses-video-http.py", EVAL_VISION_CAMERA),
     # Currently not working.
     # ("14c-function-calling-together.py", EVAL_WEATHER),
     # ("14l-function-calling-deepseek.py", EVAL_WEATHER),

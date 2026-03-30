@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+
 import os
 
 from dotenv import load_dotenv
@@ -12,7 +13,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -21,25 +22,50 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
-from pipecat.runner.utils import create_transport
+from pipecat.runner.utils import (
+    create_transport,
+    get_transport_client_id,
+    maybe_capture_participant_camera,
+)
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(params: FunctionCallParams):
-    await params.result_callback({"conditions": "nice", "temperature": "75"})
+async def fetch_user_image(params: FunctionCallParams):
+    """Fetch the user image and push it to the LLM.
 
+    When called, this function pushes a UserImageRequestFrame upstream to the
+    transport. As a result, the transport will request the user image and push a
+    UserImageRawFrame downstream which will be added to the context by the LLM
+    assistant aggregator. The result_callback will be invoked once the image is
+    retrieved and processed.
+    """
+    user_id = params.arguments["user_id"]
+    question = params.arguments["question"]
+    logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
-    await params.result_callback({"name": "The Golden Dragon"})
+    # Request a user image frame and indicate that it should be added to the
+    # context. Also associate it to the function call. Pass the result_callback
+    # so it can be invoked when the image is actually retrieved.
+    await params.llm.push_frame(
+        UserImageRequestFrame(
+            user_id=user_id,
+            text=question,
+            append_to_context=True,
+            function_name=params.function_name,
+            tool_call_id=params.tool_call_id,
+            result_callback=params.result_callback,
+        ),
+        FrameDirection.UPSTREAM,
+    )
 
 
 # We use lambdas to defer transport parameter creation until the transport
@@ -48,14 +74,12 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-    ),
-    "twilio": lambda: FastAPIWebsocketParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
+        video_in_enabled=True,
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        video_in_enabled=True,
     ),
 }
 
@@ -72,54 +96,34 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm = OpenAIResponsesLLMService(
+    llm = OpenAIResponsesHttpLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAIResponsesLLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+        settings=OpenAIResponsesHttpLLMService.Settings(
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way. You are able to describe images from the user camera.",
         ),
     )
-
-    # You can also register a function_name of None to get all functions
-    # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+    llm.register_function("fetch_user_image", fetch_user_image)
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
-        # Avoid appending this filler message to the LLM context — it would
-        # alter the conversation history and prevent
-        # OpenAIResponsesLLMService's previous_response_id optimization from
-        # matching, forcing a full context resend.
         await tts.queue_frame(TTSSpeakFrame("Let me check on that.", append_to_context=False))
 
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
+    fetch_image_function = FunctionSchema(
+        name="fetch_user_image",
+        description="Called when the user requests a description of their camera feed",
         properties={
-            "location": {
+            "user_id": {
                 "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
+                "description": "The ID of the user to grab the image from",
             },
-            "format": {
+            "question": {
                 "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
+                "description": "The question that the user is asking about the image",
             },
         },
-        required=["location", "format"],
+        required=["user_id", "question"],
     )
-    restaurant_function = FunctionSchema(
-        name="get_restaurant_recommendation",
-        description="Get a restaurant recommendation",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-        },
-        required=["location"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
+    tools = ToolsSchema(standard_tools=[fetch_image_function])
 
     context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -129,13 +133,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),
-            stt,
-            user_aggregator,
-            llm,
-            tts,
-            transport.output(),
-            assistant_aggregator,
+            transport.input(),  # Transport user input
+            stt,  # STT
+            user_aggregator,  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 
@@ -151,9 +155,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+
+        await maybe_capture_participant_camera(transport, client)
+
+        client_id = get_transport_client_id(transport, client)
+
         # Kick off the conversation.
         context.add_message(
-            {"role": "developer", "content": "Please introduce yourself to the user."}
+            {
+                "role": "developer",
+                "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
+            }
         )
         await task.queue_frames([LLMRunFrame()])
 
@@ -161,6 +173,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @tts.event_handler("on_tts_request")
+    async def on_tts_request(tts, context_id: str, text: str):
+        logger.debug(f"On TTS request: {context_id}: {text}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

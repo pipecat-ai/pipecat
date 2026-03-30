@@ -20,7 +20,10 @@ from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.aws.llm import AWSBedrockLLMService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
+from pipecat.services.openai.responses.llm import (
+    OpenAIResponsesHttpLLMService,
+    OpenAIResponsesLLMService,
+)
 
 
 @pytest.mark.asyncio
@@ -926,6 +929,171 @@ async def test_openai_responses_run_inference_system_instruction_param_with_empt
     with patch.object(OpenAIResponsesLLMService, "_create_client"):
         service = OpenAIResponsesLLMService(
             settings=OpenAIResponsesLLMService.Settings(model="gpt-4.1"),
+        )
+        service._client = AsyncMock()
+
+        context = LLMContext(messages=[])
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Response"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        result = await service.run_inference(
+            context, system_instruction="Summarize the conversation"
+        )
+
+        assert result == "Response"
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["input"] == [
+            {"role": "developer", "content": "Summarize the conversation"}
+        ]
+        assert "instructions" not in call_kwargs
+
+
+# --- OpenAI Responses HTTP API tests ---
+# These mirror the WebSocket variant tests above, verifying that the HTTP
+# variant's run_inference (inherited from the shared base class) works
+# identically.
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_http_run_inference_with_llm_context():
+    """Test run_inference with LLMContext returns expected response (HTTP variant)."""
+    with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+        service = OpenAIResponsesHttpLLMService(
+            settings=OpenAIResponsesHttpLLMService.Settings(
+                model="gpt-4.1",
+                system_instruction="You are a helpful assistant",
+                temperature=0.7,
+                max_completion_tokens=100,
+            ),
+        )
+        service._client = AsyncMock()
+
+        context = LLMContext(
+            messages=[
+                {"role": "user", "content": "Hello, world!"},
+            ]
+        )
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Hello! How can I help you today?"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        result = await service.run_inference(context)
+
+        assert result == "Hello! How can I help you today?"
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["model"] == "gpt-4.1"
+        assert call_kwargs["stream"] is False
+        assert call_kwargs["store"] is False
+        assert call_kwargs["input"] == [{"role": "user", "content": "Hello, world!"}]
+        assert call_kwargs["instructions"] == "You are a helpful assistant"
+        assert call_kwargs["temperature"] == 0.7
+        assert call_kwargs["max_output_tokens"] == 100
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_http_run_inference_client_exception():
+    """Test that exceptions from the client are propagated (HTTP variant)."""
+    with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+        service = OpenAIResponsesHttpLLMService()
+        service._client = AsyncMock()
+
+        context = LLMContext(messages=[{"role": "user", "content": "Hello"}])
+        service._client.responses.create = AsyncMock(side_effect=Exception("API Error"))
+
+        with pytest.raises(Exception, match="API Error"):
+            await service.run_inference(context)
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_http_run_inference_system_instruction_overrides():
+    """Test that system_instruction parameter overrides the settings instruction (HTTP variant)."""
+    with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+        service = OpenAIResponsesHttpLLMService(
+            settings=OpenAIResponsesHttpLLMService.Settings(
+                model="gpt-4.1",
+                system_instruction="Original instruction",
+            ),
+        )
+        service._client = AsyncMock()
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Response"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        result = await service.run_inference(context, system_instruction="New system instruction")
+
+        assert result == "Response"
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["instructions"] == "New system instruction"
+        assert call_kwargs["input"] == [{"role": "user", "content": "Hello"}]
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_http_run_inference_empty_context_with_instruction():
+    """Test that system_instruction becomes a developer message when context is empty (HTTP)."""
+    with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+        service = OpenAIResponsesHttpLLMService(
+            settings=OpenAIResponsesHttpLLMService.Settings(
+                model="gpt-4.1",
+                system_instruction="You are helpful",
+            ),
+        )
+        service._client = AsyncMock()
+
+        context = LLMContext(messages=[])
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Response"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        result = await service.run_inference(context)
+
+        assert result == "Response"
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["input"] == [{"role": "developer", "content": "You are helpful"}]
+        assert "instructions" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_http_run_inference_max_tokens_override():
+    """Test that max_tokens parameter overrides max_output_tokens (HTTP variant)."""
+    with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+        service = OpenAIResponsesHttpLLMService(
+            settings=OpenAIResponsesHttpLLMService.Settings(
+                model="gpt-4.1",
+                max_completion_tokens=500,
+            ),
+        )
+        service._client = AsyncMock()
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Summarize this"}],
+        )
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Summary"
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        result = await service.run_inference(context, max_tokens=200)
+
+        assert result == "Summary"
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["max_output_tokens"] == 200
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_http_run_inference_system_instruction_param_with_empty_context():
+    """Test system_instruction param becomes developer message for empty context (HTTP)."""
+    with patch.object(OpenAIResponsesHttpLLMService, "_create_client"):
+        service = OpenAIResponsesHttpLLMService(
+            settings=OpenAIResponsesHttpLLMService.Settings(model="gpt-4.1"),
         )
         service._client = AsyncMock()
 
