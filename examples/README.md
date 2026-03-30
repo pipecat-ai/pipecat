@@ -6,7 +6,6 @@ This directory contains examples to help you learn how to build with Pipecat.
 
 New to Pipecat? Start here:
 
-- **[Quickstart](quickstart/)** - Get your first voice AI bot running in 5 minutes _(coming soon)_
 - **[Client/Server Web](client-server-web/)** - Learn to build web applications with Pipecat's client SDKs _(coming soon)_
 - **[Phone Bot with Twilio](phone-bot-twilio/)** - Connect your bot to a phone number _(coming soon)_
 
