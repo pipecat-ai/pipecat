@@ -54,8 +54,8 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
     UserImageRawFrame,
-    VADUserStartedSpeakingFrame,
-    VADUserStoppedSpeakingFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -1072,10 +1072,10 @@ class GeminiLiveLLMService(LLMService):
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
             await self.push_frame(frame, direction)
-        elif isinstance(frame, VADUserStartedSpeakingFrame):
+        elif isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        elif isinstance(frame, UserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
