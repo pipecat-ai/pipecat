@@ -19,10 +19,6 @@ The example:
        - Using Mem0 API (cloud-based memory storage)
        - Using local configuration with custom LLM (self-hosted memory)
 
-Example usage (run from pipecat root directory):
-    $ pip install "pipecat-ai[daily,openai,elevenlabs,silero,mem0]"
-    $ python examples/foundational/37-mem0.py
-
 Requirements:
     - OpenAI API key
     - ElevenLabs API key (for text-to-speech)

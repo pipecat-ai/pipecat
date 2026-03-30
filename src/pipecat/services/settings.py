@@ -365,7 +365,7 @@ class LLMSettings(ServiceSettings):
         seed: Random seed for reproducibility.
         filter_incomplete_user_turns: Enable LLM-based turn completion detection
             to suppress bot responses when the user was cut off mid-thought.
-            See ``examples/foundational/22-filter-incomplete-turns.py`` and
+            See ``examples/22-filter-incomplete-turns.py`` and
             ``UserTurnCompletionLLMServiceMixin``.
         user_turn_completion_config: Configuration for turn completion behavior
             when ``filter_incomplete_user_turns`` is enabled. Controls timeouts

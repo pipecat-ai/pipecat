@@ -22,7 +22,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 ASSETS_DIR = SCRIPT_DIR / "assets"
 
-FOUNDATIONAL_DIR = SCRIPT_DIR.parent.parent / "examples" / "foundational"
+FOUNDATIONAL_DIR = SCRIPT_DIR.parent.parent / "examples"
 
 EVAL_SIMPLE_MATH = EvalConfig(
     prompt="A simple math addition.",

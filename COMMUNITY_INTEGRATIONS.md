@@ -23,7 +23,7 @@ Create your integration following the patterns and examples shown in the "Integr
 Your repository must contain these components:
 
 - **Source code** - Complete implementation following Pipecat patterns
-- **Foundational example** - Single file example showing basic usage (see [Pipecat examples](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational))
+- **Foundational example** - Single file example showing basic usage (see [Pipecat examples](https://github.com/pipecat-ai/pipecat/tree/main/examples))
 - **README.md** - Must include:
   - Introduction and explanation of your integration
   - Installation instructions

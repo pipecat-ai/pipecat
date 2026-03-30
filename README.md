@@ -80,7 +80,7 @@ Catch new features, interviews, and how-tos on our [Pipecat TV](https://www.yout
     <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/storytelling-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat-examples/main/storytelling-chatbot/image.png" width="400" /></a>
     <br/>
     <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/translation-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat-examples/main/translation-chatbot/image.png" width="400" /></a>&nbsp;
-    <a href="https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/12-describe-video.py"><img src="https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/assets/moondream.png" width="400" /></a>
+    <a href="https://github.com/pipecat-ai/pipecat/blob/main/examples/12-describe-video.py"><img src="https://github.com/pipecat-ai/pipecat/blob/main/examples/assets/moondream.png" width="400" /></a>
 </p>
 
 ## 🧩 Available services
@@ -142,7 +142,7 @@ You can get started with Pipecat running on your local machine, then move your a
 
 ## 🧪 Code examples
 
-- [Foundational](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational) — small snippets that build on each other, introducing one or two concepts at a time
+- [Foundational](https://github.com/pipecat-ai/pipecat/tree/main/examples) — small snippets that build on each other, introducing one or two concepts at a time
 - [Example apps](https://github.com/pipecat-ai/pipecat-examples) — complete applications that you can use as starting points for development
 
 ## 🛠️ Contributing to the framework
