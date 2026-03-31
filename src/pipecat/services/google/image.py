@@ -70,12 +70,12 @@ class GoogleImageGenService(ImageGenService):
 
         Parameters:
             number_of_images: Number of images to generate (1-8). Defaults to 1.
-            model: Google Imagen model to use. Defaults to "imagen-3.0-generate-002".
+            model: Google Imagen model to use. Defaults to "imagen-4.0-generate-001".
             negative_prompt: Optional negative prompt to guide what not to include.
         """
 
         number_of_images: int = Field(default=1, ge=1, le=8)
-        model: str = Field(default="imagen-3.0-generate-002")
+        model: str = Field(default="imagen-4.0-generate-001")
         negative_prompt: Optional[str] = Field(default=None)
 
     def __init__(
@@ -103,7 +103,7 @@ class GoogleImageGenService(ImageGenService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="imagen-3.0-generate-002",
+            model="imagen-4.0-generate-001",
             number_of_images=1,
             negative_prompt=None,
         )
