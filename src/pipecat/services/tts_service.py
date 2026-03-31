@@ -58,7 +58,6 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.settings import TTSSettings, is_given
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.time import seconds_to_nanoseconds
@@ -168,8 +167,6 @@ class TTSService(AIService):
         append_trailing_space: bool = False,
         # TTS output sample rate
         sample_rate: Optional[int] = None,
-        # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
-        text_aggregator: Optional[BaseTextAggregator] = None,
         # Types of text aggregations that should not be spoken.
         skip_aggregator_types: Optional[List[str]] = [],
         # A list of callables to transform text before just before sending it to TTS.
@@ -182,7 +179,6 @@ class TTSService(AIService):
         ] = None,
         # Text filter executed after text has been aggregated.
         text_filters: Optional[Sequence[BaseTextFilter]] = None,
-        text_filter: Optional[BaseTextFilter] = None,
         # Audio transport destination of the generated frames.
         transport_destination: Optional[str] = None,
         settings: Optional[TTSSettings] = None,
@@ -215,11 +211,6 @@ class TTSService(AIService):
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
             sample_rate: Output sample rate for generated audio.
-            text_aggregator: Custom text aggregator for processing incoming text.
-
-                .. deprecated:: 0.0.95
-                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
-
             skip_aggregator_types: List of aggregation types that should not be spoken.
             text_transforms: A list of callables to transform text before just before sending it
                 to TTS. Each callable takes the aggregated text and its type, and returns the
@@ -227,11 +218,6 @@ class TTSService(AIService):
                 (aggregation_type | '*', transform_function).
 
             text_filters: Sequence of text filters to apply after aggregation.
-            text_filter: Single text filter (deprecated, use text_filters).
-
-                .. deprecated:: 0.0.59
-                    Use `text_filters` instead, which allows multiple filters.
-
             transport_destination: Destination for generated audio frames.
             settings: The runtime-updatable settings for the TTS service.
             reuse_context_id_within_turn: Whether the service should reuse context IDs within the
@@ -300,18 +286,7 @@ class TTSService(AIService):
         self._append_trailing_space: bool = append_trailing_space
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator(
-            aggregation_type=self._text_aggregation_mode
-        )
-        if text_aggregator:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'text_aggregator' is deprecated. Use an LLMTextProcessor before the TTSService for custom text aggregation.",
-                    DeprecationWarning,
-                )
+        self._text_aggregator = SimpleTextAggregator(aggregation_type=self._text_aggregation_mode)
 
         self._skip_aggregator_types: List[str] = skip_aggregator_types or []
         self._text_transforms: List[
@@ -320,16 +295,6 @@ class TTSService(AIService):
         # TODO: Deprecate _text_filters when added to LLMTextProcessor
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: Optional[str] = transport_destination
-        if text_filter:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'text_filter' is deprecated, use 'text_filters' instead.",
-                    DeprecationWarning,
-                )
-            self._text_filters = [text_filter]
 
         self._resampler = create_stream_resampler()
 

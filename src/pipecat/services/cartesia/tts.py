@@ -28,7 +28,6 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -240,7 +239,6 @@ class CartesiaTTSService(WebsocketTTSService):
         container: str = "raw",
         params: Optional[InputParams] = None,
         settings: Optional[Settings] = None,
-        text_aggregator: Optional[BaseTextAggregator] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         aggregate_sentences: Optional[bool] = None,
         **kwargs,
@@ -271,11 +269,6 @@ class CartesiaTTSService(WebsocketTTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
-            text_aggregator: Custom text aggregator for processing input text.
-
-                .. deprecated:: 0.0.95
-                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
-
             text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
 
@@ -337,20 +330,18 @@ class CartesiaTTSService(WebsocketTTSService):
             pause_frame_processing=False,
             sample_rate=sample_rate,
             push_start_frame=True,
-            text_aggregator=text_aggregator,
             settings=default_settings,
             **kwargs,
         )
 
-        if not text_aggregator:
-            # Always skip tags added for spelled-out text
-            # Note: This is primarily to support backwards compatibility.
-            #    The preferred way of taking advantage of Cartesia SSML Tags is
-            #    to use an LLMTextProcessor and/or a text_transformer to identify
-            #    and insert these tags for the purpose of the TTS service alone.
-            self._text_aggregator = SkipTagsAggregator(
-                [("<spell>", "</spell>")], aggregation_type=self._text_aggregation_mode
-            )
+        # Always skip tags added for spelled-out text
+        # Note: This is primarily to support backwards compatibility.
+        #    The preferred way of taking advantage of Cartesia SSML Tags is
+        #    to use an LLMTextProcessor and/or a text_transformer to identify
+        #    and insert these tags for the purpose of the TTS service alone.
+        self._text_aggregator = SkipTagsAggregator(
+            [("<spell>", "</spell>")], aggregation_type=self._text_aggregation_mode
+        )
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version
