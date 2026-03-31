@@ -84,6 +84,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
+    @llm.event_handler("on_connection_error")
+    async def on_connection_error(service, error):
+        logger.error(f"LLM connection error: {error}")
+
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
         # Avoid appending this filler message to the LLM context — it would
