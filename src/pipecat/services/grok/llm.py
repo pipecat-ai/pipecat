@@ -6,7 +6,7 @@
 
 """Grok LLM service implementation.
 
-.. deprecated::
+.. deprecated:: 0.0.108
     This module is deprecated. Please use GrokLLMService from
     pipecat.services.xai.llm instead.
 """

@@ -12,12 +12,11 @@ from .frames import *
 from .gemini_live import *
 from .image import *
 from .llm import *
-from .openai import *
 from .rtvi import *
 from .stt import *
 from .tts import *
 from .vertex import *
 
 sys.modules[__name__] = DeprecatedModuleProxy(
-    globals(), "google", "google.[frames,image,llm,openai,vertex,rtvi,stt,tts]"
+    globals(), "google", "google.[frames,image,llm,vertex,rtvi,stt,tts]"
 )

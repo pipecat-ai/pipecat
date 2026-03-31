@@ -6,7 +6,7 @@
 
 """Grok Realtime event models.
 
-.. deprecated::
+.. deprecated:: 0.0.108
     This module is deprecated. Please use pipecat.services.xai.realtime.events instead.
 """
 
