@@ -73,15 +73,18 @@ class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
         self.assertIn("unknown", error_msg)
 
     async def test_invalid_version_format_sends_error(self):
-        data = RTVI.ClientReadyData(
-            version="not-a-version",
-            about=RTVI.AboutClientData(library="test-client"),
-        )
-        await self._call_handle_client_ready(data)
-        self.processor._send_error_response.assert_called_once()
-        error_msg = self.processor._send_error_response.call_args[0][1]
-        self.assertIn("Invalid client version format", error_msg)
-        self.assertIn("not-a-version", error_msg)
+        bad_versions = ["not-a-version", "123", "1.2.3.0", "junk", "1.2"]
+        for version in bad_versions:
+            with self.subTest(version=version):
+                data = RTVI.ClientReadyData(
+                    version=version,
+                    about=RTVI.AboutClientData(library="test-client"),
+                )
+                await self._call_handle_client_ready(data)
+                self.processor._send_error_response.assert_called_once()
+                error_msg = self.processor._send_error_response.call_args[0][1]
+                self.assertIn("Invalid client version format", error_msg)
+                self.assertIn(version, error_msg)
 
     async def test_error_message_includes_compatibility_warning(self):
         """All version errors should append the compatibility warning."""
