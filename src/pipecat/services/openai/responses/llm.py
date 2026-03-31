@@ -709,7 +709,7 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
                 self._needs_drain = True
                 raise
             except Exception as e:
-                await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
+                await self.push_error(error_msg=f"Error during inference: {e}", exception=e)
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
@@ -971,7 +971,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
             except Exception as e:
-                await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
+                await self.push_error(error_msg=f"Error during inference: {e}", exception=e)
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
