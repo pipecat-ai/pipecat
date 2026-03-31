@@ -8,14 +8,15 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
+from PIL import Image
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, LLMRunFrame, MetricsFrame
-from pipecat.metrics.metrics import (
-    LLMUsageMetricsData,
-    ProcessingMetricsData,
-    TTFBMetricsData,
-    TTSUsageMetricsData,
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    Frame,
+    LLMRunFrame,
+    OutputImageRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -33,28 +34,42 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
 
-class MetricsLogger(FrameProcessor):
+class ImageSyncAggregator(FrameProcessor):
+    def __init__(self, speaking_path: str, waiting_path: str):
+        super().__init__()
+        self._speaking_image = Image.open(speaking_path)
+        self._speaking_image_format = self._speaking_image.format
+        self._speaking_image_bytes = self._speaking_image.tobytes()
+
+        self._waiting_image = Image.open(waiting_path)
+        self._waiting_image_format = self._waiting_image.format
+        self._waiting_image_bytes = self._waiting_image.tobytes()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, MetricsFrame):
-            for d in frame.data:
-                if isinstance(d, TTFBMetricsData):
-                    print(f"!!! MetricsFrame: {frame}, ttfb: {d.value}")
-                elif isinstance(d, ProcessingMetricsData):
-                    print(f"!!! MetricsFrame: {frame}, processing: {d.value}")
-                elif isinstance(d, LLMUsageMetricsData):
-                    tokens = d.value
-                    print(
-                        f"!!! MetricsFrame: {frame}, tokens: {tokens.prompt_tokens}, characters: {tokens.completion_tokens}"
-                    )
-                elif isinstance(d, TTSUsageMetricsData):
-                    print(f"!!! MetricsFrame: {frame}, characters: {d.value}")
+        if isinstance(frame, BotStartedSpeakingFrame):
+            await self.push_frame(
+                OutputImageRawFrame(
+                    image=self._speaking_image_bytes,
+                    size=(1024, 1024),
+                    format=self._speaking_image_format,
+                )
+            )
+
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self.push_frame(
+                OutputImageRawFrame(
+                    image=self._waiting_image_bytes,
+                    size=(1024, 1024),
+                    format=self._waiting_image_format,
+                )
+            )
+
         await self.push_frame(frame, direction)
 
 
@@ -64,14 +79,16 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-    ),
-    "twilio": lambda: FastAPIWebsocketParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
+        video_out_enabled=True,
+        video_out_width=1024,
+        video_out_height=1024,
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        video_out_enabled=True,
+        video_out_width=1024,
+        video_out_height=1024,
     ),
 }
 
@@ -95,12 +112,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    ml = MetricsLogger()
-
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
+
+    image_sync_aggregator = ImageSyncAggregator(
+        os.path.join(os.path.dirname(__file__), "..", "assets", "speaking.png"),
+        os.path.join(os.path.dirname(__file__), "..", "assets", "waiting.png"),
     )
 
     pipeline = Pipeline(
@@ -110,7 +130,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             user_aggregator,
             llm,
             tts,
-            ml,
+            image_sync_aggregator,
             transport.output(),
             assistant_aggregator,
         ]
@@ -129,9 +149,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message(
-            {"role": "developer", "content": "Please introduce yourself to the user."}
-        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

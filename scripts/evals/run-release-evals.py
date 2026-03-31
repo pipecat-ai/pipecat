@@ -96,214 +96,175 @@ EVAL_COMPLETE_TURN = EvalConfig(
 )
 
 
-TESTS_07 = [
-    # 07 series
-    ("07-interruptible.py", EVAL_SIMPLE_MATH),
-    ("07-interruptible-cartesia-http.py", EVAL_SIMPLE_MATH),
-    ("07a-interruptible-speechmatics.py", EVAL_SIMPLE_MATH),
-    ("07a-interruptible-speechmatics-vad.py", EVAL_SIMPLE_MATH),
-    ("07b-interruptible-langchain.py", EVAL_SIMPLE_MATH),
-    ("07c-interruptible-deepgram.py", EVAL_SIMPLE_MATH),
-    ("07c-interruptible-deepgram-flux.py", EVAL_SIMPLE_MATH),
-    ("07c-interruptible-deepgram-http.py", EVAL_SIMPLE_MATH),
-    ("07d-interruptible-elevenlabs.py", EVAL_SIMPLE_MATH),
-    ("07d-interruptible-elevenlabs-http.py", EVAL_SIMPLE_MATH),
-    ("07e-interruptible-xai.py", EVAL_SIMPLE_MATH),
-    ("07f-interruptible-azure.py", EVAL_SIMPLE_MATH),
-    ("07f-interruptible-azure-http.py", EVAL_SIMPLE_MATH),
-    ("07g-interruptible-openai.py", EVAL_SIMPLE_MATH),
-    ("07g-interruptible-openai-http.py", EVAL_SIMPLE_MATH),
-    ("07j-interruptible-gladia.py", EVAL_SIMPLE_MATH),
-    ("07j-interruptible-gladia-vad.py", EVAL_SIMPLE_MATH),
-    ("07k-interruptible-lmnt.py", EVAL_SIMPLE_MATH),
-    ("07l-interruptible-groq.py", EVAL_SIMPLE_MATH),
-    ("07m-interruptible-aws.py", EVAL_SIMPLE_MATH),
-    ("07m-interruptible-aws-strands.py", EVAL_WEATHER),
-    ("07n-interruptible-gemini.py", EVAL_SIMPLE_MATH),
-    ("07n-interruptible-google.py", EVAL_SIMPLE_MATH),
-    ("07n-interruptible-google-http.py", EVAL_SIMPLE_MATH),
-    ("07o-interruptible-assemblyai.py", EVAL_SIMPLE_MATH),
-    ("07p-interruptible-krisp-viva.py", EVAL_SIMPLE_MATH),
-    ("07q-interruptible-rime.py", EVAL_SIMPLE_MATH),
-    ("07q-interruptible-rime-http.py", EVAL_SIMPLE_MATH),
-    ("07r-interruptible-nvidia.py", EVAL_SIMPLE_MATH),
-    ("07s-interruptible-google-audio-in.py", EVAL_SIMPLE_MATH),
-    ("07t-interruptible-fish.py", EVAL_SIMPLE_MATH),
-    ("07v-interruptible-neuphonic.py", EVAL_SIMPLE_MATH),
-    ("07v-interruptible-neuphonic-http.py", EVAL_SIMPLE_MATH),
-    ("07w-interruptible-fal.py", EVAL_SIMPLE_MATH),
-    ("07y-interruptible-minimax.py", EVAL_SIMPLE_MATH),
-    ("07z-interruptible-sarvam.py", EVAL_SIMPLE_MATH),
-    ("07z-interruptible-sarvam-http.py", EVAL_SIMPLE_MATH),
-    ("07za-interruptible-soniox.py", EVAL_SIMPLE_MATH),
-    ("07zb-interruptible-inworld.py", EVAL_SIMPLE_MATH),
-    ("07zb-interruptible-inworld-http.py", EVAL_SIMPLE_MATH),
-    ("07zc-interruptible-asyncai.py", EVAL_SIMPLE_MATH),
-    ("07zc-interruptible-asyncai-http.py", EVAL_SIMPLE_MATH),
-    ("07zd-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
-    ("07ze-interruptible-hume.py", EVAL_SIMPLE_MATH),
-    ("07zf-interruptible-gradium.py", EVAL_SIMPLE_MATH),
-    ("07zg-interruptible-camb.py", EVAL_SIMPLE_MATH),
-    ("07zi-interruptible-piper.py", EVAL_SIMPLE_MATH),
-    ("07zj-interruptible-kokoro.py", EVAL_SIMPLE_MATH),
-    ("07zk-interruptible-resembleai.py", EVAL_SIMPLE_MATH),
-    ("07zl-interruptible-smallest.py", EVAL_SIMPLE_MATH),
-    ("07-interruptible-openai-responses.py", EVAL_SIMPLE_MATH),
-    ("07-interruptible-openai-responses-http.py", EVAL_SIMPLE_MATH),
+TESTS_SPEECH = [
+    ("services/speech/cartesia.py", EVAL_SIMPLE_MATH),
+    ("services/speech/cartesia-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/speechmatics.py", EVAL_SIMPLE_MATH),
+    ("services/speech/speechmatics-vad.py", EVAL_SIMPLE_MATH),
+    ("services/speech/langchain.py", EVAL_SIMPLE_MATH),
+    ("services/speech/deepgram.py", EVAL_SIMPLE_MATH),
+    ("services/speech/deepgram-flux.py", EVAL_SIMPLE_MATH),
+    ("services/speech/deepgram-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/elevenlabs.py", EVAL_SIMPLE_MATH),
+    ("services/speech/elevenlabs-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/xai.py", EVAL_SIMPLE_MATH),
+    ("services/speech/azure.py", EVAL_SIMPLE_MATH),
+    ("services/speech/azure-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/openai.py", EVAL_SIMPLE_MATH),
+    ("services/speech/openai-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/gladia.py", EVAL_SIMPLE_MATH),
+    ("services/speech/gladia-vad.py", EVAL_SIMPLE_MATH),
+    ("services/speech/lmnt.py", EVAL_SIMPLE_MATH),
+    ("services/speech/groq.py", EVAL_SIMPLE_MATH),
+    ("services/speech/aws.py", EVAL_SIMPLE_MATH),
+    ("services/speech/aws-strands.py", EVAL_WEATHER),
+    ("services/speech/google-gemini-tts.py", EVAL_SIMPLE_MATH),
+    ("services/speech/google.py", EVAL_SIMPLE_MATH),
+    ("services/speech/google-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/assemblyai.py", EVAL_SIMPLE_MATH),
+    ("services/speech/krisp-viva.py", EVAL_SIMPLE_MATH),
+    ("services/speech/rime.py", EVAL_SIMPLE_MATH),
+    ("services/speech/rime-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/nvidia.py", EVAL_SIMPLE_MATH),
+    ("services/speech/google-audio-in.py", EVAL_SIMPLE_MATH),
+    ("services/speech/fish.py", EVAL_SIMPLE_MATH),
+    ("services/speech/neuphonic.py", EVAL_SIMPLE_MATH),
+    ("services/speech/neuphonic-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/fal.py", EVAL_SIMPLE_MATH),
+    ("services/speech/minimax.py", EVAL_SIMPLE_MATH),
+    ("services/speech/sarvam.py", EVAL_SIMPLE_MATH),
+    ("services/speech/sarvam-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/soniox.py", EVAL_SIMPLE_MATH),
+    ("services/speech/inworld.py", EVAL_SIMPLE_MATH),
+    ("services/speech/inworld-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/asyncai.py", EVAL_SIMPLE_MATH),
+    ("services/speech/asyncai-http.py", EVAL_SIMPLE_MATH),
+    ("services/speech/aicoustics.py", EVAL_SIMPLE_MATH),
+    ("services/speech/hume.py", EVAL_SIMPLE_MATH),
+    ("services/speech/gradium.py", EVAL_SIMPLE_MATH),
+    ("services/speech/camb.py", EVAL_SIMPLE_MATH),
+    ("services/speech/piper.py", EVAL_SIMPLE_MATH),
+    ("services/speech/kokoro.py", EVAL_SIMPLE_MATH),
+    ("services/speech/resemble.py", EVAL_SIMPLE_MATH),
+    ("services/speech/smallest.py", EVAL_SIMPLE_MATH),
+    ("services/speech/openai-responses.py", EVAL_SIMPLE_MATH),
+    ("services/speech/openai-responses-http.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
-    # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
+    # ("services/speech/xtts.py", EVAL_SIMPLE_MATH),
 ]
 
-TESTS_12 = [
-    ("12-describe-image-openai.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
-    ("12-describe-image-openai-responses.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
-    ("12-describe-image-openai-responses-http.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
-    ("12a-describe-image-anthropic.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
-    ("12b-describe-image-aws.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
-    ("12c-describe-image-gemini-flash.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
-    ("12d-describe-image-moondream.py", EVAL_VISION_IMAGE()),
+TESTS_VISION = [
+    ("vision/openai.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("vision/openai-responses.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("vision/openai-responses-http.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("vision/anthropic.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("vision/aws.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("vision/gemini-flash.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("vision/moondream.py", EVAL_VISION_IMAGE()),
 ]
 
 # For a few major services, we also test parallel function calling.
 # (We don't bother doing this with every single service, as it's expensive and
 # most rely on the same OpenAI-compatible implementation.)
-TESTS_14 = [
-    ("14-function-calling.py", EVAL_WEATHER),
-    ("14-function-calling.py", EVAL_WEATHER_AND_RESTAURANT),
-    ("14-function-calling-openai-responses.py", EVAL_WEATHER),
-    ("14-function-calling-openai-responses.py", EVAL_WEATHER_AND_RESTAURANT),
-    ("14-function-calling-openai-responses-http.py", EVAL_WEATHER),
-    ("14-function-calling-openai-responses-http.py", EVAL_WEATHER_AND_RESTAURANT),
-    ("14a-function-calling-anthropic.py", EVAL_WEATHER),
-    ("14a-function-calling-anthropic.py", EVAL_WEATHER_AND_RESTAURANT),
-    ("14b-function-calling-openai.py", EVAL_WEATHER),
-    ("14e-function-calling-google.py", EVAL_WEATHER),
-    ("14e-function-calling-google.py", EVAL_WEATHER_AND_RESTAURANT),
-    ("14f-function-calling-groq.py", EVAL_WEATHER),
-    ("14g-function-calling-grok.py", EVAL_WEATHER),
-    ("14h-function-calling-azure.py", EVAL_WEATHER),
-    ("14i-function-calling-fireworks.py", EVAL_WEATHER),
-    ("14j-function-calling-nvidia.py", EVAL_WEATHER),
-    ("14k-function-calling-cerebras.py", EVAL_WEATHER),
-    ("14m-function-calling-openrouter.py", EVAL_WEATHER),
-    ("14n-function-calling-perplexity.py", EVAL_WEATHER),
-    ("14p-function-calling-gemini-vertex-ai.py", EVAL_WEATHER),
-    ("14q-function-calling-qwen.py", EVAL_WEATHER),
-    ("14r-function-calling-aws.py", EVAL_WEATHER),
-    ("14s-function-calling-sambanova.py", EVAL_WEATHER),
-    ("14r-function-calling-aws.py", EVAL_WEATHER_AND_RESTAURANT),
-    ("14v-function-calling-nebius.py", EVAL_WEATHER),
-    ("14w-function-calling-mistral.py", EVAL_WEATHER),
-    ("14y-function-calling-sarvam.py", EVAL_WEATHER),
-    ("14z-function-calling-novita.py", EVAL_WEATHER),
+TESTS_FUNCTION_CALLING = [
+    ("getting-started/07-function-calling.py", EVAL_WEATHER),
+    ("getting-started/07-function-calling.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("services/function-calling/openai-responses.py", EVAL_WEATHER),
+    ("services/function-calling/openai-responses.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("services/function-calling/openai-responses-http.py", EVAL_WEATHER),
+    ("services/function-calling/openai-responses-http.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("services/function-calling/anthropic.py", EVAL_WEATHER),
+    ("services/function-calling/anthropic.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("services/function-calling/openai.py", EVAL_WEATHER),
+    ("services/function-calling/google.py", EVAL_WEATHER),
+    ("services/function-calling/google.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("services/function-calling/groq.py", EVAL_WEATHER),
+    ("services/function-calling/grok.py", EVAL_WEATHER),
+    ("services/function-calling/azure.py", EVAL_WEATHER),
+    ("services/function-calling/fireworks.py", EVAL_WEATHER),
+    ("services/function-calling/nvidia.py", EVAL_WEATHER),
+    ("services/function-calling/cerebras.py", EVAL_WEATHER),
+    ("services/function-calling/openrouter.py", EVAL_WEATHER),
+    ("services/function-calling/perplexity.py", EVAL_WEATHER),
+    ("services/function-calling/google-vertex.py", EVAL_WEATHER),
+    ("services/function-calling/qwen.py", EVAL_WEATHER),
+    ("services/function-calling/aws.py", EVAL_WEATHER),
+    ("services/function-calling/sambanova.py", EVAL_WEATHER),
+    ("services/function-calling/aws.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("services/function-calling/nebius.py", EVAL_WEATHER),
+    ("services/function-calling/mistral.py", EVAL_WEATHER),
+    ("services/function-calling/sarvam.py", EVAL_WEATHER),
+    ("services/function-calling/novita.py", EVAL_WEATHER),
     # Video
-    ("14d-function-calling-anthropic-video.py", EVAL_VISION_CAMERA),
-    ("14d-function-calling-aws-video.py", EVAL_VISION_CAMERA),
-    ("14d-function-calling-gemini-flash-video.py", EVAL_VISION_CAMERA),
-    ("14d-function-calling-moondream-video.py", EVAL_VISION_CAMERA),
-    ("14d-function-calling-openai-video.py", EVAL_VISION_CAMERA),
-    ("14d-function-calling-openai-responses-video.py", EVAL_VISION_CAMERA),
-    ("14d-function-calling-openai-responses-video-http.py", EVAL_VISION_CAMERA),
+    ("services/function-calling/anthropic-video.py", EVAL_VISION_CAMERA),
+    ("services/function-calling/aws-video.py", EVAL_VISION_CAMERA),
+    ("services/function-calling/google-video.py", EVAL_VISION_CAMERA),
+    ("services/function-calling/moondream-video.py", EVAL_VISION_CAMERA),
+    ("services/function-calling/openai-video.py", EVAL_VISION_CAMERA),
+    ("services/function-calling/openai-responses-video.py", EVAL_VISION_CAMERA),
+    ("services/function-calling/openai-responses-video-http.py", EVAL_VISION_CAMERA),
     # Currently not working.
-    # ("14c-function-calling-together.py", EVAL_WEATHER),
-    # ("14l-function-calling-deepseek.py", EVAL_WEATHER),
-    # ("14o-function-calling-gemini-openai-format.py", EVAL_WEATHER),
+    # ("services/function-calling/together.py", EVAL_WEATHER),
+    # ("services/function-calling/deepseek.py", EVAL_WEATHER),
+    # ("services/function-calling/gemini-openai-format.py", EVAL_WEATHER),
 ]
 
-TESTS_15 = [
-    ("15a-switch-languages.py", EVAL_SWITCH_LANGUAGE),
+TESTS_FEATURES = [
+    ("features/switch-languages.py", EVAL_SWITCH_LANGUAGE),
+    ("features/voicemail-detection.py", EVAL_VOICEMAIL),
+    ("features/voicemail-detection.py", EVAL_CONVERSATION),
+    ("features/concurrent-llm-evaluation.py", EVAL_SIMPLE_MATH),
 ]
 
-TESTS_19 = [
-    ("19-openai-realtime.py", EVAL_WEATHER),
-    ("19-openai-realtime-beta.py", EVAL_WEATHER),
+TESTS_REALTIME = [
+    ("realtime/openai.py", EVAL_WEATHER),
+    ("realtime/openai-beta.py", EVAL_WEATHER),
     # OpenAI Realtime not released on Azure yet
-    # ("19a-azure-realtime.py", EVAL_WEATHER),
-    ("19a-azure-realtime-beta.py", EVAL_WEATHER),
-    ("19b-openai-realtime-text.py", EVAL_WEATHER),
-    ("19b-openai-realtime-beta-text.py", EVAL_WEATHER),
-    ("19c-openai-realtime-live-video.py", EVAL_VISION_CAMERA),
-]
-
-TESTS_21 = [
-    ("21a-tavus-video-service.py", EVAL_SIMPLE_MATH),
-]
-
-TESTS_22 = [
-    ("22-filter-incomplete-turns.py", EVAL_COMPLETE_TURN),
-]
-
-TESTS_26 = [
-    ("26-gemini-live.py", EVAL_SIMPLE_MATH),
-    ("26a-gemini-live-local-vad.py", EVAL_SIMPLE_MATH),
-    ("26b-gemini-live-function-calling.py", EVAL_WEATHER),
-    ("26c-gemini-live-video.py", EVAL_VISION_CAMERA),
-    ("26e-gemini-live-google-search.py", EVAL_ONLINE_SEARCH),
-    ("26h-gemini-live-vertex-function-calling.py", EVAL_WEATHER),
+    # ("realtime/azure.py", EVAL_WEATHER),
+    ("realtime/azure-beta.py", EVAL_WEATHER),
+    ("realtime/openai-text.py", EVAL_WEATHER),
+    ("realtime/openai-beta-text.py", EVAL_WEATHER),
+    ("realtime/openai-live-video.py", EVAL_VISION_CAMERA),
+    ("realtime/gemini-live.py", EVAL_SIMPLE_MATH),
+    ("realtime/gemini-live-local-vad.py", EVAL_SIMPLE_MATH),
+    ("realtime/gemini-live-function-calling.py", EVAL_WEATHER),
+    ("realtime/gemini-live-video.py", EVAL_VISION_CAMERA),
+    ("realtime/gemini-live-google-search.py", EVAL_ONLINE_SEARCH),
+    ("realtime/gemini-live-vertex-function-calling.py", EVAL_WEATHER),
     # Currently not working.
-    # ("26d-gemini-live-text.py", EVAL_SIMPLE_MATH),
+    # ("realtime/gemini-live-text.py", EVAL_SIMPLE_MATH),
+    ("realtime/aws-nova-sonic.py", EVAL_SIMPLE_MATH),
+    ("realtime/ultravox.py", EVAL_ORDER),
+    ("realtime/grok.py", EVAL_WEATHER),
 ]
 
-TESTS_27 = [
-    ("27-simli-layer.py", EVAL_SIMPLE_MATH),
+TESTS_VIDEO_AVATAR = [
+    ("video-avatar/tavus-video-service.py", EVAL_SIMPLE_MATH),
+    ("video-avatar/heygen-video-service.py", EVAL_SIMPLE_MATH),
+    ("video-avatar/simli-layer.py", EVAL_SIMPLE_MATH),
+    ("video-avatar/lemonslice-transport.py", EVAL_SIMPLE_MATH),
 ]
 
-TESTS_40 = [
-    ("40-aws-nova-sonic.py", EVAL_SIMPLE_MATH),
+TESTS_TURN_MANAGEMENT = [
+    ("turn-management/filter-incomplete-turns.py", EVAL_COMPLETE_TURN),
 ]
 
-TESTS_43 = [
-    ("43a-heygen-video-service.py", EVAL_SIMPLE_MATH),
-]
-
-TESTS_44 = [
-    ("44-voicemail-detection.py", EVAL_VOICEMAIL),
-    ("44-voicemail-detection.py", EVAL_CONVERSATION),
-]
-
-TESTS_49 = [
-    ("49a-thinking-anthropic.py", EVAL_SIMPLE_MATH),
-    ("49b-thinking-google.py", EVAL_SIMPLE_MATH),
-    ("49c-thinking-functions-anthropic.py", EVAL_FLIGHT_STATUS),
-    ("49d-thinking-functions-google.py", EVAL_FLIGHT_STATUS),
-]
-
-
-TESTS_50 = [
-    ("50-ultravox-realtime.py", EVAL_ORDER),
-]
-
-
-TESTS_51 = [
-    ("51-grok-realtime.py", EVAL_WEATHER),
-]
-
-TESTS_53 = [
-    ("53-concurrent-llm-evaluation.py", EVAL_SIMPLE_MATH),
-]
-
-TESTS_56 = [
-    ("56-lemonslice-transport.py", EVAL_SIMPLE_MATH),
+TESTS_THINKING_AND_MCP = [
+    ("thinking-and-mcp/thinking-anthropic.py", EVAL_SIMPLE_MATH),
+    ("thinking-and-mcp/thinking-google.py", EVAL_SIMPLE_MATH),
+    ("thinking-and-mcp/thinking-functions-anthropic.py", EVAL_FLIGHT_STATUS),
+    ("thinking-and-mcp/thinking-functions-google.py", EVAL_FLIGHT_STATUS),
 ]
 
 TESTS = [
-    *TESTS_07,
-    *TESTS_12,
-    *TESTS_14,
-    *TESTS_15,
-    *TESTS_19,
-    *TESTS_21,
-    *TESTS_22,
-    *TESTS_26,
-    *TESTS_27,
-    *TESTS_40,
-    *TESTS_43,
-    *TESTS_44,
-    *TESTS_49,
-    *TESTS_50,
-    *TESTS_51,
-    *TESTS_53,
-    *TESTS_56,
+    *TESTS_SPEECH,
+    *TESTS_VISION,
+    *TESTS_FUNCTION_CALLING,
+    *TESTS_FEATURES,
+    *TESTS_REALTIME,
+    *TESTS_VIDEO_AVATAR,
+    *TESTS_TURN_MANAGEMENT,
+    *TESTS_THINKING_AND_MCP,
 ]
 
 
