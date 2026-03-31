@@ -268,10 +268,19 @@ class RTVIProcessor(FrameProcessor):
             match message.type:
                 case "client-ready":
                     data = None
-                    try:
-                        data = RTVI.ClientReadyData.model_validate(message.data)
-                    except ValidationError:
-                        pass
+                    raw = message.data or {}
+                    version = raw.get("version")
+                    if isinstance(version, str):
+                        about = RTVI.AboutClientData(library="unknown")
+                        about_raw = raw.get("about")
+                        if about_raw is not None:
+                            try:
+                                about = RTVI.AboutClientData.model_validate(about_raw)
+                            except ValidationError:
+                                logger.warning(
+                                    "Invalid 'about' data in client-ready message, ignoring."
+                                )
+                        data = RTVI.ClientReadyData(version=version, about=about)
                     await self._handle_client_ready(message.id, data)
                 case "disconnect-bot":
                     await self.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
