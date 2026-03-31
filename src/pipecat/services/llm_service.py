@@ -1012,8 +1012,13 @@ class WebsocketLLMService(LLMService, WebsocketService):
 
     Provides connection lifecycle management (connect on start, disconnect
     on stop/cancel), automatic reconnection with exponential backoff, and
-    helpers for the per-inference exchange (``_ws_send``, ``_ws_recv``,
-    ``_ensure_connected``).
+    three helpers for running each inference:
+
+    1. ``_ensure_connected()`` — verify the websocket is alive, reconnect
+       with exponential backoff if not.
+    2. ``_ws_send(message)`` — send the inference request as JSON.
+    3. ``_ws_recv()`` — receive and parse response events one at a time
+       until the caller sees a terminal event.
 
     ``_ws_send`` and ``_ws_recv`` catch ``ConnectionClosed`` transparently,
     auto-reconnect via ``_try_reconnect``, and raise
