@@ -199,7 +199,11 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
                     # which currently results in an empty function name('').
                     continue
 
-                arguments = json.loads(arguments)
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    logger.warning(f"{self}: Failed to parse function call arguments: {arguments}")
+                    continue
 
                 function_calls.append(
                     FunctionCallFromLLM(
