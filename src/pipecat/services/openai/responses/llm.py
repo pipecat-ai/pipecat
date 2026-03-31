@@ -789,10 +789,15 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
         params = self._build_response_params(invocation_params)
         params.pop("stream", None)
 
-        await self._ensure_connected()
-        await self.start_ttfb_metrics()
-        await self._ws_send({"type": "response.create", **params})
-        await self._receive_response_events(context, full_input)
+        try:
+            await self._ensure_connected()
+            await self.start_ttfb_metrics()
+            await self._ws_send({"type": "response.create", **params})
+            await self._receive_response_events(context, full_input)
+        except Exception:
+            self._clear_previous_response_state()
+            await self.stop_ttfb_metrics()
+            raise
 
     async def _receive_response_events(self, context: LLMContext, full_input: list):
         """Receive and process WebSocket events until the response completes.
