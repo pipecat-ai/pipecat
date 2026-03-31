@@ -13,9 +13,6 @@ Features showcased:
 - Gemini LLM for conversation and image generation
 - Google TTS and STT
 
-Run with:
-    python examples/foundational/07n-interruptible-gemini-image.py
-
 Make sure to set your environment variables:
     export GOOGLE_API_KEY=your_api_key_here
 """

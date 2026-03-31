@@ -4,16 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -24,20 +21,14 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.google.vertex.llm import GoogleVertexLLMService
-from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.cartesia.stt import CartesiaSTTService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
-
-
-async def fetch_weather_from_api(params: FunctionCallParams):
-    await params.result_callback({"conditions": "nice", "temperature": "75"})
-
 
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
@@ -60,57 +51,23 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
 
-    tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        settings=ElevenLabsTTSService.Settings(
-            voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
     )
 
-    llm = GoogleVertexLLMService(
-        credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
-        project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
-        location=os.getenv("GOOGLE_CLOUD_LOCATION"),
-        settings=GoogleVertexLLMService.Settings(
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
-    # You can aslo register a function_name of None to get all functions
-    # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_current_weather", fetch_weather_from_api)
 
-    @llm.event_handler("on_function_calls_started")
-    async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
-
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function])
-
-    messages = [
-        {
-            "role": "developer",
-            "content": "Start a conversation with 'Hey there' to get the current weather.",
-        },
-    ]
-
-    context = LLMContext(messages, tools)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -118,13 +75,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),
+            transport.input(),  # Transport user input
             stt,
-            user_aggregator,
-            llm,
-            tts,
-            transport.output(),
-            assistant_aggregator,
+            user_aggregator,  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 
@@ -141,6 +98,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

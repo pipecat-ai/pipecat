@@ -13,8 +13,6 @@ This example outputs two video track simultaneously:
 The pattern generator pushes frames to the default camera. A second processor
 (BlueTintProcessor) duplicates each frame, applies a blue tint, and pushes it
 to the "blue" custom video destination.
-
-Run with: python examples/foundational/56-custom-video-track.py -t daily
 """
 
 import asyncio

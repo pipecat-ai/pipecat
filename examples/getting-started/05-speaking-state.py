@@ -119,8 +119,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     image_sync_aggregator = ImageSyncAggregator(
-        os.path.join(os.path.dirname(__file__), "assets", "speaking.png"),
-        os.path.join(os.path.dirname(__file__), "assets", "waiting.png"),
+        os.path.join(os.path.dirname(__file__), "..", "assets", "speaking.png"),
+        os.path.join(os.path.dirname(__file__), "..", "assets", "waiting.png"),
     )
 
     pipeline = Pipeline(
