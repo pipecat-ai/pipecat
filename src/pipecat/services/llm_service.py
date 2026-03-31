@@ -1004,11 +1004,13 @@ class WebsocketReconnectedError(Exception):
 class WebsocketLLMService(LLMService, WebsocketService):
     """Base class for websocket-based LLM services.
 
-    Each inference is a self-contained exchange: send a request, receive
-    events inline until a terminal event, then move on to the next.
-    Unlike ``WebsocketTTSService`` / ``WebsocketSTTService`` which run a
-    continuous background receive loop (``_receive_task_handler``), this
-    class does **not** start one.
+    Each LLM inference is a discrete request/response exchange: send one
+    request, receive events inline until a terminal event, then wait for
+    the next frame to trigger an inference.  This contrasts with
+    ``WebsocketTTSService`` / ``WebsocketSTTService`` which stream data
+    continuously via a background receive loop
+    (``_receive_task_handler``).  This class does **not** start a
+    background receive loop.
 
     Provides connection lifecycle management (connect on start, disconnect
     on stop/cancel), automatic reconnection with exponential backoff, and
