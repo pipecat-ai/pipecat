@@ -242,6 +242,7 @@ class SmallWebRTCConnection(BaseObject):
             SCREEN_VIDEO_TRANSCEIVER_INDEX: self.screen_video_input_track,
         }
         self.connection_timeout_secs = connection_timeout_secs
+        self._renegotiation_task = None
 
         self._initialize()
 
@@ -431,7 +432,7 @@ class SmallWebRTCConnection(BaseObject):
             await asyncio.sleep(2)
             self._renegotiation_in_progress = False
 
-        asyncio.create_task(delayed_task())
+        self._renegotiation_task = asyncio.create_task(delayed_task())
 
     def force_transceivers_to_send_recv(self):
         """Force all transceivers to bidirectional send/receive mode."""

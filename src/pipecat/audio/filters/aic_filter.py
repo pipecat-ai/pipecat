@@ -45,6 +45,9 @@ class AICModelManager:
     """
 
     _cache: dict[str, Tuple[Model, int]] = {}  # key -> (model, ref_count)
+    # NOTE: Intentionally using threading.Lock (not asyncio.Lock) because this lock
+    # protects quick in-memory cache operations and is also used from the synchronous
+    # release() classmethod. Critical sections are very short (no I/O or awaits).
     _lock = Lock()
     _loading: dict[
         str, asyncio.Task[Model]

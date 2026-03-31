@@ -187,7 +187,7 @@ class AWSAgentCoreProcessor(FrameProcessor):
 
         # Push the text frame
         await self.push_frame(LLMTextFrame(text))
-        self._last_text_frame_time = asyncio.get_event_loop().time()
+        self._last_text_frame_time = asyncio.get_running_loop().time()
 
         # Schedule closing the output response after timeout
         self._close_task = self.create_task(self._close_output_response_after_timeout())

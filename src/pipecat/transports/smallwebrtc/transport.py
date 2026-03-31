@@ -96,6 +96,7 @@ class RawAudioTrack(AudioStreamTrack):
         self._start = time.time()
         # Queue of (bytes, future), broken into 10ms sub chunks as needed
         self._chunk_queue = deque()
+        self._chunk_available = asyncio.Event()
 
     def add_audio_bytes(self, audio_bytes: bytes):
         """Add audio bytes to the buffer for transmission.
@@ -120,6 +121,7 @@ class RawAudioTrack(AudioStreamTrack):
             fut = future if i + self._bytes_per_10ms >= len(audio_bytes) else None
             self._chunk_queue.append((chunk, fut))
 
+        self._chunk_available.set()
         return future
 
     async def recv(self):
@@ -139,15 +141,18 @@ class RawAudioTrack(AudioStreamTrack):
             if self._auto_silence:
                 chunk = bytes(self._bytes_per_10ms)
             else:
-                while not self._chunk_queue:
-                    await asyncio.sleep(0.005)
+                await self._chunk_available.wait()
                 chunk, future = self._chunk_queue.popleft()
                 if future and not future.done():
                     future.set_result(True)
+                if not self._chunk_queue:
+                    self._chunk_available.clear()
         else:
             chunk, future = self._chunk_queue.popleft()
             if future and not future.done():
                 future.set_result(True)
+            if not self._chunk_queue:
+                self._chunk_available.clear()
 
         # Convert the byte data to an ndarray of int16 samples
         samples = np.frombuffer(chunk, dtype=np.int16)

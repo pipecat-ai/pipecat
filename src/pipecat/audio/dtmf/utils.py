@@ -23,7 +23,17 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.utils import create_file_resampler
 
-__DTMF_LOCK__ = asyncio.Lock()
+__DTMF_LOCK__: Optional[asyncio.Lock] = None
+
+
+def _get_dtmf_lock() -> asyncio.Lock:
+    """Get or create the DTMF lock, lazily initialized to avoid module-level event loop binding."""
+    global __DTMF_LOCK__
+    if __DTMF_LOCK__ is None:
+        __DTMF_LOCK__ = asyncio.Lock()
+    return __DTMF_LOCK__
+
+
 __DTMF_AUDIO__: Dict[KeypadEntry, bytes] = {}
 __DTMF_RESAMPLER__: Optional[BaseAudioResampler] = None
 
@@ -45,7 +55,7 @@ async def load_dtmf_audio(button: KeypadEntry, *, sample_rate: int = 8000) -> by
     """
     global __DTMF_AUDIO__, __DTMF_RESAMPLER__
 
-    async with __DTMF_LOCK__:
+    async with _get_dtmf_lock():
         if button in __DTMF_AUDIO__:
             return __DTMF_AUDIO__[button]
 

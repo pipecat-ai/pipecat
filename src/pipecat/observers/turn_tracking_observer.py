@@ -109,7 +109,7 @@ class TurnTrackingObserver(BaseObserver):
         self._cancel_turn_end_timer()
 
         # Create a new timer
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self._end_turn_timer = loop.call_later(
             self._turn_end_timeout_secs,
             lambda: asyncio.create_task(self._end_turn_after_timeout(data)),

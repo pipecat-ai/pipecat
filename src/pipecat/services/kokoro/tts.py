@@ -178,6 +178,8 @@ class KokoroTTSService(TTSService):
         model_file = Path(model_path) if model_path else KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
         voices = Path(voices_path) if voices_path else KOKORO_CACHE_DIR / "voices-v1.0.bin"
 
+        # NOTE: This performs a synchronous HTTP download if model files are not cached.
+        # This blocks the current thread but only runs once per model.
         _ensure_model_files(model_file, voices)
 
         self._kokoro = Kokoro(str(model_file), str(voices))

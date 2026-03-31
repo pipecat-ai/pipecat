@@ -540,7 +540,14 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             bot_module = _get_bot_module()
             runner_args = DailyRunnerArguments(room_url=room_url, token=token)
             runner_args.cli_args = args
-            asyncio.create_task(bot_module.bot(runner_args))
+            task = asyncio.create_task(bot_module.bot(runner_args))
+            task.add_done_callback(
+                lambda t: (
+                    logger.error(f"Bot task error: {t.exception()}")
+                    if not t.cancelled() and t.exception()
+                    else None
+                )
+            )
             return RedirectResponse(room_url)
 
     @app.post("/start")
@@ -627,7 +634,14 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
         runner_args.cli_args = args
 
         # Start the bot in the background
-        asyncio.create_task(bot_module.bot(runner_args))
+        task = asyncio.create_task(bot_module.bot(runner_args))
+        task.add_done_callback(
+            lambda t: (
+                logger.error(f"Bot task error: {t.exception()}")
+                if not t.cancelled() and t.exception()
+                else None
+            )
+        )
 
         return result
 
@@ -730,7 +744,14 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             )
             runner_args.cli_args = args
 
-            asyncio.create_task(bot_module.bot(runner_args))
+            task = asyncio.create_task(bot_module.bot(runner_args))
+            task.add_done_callback(
+                lambda t: (
+                    logger.error(f"Bot task error: {t.exception()}")
+                    if not t.cancelled() and t.exception()
+                    else None
+                )
+            )
 
             # Generate session ID
             session_id = str(uuid.uuid4())
