@@ -28,7 +28,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -44,7 +47,7 @@ load_dotenv(override=True)
 # The system prompt for the main conversation.
 #
 conversation_system_message = """
-You are a helpful LLM in a WebRTC call. Your goals are to be helpful and brief in your responses. Respond with one or two sentences at most, unless you are asked to
+You are a helpful LLM in a voice call. Your goals are to be helpful and brief in your responses. Respond with one or two sentences at most, unless you are asked to
 respond at more length. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
 """
 
@@ -176,7 +179,7 @@ class InputTranscriptionContextFilter(FrameProcessor):
                 }
             )
             new_message_content.append(last_part)
-            msg = {"role": "user", "content": new_message_content}
+            msg = {"role": "developer", "content": new_message_content}
             ctx = LLMContext([{"role": "system", "content": transcriber_system_message}, msg])
 
             await self.push_frame(LLMContextFrame(context=ctx))
@@ -270,17 +273,14 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -290,37 +290,44 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     conversation_llm = GoogleLLMService(
         name="Conversation",
-        model="gemini-2.0-flash-001",
-        # model="gemini-exp-1121",
+        settings=GoogleLLMService.Settings(
+            model="gemini-2.5-flash",
+            system_instruction=conversation_system_message,
+        ),
         api_key=os.getenv("GOOGLE_API_KEY"),
         # we can give the GoogleLLMService a system instruction to use directly
         # in the GenerativeModel constructor. Let's do that rather than put
         # our system message in the messages list.
-        system_instruction=conversation_system_message,
     )
 
     input_transcription_llm = GoogleLLMService(
         name="Transcription",
-        model="gemini-2.0-flash-001",
-        # model="gemini-exp-1121",
+        settings=GoogleLLMService.Settings(
+            model="gemini-2.5-flash",
+            system_instruction=transcriber_system_message,
+        ),
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=transcriber_system_message,
     )
 
     messages = [
         {
-            "role": "user",
+            "role": "developer",
             "content": "Start by saying hello.",
         },
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
     audio_collector = UserAudioCollector(context, context_aggregator.user())
     input_transcription_context_filter = InputTranscriptionContextFilter()
     transcription_frames_emitter = InputTranscriptionFrameEmitter()

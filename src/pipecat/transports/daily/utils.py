@@ -89,7 +89,7 @@ class DailyRoomProperties(BaseModel):
         enable_emoji_reactions: Whether emoji reactions are enabled.
         eject_at_room_exp: Whether to remove participants when room expires.
         enable_dialout: Whether SIP dial-out is enabled.
-        enable_recording: Recording settings ('cloud', 'local', 'raw-tracks').
+        enable_recording: Recording settings ('cloud', 'cloud-audio-only', 'local', 'raw-tracks').
         enable_transcription_storage: Whether transcription storage is enabled.
         geo: Geographic region for room.
         max_participants: Maximum number of participants allowed in the room.
@@ -185,7 +185,7 @@ class DailyMeetingTokenProperties(BaseModel):
         enable_screenshare: If True, the user will be able to share their screen.
         start_video_off: If True, the user's video will be turned off when they join the room.
         start_audio_off: If True, the user's audio will be turned off when they join the room.
-        enable_recording: Recording settings for the token. Must be one of 'cloud', 'local' or 'raw-tracks'.
+        enable_recording: Recording settings for the token. Must be one of 'cloud', 'cloud-audio-only', 'local' or 'raw-tracks'.
         enable_prejoin_ui: If True, the user will see the prejoin UI before joining the room.
         start_cloud_recording: Start cloud recording when the user joins the room.
         permissions: Specifies the initial default permissions for a non-meeting-owner participant.

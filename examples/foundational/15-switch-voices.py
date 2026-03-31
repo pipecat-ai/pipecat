@@ -43,17 +43,23 @@ class SwitchVoices(ParallelPipeline):
 
         news_lady = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="bf991597-6c13-47e4-8411-91ec2de5c466",  # Newslady
+            settings=CartesiaTTSService.Settings(
+                voice="bf991597-6c13-47e4-8411-91ec2de5c466",  # Newslady
+            ),
         )
 
         british_lady = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            settings=CartesiaTTSService.Settings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
         )
 
         barbershop_man = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
+            settings=CartesiaTTSService.Settings(
+                voice="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
+            ),
         )
 
         super().__init__(
@@ -114,7 +120,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities. Respond to what the user said in a creative and helpful way. Your output should not include non-alphanumeric characters. You can do the following voices: 'News Lady', 'British Lady' and 'Barbershop Man'.",
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative and helpful way. You can do the following voices: 'News Lady', 'British Lady' and 'Barbershop Man'.",
+        ),
     )
     llm.register_function("switch_voice", tts.switch_voice)
 
@@ -164,7 +172,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         context.add_message(
             {
-                "role": "system",
+                "role": "developer",
                 "content": f"Please introduce yourself to the user and let them know the voices you can do. Your initial responses should be as if you were a {tts.current_voice}.",
             }
         )

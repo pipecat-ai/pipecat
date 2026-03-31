@@ -8,8 +8,8 @@
 
 import base64
 import json
-from dataclasses import dataclass, field
-from typing import AsyncGenerator, ClassVar, Dict, Optional
+from dataclasses import dataclass
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -23,8 +23,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-from pipecat.services.tts_service import AudioContextTTSService
+from pipecat.services.settings import TTSSettings
+from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -38,25 +38,12 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class ResembleAITTSSettings(TTSSettings):
-    """Settings for Resemble AI TTS service.
+    """Settings for ResembleAITTSService."""
 
-    Parameters:
-        precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).
-        output_format: Audio format (wav or mp3).
-        resemble_sample_rate: Audio sample rate sent to the API.
-    """
-
-    precision: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    output_format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    resemble_sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-    _aliases: ClassVar[Dict[str, str]] = {
-        "voice_id": "voice",
-        "sample_rate": "resemble_sample_rate",
-    }
+    pass
 
 
-class ResembleAITTSService(AudioContextTTSService):
+class ResembleAITTSService(WebsocketTTSService):
     """Resemble AI TTS service with WebSocket streaming and word timestamps.
 
     Provides text-to-speech using Resemble AI's streaming WebSocket API.
@@ -64,17 +51,19 @@ class ResembleAITTSService(AudioContextTTSService):
     multiple simultaneous synthesis requests with proper interruption support.
     """
 
-    _settings: ResembleAITTSSettings
+    Settings = ResembleAITTSSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         url: str = "wss://websocket.cluster.resemble.ai/stream",
         precision: Optional[str] = "PCM_16",
         output_format: Optional[str] = "wav",
         sample_rate: Optional[int] = 22050,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Resemble AI TTS service.
@@ -82,29 +71,50 @@ class ResembleAITTSService(AudioContextTTSService):
         Args:
             api_key: Resemble AI API key for authentication.
             voice_id: Voice UUID to use for synthesis.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=ResembleAITTSService.Settings(voice=...)`` instead.
+
             url: WebSocket URL for Resemble AI TTS API.
             precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).
             output_format: Audio format (wav or mp3).
             sample_rate: Audio sample rate (8000, 16000, 22050, 32000, or 44100). Defaults to 22050.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent service.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            voice=None,
+            language=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             reuse_context_id_within_turn=False,
-            supports_word_timestamps=True,
-            settings=ResembleAITTSSettings(
-                model=None,
-                voice=voice_id,
-                language=None,
-                precision=precision,
-                output_format=output_format,
-                resemble_sample_rate=sample_rate,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         self._api_key = api_key
         self._url = url
+
+        # Init-only audio format config (not runtime-updatable).
+        self._precision = precision or "PCM_16"
+        self._output_format = output_format or "wav"
+        self._resemble_sample_rate = 0  # Set in start()
 
         self._websocket = None
         self._request_id_counter = 0
@@ -147,9 +157,9 @@ class ResembleAITTSService(AudioContextTTSService):
             "data": text,
             "binary_response": False,  # Use JSON frames to get timestamps
             "request_id": self._request_id_counter,  # ResembleAI only accepts number
-            "output_format": self._settings.output_format,
-            "sample_rate": self._settings.resemble_sample_rate,
-            "precision": self._settings.precision,
+            "output_format": self._output_format,
+            "sample_rate": self._resemble_sample_rate,
+            "precision": self._precision,
             "no_audio_header": True,
         }
 
@@ -163,7 +173,7 @@ class ResembleAITTSService(AudioContextTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.resemble_sample_rate = self.sample_rate
+        self._resemble_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -248,6 +258,7 @@ class ResembleAITTSService(AudioContextTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Stop metrics when the bot is interrupted."""
         await self.stop_all_metrics()
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Stop metrics after the Resemble AI context finishes playing.
@@ -256,9 +267,9 @@ class ResembleAITTSService(AudioContextTTSService):
         ``audio_end`` message (handled in ``_process_messages``), after which
         the server-side context is already closed.
         """
-        pass
+        await super().on_audio_context_completed(context_id)
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio and finalize the current context."""
         logger.trace(f"{self}: flushing audio")
         # For Resemble AI, we just wait for the audio_end message
@@ -287,9 +298,6 @@ class ResembleAITTSService(AudioContextTTSService):
                 continue
 
             if msg_type == "audio":
-                await self.stop_ttfb_metrics()
-                await self.start_word_timestamps()
-
                 # Decode base64 audio content
                 audio_content = msg.get("audio_content", "")
                 if not audio_content:
@@ -380,7 +388,9 @@ class ResembleAITTSService(AudioContextTTSService):
                     if request_id in self._request_id_to_context:
                         del self._request_id_to_context[request_id]
 
-                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], context_id)
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
                 await self.remove_audio_context(context_id)
 
             elif msg_type == "error":
@@ -437,13 +447,13 @@ class ResembleAITTSService(AudioContextTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame(context_id=context_id)
+            if not self.audio_context_available(context_id):
+                await self.create_audio_context(context_id)
+                await self.start_ttfb_metrics()
+                yield TTSStartedFrame(context_id=context_id)
 
             # Map request_id to context_id for tracking
             self._request_id_to_context[self._request_id_counter] = context_id
-
-            await self.create_audio_context(context_id)
 
             msg = self._build_msg(text=text)
 

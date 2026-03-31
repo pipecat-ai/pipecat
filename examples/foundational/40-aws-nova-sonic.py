@@ -24,6 +24,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -87,17 +88,14 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -130,9 +128,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         #   - ap-northeast-1
         region=os.getenv("AWS_REGION"),
         session_token=os.getenv("AWS_SESSION_TOKEN"),
-        voice_id="tiffany",
-        # you could choose to pass instruction here rather than via context
-        # system_instruction=system_instruction
+        settings=AWSNovaSonicLLMService.Settings(
+            voice="tiffany",
+            system_instruction=system_instruction,
+        ),
         # you could choose to pass tools here rather than via context
         # tools=tools
     )
@@ -145,17 +144,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # Set up context and context management.
-    context = LLMContext(
-        messages=[
-            {"role": "system", "content": f"{system_instruction}"},
-            {
-                "role": "user",
-                "content": "Tell me a fun fact!",
-            },
-        ],
-        tools=tools,
+    context = LLMContext(tools=tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     # Build the pipeline
     pipeline = Pipeline(
@@ -183,6 +176,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
         # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
         # triggering the first assistant response. Note that this trigger requires a special

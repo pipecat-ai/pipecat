@@ -47,6 +47,7 @@ from pipecat.transcriptions.language import Language
 if TYPE_CHECKING:
     from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
+
 # ---------------------------------------------------------------------------
 # NOT_GIVEN sentinel
 # ---------------------------------------------------------------------------
@@ -354,6 +355,7 @@ class LLMSettings(ServiceSettings):
 
     Parameters:
         model: LLM model identifier.
+        system_instruction: System instruction/prompt for the model.
         temperature: Sampling temperature.
         max_tokens: Maximum tokens to generate.
         top_p: Nucleus sampling probability.
@@ -370,6 +372,7 @@ class LLMSettings(ServiceSettings):
             and prompts for incomplete turns.
     """
 
+    system_instruction: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_tokens: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)

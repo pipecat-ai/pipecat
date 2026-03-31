@@ -108,11 +108,11 @@ TESTS_07 = [
     ("07c-interruptible-deepgram-http.py", EVAL_SIMPLE_MATH),
     ("07d-interruptible-elevenlabs.py", EVAL_SIMPLE_MATH),
     ("07d-interruptible-elevenlabs-http.py", EVAL_SIMPLE_MATH),
+    ("07e-interruptible-xai.py", EVAL_SIMPLE_MATH),
     ("07f-interruptible-azure.py", EVAL_SIMPLE_MATH),
     ("07f-interruptible-azure-http.py", EVAL_SIMPLE_MATH),
     ("07g-interruptible-openai.py", EVAL_SIMPLE_MATH),
     ("07g-interruptible-openai-http.py", EVAL_SIMPLE_MATH),
-    ("07h-interruptible-openpipe.py", EVAL_SIMPLE_MATH),
     ("07j-interruptible-gladia.py", EVAL_SIMPLE_MATH),
     ("07j-interruptible-gladia-vad.py", EVAL_SIMPLE_MATH),
     ("07k-interruptible-lmnt.py", EVAL_SIMPLE_MATH),
@@ -146,12 +146,18 @@ TESTS_07 = [
     ("07zg-interruptible-camb.py", EVAL_SIMPLE_MATH),
     ("07zi-interruptible-piper.py", EVAL_SIMPLE_MATH),
     ("07zj-interruptible-kokoro.py", EVAL_SIMPLE_MATH),
+    ("07zk-interruptible-resembleai.py", EVAL_SIMPLE_MATH),
+    ("07zl-interruptible-smallest.py", EVAL_SIMPLE_MATH),
+    ("07-interruptible-openai-responses.py", EVAL_SIMPLE_MATH),
+    ("07-interruptible-openai-responses-http.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
 ]
 
 TESTS_12 = [
     ("12-describe-image-openai.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("12-describe-image-openai-responses.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("12-describe-image-openai-responses-http.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
     ("12a-describe-image-anthropic.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
     ("12b-describe-image-aws.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
     ("12c-describe-image-gemini-flash.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
@@ -164,8 +170,13 @@ TESTS_12 = [
 TESTS_14 = [
     ("14-function-calling.py", EVAL_WEATHER),
     ("14-function-calling.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("14-function-calling-openai-responses.py", EVAL_WEATHER),
+    ("14-function-calling-openai-responses.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("14-function-calling-openai-responses-http.py", EVAL_WEATHER),
+    ("14-function-calling-openai-responses-http.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14a-function-calling-anthropic.py", EVAL_WEATHER),
     ("14a-function-calling-anthropic.py", EVAL_WEATHER_AND_RESTAURANT),
+    ("14b-function-calling-openai.py", EVAL_WEATHER),
     ("14e-function-calling-google.py", EVAL_WEATHER),
     ("14e-function-calling-google.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14f-function-calling-groq.py", EVAL_WEATHER),
@@ -179,16 +190,20 @@ TESTS_14 = [
     ("14p-function-calling-gemini-vertex-ai.py", EVAL_WEATHER),
     ("14q-function-calling-qwen.py", EVAL_WEATHER),
     ("14r-function-calling-aws.py", EVAL_WEATHER),
+    ("14s-function-calling-sambanova.py", EVAL_WEATHER),
     ("14r-function-calling-aws.py", EVAL_WEATHER_AND_RESTAURANT),
-    ("14v-function-calling-openai.py", EVAL_WEATHER),
+    ("14v-function-calling-nebius.py", EVAL_WEATHER),
     ("14w-function-calling-mistral.py", EVAL_WEATHER),
-    ("14x-function-calling-openpipe.py", EVAL_WEATHER),
+    ("14y-function-calling-sarvam.py", EVAL_WEATHER),
+    ("14z-function-calling-novita.py", EVAL_WEATHER),
     # Video
     ("14d-function-calling-anthropic-video.py", EVAL_VISION_CAMERA),
     ("14d-function-calling-aws-video.py", EVAL_VISION_CAMERA),
     ("14d-function-calling-gemini-flash-video.py", EVAL_VISION_CAMERA),
     ("14d-function-calling-moondream-video.py", EVAL_VISION_CAMERA),
     ("14d-function-calling-openai-video.py", EVAL_VISION_CAMERA),
+    ("14d-function-calling-openai-responses-video.py", EVAL_VISION_CAMERA),
+    ("14d-function-calling-openai-responses-video-http.py", EVAL_VISION_CAMERA),
     # Currently not working.
     # ("14c-function-calling-together.py", EVAL_WEATHER),
     # ("14l-function-calling-deepseek.py", EVAL_WEATHER),
@@ -220,7 +235,7 @@ TESTS_22 = [
 
 TESTS_26 = [
     ("26-gemini-live.py", EVAL_SIMPLE_MATH),
-    ("26a-gemini-live-transcription.py", EVAL_SIMPLE_MATH),
+    ("26a-gemini-live-local-vad.py", EVAL_SIMPLE_MATH),
     ("26b-gemini-live-function-calling.py", EVAL_WEATHER),
     ("26c-gemini-live-video.py", EVAL_VISION_CAMERA),
     ("26e-gemini-live-google-search.py", EVAL_ONLINE_SEARCH),
@@ -267,6 +282,10 @@ TESTS_53 = [
     ("53-concurrent-llm-evaluation.py", EVAL_SIMPLE_MATH),
 ]
 
+TESTS_56 = [
+    ("56-lemonslice-transport.py", EVAL_SIMPLE_MATH),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_12,
@@ -284,6 +303,7 @@ TESTS = [
     *TESTS_50,
     *TESTS_51,
     *TESTS_53,
+    *TESTS_56,
 ]
 
 

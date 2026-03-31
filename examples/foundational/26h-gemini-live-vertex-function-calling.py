@@ -13,20 +13,15 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.gemini_live.llm_vertex import GeminiLiveVertexLLMService
+from pipecat.services.google.gemini_live.vertex.llm import GeminiLiveVertexLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -117,25 +112,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
         project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
         location=os.getenv("GOOGLE_CLOUD_LOCATION"),
-        system_instruction=system_instruction,
-        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+        settings=GeminiLiveVertexLLMService.Settings(
+            system_instruction=system_instruction,
+            voice="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+        ),
         tools=tools,
     )
 
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
-    context = LLMContext([{"role": "user", "content": "Say hello."}])
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(
-            # Set stop_secs to something roughly similar to the internal setting
-            # of the Multimodal Live api, just to align events. This doesn't
-            # really matter because we can only use the Multimodal Live API's
-            # phrase endpointing, for now.
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5))
-        ),
-    )
+    context = LLMContext([{"role": "developer", "content": "Say hello."}])
+    # Server-side VAD is enabled by default; no local VAD is added.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

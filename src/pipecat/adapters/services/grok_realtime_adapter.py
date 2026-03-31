@@ -21,7 +21,7 @@ from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
-from pipecat.services.grok.realtime import events
+from pipecat.services.xai.realtime import events
 
 
 class GrokRealtimeLLMInvocationParams(TypedDict):
@@ -50,18 +50,26 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         """Get the identifier used in LLMSpecificMessage instances for Grok Realtime."""
         return "grok-realtime"
 
-    def get_llm_invocation_params(self, context: LLMContext) -> GrokRealtimeLLMInvocationParams:
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, system_instruction: Optional[str] = None
+    ) -> GrokRealtimeLLMInvocationParams:
         """Get Grok Realtime-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings.
 
         Returns:
             Dictionary of parameters for invoking Grok's Voice Agent API.
         """
         messages = self._from_universal_context_messages(self.get_messages(context))
+        effective_system = self._resolve_system_instruction(
+            messages.system_instruction,
+            system_instruction,
+            discard_context_system=True,
+        )
         return {
-            "system_instruction": messages.system_instruction,
+            "system_instruction": effective_system,
             "messages": messages.messages,
             "tools": self.from_standard_tools(context.tools) or [],
         }
@@ -127,6 +135,11 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
                 system_instruction = content[0].get("text")
             if not messages:
                 return self.ConvertedMessages(messages=[], system_instruction=system_instruction)
+
+        # Convert any remaining "system"/"developer" messages to "user"
+        for msg in messages:
+            if msg.get("role") in ("system", "developer"):
+                msg["role"] = "user"
 
         # Single user message can be sent normally
         if len(messages) == 1 and messages[0].get("role") == "user":

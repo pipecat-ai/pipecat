@@ -58,7 +58,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     try:
@@ -84,7 +86,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.exception("error trace:")
 
     system = f"""
-    You are a helpful LLM in a WebRTC call.
+    You are a helpful LLM in a voice call.
     Your goal is to answer questions about the user's GitHub repositories and account.
     You have access to a number of tools provided by Github. Use any and all tools to help users.
     Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
@@ -100,7 +102,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     await mcp.register_tools_schema(tools, llm)
 
-    context = LLMContext([{"role": "user", "content": "Please introduce yourself."}])
+    context = LLMContext([{"role": "developer", "content": "Please introduce yourself."}])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

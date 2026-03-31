@@ -56,12 +56,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = NeuphonicTTSService(
         api_key=os.getenv("NEUPHONIC_API_KEY"),
-        voice_id="fc854436-2dac-4d21-aa69-ae17b54e98eb",  # Emily
+        settings=NeuphonicTTSService.Settings(
+            voice="fc854436-2dac-4d21-aa69-ae17b54e98eb",  # Emily
+        ),
     )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+        ),
     )
 
     context = LLMContext()
@@ -95,7 +99,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

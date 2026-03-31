@@ -16,7 +16,6 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.assemblyai.models import AssemblyAIConnectionParams
 from pipecat.services.assemblyai.stt import AssemblyAISTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -50,8 +49,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = AssemblyAISTTService(
         api_key=os.getenv("ASSEMBLYAI_API_KEY"),
-        connection_params=AssemblyAIConnectionParams(
-            speech_model="u3-rt-pro",
+        settings=AssemblyAISTTService.Settings(
+            model="u3-rt-pro",
         ),
     )
 

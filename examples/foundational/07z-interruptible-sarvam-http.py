@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.sarvam.llm import SarvamLLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamHttpTTSService
 from pipecat.transcriptions.language import Language
@@ -59,18 +59,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async with aiohttp.ClientSession() as session:
         stt = SarvamSTTService(
             api_key=os.getenv("SARVAM_API_KEY"),
-            model="saarika:v2.5",
+            settings=SarvamSTTService.Settings(
+                model="saarika:v2.5",
+            ),
         )
 
         tts = SarvamHttpTTSService(
             api_key=os.getenv("SARVAM_API_KEY"),
             aiohttp_session=session,
-            params=SarvamHttpTTSService.InputParams(language=Language.EN),
+            settings=SarvamHttpTTSService.Settings(
+                language=Language.EN_IN,
+            ),
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        llm = SarvamLLMService(
+            api_key=os.getenv("SARVAM_API_KEY"),
+            settings=SarvamLLMService.Settings(
+                system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+            ),
         )
 
         context = LLMContext()
@@ -105,7 +111,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             logger.info(f"Client connected")
             # Kick off the conversation.
             context.add_message(
-                {"role": "system", "content": "Please introduce yourself to the user."}
+                {"role": "developer", "content": "Please introduce yourself to the user."}
             )
             await task.queue_frames([LLMRunFrame()])
 

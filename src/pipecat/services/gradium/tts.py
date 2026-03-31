@@ -6,7 +6,7 @@
 
 import base64
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -19,11 +19,10 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-from pipecat.services.tts_service import AudioContextTTSService
+from pipecat.services.settings import TTSSettings
+from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -40,22 +39,22 @@ SAMPLE_RATE = 48000
 
 @dataclass
 class GradiumTTSSettings(TTSSettings):
-    """Settings for the Gradium TTS service.
+    """Settings for GradiumTTSService."""
 
-    Parameters:
-        output_format: Audio output format.
-    """
-
-    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pass
 
 
-class GradiumTTSService(AudioContextTTSService):
+class GradiumTTSService(WebsocketTTSService):
     """Text-to-Speech service using Gradium's websocket API."""
 
-    _settings: GradiumTTSSettings
+    Settings = GradiumTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Gradium TTS service.
+
+        .. deprecated:: 0.0.105
+            Use ``GradiumTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             temp: Temperature to be used for generation, defaults to 0.6.
@@ -67,11 +66,12 @@ class GradiumTTSService(AudioContextTTSService):
         self,
         *,
         api_key: str,
-        voice_id: str = "YTpq7expH9539ERJ",
+        voice_id: Optional[str] = None,
         url: str = "wss://eu.api.gradium.ai/api/speech/tts",
-        model: str = "default",
+        model: Optional[str] = None,
         json_config: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Gradium TTS service.
@@ -79,26 +79,57 @@ class GradiumTTSService(AudioContextTTSService):
         Args:
             api_key: Gradium API key for authentication.
             voice_id: the voice identifier.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GradiumTTSService.Settings(voice=...)`` instead.
+
             url: Gradium websocket API endpoint.
             model: Model ID to use for synthesis.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GradiumTTSService.Settings(model=...)`` instead.
+
             json_config: Optional JSON configuration string for additional model settings.
             params: Additional configuration parameters.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GradiumTTSService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent class.
         """
-        params = params or GradiumTTSService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="default",
+            voice="YTpq7expH9539ERJ",
+            language=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            # Note: params.temp has no corresponding settings field
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             push_stop_frames=True,
+            push_start_frame=True,
             push_text_frames=False,
             pause_frame_processing=True,
-            supports_word_timestamps=True,
             sample_rate=SAMPLE_RATE,
-            settings=GradiumTTSSettings(
-                model=model,
-                voice=voice_id,
-                language=None,
-                output_format="pcm",
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -109,6 +140,7 @@ class GradiumTTSService(AudioContextTTSService):
 
         # State tracking
         self._receive_task = None
+        self._setup_context_ids: set[str] = set()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -122,7 +154,7 @@ class GradiumTTSService(AudioContextTTSService):
         """Apply a settings delta and reconnect if voice changed.
 
         Args:
-            delta: A :class:`TTSSettings` (or ``GradiumTTSSettings``) delta.
+            delta: A :class:`TTSSettings` (or ``GradiumTTSService.Settings``) delta.
 
         Returns:
             Dict mapping changed field names to their previous values.
@@ -135,12 +167,26 @@ class GradiumTTSService(AudioContextTTSService):
             self._warn_unhandled_updated_settings(changed)
         return changed
 
-    def _build_msg(self, text: str = "") -> dict:
-        """Build JSON message for Gradium API."""
-        msg = {"text": text, "type": "text"}
-        context_id = self.get_active_audio_context_id()
-        if context_id:
-            msg["client_req_id"] = context_id
+    def _build_setup_msg(self, context_id: str) -> dict:
+        """Build setup message for Gradium API.
+
+        Args:
+            context_id: Context ID to use as ``client_req_id``.
+        """
+        setup_msg: dict[str, Any] = {
+            "type": "setup",
+            "output_format": "pcm",
+            "voice_id": self._settings.voice,
+            "close_ws_on_eos": False,
+            "client_req_id": context_id,
+        }
+        if self._json_config is not None:
+            setup_msg["json_config"] = self._json_config
+        return setup_msg
+
+    def _build_text_msg(self, text: str = "", context_id: str = "") -> dict:
+        """Build text message for Gradium API."""
+        msg = {"text": text, "type": "text", "client_req_id": context_id}
         return msg
 
     async def start(self, frame: StartFrame):
@@ -208,22 +254,6 @@ class GradiumTTSService(AudioContextTTSService):
             headers = {"x-api-key": self._api_key, "x-api-source": "pipecat"}
             self._websocket = await websocket_connect(self._url, additional_headers=headers)
 
-            setup_msg = {
-                "type": "setup",
-                "output_format": "pcm",
-                "voice_id": self._settings.voice,
-                "close_ws_on_eos": False,
-            }
-            if self._json_config is not None:
-                setup_msg["json_config"] = self._json_config
-            await self._websocket.send(json.dumps(setup_msg))
-            ready_msg = await self._websocket.recv()
-            ready_msg = json.loads(ready_msg)
-            if ready_msg["type"] == "error":
-                raise Exception(f"received error {ready_msg['message']}")
-            if ready_msg["type"] != "ready":
-                raise Exception(f"unexpected first message type {ready_msg['type']}")
-
             await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -241,6 +271,7 @@ class GradiumTTSService(AudioContextTTSService):
         finally:
             await self.remove_active_audio_context()
             self._websocket = None
+            self._setup_context_ids.clear()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -249,15 +280,14 @@ class GradiumTTSService(AudioContextTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis."""
-        context_id = self.get_active_audio_context_id()
-        if not context_id or not self._websocket:
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
             return
         try:
-            msg = {"type": "end_of_stream", "client_req_id": context_id}
+            msg = {"type": "end_of_stream", "client_req_id": flush_id}
             await self._websocket.send(json.dumps(msg))
-            self.reset_active_audio_context()
         except ConnectionClosedOK:
             logger.debug(f"{self}: connection closed normally during flush")
         except Exception as e:
@@ -271,6 +301,7 @@ class GradiumTTSService(AudioContextTTSService):
         audio context no longer exists.
         """
         await self.stop_all_metrics()
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Called after an audio context has finished playing all of its audio.
@@ -279,7 +310,7 @@ class GradiumTTSService(AudioContextTTSService):
         ``end_of_stream`` message (handled in ``_receive_messages``), after
         which the server-side context is already closed.
         """
-        pass
+        await super().on_audio_context_completed(context_id)
 
     async def _receive_messages(self):
         """Process incoming websocket messages, demultiplexing by client_req_id."""
@@ -295,8 +326,6 @@ class GradiumTTSService(AudioContextTTSService):
             if msg["type"] == "audio":
                 if not ctx_id or not self.audio_context_available(ctx_id):
                     continue
-                await self.stop_ttfb_metrics()
-                await self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["audio"]),
                     sample_rate=self.sample_rate,
@@ -309,10 +338,15 @@ class GradiumTTSService(AudioContextTTSService):
                 if ctx_id and self.audio_context_available(ctx_id):
                     await self.add_word_timestamps([(msg["text"], msg["start_s"])], ctx_id)
 
+            elif msg["type"] == "ready":
+                pass
+
             elif msg["type"] == "end_of_stream":
                 if ctx_id and self.audio_context_available(ctx_id):
-                    await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
+                    await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                     await self.remove_audio_context(ctx_id)
+                if ctx_id:
+                    self._setup_context_ids.discard(ctx_id)
                 await self.stop_all_metrics()
 
             elif msg["type"] == "error":
@@ -338,13 +372,12 @@ class GradiumTTSService(AudioContextTTSService):
                 await self._connect()
 
             try:
-                if not self.has_active_audio_context():
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame(context_id=context_id)
-                    await self.create_audio_context(context_id)
-
-                msg = self._build_msg(text=text)
-                await self._get_websocket().send(json.dumps(msg))
+                ws = self._get_websocket()
+                if context_id not in self._setup_context_ids:
+                    await ws.send(json.dumps(self._build_setup_msg(context_id)))
+                    self._setup_context_ids.add(context_id)
+                msg = self._build_text_msg(text=text, context_id=context_id)
+                await ws.send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")

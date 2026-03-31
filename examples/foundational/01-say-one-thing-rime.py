@@ -39,8 +39,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async with aiohttp.ClientSession() as session:
         tts = RimeHttpTTSService(
             api_key=os.getenv("RIME_API_KEY", ""),
-            voice_id="rex",
             aiohttp_session=session,
+            settings=RimeHttpTTSService.Settings(
+                voice="rex",
+            ),
         )
 
         task = PipelineTask(

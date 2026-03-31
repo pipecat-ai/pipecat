@@ -56,20 +56,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         # model="gemini-3-pro-preview", # A more powerful reasoning model, but slower
-        params=GoogleLLMService.InputParams(
+        settings=GoogleLLMService.Settings(
             thinking=GoogleLLMService.ThinkingConfig(
-                # thinking_level="low", # Use this field instead of thinking_budget for Gemini 3 Pro. Defaults to "high".
                 thinking_budget=-1,  # Dynamic thinking
                 include_thoughts=True,
-            )
+            ),
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
     )
 
     context = LLMContext()
@@ -103,7 +104,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "user", "content": "Say hello briefly."})
+        context.add_message({"role": "developer", "content": "Say hello briefly."})
         # Replace the above with one of these example prompts to demonstrate
         # thinking.
         # These examples come from Gemini and Anthropic docs.

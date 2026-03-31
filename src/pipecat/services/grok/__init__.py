@@ -8,6 +8,6 @@ import sys
 
 from pipecat.services import DeprecatedModuleProxy
 
-from .llm import *
+from .llm import *  # noqa: F401,F403
 
-sys.modules[__name__] = DeprecatedModuleProxy(globals(), "grok", "grok.llm")
+sys.modules[__name__] = DeprecatedModuleProxy(globals(), "grok", "xai.llm")

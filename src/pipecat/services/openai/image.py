@@ -11,7 +11,7 @@ for creating images from text prompts.
 """
 
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Literal, Optional
 
 import aiohttp
@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     URLImageRawFrame,
 )
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import ImageGenSettings
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
 
 
 @dataclass
@@ -34,7 +34,10 @@ class OpenAIImageGenSettings(ImageGenSettings):
 
     Parameters:
         model: DALL-E model identifier.
+        image_size: Target size for generated images.
     """
+
+    image_size: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAIImageGenService(ImageGenService):
@@ -45,14 +48,20 @@ class OpenAIImageGenService(ImageGenService):
     with configurable quality and style parameters.
     """
 
+    Settings = OpenAIImageGenSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
         api_key: str,
         base_url: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
-        image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"],
-        model: str = "dall-e-3",
+        image_size: Optional[
+            Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"]
+        ] = None,
+        model: Optional[str] = None,
+        settings: Optional[Settings] = None,
     ):
         """Initialize the OpenAI image generation service.
 
@@ -60,11 +69,39 @@ class OpenAIImageGenService(ImageGenService):
             api_key: OpenAI API key for authentication.
             base_url: Custom base URL for OpenAI API. If None, uses default.
             aiohttp_session: HTTP session for downloading generated images.
-            image_size: Target size for generated images.
+            image_size: Target size for generated images. Defaults to "1024x1024".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAIImageGenService.Settings(image_size=...)`` instead.
+
             model: DALL-E model to use for generation. Defaults to "dall-e-3".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=OpenAIImageGenService.Settings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
         """
-        super().__init__(settings=OpenAIImageGenSettings(model=model))
-        self._image_size = image_size
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="dall-e-3",
+            image_size=None,
+        )
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        if image_size is not None:
+            self._warn_init_param_moved_to_settings("image_size", "image_size")
+            default_settings.image_size = image_size
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings)
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._aiohttp_session = aiohttp_session
 
@@ -80,7 +117,7 @@ class OpenAIImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         image = await self._client.images.generate(
-            prompt=prompt, model=self._settings.model, n=1, size=self._image_size
+            prompt=prompt, model=self._settings.model, n=1, size=self._settings.image_size
         )
 
         image_url = image.data[0].url

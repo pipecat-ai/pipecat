@@ -79,18 +79,45 @@ class MoondreamService(VisionService):
     including CUDA, MPS, and Intel XPU.
     """
 
+    Settings = MoondreamSettings
+    _settings: Settings
+
     def __init__(
-        self, *, model="vikhyatk/moondream2", revision="2025-01-09", use_cpu=False, **kwargs
+        self,
+        *,
+        model: Optional[str] = None,
+        revision="2025-01-09",
+        use_cpu=False,
+        settings: Optional[Settings] = None,
+        **kwargs,
     ):
         """Initialize the Moondream service.
 
         Args:
             model: Hugging Face model identifier for the Moondream model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=MoondreamService.Settings(model=...)`` instead.
+
             revision: Specific model revision to use.
             use_cpu: Whether to force CPU usage instead of hardware acceleration.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent VisionService.
         """
-        super().__init__(settings=MoondreamSettings(model=model), **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(model="vikhyatk/moondream2")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
 
         if not use_cpu:
             device, dtype = detect_device()
@@ -101,7 +128,7 @@ class MoondreamService(VisionService):
         logger.debug("Loading Moondream model...")
 
         self._model = AutoModelForCausalLM.from_pretrained(
-            model,
+            self._settings.model,
             trust_remote_code=True,
             revision=revision,
             device_map={"": device},

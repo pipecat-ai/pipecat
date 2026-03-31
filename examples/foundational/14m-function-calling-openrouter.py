@@ -65,14 +65,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = AzureTTSService(
         api_key=os.getenv("AZURE_SPEECH_API_KEY"),
         region=os.getenv("AZURE_SPEECH_REGION"),
-        voice="en-US-JennyNeural",
-        params=AzureTTSService.InputParams(language="en-US", rate="1.1", style="cheerful"),
+        settings=AzureTTSService.Settings(
+            voice="en-US-JennyNeural",
+            language="en-US",
+            rate="1.1",
+            style="cheerful",
+        ),
     )
 
     llm = OpenRouterLLMService(
         api_key=os.getenv("OPENROUTER_API_KEY"),
-        model="openai/gpt-4o-2024-11-20",
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenRouterLLMService.Settings(
+            model="openai/gpt-4o-2024-11-20",
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+        ),
     )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.

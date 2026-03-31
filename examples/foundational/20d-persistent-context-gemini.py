@@ -122,12 +122,8 @@ async def load_conversation(params: FunctionCallParams):
         await params.result_callback({"success": False, "error": str(e)})
 
 
-# Test message munging ...
-messages = [
-    {
-        "role": "system",
-        "content": """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your
-capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that
+system_instruction = """You are a helpful assistant in a voice conversation. Your goal is to demonstrate your
+capabilities in a succinct way. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Keep responses concise. Respond to what the user said in a creative
 can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative
 and helpful way.
 
@@ -151,13 +147,7 @@ indicate you should use the get_image tool are:
   - Tell me about what you see.
   - Tell me something interesting about what you see.
   - What's happening in the video?
-        """,
-    },
-    # {"role": "user", "content": ""},
-    # {"role": "assistant", "content": []},
-    # {"role": "user", "content": "Tell me"},
-    # {"role": "user", "content": "a joke"},
-]
+"""
 
 weather_function = FunctionSchema(
     name="get_current_weather",
@@ -257,10 +247,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
-    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+    llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        system_instruction=system_instruction,
+    )
 
     # you can either register a single function for all function calls, or specific functions
     # llm.register_function(None, fetch_weather_from_api)
@@ -270,7 +265,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("load_conversation", load_conversation)
     llm.register_function("get_image", get_image)
 
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -306,9 +301,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         client_id = get_transport_client_id(transport, client)
 
         # Kick off the conversation.
-        messages.append(
+        context.add_message(
             {
-                "role": "system",
+                "role": "developer",
                 "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
             }
         )

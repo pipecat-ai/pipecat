@@ -42,7 +42,7 @@ jobs:
 
       - name: Test uv sync with all extras
         run: |
-          uv sync --group dev --all-extras --no-extra krisp
+          uv sync --group dev --all-extras
 
       - name: Verify installation
         run: |

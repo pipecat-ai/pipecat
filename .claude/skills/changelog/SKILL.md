@@ -32,6 +32,20 @@ Create changelog files for the important commits in this PR. The PR number is pr
 
 6. Use ⚠️ emoji prefix for breaking changes.
 
+7. **Write changes in user-facing terms first.** Lead with what users of the framework will notice: new APIs, changed behavior, new parameters, fixed bugs they might have hit, etc. Implementation details (internal refactoring, how something is wired up under the hood) can be included as secondary context after the user-facing description, but should never be the *only* content of a changelog entry when there is a user-visible effect.
+
+   **Good** (user-facing first, implementation detail as context):
+   ```
+   - Turn completion instructions now persist correctly across full context updates when using `system_instruction`. Previously they were injected as a context system message, which caused warning spam and didn't survive context updates.
+   ```
+
+   **Bad** (implementation detail only, no user-facing framing):
+   ```
+   - Fixed turn completion instructions being injected as a context system message instead of using `system_instruction`.
+   ```
+
+   Ask yourself: "If I'm a developer building on Pipecat, what would I notice changed?" Start there.
+
 ## Example
 
 For PR #3519 with a new feature and a bug fix:
@@ -43,5 +57,5 @@ For PR #3519 with a new feature and a bug fix:
 
 `changelog/3519.fixed.md`:
 ```
-- Fixed an issue where something was not working correctly.
+- Fixed an issue where something was not working correctly in some user-visible scenario. The root cause was an internal implementation detail.
 ```

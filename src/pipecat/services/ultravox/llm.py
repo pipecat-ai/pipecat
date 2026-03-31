@@ -166,38 +166,51 @@ class UltravoxRealtimeLLMService(LLMService):
     by the model and may not always align with its understanding of user input.
     """
 
-    _settings: UltravoxRealtimeLLMSettings
+    Settings = UltravoxRealtimeLLMSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         params: Union[AgentInputParams, OneShotInputParams, JoinUrlInputParams],
+        settings: Optional[Settings] = None,
         one_shot_selected_tools: Optional[ToolsSchema] = None,
         **kwargs,
     ):
         """Initialize the Ultravox Realtime LLM service.
 
         Args:
-            api_key: Ultravox API key for authentication.
             params: Configuration parameters for the model.
+            settings: Ultravox Realtime LLM settings. If provided, the ``settings``
+                values take precedence over default values.
             one_shot_selected_tools: ToolsSchema for tools to use with this call.
                 May only be set with OneShotInputParams.
             **kwargs: Additional arguments passed to parent LLMService.
         """
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model=None,
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            output_medium=None,
+        )
+
+        # (No step 2/3 — params is required and not deprecated)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
-            settings=UltravoxRealtimeLLMSettings(
-                model=None,
-                temperature=None,
-                max_tokens=None,
-                top_p=None,
-                top_k=None,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                output_medium=None,
-            ),
+            settings=default_settings,
             **kwargs,
         )
         self._params = params
@@ -370,7 +383,7 @@ class UltravoxRealtimeLLMService(LLMService):
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
 
-    async def _update_settings(self, delta: UltravoxRealtimeLLMSettings):
+    async def _update_settings(self, delta: Settings):
         changed = await super()._update_settings(delta)
         if "output_medium" in changed:
             await self._update_output_medium(self._settings.output_medium)

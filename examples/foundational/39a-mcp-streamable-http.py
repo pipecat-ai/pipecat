@@ -58,10 +58,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
-    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash")
+    system_prompt = f"""
+    You are a helpful LLM in a voice call.
+    Your goal is to answer questions about the user's GitHub repositories and account.
+    You have access to a number of tools provided by Github. Use any and all tools to help users.
+    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
+    Don't overexplain what you are doing.
+    Just respond with short sentences when you are carrying out tool calls.
+    """
+
+    llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        system_instruction=system_prompt,
+    )
 
     try:
         # Github MCP docs: https://github.com/github/github-mcp-server
@@ -85,18 +99,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.error(f"error registering tools")
         logger.exception("error trace:")
 
-    system = f"""
-    You are a helpful LLM in a WebRTC call.
-    Your goal is to answer questions about the user's GitHub repositories and account.
-    You have access to a number of tools provided by Github. Use any and all tools to help users.
-    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
-    Don't overexplain what you are doing.
-    Just respond with short sentences when you are carrying out tool calls.
-    """
-
-    messages = [{"role": "system", "content": system}]
-
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

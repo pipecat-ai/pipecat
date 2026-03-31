@@ -49,15 +49,13 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 
 @dataclass
 class OpenAILLMSettings(LLMSettings):
-    """Settings for OpenAI-compatible LLM services.
+    """Settings for BaseOpenAILLMService.
 
     Parameters:
         max_completion_tokens: Maximum completion tokens to generate.
-        service_tier: Service tier to use (e.g., "auto", "flex", "priority").
     """
 
     max_completion_tokens: int | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    service_tier: str | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
 
 
 class BaseOpenAILLMService(LLMService):
@@ -70,10 +68,24 @@ class BaseOpenAILLMService(LLMService):
     configurations.
     """
 
-    _settings: OpenAILLMSettings
+    Settings = OpenAILLMSettings
+    _settings: Settings
+
+    supports_developer_role: bool = True
+    """Whether this service's API supports the "developer" message role.
+
+    OpenAI's native API supports it, but some OpenAI-compatible services
+    (e.g. Cerebras) do not. Subclasses that don't support it should set
+    this to ``False``, which causes the adapter to convert "developer"
+    messages to "user" messages before sending them to the API.
+    """
 
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=BaseOpenAILLMService.Settings(...)`` instead of
+            ``params=InputParams(...)``.
 
         Parameters:
             frequency_penalty: Penalty for frequent tokens (-2.0 to 2.0).
@@ -108,56 +120,88 @@ class BaseOpenAILLMService(LLMService):
     def __init__(
         self,
         *,
-        model: str,
+        model: Optional[str] = None,
         api_key=None,
         base_url=None,
         organization=None,
         project=None,
         default_headers: Optional[Mapping[str, str]] = None,
+        service_tier: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
-        system_instruction: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
 
         Args:
             model: The OpenAI model name to use (e.g., "gpt-4.1", "gpt-4o").
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=BaseOpenAILLMService.Settings(model=...)`` instead.
+
             api_key: OpenAI API key. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
             organization: OpenAI organization ID.
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
+            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             params: Input parameters for model configuration and behavior.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=BaseOpenAILLMService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
             retry_on_timeout: Whether to retry the request once if it times out.
-            system_instruction: Optional system instruction to prepend to messages.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
-        params = params or BaseOpenAILLMService.InputParams()
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="gpt-4.1",
+            system_instruction=None,
+            frequency_penalty=NOT_GIVEN,
+            presence_penalty=NOT_GIVEN,
+            seed=NOT_GIVEN,
+            temperature=NOT_GIVEN,
+            top_p=NOT_GIVEN,
+            top_k=None,
+            max_tokens=NOT_GIVEN,
+            max_completion_tokens=NOT_GIVEN,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            extra={},
+        )
+
+        # 2. Apply direct init arg overrides (no warnings in base class)
+        if model is not None:
+            default_settings.model = model
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None and not settings:
+            default_settings.frequency_penalty = params.frequency_penalty
+            default_settings.presence_penalty = params.presence_penalty
+            default_settings.seed = params.seed
+            default_settings.temperature = params.temperature
+            default_settings.top_p = params.top_p
+            default_settings.max_tokens = params.max_tokens
+            default_settings.max_completion_tokens = params.max_completion_tokens
+            if isinstance(params.extra, dict):
+                default_settings.extra = params.extra
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
-            settings=OpenAILLMSettings(
-                model=model,
-                frequency_penalty=params.frequency_penalty,
-                presence_penalty=params.presence_penalty,
-                seed=params.seed,
-                temperature=params.temperature,
-                top_p=params.top_p,
-                top_k=None,
-                max_tokens=params.max_tokens,
-                max_completion_tokens=params.max_completion_tokens,
-                service_tier=params.service_tier,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                extra=params.extra if isinstance(params.extra, dict) else {},
-            ),
+            settings=default_settings,
             **kwargs,
         )
+        self._service_tier = service_tier
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._system_instruction = system_instruction
         self._full_model_name: str = ""
         self._client = self.create_client(
             api_key=api_key,
@@ -168,8 +212,8 @@ class BaseOpenAILLMService(LLMService):
             **kwargs,
         )
 
-        if self._system_instruction:
-            logger.debug(f"{self}: Using system instruction: {self._system_instruction}")
+        if self._settings.system_instruction:
+            logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
     def create_client(
         self,
@@ -284,7 +328,7 @@ class BaseOpenAILLMService(LLMService):
             "top_p": self._settings.top_p,
             "max_tokens": self._settings.max_tokens,
             "max_completion_tokens": self._settings.max_completion_tokens,
-            "service_tier": self._settings.service_tier,
+            "service_tier": self._service_tier if self._service_tier is not None else NOT_GIVEN,
         }
 
         # Messages, tools, tool_choice
@@ -292,17 +336,13 @@ class BaseOpenAILLMService(LLMService):
 
         params.update(self._settings.extra)
 
-        # Prepend system instruction if set
-        if self._system_instruction:
-            messages = params.get("messages", [])
-            params["messages"] = [
-                {"role": "system", "content": self._system_instruction}
-            ] + messages
-
         return params
 
     async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+        self,
+        context: LLMContext | OpenAILLMContext,
+        max_tokens: Optional[int] = None,
+        system_instruction: Optional[str] = None,
     ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -310,14 +350,19 @@ class BaseOpenAILLMService(LLMService):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate. If provided,
                 overrides the service's default max_tokens/max_completion_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
+        effective_instruction = system_instruction or self._settings.system_instruction
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
             invocation_params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
-                context
+                context,
+                system_instruction=effective_instruction,
+                convert_developer_to_user=not self.supports_developer_role,
             )
         else:
             invocation_params = OpenAILLMInvocationParams(
@@ -386,7 +431,11 @@ class BaseOpenAILLMService(LLMService):
             f"{self}: Generating chat from universal context {adapter.get_messages_for_logging(context)}"
         )
 
-        params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
+        params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
+            context,
+            system_instruction=self._settings.system_instruction,
+            convert_developer_to_user=not self.supports_developer_role,
+        )
         chunks = await self.get_chat_completions(params)
 
         return chunks
@@ -479,7 +528,7 @@ class BaseOpenAILLMService(LLMService):
                     tool_call = chunk.choices[0].delta.tool_calls[0]
                     if tool_call.index != func_idx:
                         functions_list.append(function_name)
-                        arguments_list.append(arguments)
+                        arguments_list.append(arguments or "{}")
                         tool_id_list.append(tool_call_id)
                         function_name = ""
                         arguments = ""
@@ -496,8 +545,10 @@ class BaseOpenAILLMService(LLMService):
 
                 # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
                 # we need to get LLMTextFrame for the transcript
-                elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
-                    "transcript"
+                elif (
+                    hasattr(chunk.choices[0].delta, "audio")
+                    and chunk.choices[0].delta.audio
+                    and chunk.choices[0].delta.audio.get("transcript")
                 ):
                     await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
@@ -505,10 +556,10 @@ class BaseOpenAILLMService(LLMService):
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
-        if function_name and arguments:
+        if function_name:
             # added to the list as last function name and arguments not added to the list
             functions_list.append(function_name)
-            arguments_list.append(arguments)
+            arguments_list.append(arguments or "{}")
             tool_id_list.append(tool_call_id)
 
             function_calls = []

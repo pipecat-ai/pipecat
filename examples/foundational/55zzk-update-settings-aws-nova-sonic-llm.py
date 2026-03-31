@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService, AWSNovaSonicLLMSettings
+from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -52,20 +52,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),
+        settings=AWSNovaSonicLLMService.Settings(
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+        ),
     )
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
-        },
-        {
-            "role": "user",
-            "content": "Tell me a fun fact!",
-        },
-    ]
-
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -93,13 +85,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message({"role": "developer", "content": "Tell me a fun fact."})
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
         logger.info("Updating AWS Nova Sonic LLM settings: temperature=0.1")
         await task.queue_frame(
-            LLMUpdateSettingsFrame(delta=AWSNovaSonicLLMSettings(temperature=0.1))
+            LLMUpdateSettingsFrame(delta=AWSNovaSonicLLMService.Settings(temperature=0.1))
         )
 
     @transport.event_handler("on_client_disconnected")

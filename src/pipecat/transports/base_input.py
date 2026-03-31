@@ -93,46 +93,6 @@ class BaseInputTransport(FrameProcessor):
         # them downstream until we get another `StartFrame`.
         self._paused = False
 
-        if self._params.vad_enabled:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'vad_enabled' is deprecated, use 'audio_in_enabled' and 'vad_analyzer' instead.",
-                    DeprecationWarning,
-                )
-            self._params.audio_in_enabled = True
-
-        if self._params.vad_audio_passthrough:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'vad_audio_passthrough' is deprecated, audio passthrough is now always enabled. Use 'audio_in_passthrough' to disable.",
-                    DeprecationWarning,
-                )
-            self._params.audio_in_passthrough = True
-
-        if self._params.camera_in_enabled:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameters 'camera_*' are deprecated, use 'video_*' instead.",
-                    DeprecationWarning,
-                )
-            self._params.video_in_enabled = self._params.camera_in_enabled
-            self._params.video_out_enabled = self._params.camera_out_enabled
-            self._params.video_out_is_live = self._params.camera_out_is_live
-            self._params.video_out_width = self._params.camera_out_width
-            self._params.video_out_height = self._params.camera_out_height
-            self._params.video_out_bitrate = self._params.camera_out_bitrate
-            self._params.video_out_framerate = self._params.camera_out_framerate
-            self._params.video_out_color_format = self._params.camera_out_color_format
-
         if self._params.turn_analyzer:
             import warnings
 
@@ -150,8 +110,9 @@ class BaseInputTransport(FrameProcessor):
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
-                    "Parameter 'vad_analyzer' is deprecated, use `LLMUserAggregator`'s new "
-                    "`vad_analyzer` parameter instead.",
+                    "Parameter 'vad_analyzer' is deprecated. Use `LLMUserAggregator`'s "
+                    "`vad_analyzer` parameter, or `VADProcessor` if no `LLMUserAggregator` "
+                    "is needed.",
                     DeprecationWarning,
                 )
 

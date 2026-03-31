@@ -52,7 +52,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = GradiumSTTService(
         api_key=os.getenv("GRADIUM_API_KEY"),
         api_endpoint_base_url="wss://us.api.gradium.ai/api/speech/asr",
-        params=GradiumSTTService.InputParams(language=Language.EN, delay_in_frames=8),
+        settings=GradiumSTTService.Settings(
+            language=Language.EN,
+            delay_in_frames=8,
+        ),
     )
 
     tl = TranscriptionLogger()

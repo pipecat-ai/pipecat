@@ -65,12 +65,25 @@ Once your PR is submitted, post in the `#community-integrations` Discord channel
 
 #### Websocket-based Services
 
+**Base class:** `WebsocketSTTService`
+
+**Use for:** Services where you manage the websocket connection directly. Combines `STTService` with `WebsocketService` for automatic reconnection and keepalive support.
+
+**Examples:**
+
+- [CartesiaSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/cartesia/stt.py)
+- [ElevenLabsRealtimeSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/elevenlabs/stt.py)
+
+#### SDK-based Streaming Services
+
 **Base class:** `STTService`
+
+**Use for:** Streaming services where the provider's Python SDK manages the connection internally.
 
 **Examples:**
 
 - [DeepgramSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/deepgram/stt.py)
-- [SpeechmaticsSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/speechmatics/stt.py)
+- [GoogleSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/google/stt.py)
 
 #### File-based Services
 
@@ -108,55 +121,59 @@ Once your PR is submitted, post in the `#community-integrations` Discord channel
 
 #### Key requirements:
 
-- **Frame sequence:** Output must follow this frame sequence pattern:
-  - `LLMFullResponseStartFrame` - Signals the start of an LLM response
-  - `LLMTextFrame` - Contains LLM content, typically streamed as tokens
-  - `LLMFullResponseEndFrame` - Signals the end of an LLM response
+- **`_process_context(self, context: LLMContext)`** — The main method that processes an LLM context and generates a response. Each LLM service overrides `process_frame` to extract context from `LLMContextFrame` and calls `_process_context`.
 
-- **Context aggregation:** Implement context aggregation to collect user and assistant content:
-  - Aggregators come in pairs with a `user()` instance and `assistant()` instance
-  - Context must adhere to the `LLMContext` universal format
-  - Aggregators should handle adding messages, function calls, and images to the context
+- **`adapter_class`** — Class attribute pointing to a `BaseLLMAdapter` subclass. Defaults to `OpenAILLMAdapter`. Non-OpenAI services must implement their own adapter (see `src/pipecat/adapters/base_llm_adapter.py`) with methods:
+  - `get_llm_invocation_params(context)` — Extract provider-specific params from universal context
+  - `to_provider_tools_format(tools_schema)` — Convert standard tools to provider format
+  - `get_messages_for_logging(context)` — Format messages for logging
+  - Reference adapters: `src/pipecat/adapters/services/` (anthropic, gemini, bedrock, etc.)
+
+- **Frame sequence:** Output must follow this frame sequence pattern:
+  - `LLMFullResponseStartFrame` — Signals the start of an LLM response
+  - `LLMTextFrame` — Contains LLM content, typically streamed as tokens
+  - `LLMFullResponseEndFrame` — Signals the end of an LLM response
+
+- **Thought frames (reasoning models):** If the model supports extended thinking / chain-of-thought, emit thought frames alongside the response:
+  - `LLMThoughtStartFrame` — Signals the start of a thought
+  - `LLMThoughtTextFrame` — Contains thought content, streamed as tokens
+  - `LLMThoughtEndFrame` — Signals the end of a thought
+
+- **Context aggregation** is handled by the framework via `LLMContext` + `LLMContextAggregatorPair`. The LLM service just processes context it receives — no need to implement aggregators.
 
 ### TTS (Text-to-Speech) Services
 
-#### AudioContextWordTTSService
+#### WebsocketTTSService
 
-**Use for:** Websocket-based services supporting word/timestamp alignment
+**Use for:** Websocket-based streaming services (with or without word timestamps)
 
-**Example:**
+**Examples:**
 
 - [CartesiaTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/cartesia/tts.py)
+- [ElevenLabsTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/elevenlabs/tts.py)
 
 #### InterruptibleTTSService
 
-**Use for:** Websocket-based services without word/timestamp alignment, requiring disconnection on interruption
+**Use for:** Websocket-based services without word timestamps that reconnect on interruption (e.g. don't support a context ID or interruption message)
 
 **Example:**
 
 - [SarvamTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/sarvam/tts.py)
 
-#### WordTTSService
-
-**Use for:** HTTP-based services supporting word/timestamp alignment
-
-**Example:**
-
-- [ElevenLabsHttpTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/elevenlabs/tts.py)
-
 #### TTSService
 
-**Use for:** HTTP-based services without word/timestamp alignment
+**Use for:** HTTP-based services (word timestamps are supported in the base class)
 
-**Example:**
+**Examples:**
 
 - [GoogleHttpTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/google/tts.py)
+- [OpenAITTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/openai/tts.py)
 
 #### Key requirements:
 
-- For websocket services, use asyncio WebSocket implementation (required for v13+ support)
+- For websocket services, use asyncio WebSocket implementation
 - Handle idle service timeouts with keepalives
-- TTSServices push both audio (`TTSRawAudioFrame`) and text (`TTSTextFrame`) frames
+- TTS services push both audio (`TTSAudioRawFrame`) and text (`TTSTextFrame`) frames
 
 ### Telephony Serializers
 
@@ -200,13 +217,24 @@ Vision services process images and provide analysis such as descriptions, object
 
 #### Key requirements:
 
-- Must implement `run_vision` method that takes an `LLMContext` and returns an `AsyncGenerator[Frame, None]`
-- The method processes the latest image in the context and yields frames with analysis results
-- Typically yields `TextFrame` objects containing descriptions or answers
+- Must implement `run_vision` method that takes a `UserImageRawFrame` and returns an `AsyncGenerator[Frame, None]`
+- The method processes the image frame and yields frames with analysis results
+- Must yield the frame sequence: `VisionFullResponseStartFrame`, `VisionTextFrame`, `VisionFullResponseEndFrame`
 
 ## Implementation Guidelines
 
 ### Naming Conventions
+
+#### Package and Repository Naming
+
+Use the `pipecat-{vendor}` naming convention for your PyPI package and repository:
+
+- `pipecat-{vendor}` — for single-service integrations (e.g., `pipecat-deepdub`)
+- `pipecat-{vendor}-{type}` — when a vendor offers multiple service types (e.g., `pipecat-upliftai-stt`, `pipecat-upliftai-tts`)
+
+This convention makes community packages easily discoverable via PyPI search and clearly identifies them as part of the Pipecat ecosystem.
+
+#### Class Naming
 
 - **STT:** `VendorSTTService`
 - **LLM:** `VendorLLMService`
@@ -231,49 +259,105 @@ def can_generate_metrics(self) -> bool:
     return True
 ```
 
-### Dynamic Settings Updates
+### Service Settings
 
-STT, LLM, and TTS services support runtime configuration changes via `*UpdateSettingsFrame`s (e.g. `STTUpdateSettingsFrame`, `TTSUpdateSettingsFrame`, `LLMUpdateSettingsFrame`).
+Every AI service (STT, LLM, TTS, image generation, etc.) exposes a **Settings dataclass** that serves two roles:
 
-Each service declares a settings dataclass that extends the appropriate base (`STTSettings`, `TTSSettings`, `LLMSettings`). Fields default to `NOT_GIVEN` so that update objects can represent sparse deltas:
+1. **Store mode** — the service's `self._settings` holds the current value of every runtime-updatable field.
+2. **Delta mode** — an update frame (e.g. `TTSUpdateSettingsFrame`) specifies only the fields that should change; unspecified fields remain `NOT_GIVEN`.
+
+#### Defining your Settings class
+
+Extend `STTSettings`, `TTSSettings`, `LLMSettings`, or `ImageGenSettings` (or, if your service directly subclasses `AIService`, `ServiceSettings`). The base classes already provide common fields (e.g. `model`, `voice`, `language`). You only need to add **service-specific knobs that should be runtime-updatable**:
 
 ```python
 from dataclasses import dataclass, field
 
-from pipecat.services.settings import STTSettings, NOT_GIVEN
+from pipecat.services.settings import TTSSettings, NOT_GIVEN
 
 @dataclass
-class MySTTSettings(STTSettings):
-    """Settings for my STT service.
+class MyTTSSettings(TTSSettings):
+    """Settings for MyTTS service.
 
     Parameters:
-        region: Cloud region for the service.
+        speaking_rate: Speed multiplier (0.5–2.0).
     """
 
-    region: str = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None = field(default_factory=lambda: NOT_GIVEN)
 ```
 
-The service stores its current settings in `self._settings` and declares the type with a class-level annotation for editor support:
+**What goes in Settings vs. `__init__` params:**
+
+| Belongs in Settings                                      | Stays as `__init__` params                |
+| -------------------------------------------------------- | ----------------------------------------- |
+| Model name, voice, language                              | API keys, auth tokens                     |
+| Service-specific tuning knobs (rate, pitch, temperature) | Base URLs, endpoint overrides             |
+| Anything users may want to change mid-session            | Audio encoding, sample format             |
+|                                                          | Connection parameters (timeouts, retries) |
+
+The rule of thumb: if a caller might send an update frame to change it at runtime, it belongs in Settings. Everything else is init-only config stored as `self._xxx`.
+
+#### Wiring settings into `__init__`
+
+Accept an **optional** `settings` parameter. Build a `default_settings` object with all fields set to real values, then merge any caller overrides with `apply_update`.
+
+Add a `Settings` **class attribute** that points to your settings dataclass. This lets callers access the settings class through the service itself (e.g. `MyTTSService.Settings(...)`) without a separate import:
 
 ```python
-class MySTTService(STTService):
-    _settings: MySTTSettings
+from typing import Optional
 
-    def __init__(self, *, model: str, language: str, region: str, **kwargs):
-        # An initial value should be provided for every settings field.
-        # This will be validated at service start.
-        # (If you track sample_rate, it can be a placeholder value like 0; see
-        # "Sample Rate Handling").
-        super().__init__(
-            settings=MySTTSettings(model=model, language=language, region=region), **kwargs
+class MyTTSService(TTSService):
+    Settings = MyTTSSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        settings: Optional[Settings] = None,
+        **kwargs,
+    ):
+        # 1. Defaults — every field has a real value (store mode).
+        default_settings = self.Settings(
+            model="my-model-v1",
+            voice="default-voice",
+            language="en",
+            speaking_rate=1.0,
         )
+
+        # 2. Merge caller overrides (only given fields win).
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        # 3. Pass the fully-populated settings to the base class.
+        super().__init__(settings=default_settings, **kwargs)
+
+        # 4. Init-only config stored separately.
+        self._api_key = api_key
 ```
+
+This pattern lets callers override only what they care about:
+
+```python
+# Uses all defaults
+svc = MyTTSService(api_key="sk-xxx")
+
+# Overrides just the voice — access Settings through the service class
+svc = MyTTSService(
+    api_key="sk-xxx",
+    settings=MyTTSService.Settings(voice="custom-voice"),
+)
+```
+
+#### Reacting to runtime changes
+
+AI services support runtime configuration changes via `*UpdateSettingsFrame`s (e.g. `STTUpdateSettingsFrame`, `TTSUpdateSettingsFrame`, `LLMUpdateSettingsFrame`).
 
 To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns a `dict` mapping each changed field name to its **pre-update** value. Your override should call `super()` first, then act on the changed fields. A common implementation might look like:
 
 ```python
-async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
-    """Apply a settings update, reconfiguring the recognizer if needed."""
+async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+    """Apply a settings update, reconfiguring the connection if needed."""
     changed = await super()._update_settings(update)
 
     if not changed:
@@ -292,7 +376,7 @@ Note that, in this example, the service requires a reconnect to apply the new la
 If your service can't yet apply certain settings at runtime, call `self._warn_unhandled_updated_settings(changed)` with any unhandled field names so users get a clear log message:
 
 ```python
-async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
+async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
     changed = await super()._update_settings(update)
 
     if not changed:
@@ -325,7 +409,7 @@ Note that `self.sample_rate` is a `@property` set in the TTSService base class, 
 
 Use Pipecat's tracing decorators:
 
-- **STT:** `@traced_stt` - decorate a function that handles `transcript`, `is_final`, `language` as args
+- **STT:** `@traced_stt` - decorate `_handle_transcription(self, transcript, is_final, language)` (the standard method name convention)
 - **LLM:** `@traced_llm` - decorate the `_process_context()` method
 - **TTS:** `@traced_tts` - decorate the `run_tts()` method
 
@@ -333,8 +417,9 @@ Use Pipecat's tracing decorators:
 
 ### Packaging and Distribution
 
+- Name your package `pipecat-{vendor}` (see [Naming Conventions](#naming-conventions))
 - Use [uv](https://docs.astral.sh/uv/) for packaging (encouraged)
-- Consider releasing to PyPI for easier installation
+- Publish to PyPI for easier installation
 - Follow semantic versioning principles
 - Maintain a changelog
 
@@ -347,17 +432,15 @@ For REST-based communication, use aiohttp. Pipecat includes this as a required d
 - Wrap API calls in appropriate try/catch blocks
 - Handle rate limits and network failures gracefully
 - Provide meaningful error messages
-- When errors occur, raise exceptions AND push `ErrorFrame`s to notify the pipeline:
+- When errors occur, raise exceptions AND push errors to notify the pipeline:
 
 ```python
-from pipecat.frames.frames import ErrorFrame
-
 try:
     # Your API call
     result = await self._make_api_call()
 except Exception as e:
-    # Push error frame to pipeline
-    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+    # Push error upstream to notify the pipeline
+    await self.push_error(f"{self} error: {e}", exception=e)
     # Raise or handle as appropriate
     raise
 ```

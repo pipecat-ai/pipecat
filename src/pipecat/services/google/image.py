@@ -16,7 +16,7 @@ import os
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import ImageGenSettings
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
 
 try:
     from google import genai
@@ -43,7 +43,12 @@ class GoogleImageGenSettings(ImageGenSettings):
 
     Parameters:
         model: Google Imagen model identifier.
+        number_of_images: Number of images to generate per request.
+        negative_prompt: Text describing what not to include in generated images.
     """
+
+    number_of_images: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GoogleImageGenService(ImageGenService):
@@ -54,8 +59,14 @@ class GoogleImageGenService(ImageGenService):
     prompting for enhanced control over generated content.
     """
 
+    Settings = GoogleImageGenSettings
+    _settings: Settings
+
     class InputParams(BaseModel):
         """Configuration parameters for Google image generation.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=GoogleImageGenService.Settings(...)`` instead.
 
         Parameters:
             number_of_images: Number of images to generate (1-8). Defaults to 1.
@@ -73,19 +84,43 @@ class GoogleImageGenService(ImageGenService):
         api_key: str,
         params: Optional[InputParams] = None,
         http_options: Optional[Any] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the GoogleImageGenService with API key and parameters.
 
         Args:
             api_key: Google AI API key for authentication.
-            params: Configuration parameters for image generation. Defaults to InputParams().
+            params: Configuration parameters for image generation.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleImageGenService.Settings(...)`` instead.
+
             http_options: HTTP options for the client.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent ImageGenService.
         """
-        params = params or GoogleImageGenService.InputParams()
-        super().__init__(settings=GoogleImageGenSettings(model=params.model), **kwargs)
-        self._params = params
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="imagen-3.0-generate-002",
+            number_of_images=1,
+            negative_prompt=None,
+        )
+
+        # 2. Apply params overrides (deprecated)
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                default_settings.model = params.model
+                default_settings.number_of_images = params.number_of_images
+                default_settings.negative_prompt = params.negative_prompt
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
 
         # Add client header
         http_options = update_google_client_http_options(http_options)
@@ -118,11 +153,11 @@ class GoogleImageGenService(ImageGenService):
 
         try:
             response = await self._client.aio.models.generate_images(
-                model=self._params.model,
+                model=self._settings.model,
                 prompt=prompt,
                 config=types.GenerateImagesConfig(
-                    number_of_images=self._params.number_of_images,
-                    negative_prompt=self._params.negative_prompt,
+                    number_of_images=self._settings.number_of_images,
+                    negative_prompt=self._settings.negative_prompt,
                 ),
             )
             await self.stop_ttfb_metrics()

@@ -10,6 +10,9 @@ import asyncio
 import time
 from typing import Optional
 
+from loguru import logger
+
+from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
     Frame,
     STTMetadataFrame,
@@ -17,6 +20,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
@@ -50,6 +54,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._user_speech_timeout = user_speech_timeout
         self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
         self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
+        self._stop_secs_warned: bool = False
 
         self._text = ""
         self._vad_user_speaking = False
@@ -64,6 +69,9 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = False
         self._transcript_finalized = False
         self._vad_stopped_time = None
+        if self._timeout_task:
+            await self.task_manager.cancel_task(self._timeout_task)
+            self._timeout_task = None
 
     async def setup(self, task_manager: BaseTaskManager):
         """Initialize the strategy with the given task manager.
@@ -80,7 +88,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         """Process an incoming frame to update strategy state.
 
         Updates internal transcription text and VAD state. The user end turn
@@ -89,15 +97,20 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         Args:
             frame: The frame to be analyzed.
 
+        Returns:
+            Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, STTMetadataFrame):
             self._stt_timeout = frame.ttfs_p99_latency
+            self._stop_secs_warned = False
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_vad_user_stopped_speaking(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+
+        return ProcessFrameResult.CONTINUE
 
     async def _handle_vad_user_started_speaking(self, _: VADUserStartedSpeakingFrame):
         """Handle when the VAD indicates the user is speaking."""
@@ -115,11 +128,33 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._stop_secs = frame.stop_secs
         self._vad_stopped_time = frame.timestamp
 
+        if not self._stop_secs_warned:
+            if self._stop_secs != VAD_STOP_SECS:
+                self._stop_secs_warned = True
+                logger.warning(
+                    f"{self}: VAD stop_secs ({self._stop_secs}s) differs from the "
+                    f"recommended default ({VAD_STOP_SECS}s). Built-in p99 latency "
+                    f"values assume stop_secs={VAD_STOP_SECS}. Re-run "
+                    f"https://github.com/pipecat-ai/stt-benchmark with your settings "
+                    f"and pass the TTFS P99 latency result as ttfs_p99_latency to "
+                    f"your STT service."
+                )
+            if self._stt_timeout > 0 and self._stop_secs >= self._stt_timeout:
+                self._stop_secs_warned = True
+                logger.warning(
+                    f"{self}: VAD stop_secs ({self._stop_secs}s) >= STT p99 latency "
+                    f"({self._stt_timeout}s). STT wait timeout collapsed to 0s, which "
+                    f"may cause delayed turn detection specified by the "
+                    f"user_turn_stop_timeout parameter in the LLMUserAggregatorParams."
+                )
+
         # Start the timeout task
         timeout = self._calculate_timeout()
         self._timeout_task = self.task_manager.create_task(
             self._timeout_handler(timeout), f"{self}::_timeout_handler"
         )
+        # Make sure the task is scheduled.
+        await asyncio.sleep(0)
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
@@ -141,6 +176,8 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._timeout_task = self.task_manager.create_task(
                 self._timeout_handler(timeout), f"{self}::_timeout_handler"
             )
+            # Make sure the task is scheduled.
+            await asyncio.sleep(0)
 
     def _calculate_timeout(self) -> float:
         """Calculate the timeout value based on current state.

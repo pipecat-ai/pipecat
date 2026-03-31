@@ -17,7 +17,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -46,13 +49,11 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -60,22 +61,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    session_properties = SessionProperties(
-        audio=AudioConfiguration(
-            input=AudioInput(
-                transcription=InputAudioTranscription(),
-                # Set openai TurnDetection parameters. Not setting this at all will turn it
-                # on by default
-                turn_detection=SemanticTurnDetection(),
-                # Or set to False to disable openai turn detection and use transport VAD
-                # turn_detection=False,
-                noise_reduction=InputAudioNoiseReduction(type="near_field"),
-            )
-        ),
-        # In this example we provide tools through the context, but you could
-        # alternatively provide them here.
-        # tools=tools,
-        instructions="""You are a helpful and friendly AI.
+    llm = OpenAIRealtimeLLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAIRealtimeLLMService.Settings(
+            system_instruction="""You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human
 things in the real world. Your voice and personality should be warm and engaging, with a lively and
@@ -89,21 +78,36 @@ You are participating in a voice conversation. Keep your responses concise, shor
 unless specifically asked to elaborate on a topic.
 
 Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
-    )
-
-    llm = OpenAIRealtimeLLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        session_properties=session_properties,
+            session_properties=SessionProperties(
+                audio=AudioConfiguration(
+                    input=AudioInput(
+                        transcription=InputAudioTranscription(),
+                        # Set openai TurnDetection parameters. Not setting this at all will turn it
+                        # on by default
+                        turn_detection=SemanticTurnDetection(),
+                        # Or set to False to disable openai turn detection and use transport VAD
+                        # turn_detection=False,
+                        noise_reduction=InputAudioNoiseReduction(type="near_field"),
+                    )
+                ),
+                # In this example we provide tools through the context, but you could
+                # alternatively provide them here.
+                # tools=tools,
+            ),
+        ),
     )
 
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
     context = LLMContext(
-        [{"role": "user", "content": "Say hello!"}],
+        [{"role": "developer", "content": "Say hello!"}],
     )
 
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [

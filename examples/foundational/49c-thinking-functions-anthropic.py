@@ -77,15 +77,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     llm = AnthropicLLMService(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        params=AnthropicLLMService.InputParams(
-            thinking=AnthropicLLMService.ThinkingConfig(type="enabled", budget_tokens=2048)
+        settings=AnthropicLLMService.Settings(
+            thinking=AnthropicLLMService.ThinkingConfig(
+                type="enabled",
+                budget_tokens=2048,
+            ),
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
     )
 
     llm.register_direct_function(check_flight_status)
@@ -124,7 +129,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "user", "content": "Say hello briefly."})
+        context.add_message({"role": "developer", "content": "Say hello briefly."})
         # Here is an example prompt conducive to demonstrating thinking and
         # function calling.
         # This example comes from Gemini docs.

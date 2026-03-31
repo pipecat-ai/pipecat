@@ -16,11 +16,12 @@ from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,
     LLMFullResponseStartFrame,
+    OutputImageRawFrame,
     TextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
+from pipecat.pipeline.sync_parallel_pipeline import FrameOrder, SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.sentence import SentenceAggregator
@@ -30,6 +31,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService
 from pipecat.services.fal.image import FalImageGenService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.tts_service import TextAggregationMode
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
@@ -42,6 +44,18 @@ class MonthFrame(DataFrame):
 
     def __str__(self):
         return f"{self.name}(month: {self.month})"
+
+
+class MarkImageForPlaybackSync(FrameProcessor):
+    """Marks output image frames to be synchronized with audio playback."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, OutputImageRawFrame):
+            frame.sync_with_audio = True
+
+        await self.push_frame(frame, direction)
 
 
 class MonthPrepender(FrameProcessor):
@@ -98,11 +112,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         tts = CartesiaHttpTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            settings=CartesiaHttpTTSService.Settings(
+                voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            ),
+            # No need to aggregate by sentences (the default), as we already know we're getting full sentences
+            # (Otherwise the service will unnecessarily wait for follow-up input to confirm the sentence is complete,
+            #  which, sadly, actually breaks the synchronization mechanism)
+            text_aggregation_mode=TextAggregationMode.TOKEN,
         )
 
         imagegen = FalImageGenService(
-            params=FalImageGenService.InputParams(image_size="square_hd"),
+            settings=FalImageGenService.Settings(
+                image_size="square_hd",
+            ),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )
@@ -115,17 +137,26 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # that, each pipeline runs concurrently and `SyncParallelPipeline` will
         # wait for the input frame to be processed.
         #
+        # We use `FrameOrder.PIPELINE` so that each synchronized batch of output
+        # frames is pushed in the order the pipelines are listed: image first,
+        # then audio. This ensures the transport receives the image before the
+        # audio frames it should accompany.
+        #
         # Note that `SyncParallelPipeline` requires the last processor in each
         # of the pipelines to be synchronous. In this case, we use
-        # `CartesiaHttpTTSService` and `FalImageGenService` which make HTTP
+        # `FalImageGenService` and `CartesiaHttpTTSService` which make HTTP
         # requests and wait for the response.
         pipeline = Pipeline(
             [
                 llm,  # LLM
                 sentence_aggregator,  # Aggregates LLM output into full sentences
                 SyncParallelPipeline(  # Run pipelines in parallel aggregating the result
+                    [
+                        imagegen,  # Generate image
+                        MarkImageForPlaybackSync(),  # Mark image as needing sync w/audio during playback
+                    ],
                     [month_prepender, tts],  # Create "Month: sentence" and output audio
-                    [imagegen],  # Generate image
+                    frame_order=FrameOrder.PIPELINE,
                 ),
                 transport.output(),  # Transport output
             ]
@@ -148,7 +179,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]:
             messages = [
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
                 }
             ]

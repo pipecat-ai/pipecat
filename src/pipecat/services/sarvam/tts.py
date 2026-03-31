@@ -53,11 +53,9 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -230,16 +228,27 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
     """
     LANGUAGE_MAP = {
         Language.BN: "bn-IN",  # Bengali
+        Language.BN_IN: "bn-IN",
         Language.EN: "en-IN",  # English (India)
+        Language.EN_IN: "en-IN",
         Language.GU: "gu-IN",  # Gujarati
+        Language.GU_IN: "gu-IN",
         Language.HI: "hi-IN",  # Hindi
+        Language.HI_IN: "hi-IN",
         Language.KN: "kn-IN",  # Kannada
+        Language.KN_IN: "kn-IN",
         Language.ML: "ml-IN",  # Malayalam
+        Language.ML_IN: "ml-IN",
         Language.MR: "mr-IN",  # Marathi
+        Language.MR_IN: "mr-IN",
         Language.OR: "od-IN",  # Odia
+        Language.OR_IN: "od-IN",
         Language.PA: "pa-IN",  # Punjabi
+        Language.PA_IN: "pa-IN",
         Language.TA: "ta-IN",  # Tamil
+        Language.TA_IN: "ta-IN",
         Language.TE: "te-IN",  # Telugu
+        Language.TE_IN: "te-IN",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
@@ -247,10 +256,9 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
 
 @dataclass
 class SarvamHttpTTSSettings(TTSSettings):
-    """Settings for Sarvam HTTP TTS service.
+    """Settings for SarvamHttpTTSService.
 
     Parameters:
-        language: Sarvam language code.
         enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
             **Note:** Always enabled for bulbul:v3-beta (cannot be disabled).
         pace: Speech pace multiplier. Defaults to 1.0.
@@ -263,60 +271,32 @@ class SarvamHttpTTSSettings(TTSSettings):
         temperature: Controls output randomness for bulbul:v3-beta (0.01 to 1.0).
             Lower values = more deterministic, higher = more random. Defaults to 0.6.
             **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
-        sample_rate: Audio sample rate.
     """
 
-    language: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pace: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     loudness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    sarvam_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
-class SarvamTTSSettings(TTSSettings):
-    """Settings for Sarvam WebSocket TTS service.
+class SarvamTTSSettings(SarvamHttpTTSSettings):
+    """Settings for SarvamTTSService.
+
+    Extends :class:`SarvamHttpTTSService.Settings` with WebSocket-specific buffering parameters.
 
     Parameters:
-        language: Sarvam language code (e.g. ``"hi-IN"``).  Uses the standard
-            ``TTSSettings.language`` field.
-        speech_sample_rate: Audio sample rate as string.
-        enable_preprocessing: Enable text preprocessing. Defaults to False.
-            **Note:** Always enabled for bulbul:v3-beta.
         min_buffer_size: Minimum characters to buffer before generating audio.
             Lower values reduce latency but may affect quality. Defaults to 50.
         max_chunk_length: Maximum characters processed in a single chunk.
             Controls memory usage and processing efficiency. Defaults to 150.
-        output_audio_codec: Audio codec format. Options: linear16, mulaw, alaw,
-            opus, flac, aac, wav, mp3. Defaults to "linear16".
-        output_audio_bitrate: Audio bitrate (32k, 64k, 96k, 128k, 192k).
-            Defaults to "128k".
-        pace: Speech pace multiplier. Defaults to 1.0.
-            - bulbul:v2: Range 0.3 to 3.0
-            - bulbul:v3-beta: Range 0.5 to 2.0
-        pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
-            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
-        loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
-            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
-        temperature: Controls output randomness for bulbul:v3-beta (0.01 to 1.0).
-            Lower = more deterministic, higher = more random. Defaults to 0.6.
-            **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
     """
 
     _aliases: ClassVar[Dict[str, str]] = {"target_language_code": "language"}
 
-    speech_sample_rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_buffer_size: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_chunk_length: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    output_audio_codec: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    output_audio_bitrate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pace: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    loudness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamHttpTTSService(TTSService):
@@ -346,35 +326,39 @@ class SarvamHttpTTSService(TTSService):
         # Using bulbul:v2 (default)
         tts = SarvamHttpTTSService(
             api_key="your-api-key",
-            voice_id="anushka",
-            model="bulbul:v2",
             aiohttp_session=session,
-            params=SarvamHttpTTSService.InputParams(
+            settings=SarvamHttpTTSService.Settings(
+                voice="anushka",
+                model="bulbul:v2",
                 language=Language.HI,
                 pitch=0.1,
                 pace=1.2,
-                loudness=1.5
-            )
+                loudness=1.5,
+            ),
         )
 
         # Using bulbul:v3-beta with temperature control
         tts_v3 = SarvamHttpTTSService(
             api_key="your-api-key",
-            voice_id="aditya",  # Use v3 speaker
-            model="bulbul:v3-beta",
             aiohttp_session=session,
-            params=SarvamHttpTTSService.InputParams(
+            settings=SarvamHttpTTSService.Settings(
+                voice="aditya",  # Use v3 speaker
+                model="bulbul:v3-beta",
                 language=Language.HI,
                 pace=1.2,  # Range: 0.5-2.0 for v3
-                temperature=0.8
-            )
+                temperature=0.8,
+            ),
         )
     """
 
-    _settings: SarvamHttpTTSSettings
+    Settings = SarvamHttpTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Input parameters for Sarvam TTS configuration.
+
+        .. deprecated:: 0.0.105
+            Use ``SarvamHttpTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             language: Language for synthesis. Defaults to English (India).
@@ -428,10 +412,11 @@ class SarvamHttpTTSService(TTSService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         voice_id: Optional[str] = None,
-        model: str = "bulbul:v2",
+        model: Optional[str] = None,
         base_url: str = "https://api.sarvam.ai",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Sarvam TTS service.
@@ -440,81 +425,122 @@ class SarvamHttpTTSService(TTSService):
             api_key: Sarvam AI API subscription key.
             aiohttp_session: Shared aiohttp session for making requests.
             voice_id: Speaker voice ID. If None, uses model-appropriate default.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead.
+
             model: TTS model to use. Options:
                 - "bulbul:v2" (default): Standard model with pitch/loudness support
                 - "bulbul:v3-beta": Advanced model with temperature control
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SarvamHttpTTSService.Settings(model=...)`` instead.
+
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
             sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000).
                 If None, uses model-specific default.
             params: Additional voice and preprocessing parameters. If None, uses defaults.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SarvamHttpTTSService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        # Get model configuration (validates model exists)
-        if model not in TTS_MODEL_CONFIGS:
-            allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
-            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="bulbul:v2",
+            voice="anushka",
+            language="en-IN",
+            enable_preprocessing=False,
+            pace=1.0,
+            pitch=None,
+            loudness=None,
+            temperature=None,
+        )
 
-        self._config = TTS_MODEL_CONFIGS[model]
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.enable_preprocessing is not None:
+                    default_settings.enable_preprocessing = params.enable_preprocessing
+                if params.pace is not None:
+                    default_settings.pace = params.pace
+                if params.pitch is not None:
+                    default_settings.pitch = params.pitch
+                if params.loudness is not None:
+                    default_settings.loudness = params.loudness
+                if params.temperature is not None:
+                    default_settings.temperature = params.temperature
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        # Get model configuration (validates model exists)
+        resolved_model = default_settings.model
+        if resolved_model not in TTS_MODEL_CONFIGS:
+            allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
+            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
+
+        self._config = TTS_MODEL_CONFIGS[resolved_model]
 
         # Set default sample rate based on model if not specified
         if sample_rate is None:
             sample_rate = self._config.default_sample_rate
 
-        params = params or SarvamHttpTTSService.InputParams()
-
-        # Set default voice based on model if not specified
-        if voice_id is None:
-            voice_id = self._config.default_speaker
+        # Set default voice based on model if not specified via any mechanism
+        if voice_id is None and (settings is None or settings.voice is NOT_GIVEN):
+            default_settings.voice = self._config.default_speaker
 
         # Validate and clamp pace to model's valid range
-        pace = params.pace
+        pace = default_settings.pace
         pace_min, pace_max = self._config.pace_range
         if pace is not None and (pace < pace_min or pace > pace_max):
             logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")
-            pace = max(pace_min, min(pace_max, pace))
+            default_settings.pace = max(pace_min, min(pace_max, pace))
+
+        # Force preprocessing for models that require it
+        if self._config.preprocessing_always_enabled:
+            default_settings.enable_preprocessing = True
+
+        # Warn about unsupported model-specific parameters
+        if not self._config.supports_pitch and default_settings.pitch not in (None, 0.0):
+            logger.warning(f"pitch parameter is ignored for {resolved_model}")
+            default_settings.pitch = None
+        if not self._config.supports_loudness and default_settings.loudness not in (None, 1.0):
+            logger.warning(f"loudness parameter is ignored for {resolved_model}")
+            default_settings.loudness = None
+        if not self._config.supports_temperature and default_settings.temperature not in (
+            None,
+            0.6,
+        ):
+            logger.warning(f"temperature parameter is ignored for {resolved_model}")
+            default_settings.temperature = None
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=SarvamHttpTTSSettings(
-                language=(
-                    self.language_to_service_language(params.language)
-                    if params.language
-                    else "en-IN"
-                ),
-                enable_preprocessing=(
-                    True
-                    if self._config.preprocessing_always_enabled
-                    else params.enable_preprocessing
-                ),
-                pace=pace,
-                pitch=None,
-                loudness=None,
-                temperature=None,
-                model=model,
-                voice=voice_id,
-            ),
+            push_stop_frames=True,
+            push_start_frame=True,
+            settings=default_settings,
             **kwargs,
         )
 
         self._api_key = api_key
         self._base_url = base_url
         self._session = aiohttp_session
-
-        # Add parameters based on model support
-        if self._config.supports_pitch:
-            self._settings.pitch = params.pitch
-        elif params.pitch != 0.0:
-            logger.warning(f"pitch parameter is ignored for {model}")
-
-        if self._config.supports_loudness:
-            self._settings.loudness = params.loudness
-        elif params.loudness != 1.0:
-            logger.warning(f"loudness parameter is ignored for {model}")
-
-        if self._config.supports_temperature:
-            self._settings.temperature = params.temperature
-        elif params.temperature != 0.6:
-            logger.warning(f"temperature parameter is ignored for {model}")
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -542,7 +568,6 @@ class SarvamHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.sarvam_sample_rate = self.sample_rate
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -558,8 +583,6 @@ class SarvamHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-
             # Build payload with common parameters
             payload = {
                 "text": text,
@@ -590,8 +613,6 @@ class SarvamHttpTTSService(TTSService):
             }
 
             url = f"{self._base_url}/text-to-speech"
-
-            yield TTSStartedFrame(context_id=context_id)
 
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
@@ -630,7 +651,6 @@ class SarvamHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Error generating TTS: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame(context_id=context_id)
 
 
 class SarvamTTSService(InterruptibleTTSService):
@@ -667,35 +687,39 @@ class SarvamTTSService(InterruptibleTTSService):
         # Using bulbul:v2 (default)
         tts = SarvamTTSService(
             api_key="your-api-key",
-            voice_id="anushka",
-            model="bulbul:v2",
-            params=SarvamTTSService.InputParams(
+            settings=SarvamTTSService.Settings(
+                voice="anushka",
+                model="bulbul:v2",
                 language=Language.HI,
                 pitch=0.1,
                 pace=1.2,
-                loudness=1.5
-            )
+                loudness=1.5,
+            ),
         )
 
         # Using bulbul:v3-beta with temperature control
         tts_v3 = SarvamTTSService(
             api_key="your-api-key",
-            voice_id="aditya",  # Use v3 speaker
-            model="bulbul:v3-beta",
-            params=SarvamTTSService.InputParams(
+            settings=SarvamTTSService.Settings(
+                voice="aditya",  # Use v3 speaker
+                model="bulbul:v3-beta",
                 language=Language.HI,
                 pace=1.2,  # Range: 0.5-2.0 for v3
-                temperature=0.8
-            )
+                temperature=0.8,
+            ),
         )
 
     See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for API details.
     """
 
-    _settings: SarvamTTSSettings
+    Settings = SarvamTTSSettings
+    _settings: Settings
 
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam TTS WebSocket service.
+
+        .. deprecated:: 0.0.105
+            Use ``SarvamTTSService.Settings`` directly via the ``settings`` parameter instead.
 
         Parameters:
             pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
@@ -782,13 +806,14 @@ class SarvamTTSService(InterruptibleTTSService):
         self,
         *,
         api_key: str,
-        model: str = "bulbul:v2",
+        model: Optional[str] = None,
         voice_id: Optional[str] = None,
         url: str = "wss://api.sarvam.ai/text-to-speech/ws",
         aggregate_sentences: Optional[bool] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
         **kwargs,
     ):
         """Initialize the Sarvam TTS service with voice and transport configuration.
@@ -798,7 +823,15 @@ class SarvamTTSService(InterruptibleTTSService):
             model: TTS model to use. Options:
                 - "bulbul:v2" (default): Standard model with pitch/loudness support
                 - "bulbul:v3-beta": Advanced model with temperature control
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SarvamTTSService.Settings(model=...)`` instead.
+
             voice_id: Speaker voice ID. If None, uses model-appropriate default.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SarvamTTSService.Settings(voice=...)`` instead.
+
             url: WebSocket URL for the TTS backend (default production URL).
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
@@ -809,91 +842,136 @@ class SarvamTTSService(InterruptibleTTSService):
             sample_rate: Output audio sample rate in Hz (8000, 16000, 22050, 24000).
                 If None, uses model-specific default.
             params: Optional input parameters to override defaults.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SarvamTTSService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Arguments forwarded to InterruptibleTTSService.
 
         See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream
         """
-        # Get model configuration (validates model exists)
-        if model not in TTS_MODEL_CONFIGS:
-            allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
-            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="bulbul:v2",
+            voice="anushka",
+            language="en-IN",
+            enable_preprocessing=False,
+            min_buffer_size=50,
+            max_chunk_length=150,
+            pace=1.0,
+            pitch=None,
+            loudness=None,
+            temperature=None,
+        )
 
-        self._config = TTS_MODEL_CONFIGS[model]
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if voice_id is not None:
+            self._warn_init_param_moved_to_settings("voice_id", "voice")
+            default_settings.voice = voice_id
+
+        # Init-only audio format fields (not runtime-updatable)
+        output_audio_codec = "linear16"
+        output_audio_bitrate = "128k"
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                if params.language is not None:
+                    default_settings.language = params.language
+                if params.enable_preprocessing is not None:
+                    default_settings.enable_preprocessing = params.enable_preprocessing
+                if params.min_buffer_size is not None:
+                    default_settings.min_buffer_size = params.min_buffer_size
+                if params.max_chunk_length is not None:
+                    default_settings.max_chunk_length = params.max_chunk_length
+                if params.output_audio_codec is not None:
+                    output_audio_codec = params.output_audio_codec
+                if params.output_audio_bitrate is not None:
+                    output_audio_bitrate = params.output_audio_bitrate
+                if params.pace is not None:
+                    default_settings.pace = params.pace
+                if params.pitch is not None:
+                    default_settings.pitch = params.pitch
+                if params.loudness is not None:
+                    default_settings.loudness = params.loudness
+                if params.temperature is not None:
+                    default_settings.temperature = params.temperature
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        # Get model configuration (validates model exists)
+        resolved_model = default_settings.model
+        if resolved_model not in TTS_MODEL_CONFIGS:
+            allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
+            raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
+
+        self._config = TTS_MODEL_CONFIGS[resolved_model]
 
         # Set default sample rate based on model if not specified
         if sample_rate is None:
             sample_rate = self._config.default_sample_rate
 
-        # Set default voice based on model if not specified
-        if voice_id is None:
-            voice_id = self._config.default_speaker
-
-        params = params or SarvamTTSService.InputParams()
+        # Set default voice based on model if not specified via any mechanism
+        if voice_id is None and (settings is None or settings.voice is NOT_GIVEN):
+            default_settings.voice = self._config.default_speaker
 
         # Validate and clamp pace to model's valid range
-        pace = params.pace
+        pace = default_settings.pace
         pace_min, pace_max = self._config.pace_range
         if pace is not None and (pace < pace_min or pace > pace_max):
             logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")
-            pace = max(pace_min, min(pace_max, pace))
+            default_settings.pace = max(pace_min, min(pace_max, pace))
 
-        # Initialize parent class first
+        # Force preprocessing for models that require it
+        if self._config.preprocessing_always_enabled:
+            default_settings.enable_preprocessing = True
+
+        # Warn about unsupported model-specific parameters
+        if not self._config.supports_pitch and default_settings.pitch not in (None, 0.0):
+            logger.warning(f"pitch parameter is ignored for {resolved_model}")
+            default_settings.pitch = None
+        if not self._config.supports_loudness and default_settings.loudness not in (None, 1.0):
+            logger.warning(f"loudness parameter is ignored for {resolved_model}")
+            default_settings.loudness = None
+        if not self._config.supports_temperature and default_settings.temperature not in (
+            None,
+            0.6,
+        ):
+            logger.warning(f"temperature parameter is ignored for {resolved_model}")
+            default_settings.temperature = None
+
+        # Initialize parent class
         super().__init__(
             aggregate_sentences=aggregate_sentences,
             text_aggregation_mode=text_aggregation_mode,
             push_text_frames=True,
             pause_frame_processing=True,
             push_stop_frames=True,
+            push_start_frame=True,
             sample_rate=sample_rate,
-            settings=SarvamTTSSettings(
-                language=(
-                    self.language_to_service_language(params.language)
-                    if params.language
-                    else "en-IN"
-                ),
-                speech_sample_rate=str(sample_rate),
-                enable_preprocessing=(
-                    True
-                    if self._config.preprocessing_always_enabled
-                    else params.enable_preprocessing
-                ),
-                min_buffer_size=params.min_buffer_size,
-                max_chunk_length=params.max_chunk_length,
-                output_audio_codec=params.output_audio_codec,
-                output_audio_bitrate=params.output_audio_bitrate,
-                pace=pace,
-                pitch=None,
-                loudness=None,
-                temperature=None,
-                model=model,
-                voice=voice_id,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
+        # Init-only audio format fields (not runtime-updatable)
+        self._speech_sample_rate = str(sample_rate)
+        self._output_audio_codec = output_audio_codec
+        self._output_audio_bitrate = output_audio_bitrate
+
         # WebSocket endpoint URL with model query parameter
-        self._websocket_url = f"{url}?model={model}"
+        self._websocket_url = f"{url}?model={resolved_model}"
         self._api_key = api_key
-
-        # Add parameters based on model support
-        if self._config.supports_pitch:
-            self._settings.pitch = params.pitch
-        elif params.pitch != 0.0:
-            logger.warning(f"pitch parameter is ignored for {model}")
-
-        if self._config.supports_loudness:
-            self._settings.loudness = params.loudness
-        elif params.loudness != 1.0:
-            logger.warning(f"loudness parameter is ignored for {model}")
-
-        if self._config.supports_temperature:
-            self._settings.temperature = params.temperature
-        elif params.temperature != 0.6:
-            logger.warning(f"temperature parameter is ignored for {model}")
 
         self._receive_task = None
         self._keepalive_task = None
-        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -923,7 +1001,7 @@ class SarvamTTSService(InterruptibleTTSService):
         await super().start(frame)
 
         # WebSocket API expects sample rate as string
-        self._settings.speech_sample_rate = str(self.sample_rate)
+        self._speech_sample_rate = str(self.sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -944,7 +1022,7 @@ class SarvamTTSService(InterruptibleTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending flush command."""
         try:
             if self._websocket:
@@ -952,23 +1030,6 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._websocket.send(json.dumps(msg))
         except Exception as e:
             await self.push_error(error_msg=f"Error sending flush to Sarvam: {e}", exception=e)
-
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push a frame downstream with special handling for stop conditions.
-
-        Args:
-            frame: The frame to push.
-            direction: The direction to push the frame.
-        """
-        await super().push_frame(frame, direction)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process a frame and flush audio if it's the end of a full response."""
-        await super().process_frame(frame, direction)
-
-        # When the LLM finishes responding, flush any remaining text in Sarvam's buffer
-        if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
-            await self.flush_audio()
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta and resend config if voice changed."""
@@ -1041,12 +1102,12 @@ class SarvamTTSService(InterruptibleTTSService):
         config_data = {
             "target_language_code": self._settings.language,
             "speaker": self._settings.voice,
-            "speech_sample_rate": self._settings.speech_sample_rate,
+            "speech_sample_rate": self._speech_sample_rate,
             "enable_preprocessing": self._settings.enable_preprocessing,
             "min_buffer_size": self._settings.min_buffer_size,
             "max_chunk_length": self._settings.max_chunk_length,
-            "output_audio_codec": self._settings.output_audio_codec,
-            "output_audio_bitrate": self._settings.output_audio_bitrate,
+            "output_audio_codec": self._output_audio_codec,
+            "output_audio_bitrate": self._output_audio_bitrate,
             "pace": self._settings.pace,
             "model": self._settings.model,
         }
@@ -1077,7 +1138,6 @@ class SarvamTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
-            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -1091,14 +1151,13 @@ class SarvamTTSService(InterruptibleTTSService):
         async for message in self._get_websocket():
             if isinstance(message, str):
                 msg = json.loads(message)
+                context_id = self.get_active_audio_context_id()
                 if msg.get("type") == "audio":
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
-                    frame = TTSAudioRawFrame(
-                        audio, self.sample_rate, 1, context_id=self._context_id
-                    )
-                    await self.push_frame(frame)
+                    frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
+                    await self.append_to_audio_context(context_id, frame)
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
                     await self.push_error(error_msg=f"TTS Error: {error_msg}")
@@ -1106,8 +1165,9 @@ class SarvamTTSService(InterruptibleTTSService):
                     # If it's a timeout error, the connection might need to be reset
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
-
-                    await self.push_frame(ErrorFrame(error=f"TTS Error: {error_msg}"))
+                    await self.append_to_audio_context(
+                        context_id, ErrorFrame(error=f"TTS Error: {error_msg}")
+                    )
 
     async def _keepalive_task_handler(self):
         """Handle keepalive messages to maintain WebSocket connection."""
@@ -1150,10 +1210,6 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
-                # Store context_id for use in _receive_messages
-                self._context_id = context_id
-                yield TTSStartedFrame(context_id=context_id)
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:

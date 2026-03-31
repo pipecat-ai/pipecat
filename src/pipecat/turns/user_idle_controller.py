@@ -143,6 +143,8 @@ class UserIdleController(BaseObject):
             self._idle_timer_expired(),
             f"{self}::idle_timer",
         )
+        # Make sure the task is scheduled.
+        await asyncio.sleep(0)
 
     async def _cancel_idle_timer(self):
         """Cancel the idle timer if running."""

@@ -60,14 +60,14 @@ class IdleHandler:
         if self._retry_count == 1:
             # First attempt: Add a gentle prompt to the conversation
             message = {
-                "role": "system",
+                "role": "developer",
                 "content": "The user has been quiet. Politely and briefly ask if they're still there.",
             }
             await aggregator.push_frame(LLMMessagesAppendFrame([message], run_llm=True))
         elif self._retry_count == 2:
             # Second attempt: More direct prompt
             message = {
-                "role": "system",
+                "role": "developer",
                 "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
             }
             await aggregator.push_frame(LLMMessagesAppendFrame([message], run_llm=True))
@@ -115,12 +115,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        system_instruction="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        settings=OpenAILLMService.Settings(
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+        ),
     )
 
     llm.register_function("get_current_weather", fetch_weather_from_api)
@@ -205,7 +209,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        context.add_message({"role": "system", "content": "Please introduce yourself to the user."})
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
         await asyncio.sleep(30)
         logger.info(f"Disabling idle detection")

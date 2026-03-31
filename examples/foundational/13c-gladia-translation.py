@@ -17,7 +17,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.gladia.config import (
-    GladiaInputParams,
     LanguageConfig,
     RealtimeProcessingConfig,
     TranslationConfig,
@@ -59,16 +58,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = GladiaSTTService(
         api_key=os.getenv("GLADIA_API_KEY"),
         region=os.getenv("GLADIA_REGION"),
-        params=GladiaInputParams(
+        settings=GladiaSTTService.Settings(
             language_config=LanguageConfig(
-                languages=[Language.EN],  # Input in English
+                languages=[Language.EN],
                 code_switching=False,
             ),
             realtime_processing=RealtimeProcessingConfig(
-                translation=True,  # Enable translation
+                translation=True,
                 translation_config=TranslationConfig(
-                    target_languages=[Language.ES],  # Translate to Spanish
-                    model="enhanced",  # Use the enhanced translation model
+                    target_languages=[Language.ES],
+                    model="enhanced",
                 ),
             ),
         ),

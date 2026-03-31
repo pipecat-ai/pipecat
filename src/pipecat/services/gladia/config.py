@@ -152,6 +152,10 @@ class MessagesConfig(BaseModel):
 class GladiaInputParams(BaseModel):
     """Configuration parameters for the Gladia STT service.
 
+    .. deprecated:: 0.0.105
+        Use ``settings=GladiaSTTService.Settings(...)`` for runtime-updatable
+        fields and direct init parameters for encoding/bit_depth/channels.
+
     Parameters:
         encoding: Audio encoding format
         bit_depth: Audio bit depth

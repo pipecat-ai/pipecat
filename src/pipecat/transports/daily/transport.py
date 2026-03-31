@@ -22,6 +22,7 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     BotConnectedFrame,
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputDTMFFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
@@ -57,10 +59,11 @@ try:
         CallClient,
         CustomAudioSource,
         CustomAudioTrack,
+        CustomVideoSource,
+        CustomVideoTrack,
         Daily,
         EventHandler,
         VideoFrame,
-        VirtualCameraDevice,
         VirtualSpeakerDevice,
     )
     from daily import LogLevel as DailyLogLevel
@@ -97,58 +100,6 @@ class DailyOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame):
 
 
 @dataclass
-class DailyTransportMessageFrame(DailyOutputTransportMessageFrame):
-    """Frame for transport messages in Daily calls.
-
-    .. deprecated:: 0.0.87
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `DailyOutputTransportMessageFrame`.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "DailyTransportMessageFrame is deprecated and will be removed in a future version. "
-                "Instead, use DailyOutputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
-class DailyTransportMessageUrgentFrame(DailyOutputTransportMessageUrgentFrame):
-    """Frame for urgent transport messages in Daily calls.
-
-    .. deprecated:: 0.0.87
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `DailyOutputTransportMessageUrgentFrame`.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "DailyTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
-                "Instead, use DailyOutputTransportMessageUrgentFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
 class DailyInputTransportMessageFrame(InputTransportMessageFrame):
     """Frame for input urgent transport messages in Daily calls.
 
@@ -157,31 +108,6 @@ class DailyInputTransportMessageFrame(InputTransportMessageFrame):
     """
 
     participant_id: Optional[str] = None
-
-
-class DailyInputTransportMessageUrgentFrame(DailyInputTransportMessageFrame):
-    """Frame for input urgent transport messages in Daily calls.
-
-    .. deprecated:: 0.0.87
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `DailyInputTransportMessageFrame`.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "DailyInputTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
-                "Instead, use DailyInputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
 
 @dataclass
@@ -304,6 +230,44 @@ class DailyTranscriptionSettings(BaseModel):
     extra: Mapping[str, Any] = {"interim_results": True}
 
 
+class DailyCustomVideoTrackParams(BaseModel):
+    """Configuration for a custom video track.
+
+    If ``send_settings`` is not provided, the track will use the default video
+    publishing settings (framerate, bitrate, codec, etc.).
+
+    Parameters:
+        width: Video width in pixels.
+        height: Video height in pixels.
+        color_format: Video color format (e.g., "RGB", "RGBA", "BGRA").
+        send_settings: Optional Daily sendSettings dict for this track.
+            See https://reference-python.daily.co/types.html#videopublishingsettings
+    """
+
+    width: int = 1024
+    height: int = 768
+    color_format: str = "RGB"
+    send_settings: Optional[Dict[str, Any]] = None
+
+
+class DailyCustomAudioTrackParams(BaseModel):
+    """Configuration for a custom audio track.
+
+    If ``send_settings`` is not provided, the track will use the default audio
+    publishing settings (bitrate, channel config, etc.).
+
+    Parameters:
+        sample_rate: Audio sample rate in Hz. Defaults to transport's output sample rate.
+        channels: Number of audio channels.
+        send_settings: Optional Daily sendSettings dict for this track.
+            See https://reference-python.daily.co/types.html#audiopublishingsettings
+    """
+
+    sample_rate: Optional[int] = None
+    channels: int = 1
+    send_settings: Optional[Dict[str, Any]] = None
+
+
 class DailyParams(TransportParams):
     """Configuration parameters for Daily transport.
 
@@ -311,8 +275,10 @@ class DailyParams(TransportParams):
         api_url: Daily API base URL.
         api_key: Daily API authentication key.
         audio_in_user_tracks: Receive users' audio in separate tracks
-        dialin_settings: Optional settings for dial-in functionality.
         camera_out_enabled: Whether to enable the main camera output track.
+        custom_audio_track_params: Per-destination configuration for custom audio tracks.
+        custom_video_track_params: Per-destination configuration for custom video tracks.
+        dialin_settings: Optional settings for dial-in functionality.
         microphone_out_enabled: Whether to enable the main microphone track.
         transcription_enabled: Whether to enable speech transcription.
         transcription_settings: Configuration for transcription service.
@@ -321,8 +287,10 @@ class DailyParams(TransportParams):
     api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
     audio_in_user_tracks: bool = True
-    dialin_settings: Optional[DailyDialinSettings] = None
     camera_out_enabled: bool = True
+    custom_audio_track_params: Optional[Mapping[str, DailyCustomAudioTrackParams]] = None
+    custom_video_track_params: Optional[Mapping[str, DailyCustomVideoTrackParams]] = None
+    dialin_settings: Optional[DailyDialinSettings] = None
     microphone_out_enabled: bool = True
     transcription_enabled: bool = False
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
@@ -351,6 +319,7 @@ class DailyCallbacks(BaseModel):
         on_dialout_stopped: Called when dial-out is stopped.
         on_dialout_error: Called when dial-out encounters an error.
         on_dialout_warning: Called when dial-out has a warning.
+        on_dtmf_event: Called when a DTMF tone happens.
         on_participant_joined: Called when a participant joins.
         on_participant_left: Called when a participant leaves.
         on_participant_updated: Called when participant info is updated.
@@ -381,6 +350,7 @@ class DailyCallbacks(BaseModel):
     on_dialout_stopped: Callable[[Any], Awaitable[None]]
     on_dialout_error: Callable[[Any], Awaitable[None]]
     on_dialout_warning: Callable[[Any], Awaitable[None]]
+    on_dtmf_event: Callable[[Any], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
@@ -428,6 +398,19 @@ class DailyAudioTrack:
 
     source: CustomAudioSource
     track: CustomAudioTrack
+
+
+@dataclass
+class DailyVideoTrack:
+    """Container for Daily video track components.
+
+    Parameters:
+        source: The custom video source for the track.
+        track: The custom video track instance.
+    """
+
+    source: CustomVideoSource
+    track: CustomVideoTrack
 
 
 # This is just a type alias for the errors returned by daily-python. Right now
@@ -519,14 +502,11 @@ class DailyTransportClient(EventHandler):
         self._in_sample_rate = 0
         self._out_sample_rate = 0
 
-        self._camera: Optional[VirtualCameraDevice] = None
         self._speaker: Optional[VirtualSpeakerDevice] = None
+        self._camera_track: Optional[DailyVideoTrack] = None
         self._microphone_track: Optional[DailyAudioTrack] = None
         self._custom_audio_tracks: Dict[str, DailyAudioTrack] = {}
-
-    def _camera_name(self):
-        """Generate a unique virtual camera name for this client instance."""
-        return f"camera-{self}"
+        self._custom_video_tracks: Dict[str, DailyVideoTrack] = {}
 
     def _speaker_name(self):
         """Generate a unique virtual speaker name for this client instance."""
@@ -619,14 +599,39 @@ class DailyTransportClient(EventHandler):
             await asyncio.sleep(0.01)
             return None
 
-    async def register_audio_destination(self, destination: str):
+    async def register_audio_destination(
+        self, destination: str, auto_silence: Optional[bool] = True
+    ):
         """Register a custom audio destination for multi-track output.
 
         Args:
             destination: The destination identifier to register.
+            auto_silence: If True, the audio source inserts silence when no audio is available.
+                If False, the source waits for audio data. Defaults to True.
         """
-        self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
-        self._client.update_publishing({"customAudio": {destination: True}})
+        params = (self._params.custom_audio_track_params or {}).get(destination)
+        self._custom_audio_tracks[destination] = await self.add_custom_audio_track(
+            destination, params=params, auto_silence=auto_silence
+        )
+        publishing: Dict[str, Any] = {"customAudio": {destination: True}}
+        if params and params.send_settings:
+            publishing["customAudio"][destination] = {"sendSettings": params.send_settings}
+        self._client.update_publishing(publishing)
+
+    async def register_video_destination(self, destination: str):
+        """Register a custom video destination for multi-track output.
+
+        Args:
+            destination: The destination identifier to register.
+        """
+        params = (self._params.custom_video_track_params or {}).get(destination)
+        self._custom_video_tracks[destination] = await self.add_custom_video_track(
+            destination, params=params
+        )
+        publishing: Dict[str, Any] = {"customVideo": {destination: True}}
+        if params and params.send_settings:
+            publishing["customVideo"][destination] = {"sendSettings": params.send_settings}
+        self._client.update_publishing(publishing)
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the appropriate audio track.
@@ -657,7 +662,7 @@ class DailyTransportClient(EventHandler):
         return num_frames > 0
 
     async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
-        """Write a video frame to the camera device.
+        """Write a video frame to the appropriate video track.
 
         Args:
             frame: The image frame to write.
@@ -665,10 +670,20 @@ class DailyTransportClient(EventHandler):
         Returns:
             True if the video frame was written successfully, False otherwise.
         """
-        if not frame.transport_destination and self._camera:
-            self._camera.write_frame(frame.image)
+        destination = frame.transport_destination
+        video_source: Optional[CustomVideoSource] = None
+        if not destination and self._camera_track:
+            video_source = self._camera_track.source
+        elif destination and destination in self._custom_video_tracks:
+            track = self._custom_video_tracks[destination]
+            video_source = track.source
+
+        if video_source:
+            video_source.write_frame(frame.image)
             return True
-        return False
+        else:
+            logger.warning(f"{self} unable to write video frames to destination [{destination}]")
+            return False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client with task manager and event queues.
@@ -733,16 +748,24 @@ class DailyTransportClient(EventHandler):
                 self._callback_task_handler(self._video_queue),
                 f"{self}::video_callback_task",
             )
-        if self._params.video_out_enabled and not self._camera:
-            self._camera = Daily.create_camera_device(
-                self._camera_name(),
-                width=self._params.video_out_width,
-                height=self._params.video_out_height,
-                color_format=self._params.video_out_color_format,
+        if self._params.video_out_enabled and not self._camera_track:
+            video_source = CustomVideoSource(
+                self._params.video_out_width,
+                self._params.video_out_height,
+                self._params.video_out_color_format,
             )
+            video_track = CustomVideoTrack(video_source)
+            self._camera_track = DailyVideoTrack(source=video_source, track=video_track)
 
         if self._params.audio_out_enabled and not self._microphone_track:
-            audio_source = CustomAudioSource(self._out_sample_rate, self._params.audio_out_channels)
+            logger.debug(
+                f"Creating custom audio source, auto silence {self._params.audio_out_auto_silence}"
+            )
+            audio_source = CustomAudioSource(
+                self._out_sample_rate,
+                self._params.audio_out_channels,
+                self._params.audio_out_auto_silence,
+            )
             audio_track = CustomAudioTrack(audio_source)
             self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
 
@@ -809,7 +832,11 @@ class DailyTransportClient(EventHandler):
                     "camera": {
                         "isEnabled": camera_enabled,
                         "settings": {
-                            "deviceId": self._camera_name(),
+                            "customTrack": {
+                                "id": self._camera_track.track.id
+                                if self._camera_track
+                                else "no-camera-track"
+                            }
                         },
                     },
                     "microphone": {
@@ -874,6 +901,8 @@ class DailyTransportClient(EventHandler):
         # Remove any custom tracks, if any.
         for track_name, _ in self._custom_audio_tracks.items():
             await self.remove_custom_audio_track(track_name)
+        for track_name, _ in self._custom_video_tracks.items():
+            await self.remove_custom_video_track(track_name)
 
         error = await self._leave()
         if not error:
@@ -1043,10 +1072,7 @@ class DailyTransportClient(EventHandler):
             return "Transcription can't be started without a room token"
 
         future = self._get_event_loop().create_future()
-        self._client.start_transcription(
-            settings=self._params.transcription_settings.model_dump(exclude_none=True),
-            completion=completion_callback(future),
-        )
+        self._client.start_transcription(settings=settings, completion=completion_callback(future))
         return await future
 
     async def stop_transcription(self) -> Optional[CallClientError]:
@@ -1173,18 +1199,29 @@ class DailyTransportClient(EventHandler):
             color_format=color_format,
         )
 
-    async def add_custom_audio_track(self, track_name: str) -> DailyAudioTrack:
+    async def add_custom_audio_track(
+        self,
+        track_name: str,
+        params: Optional[DailyCustomAudioTrackParams] = None,
+        auto_silence: Optional[bool] = True,
+    ) -> DailyAudioTrack:
         """Add a custom audio track for multi-stream output.
 
         Args:
             track_name: Name for the custom audio track.
+            params: Optional per-track configuration for sample rate, channels, and sendSettings.
+            auto_silence: If True, the audio source inserts silence when no audio is available.
+                If False, the source waits for audio data. Defaults to True.
 
         Returns:
             The created DailyAudioTrack instance.
         """
         future = self._get_event_loop().create_future()
 
-        audio_source = CustomAudioSource(self._out_sample_rate, 1)
+        sample_rate = params.sample_rate if params and params.sample_rate else self._out_sample_rate
+        channels = params.channels if params else 1
+
+        audio_source = CustomAudioSource(sample_rate, channels, auto_silence)
 
         audio_track = CustomAudioTrack(audio_source)
 
@@ -1212,6 +1249,56 @@ class DailyTransportClient(EventHandler):
         """
         future = self._get_event_loop().create_future()
         self._client.remove_custom_audio_track(
+            track_name=track_name,
+            completion=completion_callback(future),
+        )
+        return await future
+
+    async def add_custom_video_track(
+        self,
+        track_name: str,
+        params: Optional[DailyCustomVideoTrackParams] = None,
+    ) -> DailyVideoTrack:
+        """Add a custom video track for multi-stream output.
+
+        Args:
+            track_name: Name for the custom video track.
+            params: Optional per-track configuration for dimensions, color format, and sendSettings.
+
+        Returns:
+            The created DailyVideoTrack instance.
+        """
+        future = self._get_event_loop().create_future()
+
+        width = params.width if params else self._params.video_out_width
+        height = params.height if params else self._params.video_out_height
+        color_format = params.color_format if params else self._params.video_out_color_format
+
+        video_source = CustomVideoSource(width, height, color_format)
+
+        video_track = CustomVideoTrack(video_source)
+
+        self._client.add_custom_video_track(
+            track_name=track_name,
+            video_track=video_track,
+            completion=completion_callback(future),
+        )
+
+        await future
+
+        return DailyVideoTrack(source=video_source, track=video_track)
+
+    async def remove_custom_video_track(self, track_name: str) -> Optional[CallClientError]:
+        """Remove a custom video track.
+
+        Args:
+            track_name: Name of the custom video track to remove.
+
+        Returns:
+            error: An error description or None.
+        """
+        future = self._get_event_loop().create_future()
+        self._client.remove_custom_video_track(
             track_name=track_name,
             completion=completion_callback(future),
         )
@@ -1413,6 +1500,14 @@ class DailyTransportClient(EventHandler):
             data: Dial-out warning data.
         """
         self._call_event_callback(self._callbacks.on_dialout_warning, data)
+
+    def on_dtmf_event(self, data: Any):
+        """Handle incoming DTMF events.
+
+        Args:
+            data: DTMF data.
+        """
+        self._call_event_callback(self._callbacks.on_dtmf_event, data)
 
     def on_participant_joined(self, participant):
         """Handle participant joined events.
@@ -1985,7 +2080,7 @@ class DailyOutputTransport(BaseOutputTransport):
         Args:
             destination: The destination identifier to register.
         """
-        logger.warning(f"{self} registering video destinations is not supported yet")
+        await self._client.register_video_destination(destination)
 
     async def register_audio_destination(self, destination: str):
         """Register an audio output destination.
@@ -2167,6 +2262,7 @@ class DailyTransport(BaseTransport):
             on_dialout_stopped=self._on_dialout_stopped,
             on_dialout_error=self._on_dialout_error,
             on_dialout_warning=self._on_dialout_warning,
+            on_dtmf_event=self._on_dtmf_event,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
@@ -2208,6 +2304,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_dialout_stopped")
         self._register_event_handler("on_dialout_error")
         self._register_event_handler("on_dialout_warning")
+        self._register_event_handler("on_dtmf_event")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
@@ -2578,7 +2675,8 @@ class DailyTransport(BaseTransport):
         if self._params.transcription_enabled:
             # We report an error because we are starting transcription
             # internally and if it fails we need to know.
-            error = await self.start_transcription(self._params.transcription_settings)
+            settings = self._params.transcription_settings.model_dump(exclude_none=True)
+            error = await self.start_transcription(settings)
             if error:
                 await self._on_error(f"Unable to start transcription: {error}")
         await self._call_event_handler("on_joined", data)
@@ -2717,6 +2815,15 @@ class DailyTransport(BaseTransport):
         logger.warning(f"{self} dial-out warning: {data}")
         await self._call_event_handler("on_dialout_warning", data)
 
+    async def _on_dtmf_event(self, data):
+        """Handle incoming DTMF events."""
+        logger.debug(f"{self} DTMF event: {data}")
+        await self._call_event_handler("on_dtmf_event", data)
+
+        if self._input:
+            frame = InputDTMFFrame(button=KeypadEntry(data["tone"]))
+            await self._input.push_frame(frame)
+
     async def _on_participant_joined(self, participant):
         """Handle participant joined events."""
         id = participant["id"]
@@ -2747,7 +2854,7 @@ class DailyTransport(BaseTransport):
 
     async def _on_participant_updated(self, participant):
         """Handle participant updated events."""
-        logger.debug(f"{self} participant updated: {participant}")
+        logger.trace(f"{self} participant updated: {participant}")
         await self._call_event_handler("on_participant_updated", participant)
 
     async def _on_transcription_message(self, message: Mapping[str, Any]) -> None:

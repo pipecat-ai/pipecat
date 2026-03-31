@@ -10,17 +10,12 @@ import tempfile
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -110,9 +105,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize Gemini service with File API support
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_instruction,
-        voice_id="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
-        transcribe_user_audio=True,
+        settings=GeminiLiveLLMService.Settings(
+            system_instruction=system_instruction,
+            voice="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
+        ),
     )
 
     # Upload the sample file to Gemini File API
@@ -132,7 +128,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context = LLMContext(
             [
                 {
-                    "role": "user",
+                    "role": "developer",
                     "content": [
                         {
                             "type": "text",
@@ -155,23 +151,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context = LLMContext(
             [
                 {
-                    "role": "user",
+                    "role": "developer",
                     "content": "Greet the user and explain that there was an issue with file upload, but you're ready to help with other tasks.",
                 }
             ]
         )
 
-    # Create context aggregator
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(
-            # Set stop_secs to something roughly similar to the internal setting
-            # of the Multimodal Live api, just to align events. This doesn't
-            # really matter because we can only use the Multimodal Live API's
-            # phrase endpointing, for now.
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5))
-        ),
-    )
+    # Server-side VAD is enabled by default; no local VAD is added.
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     # Build the pipeline
     pipeline = Pipeline(

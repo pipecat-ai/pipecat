@@ -147,7 +147,9 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        ),
     )
 
     # you can either register a single function for all function calls, or specific functions
@@ -159,7 +161,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
     context = OpenAILLMContext(
-        [{"role": "user", "content": "Say hello!"}],
+        [{"role": "developer", "content": "Say hello!"}],
         tools,
     )
 

@@ -7,6 +7,7 @@
 """SambaNova LLM service implementation using OpenAI-compatible interface."""
 
 import json
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -21,8 +22,16 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.tracing.service_decorators import traced_llm
+
+
+@dataclass
+class SambaNovaLLMSettings(BaseOpenAILLMService.Settings):
+    """Settings for SambaNovaLLMService."""
+
+    pass
 
 
 class SambaNovaLLMService(OpenAILLMService):  # type: ignore
@@ -32,12 +41,20 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
     maintaining full compatibility with OpenAI's interface and functionality.
     """
 
+    # SambaNova doesn't support the "developer" message role.
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
+
+    Settings = SambaNovaLLMSettings
+    _settings: Settings
+
     def __init__(
         self,
         *,
         api_key: str,
-        model: str = "Llama-4-Maverick-17B-128E-Instruct",
+        model: Optional[str] = None,
         base_url: str = "https://api.sambanova.ai/v1",
+        settings: Optional[Settings] = None,
         **kwargs: Dict[Any, Any],
     ) -> None:
         """Initialize SambaNova LLM service.
@@ -45,10 +62,30 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         Args:
             api_key: The API key for accessing SambaNova API.
             model: The model identifier to use. Defaults to "Llama-4-Maverick-17B-128E-Instruct".
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SambaNovaLLMService.Settings(model=...)`` instead.
+
             base_url: The base URL for SambaNova API. Defaults to "https://api.sambanova.ai/v1".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(model="Llama-4-Maverick-17B-128E-Instruct")
+
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+
+        # 3. (No step 3, as there's no params object to apply)
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
 
     def create_client(
         self,
@@ -97,6 +134,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         params.update(params_from_context)
 
         params.update(self._settings.extra)
+
         return params
 
     @traced_llm  # type: ignore

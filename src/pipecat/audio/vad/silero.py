@@ -27,7 +27,7 @@ try:
 
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Silero VAD, you need to `pip install pipecat-ai[silero]`.")
+    logger.error("In order to use Silero VAD, you need to `pip install pipecat-ai`.")
     raise Exception(f"Missing module(s): {e}")
 
 

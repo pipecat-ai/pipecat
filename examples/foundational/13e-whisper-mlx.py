@@ -15,6 +15,7 @@ from pipecat.frames.frames import Frame, TranscriptionFrame, UserStoppedSpeaking
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -61,15 +62,12 @@ class TranscriptionLogger(FrameProcessor):
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=STOP_SECS)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=STOP_SECS)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=STOP_SECS)),
     ),
 }
 
@@ -77,11 +75,18 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = WhisperSTTServiceMLX(model=MLXModel.LARGE_V3_TURBO)
+    stt = WhisperSTTServiceMLX(
+        settings=WhisperSTTServiceMLX.Settings(
+            model=MLXModel.LARGE_V3_TURBO.value,
+        ),
+    )
 
     tl = TranscriptionLogger()
+    vad_processor = VADProcessor(
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=STOP_SECS))
+    )
 
-    pipeline = Pipeline([transport.input(), stt, tl])
+    pipeline = Pipeline([transport.input(), vad_processor, stt, tl])
 
     task = PipelineTask(
         pipeline,

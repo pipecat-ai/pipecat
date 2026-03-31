@@ -21,14 +21,11 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.ultravox.llm import (
-    OneShotInputParams,
-    UltravoxRealtimeLLMService,
-    UltravoxRealtimeLLMSettings,
-)
+from pipecat.services.ultravox.llm import OneShotInputParams, UltravoxRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -39,17 +36,14 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -57,7 +51,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    system_prompt = "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
+    system_prompt = "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way."
 
     llm = UltravoxRealtimeLLMService(
         params=OneShotInputParams(
@@ -77,7 +71,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [
@@ -112,13 +109,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await asyncio.sleep(10)
         logger.info("Updating Ultravox Realtime LLM settings: output_medium=text")
         await task.queue_frame(
-            LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMSettings(output_medium="text"))
+            LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMService.Settings(output_medium="text"))
         )
 
         await asyncio.sleep(10)
         logger.info("Updating Ultravox Realtime LLM settings: output_medium=voice")
         await task.queue_frame(
-            LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMSettings(output_medium="voice"))
+            LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMService.Settings(output_medium="voice"))
         )
 
     @transport.event_handler("on_client_disconnected")

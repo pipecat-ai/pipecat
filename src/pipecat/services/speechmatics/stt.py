@@ -85,12 +85,11 @@ class TurnDetectionMode(str, Enum):
 
 @dataclass
 class SpeechmaticsSTTSettings(STTSettings):
-    """Settings for Speechmatics STT service.
+    """Settings for SpeechmaticsSTTService.
 
     See ``SpeechmaticsSTTService.InputParams`` for detailed descriptions of each field.
 
     Parameters:
-        model: The operating point / model name.
         domain: Domain for Speechmatics API.
         turn_detection_mode: Endpoint handling mode.
         speaker_active_format: Formatter for active speaker ID.
@@ -100,7 +99,6 @@ class SpeechmaticsSTTSettings(STTSettings):
         focus_mode: Speaker focus mode for diarization.
         known_speakers: List of known speaker labels and identifiers.
         additional_vocab: List of additional vocabulary entries.
-        audio_encoding: Audio encoding format.
         operating_point: Operating point for accuracy vs. latency.
         max_delay: Maximum delay in seconds for transcription.
         end_of_utterance_silence_trigger: Maximum delay for end of utterance trigger.
@@ -126,7 +124,6 @@ class SpeechmaticsSTTSettings(STTSettings):
     additional_vocab: list[AdditionalVocabEntry] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    audio_encoding: AudioEncoding | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     operating_point: OperatingPoint | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_delay: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     end_of_utterance_silence_trigger: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -178,7 +175,8 @@ class SpeechmaticsSTTService(STTService):
             ...
     """
 
-    _settings: SpeechmaticsSTTSettings
+    Settings = SpeechmaticsSTTSettings
+    _settings: Settings
 
     # Export related classes as class attributes
     TurnDetectionMode = TurnDetectionMode
@@ -344,8 +342,8 @@ class SpeechmaticsSTTService(STTService):
     class UpdateParams(BaseModel):
         """Update parameters for Speechmatics STT service.
 
-        These are the only parameters that can be changed once a session has started. If you need to
-        change the language, etc., then you must create a new instance of the service.
+        .. deprecated:: 0.0.104
+            Use ``SpeechmaticsSTTService.Settings`` with ``STTUpdateSettingsFrame`` instead.
 
         Parameters:
             focus_speakers: List of speaker IDs to focus on. When enabled, only these speakers are
@@ -379,8 +377,10 @@ class SpeechmaticsSTTService(STTService):
         api_key: str | None = None,
         base_url: str | None = None,
         sample_rate: int | None = None,
+        encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
         params: InputParams | None = None,
         should_interrupt: bool = True,
+        settings: Settings | None = None,
         ttfs_p99_latency: float | None = SPEECHMATICS_TTFS_P99,
         **kwargs,
     ):
@@ -392,8 +392,15 @@ class SpeechmaticsSTTService(STTService):
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
                 or defaults to `wss://eu2.rt.speechmatics.com/v2`.
             sample_rate: Optional audio sample rate in Hz.
-            params: Optional[InputParams]: Input parameters for the service.
+            encoding: Audio encoding format. Defaults to ``AudioEncoding.PCM_S16LE``.
+            params: Input parameters for the service.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=SpeechmaticsSTTService.Settings(...)`` instead.
+
             should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                ``params``, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
@@ -410,58 +417,93 @@ class SpeechmaticsSTTService(STTService):
         if not self._base_url:
             raise ValueError("Missing Speechmatics base URL")
 
-        # Default params
-        params = params or SpeechmaticsSTTService.InputParams()
         self._should_interrupt = should_interrupt
 
-        # Deprecation check
-        self._check_deprecated_args(kwargs, params)
+        # Deprecation check (mutates params in-place for legacy kwargs migration)
+        _params = params or SpeechmaticsSTTService.InputParams()
+        self._check_deprecated_args(kwargs, _params)
 
-        # Output formatting defaults
-        speaker_active_format = params.speaker_active_format
-        if speaker_active_format is None:
-            speaker_active_format = (
-                "@{speaker_id}: {text}" if params.enable_diarization else "{text}"
-            )
-        speaker_passive_format = params.speaker_passive_format or speaker_active_format
-
-        # Settings — seeded from InputParams
-        settings = SpeechmaticsSTTSettings(
+        # --- 1. Hardcoded defaults ---
+        default_settings = self.Settings(
             model=None,  # Will be resolved from operating_point after config is built
-            language=params.language,
-            domain=params.domain,
-            turn_detection_mode=params.turn_detection_mode,
-            speaker_active_format=speaker_active_format,
-            speaker_passive_format=speaker_passive_format,
-            focus_speakers=params.focus_speakers,
-            ignore_speakers=params.ignore_speakers,
-            focus_mode=params.focus_mode,
-            known_speakers=params.known_speakers,
-            additional_vocab=params.additional_vocab,
-            audio_encoding=params.audio_encoding,
-            operating_point=params.operating_point,
-            max_delay=params.max_delay,
-            end_of_utterance_silence_trigger=params.end_of_utterance_silence_trigger,
-            end_of_utterance_max_delay=params.end_of_utterance_max_delay,
-            punctuation_overrides=params.punctuation_overrides,
-            include_partials=params.include_partials,
-            split_sentences=params.split_sentences,
-            enable_diarization=params.enable_diarization,
-            speaker_sensitivity=params.speaker_sensitivity,
-            max_speakers=params.max_speakers,
-            prefer_current_speaker=params.prefer_current_speaker,
-            extra_params=params.extra_params,
+            language=Language.EN,
+            domain=None,
+            turn_detection_mode=TurnDetectionMode.EXTERNAL,
+            speaker_active_format="{text}",
+            speaker_passive_format="{text}",
+            focus_speakers=[],
+            ignore_speakers=[],
+            focus_mode=SpeakerFocusMode.RETAIN,
+            known_speakers=[],
+            additional_vocab=[],
+            operating_point=None,
+            max_delay=None,
+            end_of_utterance_silence_trigger=None,
+            end_of_utterance_max_delay=None,
+            punctuation_overrides=None,
+            include_partials=None,
+            split_sentences=None,
+            enable_diarization=None,
+            speaker_sensitivity=None,
+            max_speakers=None,
+            prefer_current_speaker=None,
+            extra_params=None,
         )
 
-        # Build SDK config from settings, then resolve model from operating_point
+        # --- 2. No direct init arg overrides ---
+
+        # --- 3. Deprecated params overrides ---
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                default_settings.language = _params.language
+                default_settings.domain = _params.domain
+                default_settings.turn_detection_mode = _params.turn_detection_mode
+                # Output formatting defaults
+                speaker_active_format = _params.speaker_active_format
+                if speaker_active_format is None:
+                    speaker_active_format = (
+                        "@{speaker_id}: {text}" if _params.enable_diarization else "{text}"
+                    )
+                default_settings.speaker_active_format = speaker_active_format
+                default_settings.speaker_passive_format = (
+                    _params.speaker_passive_format or speaker_active_format
+                )
+                default_settings.focus_speakers = _params.focus_speakers
+                default_settings.ignore_speakers = _params.ignore_speakers
+                default_settings.focus_mode = _params.focus_mode
+                default_settings.known_speakers = _params.known_speakers
+                default_settings.additional_vocab = _params.additional_vocab
+                encoding = _params.audio_encoding
+                default_settings.operating_point = _params.operating_point
+                default_settings.max_delay = _params.max_delay
+                default_settings.end_of_utterance_silence_trigger = (
+                    _params.end_of_utterance_silence_trigger
+                )
+                default_settings.end_of_utterance_max_delay = _params.end_of_utterance_max_delay
+                default_settings.punctuation_overrides = _params.punctuation_overrides
+                default_settings.include_partials = _params.include_partials
+                default_settings.split_sentences = _params.split_sentences
+                default_settings.enable_diarization = _params.enable_diarization
+                default_settings.speaker_sensitivity = _params.speaker_sensitivity
+                default_settings.max_speakers = _params.max_speakers
+                default_settings.prefer_current_speaker = _params.prefer_current_speaker
+                default_settings.extra_params = _params.extra_params
+
+        # --- 4. Settings delta (canonical API, always wins) ---
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        # Build SDK config from settings, set model name before calling super
         self._client: VoiceAgentClient | None = None
-        self._config: VoiceAgentConfig = self._build_config(settings)
-        settings.model = self._config.operating_point.value
+        self._audio_encoding = encoding
+        self._config: VoiceAgentConfig = self._build_config(default_settings)
+        default_settings.model = self._config.operating_point.value
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=settings,
+            settings=default_settings,
             **kwargs,
         )
 
@@ -483,7 +525,7 @@ class SpeechmaticsSTTService(STTService):
         self._bot_speaking: bool = False
 
         # Event handlers
-        if params.enable_diarization:
+        if default_settings.enable_diarization:
             self._register_event_handler("on_speakers_result")
 
     # ============================================================================
@@ -495,11 +537,11 @@ class SpeechmaticsSTTService(STTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings(self, delta: SpeechmaticsSTTSettings) -> dict[str, Any]:
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
         """Apply settings delta, reconnecting only when necessary.
 
         Fields are classified into three categories (see
-        ``SpeechmaticsSTTSettings``):
+        ``SpeechmaticsSTTService.Settings``):
 
         * **HOT_FIELDS** – diarization speaker settings that can be pushed
           to a live Speechmatics connection without reconnecting.
@@ -519,7 +561,7 @@ class SpeechmaticsSTTService(STTService):
         if not changed:
             return changed
 
-        no_reconnect = SpeechmaticsSTTSettings.HOT_FIELDS | SpeechmaticsSTTSettings.LOCAL_FIELDS
+        no_reconnect = self.Settings.HOT_FIELDS | self.Settings.LOCAL_FIELDS
         needs_reconnect = bool(changed.keys() - no_reconnect)
 
         if needs_reconnect:
@@ -529,7 +571,7 @@ class SpeechmaticsSTTService(STTService):
             self._config = self._build_config(self._settings)
             await self._disconnect()
             await self._connect()
-        elif changed.keys() & SpeechmaticsSTTSettings.HOT_FIELDS:
+        elif changed.keys() & self.Settings.HOT_FIELDS:
             logger.debug(f"{self} applying hot settings update: {changed.keys()}")
             if self._config.enable_diarization:
                 # Only hot-updatable fields changed — push to the live session.
@@ -544,7 +586,7 @@ class SpeechmaticsSTTService(STTService):
                 )
                 # Diarization not enabled — the new settings will take effect
                 # if/when diarization is enabled, which does require a reconnect.
-        elif changed.keys() & SpeechmaticsSTTSettings.LOCAL_FIELDS:
+        elif changed.keys() & self.Settings.LOCAL_FIELDS:
             logger.debug(
                 f"{self} local settings update, no special action required: {changed.keys()}"
             )
@@ -663,7 +705,7 @@ class SpeechmaticsSTTService(STTService):
     # CONFIGURATION
     # ============================================================================
 
-    def _build_config(self, settings: SpeechmaticsSTTSettings) -> VoiceAgentConfig:
+    def _build_config(self, settings: Settings) -> VoiceAgentConfig:
         """Build a ``VoiceAgentConfig`` from the given settings.
 
         Used both at init time (with explicit settings, before
@@ -677,6 +719,9 @@ class SpeechmaticsSTTService(STTService):
 
         # Preset from turn detection mode
         config = VoiceAgentConfigPreset.load(s.turn_detection_mode.value)
+
+        # Audio encoding (init-only, stored as instance attribute)
+        config.audio_encoding = self._audio_encoding
 
         # Language + domain
         language = s.language
@@ -731,9 +776,9 @@ class SpeechmaticsSTTService(STTService):
     ) -> None:
         """Updates the speaker configuration.
 
-        .. deprecated::
+        .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame`` with
-            ``SpeechmaticsSTTSettings(...)`` instead.
+            ``SpeechmaticsSTTService.Settings(...)`` instead.
 
         This can update the speakers to listen to or ignore during an in-flight
         transcription. Only available if diarization is enabled.
@@ -745,7 +790,7 @@ class SpeechmaticsSTTService(STTService):
             warnings.simplefilter("always")
             warnings.warn(
                 "update_params() is deprecated. Use STTUpdateSettingsFrame with "
-                "SpeechmaticsSTTSettings(...) instead.",
+                "self.Settings(...) instead.",
                 DeprecationWarning,
             )
         # Check possible

@@ -16,7 +16,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, ClassVar, Dict, List, Literal, Optional
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Union
 
 from loguru import logger
 from PIL import Image
@@ -35,7 +35,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMMessagesFrame,
-    LLMTextFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
@@ -58,7 +57,12 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, is_given
+from pipecat.services.settings import (
+    NOT_GIVEN,
+    LLMSettings,
+    _NotGiven,
+    is_given,
+)
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -196,7 +200,9 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
             if message.role == "user":
                 for part in message.parts:
                     if part.function_response and part.function_response.id == tool_call_id:
-                        part.function_response.response = {"value": json.dumps(result)}
+                        part.function_response.response = {
+                            "value": json.dumps(result, ensure_ascii=False)
+                        }
 
 
 @dataclass
@@ -708,24 +714,26 @@ class GoogleThinkingConfig(BaseModel):
 
 @dataclass
 class GoogleLLMSettings(LLMSettings):
-    """Settings for Google LLM services.
+    """Settings for GoogleLLMService.
 
     Parameters:
         thinking: Thinking configuration.
     """
 
-    thinking: GoogleThinkingConfig | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    thinking: Union["GoogleLLMService.ThinkingConfig", _NotGiven] = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
     @classmethod
     def from_mapping(cls, settings):
         """Convert a plain dict to settings, coercing thinking dicts.
 
         For backward compatibility, a ``thinking`` value that is a plain dict
-        is converted to a :class:`GoogleThinkingConfig`.
+        is converted to a :class:`GoogleLLMService.ThinkingConfig`.
         """
         instance = super().from_mapping(settings)
         if is_given(instance.thinking) and isinstance(instance.thinking, dict):
-            instance.thinking = GoogleThinkingConfig(**instance.thinking)
+            instance.thinking = GoogleLLMService.ThinkingConfig(**instance.thinking)
         return instance
 
 
@@ -737,7 +745,8 @@ class GoogleLLMService(LLMService):
     expected by the Google AI model.
     """
 
-    _settings: GoogleLLMSettings
+    Settings = GoogleLLMSettings
+    _settings: Settings
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
@@ -747,6 +756,9 @@ class GoogleLLMService(LLMService):
 
     class InputParams(BaseModel):
         """Input parameters for Google AI models.
+
+        .. deprecated:: 0.0.105
+            Use ``settings=GoogleLLMService.Settings(...)`` instead.
 
         Parameters:
             max_tokens: Maximum number of tokens to generate.
@@ -766,15 +778,16 @@ class GoogleLLMService(LLMService):
         temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
         top_k: Optional[int] = Field(default=None, ge=0)
         top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-        thinking: Optional[GoogleThinkingConfig] = Field(default=None)
+        thinking: Optional["GoogleLLMService.ThinkingConfig"] = Field(default=None)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: str = "gemini-2.5-flash",
+        model: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[Settings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_config: Optional[Dict[str, Any]] = None,
@@ -785,36 +798,72 @@ class GoogleLLMService(LLMService):
 
         Args:
             api_key: Google AI API key for authentication.
-            model: Model name to use. Defaults to "gemini-2.0-flash".
-            params: Input parameters for the model.
+            model: Model name to use.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleLLMService.Settings(model=...)`` instead.
+
+            params: Optional model parameters for inference.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleLLMService.Settings(...)`` instead.
+
+            settings: Runtime-updatable settings for this service.  When both
+                deprecated parameters and *settings* are provided, *settings*
+                values take precedence.
             system_instruction: System instruction/prompt for the model.
+
+                .. deprecated:: 0.0.105
+                    Use ``settings=GoogleLLMService.Settings(system_instruction=...)`` instead.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent class.
         """
-        params = params or GoogleLLMService.InputParams()
-
-        super().__init__(
-            settings=GoogleLLMSettings(
-                model=model,
-                max_tokens=params.max_tokens,
-                temperature=params.temperature,
-                top_k=params.top_k,
-                top_p=params.top_p,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                thinking=params.thinking,
-                extra=params.extra if isinstance(params.extra, dict) else {},
-            ),
-            **kwargs,
+        # 1. Initialize default_settings with hardcoded defaults
+        default_settings = self.Settings(
+            model="gemini-2.5-flash",
+            system_instruction=None,
+            max_tokens=4096,
+            temperature=None,
+            top_k=None,
+            top_p=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            thinking=None,
+            extra={},
         )
 
+        # 2. Apply direct init arg overrides (deprecated)
+        if model is not None:
+            self._warn_init_param_moved_to_settings("model", "model")
+            default_settings.model = model
+        if system_instruction is not None:
+            self._warn_init_param_moved_to_settings("system_instruction", "system_instruction")
+            default_settings.system_instruction = system_instruction
+
+        # 3. Apply params overrides — only if settings not provided
+        if params is not None:
+            self._warn_init_param_moved_to_settings("params")
+            if not settings:
+                default_settings.max_tokens = params.max_tokens
+                default_settings.temperature = params.temperature
+                default_settings.top_k = params.top_k
+                default_settings.top_p = params.top_p
+                default_settings.thinking = params.thinking
+                if isinstance(params.extra, dict):
+                    default_settings.extra = params.extra
+
+        # 4. Apply settings delta (canonical API, always wins)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
+
         self._api_key = api_key
-        self._system_instruction = system_instruction
         self._http_options = update_google_client_http_options(http_options)
         self._tools = tools
         self._tool_config = tool_config
@@ -835,7 +884,10 @@ class GoogleLLMService(LLMService):
         self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
 
     async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+        self,
+        context: LLMContext | OpenAILLMContext,
+        max_tokens: Optional[int] = None,
+        system_instruction: Optional[str] = None,
     ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -843,6 +895,8 @@ class GoogleLLMService(LLMService):
             context: The LLM context containing conversation history.
             max_tokens: Optional maximum number of tokens to generate. If provided,
                 overrides the service's default max_tokens setting.
+            system_instruction: Optional system instruction to use for this inference.
+                If provided, overrides any system instruction in the context.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -850,9 +904,12 @@ class GoogleLLMService(LLMService):
         messages = []
         system = []
         tools = []
+        effective_instruction = system_instruction or self._settings.system_instruction
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
-            params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
+                context, system_instruction=effective_instruction
+            )
             messages = params["messages"]
             system = params["system_instruction"]
             tools = params["tools"]
@@ -951,12 +1008,9 @@ class GoogleLLMService(LLMService):
         self, params_from_context: GeminiLLMInvocationParams
     ) -> AsyncIterator[GenerateContentResponse]:
         messages = params_from_context["messages"]
-        if (
-            params_from_context["system_instruction"]
-            and self._system_instruction != params_from_context["system_instruction"]
-        ):
-            logger.debug(f"System instruction changed: {params_from_context['system_instruction']}")
-            self._system_instruction = params_from_context["system_instruction"]
+
+        # The adapter already resolved system_instruction vs context system message.
+        system_instruction = params_from_context["system_instruction"]
 
         tools = []
         if params_from_context["tools"]:
@@ -969,7 +1023,9 @@ class GoogleLLMService(LLMService):
 
         # Build generation parameters
         generation_params = self._build_generation_params(
-            system_instruction=self._system_instruction, tools=tools, tool_config=tool_config
+            system_instruction=system_instruction,
+            tools=tools,
+            tool_config=tool_config,
         )
 
         # possibly modify generation_params (in place) to set thinking to off by default
@@ -1003,7 +1059,9 @@ class GoogleLLMService(LLMService):
         self, context: LLMContext
     ) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
-        params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
+        params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
+            context, system_instruction=self._settings.system_instruction
+        )
 
         logger.debug(
             f"{self}: Generating chat from universal context [{params['system_instruction']}] | {adapter.get_messages_for_logging(context)}"
