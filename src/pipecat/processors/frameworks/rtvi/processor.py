@@ -304,7 +304,10 @@ class RTVIProcessor(FrameProcessor):
         version_error = None
         if version:
             try:
-                self._client_version = [int(v) for v in version.split(".")]
+                parts = [int(v) for v in version.split(".")]
+                if len(parts) != 3:
+                    raise ValueError
+                self._client_version = parts
                 protocol_major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
                 if self._client_version[0] != protocol_major:
                     version_error = f"RTVI version {version} is not compatible with server protocol {RTVI.PROTOCOL_VERSION}."
