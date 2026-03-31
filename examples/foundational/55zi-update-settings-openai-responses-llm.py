@@ -102,9 +102,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating OpenAI LLM settings: temperature=0.1")
+        logger.info("Updating OpenAI LLM settings: temperature=1")
         await task.queue_frame(
-            LLMUpdateSettingsFrame(delta=OpenAIResponsesLLMService.Settings(temperature=0.1))
+            # Known OpenAI Python issue (as of 2026-03-31): setting temperature
+            # to non-integer value results in failure.
+            # https://github.com/openai/openai-python/issues/2919
+            LLMUpdateSettingsFrame(delta=OpenAIResponsesLLMService.Settings(temperature=1))
         )
 
     @transport.event_handler("on_client_disconnected")
