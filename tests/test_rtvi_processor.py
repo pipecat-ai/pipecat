@@ -5,7 +5,7 @@
 #
 
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
