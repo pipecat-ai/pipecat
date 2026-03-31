@@ -389,9 +389,13 @@ class LLMContextSummarizationUtil:
 
         Scans messages from ``start_idx`` up to (but not including)
         ``summary_end`` to identify tool calls whose responses either don't
-        exist yet or fall in the kept portion of the context (>= summary_end).
+        exist yet, fall in the kept portion of the context (>= summary_end),
+        or are still marked as ``IN_PROGRESS`` (async calls whose results have
+        not yet arrived).
+
         This prevents summarizing tool call requests when their responses would
-        remain in the kept context as orphans, which the OpenAI API rejects.
+        remain in the kept context as orphans, which the OpenAI API rejects,
+        and avoids summarizing async function calls before their results arrive.
 
         Args:
             messages: List of messages to check.
@@ -428,11 +432,13 @@ class LLMContextSummarizationUtil:
                             if tool_call_id:
                                 pending_tool_calls[tool_call_id] = i
 
-            # Check for tool results
+            # Check for tool results — treat IN_PROGRESS as still pending
+            # (async function calls whose results have not yet arrived).
             if role == "tool":
                 tool_call_id = msg.get("tool_call_id")
                 if tool_call_id and tool_call_id in pending_tool_calls:
-                    pending_tool_calls.pop(tool_call_id)
+                    if msg.get("content") != "IN_PROGRESS":
+                        pending_tool_calls.pop(tool_call_id)
 
         # If we have pending tool calls, return the earliest index
         if pending_tool_calls:

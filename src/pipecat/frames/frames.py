@@ -1918,12 +1918,16 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
         tool_call_id: Unique identifier for this function call.
         arguments: Arguments passed to the function.
         cancel_on_interruption: Whether to cancel this call if interrupted.
+        is_async: Whether this function call runs asynchronously. When True,
+            the LLM continues the conversation immediately without waiting for
+            the result. The result is injected later via a developer message.
     """
 
     function_name: str
     tool_call_id: str
     arguments: Any
     cancel_on_interruption: bool = False
+    is_async: bool = False
 
 
 @dataclass

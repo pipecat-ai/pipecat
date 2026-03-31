@@ -124,6 +124,9 @@ class FunctionCallRegistryItem:
         function_name: The name of the function (None for catch-all handler).
         handler: The handler for processing function call parameters.
         cancel_on_interruption: Whether to cancel the call on interruption.
+        is_async: Whether this function call runs asynchronously. When True,
+            the LLM continues the conversation immediately without waiting for
+            the result. The result is injected later via a developer message.
         timeout_secs: Optional per-tool timeout in seconds. Overrides the global
             ``function_call_timeout_secs`` for this specific function.
     """
@@ -131,6 +134,7 @@ class FunctionCallRegistryItem:
     function_name: Optional[str]
     handler: FunctionCallHandler | "DirectFunctionWrapper"
     cancel_on_interruption: bool
+    is_async: bool = False
     timeout_secs: Optional[float] = None
 
 
@@ -578,6 +582,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         handler: Any,
         *,
         cancel_on_interruption: bool = True,
+        is_async: bool = False,
         timeout_secs: Optional[float] = None,
     ):
         """Register a function handler for LLM function calls.
@@ -589,6 +594,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 parameter.
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
+            is_async: Whether this function call runs asynchronously. When True,
+                the LLM continues the conversation immediately without waiting for
+                the result. The result is injected later via a developer message.
+                Defaults to False.
             timeout_secs: Optional per-tool timeout in seconds. Overrides the global
                 ``function_call_timeout_secs`` for this specific function. Defaults to
                 None, which uses the global timeout.
@@ -599,6 +608,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             function_name=function_name,
             handler=handler,
             cancel_on_interruption=cancel_on_interruption,
+            is_async=is_async,
             timeout_secs=timeout_secs,
         )
 
@@ -607,6 +617,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         handler: DirectFunction,
         *,
         cancel_on_interruption: bool = True,
+        is_async: bool = False,
         timeout_secs: Optional[float] = None,
     ):
         """Register a direct function handler for LLM function calls.
@@ -619,6 +630,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             handler: The direct function to register. Must follow DirectFunction protocol.
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
+            is_async: Whether this function call runs asynchronously. When True,
+                the LLM continues the conversation immediately without waiting for
+                the result. The result is injected later via a developer message.
+                Defaults to False.
             timeout_secs: Optional per-tool timeout in seconds. Overrides the global
                 ``function_call_timeout_secs`` for this specific function. Defaults to
                 None, which uses the global timeout.
@@ -628,6 +643,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             function_name=wrapper.name,
             handler=wrapper,
             cancel_on_interruption=cancel_on_interruption,
+            is_async=is_async,
             timeout_secs=timeout_secs,
         )
 
@@ -766,6 +782,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             tool_call_id=runner_item.tool_call_id,
             arguments=runner_item.arguments,
             cancel_on_interruption=item.cancel_on_interruption,
+            is_async=item.is_async,
         )
 
         timeout_task: Optional[asyncio.Task] = None

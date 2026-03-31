@@ -1067,16 +1067,25 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
             return
 
+        in_progress_frame = self._function_calls_in_progress[frame.tool_call_id]
+        is_async = in_progress_frame.is_async if in_progress_frame else False
         del self._function_calls_in_progress[frame.tool_call_id]
 
         properties = frame.properties
 
-        # Update context with the function call result
-        if frame.result:
-            result = json.dumps(frame.result, ensure_ascii=False)
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+
+        if is_async:
+            # For async function calls instead of updating the existing IN_PROGRESS tool message we inject
+            # a new developer message so the LLM is notified of the completed result.
+            self._context.add_message(
+                {
+                    "role": "developer",
+                    "content": f"Async function with id '{frame.tool_call_id}' completed with result: {result}",
+                }
+            )
         else:
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, "COMPLETED")
+            self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
 
         run_llm = False
 
