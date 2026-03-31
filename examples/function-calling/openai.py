@@ -88,7 +88,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function(
+        "get_current_weather", fetch_weather_from_api, cancel_on_interruption=False, is_async=True
+    )
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     @llm.event_handler("on_function_calls_started")
