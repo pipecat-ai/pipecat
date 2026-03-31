@@ -746,33 +746,41 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
 
         full_input = invocation_params["input"]
 
-        # -- first attempt (with previous_response_id optimization) -----------
+        def build_params(*, apply_optimization: bool) -> dict:
+            params = self._build_response_params(invocation_params)
+            # WebSocket mode does not use the "stream" parameter.
+            params.pop("stream", None)
+            if apply_optimization:
+                params = self._apply_previous_response_optimization(params, full_input)
+            return params
 
-        params = self._build_response_params(invocation_params)
-        # WebSocket mode does not use the "stream" parameter
-        params.pop("stream", None)
-        params = self._apply_previous_response_optimization(params, full_input)
-
-        try:
+        async def send_and_receive(params: dict):
             await self._ensure_connected()
             await self.start_ttfb_metrics()
             await self._ws_send({"type": "response.create", **params})
             await self._receive_response_events(context, full_input)
+
+        async def cleanup():
+            self._clear_previous_response_state()
+            await self.stop_ttfb_metrics()
+
+        # -- first attempt (with previous_response_id optimization) -----------
+
+        try:
+            await send_and_receive(build_params(apply_optimization=True))
             return  # Success
         except _PreviousResponseNotFoundError:
             logger.warning(
                 f"{self}: previous_response_not_found — "
                 f"retrying with full context ({len(full_input)} items)"
             )
-            self._clear_previous_response_state()
-            await self.stop_ttfb_metrics()
+            await cleanup()
         except _ConnectionLimitReachedError:
             logger.warning(
                 f"{self}: WebSocket connection limit reached — "
                 f"reconnecting and retrying with full context ({len(full_input)} items)"
             )
-            self._clear_previous_response_state()
-            await self.stop_ttfb_metrics()
+            await cleanup()
             await self._try_reconnect(report_error=self._report_error)
         except WebsocketReconnectedError:
             # ConnectionClosed was handled by the base class — connection is
@@ -781,26 +789,17 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
                 f"{self}: Connection lost and recovered — "
                 f"retrying with full context ({len(full_input)} items)"
             )
-            self._clear_previous_response_state()
-            await self.stop_ttfb_metrics()
+            await cleanup()
         except Exception:
-            self._clear_previous_response_state()
-            await self.stop_ttfb_metrics()
+            await cleanup()
             raise
 
         # -- retry with full context (no optimization) ------------------------
 
-        params = self._build_response_params(invocation_params)
-        params.pop("stream", None)
-
         try:
-            await self._ensure_connected()
-            await self.start_ttfb_metrics()
-            await self._ws_send({"type": "response.create", **params})
-            await self._receive_response_events(context, full_input)
+            await send_and_receive(build_params(apply_optimization=False))
         except Exception:
-            self._clear_previous_response_state()
-            await self.stop_ttfb_metrics()
+            await cleanup()
             raise
 
     async def _receive_response_events(self, context: LLMContext, full_input: list):
