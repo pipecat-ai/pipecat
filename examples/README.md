@@ -63,10 +63,11 @@ Progressive introduction to Pipecat, from minimal TTS to a full voice agent with
 
 ### [`services/`](./services/)
 
-Service provider integration examples, organized into subfolders:
+Full STT + LLM + TTS pipelines showcasing different speech service providers (Deepgram, ElevenLabs, Cartesia, etc.)
 
-- **[`speech/`](./services/speech/)** — Full STT + LLM + TTS pipelines showcasing different speech service providers (Deepgram, ElevenLabs, Cartesia, etc.)
-- **[`function-calling/`](./services/function-calling/)** — Function calling with different LLM providers (OpenAI, Anthropic, Google, etc.)
+### [`function-calling/`](./function-calling/)
+
+Function calling with different LLM providers (OpenAI, Anthropic, Google, etc.)
 
 ### [`transcription/`](./transcription/)
 
