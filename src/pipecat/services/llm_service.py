@@ -8,6 +8,7 @@
 
 import asyncio
 import inspect
+import json
 import warnings
 from dataclasses import dataclass
 from typing import (
@@ -23,6 +24,8 @@ from typing import (
 )
 
 from loguru import logger
+from websockets.exceptions import ConnectionClosed
+from websockets.protocol import State
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
@@ -30,6 +33,7 @@ from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
@@ -60,6 +64,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import LLMSettings
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
@@ -978,3 +983,182 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     def _function_call_task_finished(self, task: asyncio.Task):
         if task in self._function_call_tasks:
             del self._function_call_tasks[task]
+
+
+# ---------------------------------------------------------------------------
+# WebSocket LLM service base
+# ---------------------------------------------------------------------------
+
+
+class WebsocketReconnectedError(Exception):
+    """Raised by ``_ws_send``/``_ws_recv`` after a transparent reconnection.
+
+    Signals that the WebSocket connection was lost and automatically
+    re-established.  Callers should treat this as a prompt to restart
+    the current transaction — any connection-local state on the server
+    (e.g. cached responses) is gone.
+    """
+
+    pass
+
+
+class WebsocketLLMService(LLMService, WebsocketService):
+    """Base class for websocket-based LLM services using a transactional model.
+
+    Unlike ``WebsocketTTSService`` / ``WebsocketSTTService`` which run a
+    continuous background receive loop (``_receive_task_handler``), LLM
+    services follow a **transactional** pattern: send a request, receive
+    events inline until a terminal event, then process the next request.
+    This class does **not** start ``_receive_task_handler``.
+
+    Provides connection lifecycle management (connect on start, disconnect
+    on stop/cancel), automatic reconnection with exponential backoff, and
+    transactional helpers (``_ws_send``, ``_ws_recv``, ``_ensure_connected``).
+
+    ``_ws_send`` and ``_ws_recv`` catch ``ConnectionClosed`` transparently,
+    auto-reconnect via ``_try_reconnect``, and raise
+    ``WebsocketReconnectedError`` so callers know the transaction must
+    restart.  If reconnection fails, the original ``ConnectionClosed``
+    propagates.
+
+    Subclasses must implement:
+        ``_connect_websocket()``: Establish the websocket connection.
+        ``_disconnect_websocket()``: Close the websocket and clean up.
+
+    Event handlers:
+        on_connection_error: Called when a websocket connection error occurs.
+
+    Example::
+
+        @llm.event_handler("on_connection_error")
+        async def on_connection_error(llm: LLMService, error: str):
+            logger.error(f"LLM connection error: {error}")
+    """
+
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+        """Initialize the Websocket LLM service.
+
+        Args:
+            reconnect_on_error: Whether to automatically reconnect on websocket errors.
+            **kwargs: Additional arguments passed to parent classes.
+        """
+        LLMService.__init__(self, **kwargs)
+        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+
+    # -- lifecycle ------------------------------------------------------------
+
+    async def _connect(self):
+        """Connect: reset flags and establish the websocket."""
+        await super()._connect()
+        await self._connect_websocket()
+
+    async def _disconnect(self):
+        """Disconnect: set flags and close the websocket."""
+        await super()._disconnect()
+        await self._disconnect_websocket()
+
+    async def start(self, frame: StartFrame):
+        """Start the service and establish WebSocket connection.
+
+        Args:
+            frame: The start frame triggering service initialization.
+        """
+        await super().start(frame)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the service and close WebSocket connection.
+
+        Args:
+            frame: The end frame triggering service shutdown.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the service and close WebSocket connection.
+
+        Args:
+            frame: The cancel frame triggering service cancellation.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    # -- transactional helpers ------------------------------------------------
+
+    async def _ws_send(self, message: dict):
+        """Send a JSON message over the websocket.
+
+        Guards against sends during intentional disconnect.  If the send
+        fails with ``ConnectionClosed``, attempts to reconnect and raises
+        ``WebsocketReconnectedError`` on success so callers can restart
+        the transaction.  If reconnection fails, the original
+        ``ConnectionClosed`` propagates.
+
+        Args:
+            message: The message dict to serialize and send.
+        """
+        if self._disconnecting or not self._websocket:
+            return
+        try:
+            await self._websocket.send(json.dumps(message))
+        except ConnectionClosed:
+            if self._disconnecting:
+                return
+            success = await self._try_reconnect(report_error=self._report_error)
+            if success:
+                raise WebsocketReconnectedError()
+            raise
+
+    async def _ws_recv(self) -> dict:
+        """Receive and parse a JSON message from the websocket.
+
+        If the receive fails with ``ConnectionClosed``, attempts to
+        reconnect and raises ``WebsocketReconnectedError`` on success.
+        If reconnection fails, the original ``ConnectionClosed``
+        propagates.
+
+        Returns:
+            The parsed JSON message as a dict.
+        """
+        try:
+            raw = await self._websocket.recv()
+            return json.loads(raw)
+        except ConnectionClosed:
+            if self._disconnecting:
+                raise
+            success = await self._try_reconnect(report_error=self._report_error)
+            if success:
+                raise WebsocketReconnectedError()
+            raise
+
+    async def _ensure_connected(self):
+        """Ensure the websocket is connected, reconnecting if needed.
+
+        Uses ``_try_reconnect`` with exponential backoff.
+
+        Raises:
+            ConnectionError: If the connection could not be established.
+        """
+        if self._websocket and self._websocket.state is not State.CLOSED:
+            return
+        success = await self._try_reconnect(report_error=self._report_error)
+        if not success:
+            raise ConnectionError(f"{self} failed to establish WebSocket connection")
+
+    # -- WebsocketService interface -------------------------------------------
+
+    async def _receive_messages(self):
+        """Not used — WebsocketLLMService uses transactional message reception.
+
+        This satisfies the ``WebsocketService`` abstract method but is never
+        called because ``_receive_task_handler`` is never started.
+        """
+        raise NotImplementedError(
+            "WebsocketLLMService uses transactional message reception, "
+            "not continuous background receiving"
+        )
+
+    async def _report_error(self, error: ErrorFrame):
+        await self._call_event_handler("on_connection_error", error.error)
+        await self.push_error_frame(error)

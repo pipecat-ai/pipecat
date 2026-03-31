@@ -33,18 +33,20 @@ from pipecat.adapters.services.open_ai_responses_adapter import (
     OpenAIResponsesLLMInvocationParams,
 )
 from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
     Frame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    StartFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import (
+    FunctionCallFromLLM,
+    LLMService,
+    WebsocketLLMService,
+    WebsocketReconnectedError,
+)
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
 from pipecat.services.settings import LLMSettings, _NotGiven
 from pipecat.utils.tracing.service_decorators import traced_llm
@@ -52,6 +54,7 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 try:
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.exceptions import ConnectionClosed
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
@@ -338,7 +341,7 @@ class _BaseOpenAIResponsesLLMService(LLMService):
 # ---------------------------------------------------------------------------
 
 
-class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
+class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMService):
     """OpenAI Responses API LLM service using WebSocket transport.
 
     Maintains a persistent WebSocket connection to ``wss://api.openai.com/v1/responses``
@@ -384,8 +387,6 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         super().__init__(**kwargs)
 
         self._ws_url = ws_url
-        self._websocket = None
-        self._disconnecting = False
 
         # State for previous_response_id optimization
         self._previous_response_id: Optional[str] = None
@@ -398,42 +399,12 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         self._cancel_pending_response: bool = False
         self._needs_drain: bool = False
 
-    # -- lifecycle ------------------------------------------------------------
+    # -- WebsocketLLMService interface ----------------------------------------
 
-    async def start(self, frame: StartFrame):
-        """Start the service and establish WebSocket connection.
-
-        Args:
-            frame: The start frame triggering service initialization.
-        """
-        await super().start(frame)
-        await self._connect()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the service and close WebSocket connection.
-
-        Args:
-            frame: The end frame triggering service shutdown.
-        """
-        await super().stop(frame)
-        await self._disconnect()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the service and close WebSocket connection.
-
-        Args:
-            frame: The cancel frame triggering service cancellation.
-        """
-        await super().cancel(frame)
-        await self._disconnect()
-
-    # -- connection management ------------------------------------------------
-
-    async def _connect(self):
+    async def _connect_websocket(self):
         """Establish the WebSocket connection."""
-        self._disconnecting = False
         try:
-            if self._websocket:
+            if self._websocket and self._websocket.state is not State.CLOSED:
                 return
             self._websocket = await websocket_connect(
                 uri=self._ws_url,
@@ -442,13 +413,12 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
                 },
             )
         except Exception as e:
-            await self.push_error(error_msg=f"Error connecting to WebSocket: {e}", exception=e)
             self._websocket = None
+            await self.push_error(error_msg=f"Error connecting to WebSocket: {e}", exception=e)
 
-    async def _disconnect(self):
+    async def _disconnect_websocket(self):
         """Close the WebSocket connection and clear state."""
         try:
-            self._disconnecting = True
             await self.stop_all_metrics()
             if self._websocket:
                 await self._websocket.close()
@@ -458,33 +428,6 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
             self._websocket = None
             self._clear_previous_response_state()
             self._clear_cancellation_state()
-            self._disconnecting = False
-
-    async def _reconnect(self):
-        """Reconnect to the WebSocket, clearing previous_response_id state."""
-        await self._disconnect()
-        await self._connect()
-
-    async def _ensure_connected(self):
-        """Ensure a WebSocket connection is available, reconnecting if needed.
-
-        Raises:
-            _RetryableError: If the connection could not be established.
-        """
-        if self._websocket is None:
-            await self._connect()
-        if self._websocket is None:
-            raise _RetryableError("Failed to establish WebSocket connection")
-
-    async def _ws_send(self, message: dict):
-        """Send a JSON message over the WebSocket.
-
-        Args:
-            message: The message dict to serialize and send.
-        """
-        if self._disconnecting or not self._websocket:
-            return
-        await self._websocket.send(json.dumps(message))
 
     # -- previous_response_id optimization ------------------------------------
 
@@ -676,7 +619,9 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         This method reads and discards events until a terminal event
         (``response.completed``, ``response.failed``, or
         ``response.incomplete``) arrives, ensuring the connection is clean.
-        Falls back to reconnecting if draining takes too long.
+        If draining times out or the connection drops, clears cancellation
+        state and returns — ``_ensure_connected`` will handle reconnection
+        before the next inference.
         """
         logger.debug(f"{self}: Draining cancelled response events")
         try:
@@ -711,9 +656,9 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
                     )
                     self._clear_cancellation_state()
                     return
-        except (asyncio.TimeoutError, ConnectionClosed) as e:
-            logger.warning(f"{self}: Error draining cancelled response: {e} — reconnecting")
-            await self._reconnect()
+        except (asyncio.TimeoutError, WebsocketReconnectedError, ConnectionClosed) as e:
+            logger.warning(f"{self}: Error draining cancelled response: {e}")
+            self._clear_cancellation_state()
 
     # -- frame processing -----------------------------------------------------
 
@@ -776,6 +721,12 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
     async def _process_context(self, context: LLMContext):
         """Run inference over WebSocket with retry and previous_response_id.
 
+        Tries once with the ``previous_response_id`` optimization.  On a
+        retriable error (cache miss, connection limit, connection drop),
+        clears state and retries once with the full context.  Transport-level
+        ``ConnectionClosed`` errors are handled transparently by
+        ``_ws_send``/``_ws_recv`` (auto-reconnect → ``WebsocketReconnectedError``).
+
         Args:
             context: The LLM context containing conversation history.
         """
@@ -796,60 +747,53 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
 
         full_input = invocation_params["input"]
 
-        max_attempts = 2
-        for attempt in range(max_attempts):
-            params = self._build_response_params(invocation_params)
-            # WebSocket mode does not use the "stream" parameter
-            params.pop("stream", None)
+        # -- first attempt (with previous_response_id optimization) -----------
 
-            # Apply previous_response_id optimization (skipped after a retry)
-            if attempt == 0:
-                params = self._apply_previous_response_optimization(params, full_input)
+        params = self._build_response_params(invocation_params)
+        # WebSocket mode does not use the "stream" parameter
+        params.pop("stream", None)
+        params = self._apply_previous_response_optimization(params, full_input)
 
-            try:
-                await self._ensure_connected()
-                await self.start_ttfb_metrics()
-                await self._ws_send({"type": "response.create", **params})
-                await self._receive_response_events(context, full_input)
-                return  # Success
-            except _PreviousResponseNotFoundError:
-                logger.warning(
-                    f"{self}: previous_response_not_found — "
-                    f"retrying with full context ({len(full_input)} items)"
-                )
-                self._clear_previous_response_state()
-                await self.stop_ttfb_metrics()
-                if attempt >= max_attempts - 1:
-                    await self.push_error(
-                        error_msg="previous_response_not_found: retry also failed"
-                    )
-                    return
-            except _ConnectionLimitReachedError:
-                logger.warning(
-                    f"{self}: WebSocket connection limit reached — "
-                    f"reconnecting and retrying with full context ({len(full_input)} items)"
-                )
-                self._clear_previous_response_state()
-                await self.stop_ttfb_metrics()
-                await self._reconnect()
-                if attempt >= max_attempts - 1:
-                    await self.push_error(error_msg="WebSocket connection limit: retry also failed")
-                    return
-            except ConnectionClosed as e:
-                logger.warning(
-                    f"{self}: WebSocket connection closed during inference: {e} — "
-                    f"reconnecting and retrying with full context ({len(full_input)} items)"
-                )
-                self._clear_previous_response_state()
-                self._websocket = None
-                await self.stop_ttfb_metrics()
-                await self._reconnect()
-                if attempt >= max_attempts - 1:
-                    await self.push_error(
-                        error_msg=f"WebSocket connection closed: retry also failed: {e}",
-                        exception=e,
-                    )
-                    return
+        try:
+            await self._ensure_connected()
+            await self.start_ttfb_metrics()
+            await self._ws_send({"type": "response.create", **params})
+            await self._receive_response_events(context, full_input)
+            return  # Success
+        except _PreviousResponseNotFoundError:
+            logger.warning(
+                f"{self}: previous_response_not_found — "
+                f"retrying with full context ({len(full_input)} items)"
+            )
+            self._clear_previous_response_state()
+            await self.stop_ttfb_metrics()
+        except _ConnectionLimitReachedError:
+            logger.warning(
+                f"{self}: WebSocket connection limit reached — "
+                f"reconnecting and retrying with full context ({len(full_input)} items)"
+            )
+            self._clear_previous_response_state()
+            await self.stop_ttfb_metrics()
+            await self._try_reconnect(report_error=self._report_error)
+        except WebsocketReconnectedError:
+            # ConnectionClosed was handled by the base class — connection is
+            # fresh, so any connection-local server state is gone.
+            logger.warning(
+                f"{self}: Connection lost and recovered — "
+                f"retrying with full context ({len(full_input)} items)"
+            )
+            self._clear_previous_response_state()
+            await self.stop_ttfb_metrics()
+
+        # -- retry with full context (no optimization) ------------------------
+
+        params = self._build_response_params(invocation_params)
+        params.pop("stream", None)
+
+        await self._ensure_connected()
+        await self.start_ttfb_metrics()
+        await self._ws_send({"type": "response.create", **params})
+        await self._receive_response_events(context, full_input)
 
     async def _receive_response_events(self, context: LLMContext, full_input: list):
         """Receive and process WebSocket events until the response completes.
@@ -861,14 +805,13 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService):
         Raises:
             _PreviousResponseNotFoundError: Server couldn't find previous response.
             _ConnectionLimitReachedError: 60-minute connection limit reached.
-            ConnectionClosed: WebSocket connection was closed unexpectedly.
+            WebsocketReconnectedError: Connection was lost and auto-recovered.
         """
         function_calls: Dict[str, Dict[str, str]] = {}
         current_arguments: Dict[str, str] = {}
 
         while True:
-            raw = await self._websocket.recv()
-            event = json.loads(raw)
+            event = await self._ws_recv()
             event_type = event.get("type")
 
             if event_type == "response.created":
