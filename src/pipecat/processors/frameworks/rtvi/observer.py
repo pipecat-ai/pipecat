@@ -59,7 +59,6 @@ from pipecat.metrics.metrics import (
     TTSUsageMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIServerMessageFrame,
@@ -358,10 +357,7 @@ class RTVIObserver(BaseObserver):
             and self._params.user_transcription_enabled
         ):
             await self._handle_user_transcriptions(frame)
-        elif (
-            isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame))
-            and self._params.user_llm_enabled
-        ):
+        elif isinstance(frame, LLMContextFrame) and self._params.user_llm_enabled:
             await self._handle_context(frame)
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
             await self.send_rtvi_message(RTVI.BotLLMStartedMessage())
@@ -575,13 +571,10 @@ class RTVIObserver(BaseObserver):
         if message:
             await self.send_rtvi_message(message)
 
-    async def _handle_context(self, frame: OpenAILLMContextFrame | LLMContextFrame):
+    async def _handle_context(self, frame: LLMContextFrame):
         """Process LLM context frames to extract user messages for the RTVI client."""
         try:
-            if isinstance(frame, OpenAILLMContextFrame):
-                messages = frame.context.messages
-            else:
-                messages = frame.context.get_messages()
+            messages = frame.context.get_messages()
             if not messages:
                 return
 

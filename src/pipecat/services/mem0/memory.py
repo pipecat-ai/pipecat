@@ -17,12 +17,8 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.frames.frames import Frame, LLMContextFrame, LLMMessagesFrame
+from pipecat.frames.frames import Frame, LLMContextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
@@ -227,9 +223,7 @@ class Mem0MemoryService(FrameProcessor):
             logger.error(f"Error retrieving memories from Mem0: {e}")
             return []
 
-    async def _enhance_context_with_memories(
-        self, context: LLMContext | OpenAILLMContext, query: str
-    ):
+    async def _enhance_context_with_memories(self, context: LLMContext, query: str):
         """Enhance the LLM context with relevant memories.
 
         Args:
@@ -272,13 +266,9 @@ class Mem0MemoryService(FrameProcessor):
         await super().process_frame(frame, direction)
 
         context = None
-        messages = None
 
-        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+        if isinstance(frame, LLMContextFrame):
             context = frame.context
-        elif isinstance(frame, LLMMessagesFrame):
-            messages = frame.messages
-            context = LLMContext(messages)
 
         if context:
             try:
@@ -302,12 +292,8 @@ class Mem0MemoryService(FrameProcessor):
                     # Store the conversation in Mem0 as a background task
                     self.create_task(self._store_messages(messages_to_store), name="mem0_store")
 
-                # If we received an LLMMessagesFrame, create a new one with the enhanced messages
-                if messages is not None:
-                    await self.push_frame(LLMMessagesFrame(context.get_messages()))
-                else:
-                    # Otherwise, pass the enhanced context frame downstream
-                    await self.push_frame(frame)
+                # Pass the enhanced context frame downstream
+                await self.push_frame(frame)
             except Exception as e:
                 await self.push_error(
                     error_msg=f"Error processing with Mem0: {str(e)}", exception=e

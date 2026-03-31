@@ -47,7 +47,6 @@ def _get_provider_name_from_service_name(service_name: str) -> str:
         "AzureLLMService": "az.ai.openai",
         # Google
         "GoogleLLMService": "gcp.gemini",
-        "GoogleLLMOpenAIBetaService": "gcp.gemini",
         "GoogleVertexLLMService": "gcp.vertex_ai",
         # Others
         "GrokLLMService": "xai",

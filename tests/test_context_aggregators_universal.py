@@ -4,13 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 import unittest
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     FunctionCallFromLLM,
+    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     FunctionCallsStartedFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
@@ -26,6 +29,7 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     StartFrame,
+    TextFrame,
     TranscriptionFrame,
     TranslationFrame,
     UserMuteStartedFrame,
@@ -588,6 +592,165 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_stop)
         self.assertEqual(stop_message.content, "Hello from Pipecat!")
 
+    async def test_multiple_text_with_spaces(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        def make_text_frame(text: str) -> TextFrame:
+            frame = TextFrame(text=text)
+            frame.includes_inter_frame_spaces = True
+            return frame
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            make_text_frame("Hello "),
+            make_text_frame("Pipecat. "),
+            make_text_frame("How are "),
+            make_text_frame("you?"),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert context.messages[0]["content"] == "Hello Pipecat. How are you?"
+
+    async def test_multiple_text_stripped(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            TextFrame(text="Hello"),
+            TextFrame(text="Pipecat."),
+            TextFrame(text="How are"),
+            TextFrame(text="you?"),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert context.messages[0]["content"] == "Hello Pipecat. How are you?"
+
+    async def test_multiple_text_mixed_spaces(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        def make_text_frame(text: str, includes_spaces: bool) -> TextFrame:
+            frame = TextFrame(text=text)
+            frame.includes_inter_frame_spaces = includes_spaces
+            return frame
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            make_text_frame("Hello ", includes_spaces=True),
+            make_text_frame("Pipecat. ", includes_spaces=True),
+            make_text_frame("Here's some", includes_spaces=True),
+            make_text_frame(
+                " code:", includes_spaces=True
+            ),  # Validates ending includes_inter_frame_spaces run with no space
+            make_text_frame("```python\nprint('Hello, World!')\n```", includes_spaces=False),
+            make_text_frame(
+                "```javascript\nconsole.log('Hello, World!');\n```", includes_spaces=False
+            ),
+            make_text_frame(
+                " And some more: ", includes_spaces=True
+            ),  # Validates starting includes_inter_frame_spaces run with a space and ending it with no space
+            make_text_frame("```html\n<div>Hello, World!</div>\n```", includes_spaces=False),
+            make_text_frame(
+                "Hope that ", includes_spaces=True
+            ),  # Validates starting includes_inter_frame_spaces run with no space
+            make_text_frame("helps!", includes_spaces=True),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert context.messages[0]["content"] == (
+            "Hello Pipecat. Here's some code: "
+            "```python\nprint('Hello, World!')\n``` "
+            "```javascript\nconsole.log('Hello, World!');\n``` "
+            "And some more: "
+            "```html\n<div>Hello, World!</div>\n``` "
+            "Hope that helps!"
+        )
+
+    async def test_multiple_responses(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        def make_text_frame(text: str) -> TextFrame:
+            frame = TextFrame(text=text)
+            frame.includes_inter_frame_spaces = True
+            return frame
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            make_text_frame("Hello "),
+            make_text_frame("Pipecat."),
+            LLMFullResponseEndFrame(),
+            LLMFullResponseStartFrame(),
+            make_text_frame(text="How are "),
+            make_text_frame(text="you?"),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert context.messages[0]["content"] == "Hello Pipecat."
+        assert context.messages[1]["content"] == "How are you?"
+
+    async def test_multiple_responses_interruption(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        def make_text_frame(text: str) -> TextFrame:
+            frame = TextFrame(text=text)
+            frame.includes_inter_frame_spaces = True
+            return frame
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            make_text_frame("Hello "),
+            make_text_frame("Pipecat."),
+            LLMFullResponseEndFrame(),
+            SleepFrame(0.15),
+            InterruptionFrame(),
+            LLMFullResponseStartFrame(),
+            make_text_frame("How are "),
+            make_text_frame("you?"),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+            InterruptionFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert context.messages[0]["content"] == "Hello Pipecat."
+        assert context.messages[1]["content"] == "How are you?"
+
     async def test_interruption(self):
         context = LLMContext()
 
@@ -634,6 +797,67 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(should_stop, 2)
         self.assertEqual(stop_messages[0].content, "Hello")
         self.assertEqual(stop_messages[1].content, "Hello there!")
+
+    async def test_function_call(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+        ]
+        expected_down_frames = []
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
+
+    async def test_function_call_on_context_updated(self):
+        context_updated = False
+
+        async def on_context_updated():
+            nonlocal context_updated
+            context_updated = True
+
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+                properties=FunctionCallResultProperties(on_context_updated=on_context_updated),
+            ),
+            SleepFrame(),
+        ]
+        expected_down_frames = []
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
+        assert context_updated
 
     async def test_thought(self):
         context = LLMContext()

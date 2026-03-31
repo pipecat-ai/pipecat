@@ -18,55 +18,10 @@ from loguru import logger
 
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import (
-    OpenAIAssistantContextAggregator,
     OpenAILLMService,
-    OpenAIUserContextAggregator,
 )
-
-
-@dataclass
-class GrokContextAggregatorPair:
-    """Pair of context aggregators for user and assistant interactions.
-
-    Provides a convenient container for managing both user and assistant
-    context aggregators together for Grok LLM interactions.
-
-    .. deprecated:: 0.0.99
-        `GrokContextAggregatorPair` is deprecated and will be removed in a future version.
-        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-        See `OpenAILLMContext` docstring for migration guide.
-
-    Parameters:
-        _user: The user context aggregator instance.
-        _assistant: The assistant context aggregator instance.
-    """
-
-    # Aggregators handle deprecation warnings
-    _user: OpenAIUserContextAggregator
-    _assistant: OpenAIAssistantContextAggregator
-
-    def user(self) -> OpenAIUserContextAggregator:
-        """Get the user context aggregator.
-
-        Returns:
-            The user context aggregator instance.
-        """
-        return self._user
-
-    def assistant(self) -> OpenAIAssistantContextAggregator:
-        """Get the assistant context aggregator.
-
-        Returns:
-            The assistant context aggregator instance.
-        """
-        return self._assistant
 
 
 @dataclass
@@ -147,7 +102,7 @@ class GrokLLMService(OpenAILLMService):
         logger.debug(f"Creating Grok client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    async def _process_context(self, context: OpenAILLMContext | LLMContext):
+    async def _process_context(self, context: LLMContext):
         """Process a context through the LLM and accumulate token usage metrics.
 
         This method overrides the parent class implementation to handle Grok's
@@ -213,38 +168,3 @@ class GrokLLMService(OpenAILLMService):
 
         if tokens.reasoning_tokens is not None:
             self._reasoning_tokens = tokens.reasoning_tokens
-
-    def create_context_aggregator(
-        self,
-        context: OpenAILLMContext,
-        *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> GrokContextAggregatorPair:
-        """Create an instance of GrokContextAggregatorPair from an OpenAILLMContext.
-
-        Constructor keyword arguments for both the user and assistant aggregators
-        can be provided.
-
-        Args:
-            context: The LLM context to create aggregators for.
-            user_params: Parameters for configuring the user aggregator.
-            assistant_params: Parameters for configuring the assistant aggregator.
-
-        Returns:
-            GrokContextAggregatorPair: A pair of context aggregators, one for
-            the user and one for the assistant, encapsulated in an
-            GrokContextAggregatorPair.
-
-        .. deprecated:: 0.0.99
-            `create_context_aggregator()` is deprecated and will be removed in a future version.
-            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-            See `OpenAILLMContext` docstring for migration guide.
-        """
-        context.set_llm_adapter(self.get_llm_adapter())
-
-        # Aggregators handle deprecation warnings
-        user = OpenAIUserContextAggregator(context, params=user_params)
-        assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
-
-        return GrokContextAggregatorPair(_user=user, _assistant=assistant)
