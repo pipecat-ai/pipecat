@@ -265,12 +265,8 @@ class Mem0MemoryService(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        context = None
-
         if isinstance(frame, LLMContextFrame):
             context = frame.context
-
-        if context:
             try:
                 # Get the latest user message to use as a query for memory retrieval
                 context_messages = context.get_messages()
@@ -300,5 +296,4 @@ class Mem0MemoryService(FrameProcessor):
                 )
                 await self.push_frame(frame)  # Still pass the original frame through
         else:
-            # For non-context frames, just pass them through
             await self.push_frame(frame, direction)

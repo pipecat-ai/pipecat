@@ -532,17 +532,11 @@ class BaseOpenAILLMService(LLMService):
         """
         await super().process_frame(frame, direction)
 
-        context = None
         if isinstance(frame, LLMContextFrame):
-            context = frame.context
-        else:
-            await self.push_frame(frame, direction)
-
-        if context:
             try:
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
-                await self._process_context(context)
+                await self._process_context(frame.context)
             except httpx.TimeoutException as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
@@ -551,3 +545,5 @@ class BaseOpenAILLMService(LLMService):
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
+        else:
+            await self.push_frame(frame, direction)

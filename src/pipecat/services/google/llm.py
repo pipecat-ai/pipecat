@@ -637,15 +637,10 @@ class GoogleLLMService(LLMService):
         """
         await super().process_frame(frame, direction)
 
-        context = None
-
         if isinstance(frame, LLMContextFrame):
-            context = frame.context
+            await self._process_context(frame.context)
         else:
             await self.push_frame(frame, direction)
-
-        if context:
-            await self._process_context(context)
 
     async def stop(self, frame):
         """Override stop to gracefully close the client."""

@@ -524,8 +524,7 @@ class AWSNovaSonicLLMService(LLMService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, LLMContextFrame):
-            context = frame.context
-            await self._handle_context(context)
+            await self._handle_context(frame.context)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, InterruptionFrame):

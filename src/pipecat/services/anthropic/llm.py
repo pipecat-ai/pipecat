@@ -552,17 +552,13 @@ class AnthropicLLMService(LLMService):
         """
         await super().process_frame(frame, direction)
 
-        context = None
         if isinstance(frame, LLMContextFrame):
-            context = frame.context
+            await self._process_context(frame.context)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
             self._settings.enable_prompt_caching = frame.enable
         else:
             await self.push_frame(frame, direction)
-
-        if context:
-            await self._process_context(context)
 
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r"[^\w]+", text)) * 1.3)
