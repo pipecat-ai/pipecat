@@ -783,6 +783,10 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
             )
             self._clear_previous_response_state()
             await self.stop_ttfb_metrics()
+        except Exception:
+            self._clear_previous_response_state()
+            await self.stop_ttfb_metrics()
+            raise
 
         # -- retry with full context (no optimization) ------------------------
 
