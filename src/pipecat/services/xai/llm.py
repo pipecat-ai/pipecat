@@ -102,7 +102,7 @@ class GrokLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Grok's API.
             base_url: The base URL for Grok API. Defaults to "https://api.x.ai/v1".
-            model: The model identifier to use. Defaults to "grok-3-beta".
+            model: The model identifier to use. Defaults to "grok-3".
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GrokLLMService.Settings(model=...)`` instead.
@@ -112,7 +112,9 @@ class GrokLLMService(OpenAILLMService):
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
-        default_settings = self.Settings(model="grok-3-beta")
+        default_settings = self.Settings(
+            model="grok-3",
+        )
 
         # 2. Apply direct init arg overrides (deprecated)
         if model is not None:
