@@ -865,9 +865,17 @@ class FrameProcessor(BaseObject):
     async def _start_interruption(self):
         """Start handling an interruption by cancelling current tasks."""
         try:
-            if isinstance(self.__process_current_frame, UninterruptibleFrame):
-                # We don't want to cancel UninterruptibleFrame, so we simply
-                # cleanup the queue.
+            current_is_uninterruptible = isinstance(
+                self.__process_current_frame, UninterruptibleFrame
+            )
+            queue_has_uninterruptible = any(
+                isinstance(item[0], UninterruptibleFrame) for item in self.__process_queue._queue
+            )
+            if current_is_uninterruptible or queue_has_uninterruptible:
+                # We don't want to cancel an UninterruptibleFrame (either the
+                # one currently being processed or one waiting in the queue),
+                # so we simply cleanup the queue keeping only
+                # UninterruptibleFrames.
                 self.__reset_process_queue()
             else:
                 # Cancel and re-create the process task.
