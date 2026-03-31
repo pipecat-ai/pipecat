@@ -116,9 +116,21 @@ Video avatar integrations (Tavus, HeyGen, Simli, LemonSlice).
 
 Video processing, mirroring, GStreamer, and custom video tracks.
 
+### [`audio/`](./audio/)
+
+Audio recording, background sounds, and sound effects.
+
+### [`observability/`](./observability/)
+
+Pipeline monitoring: observers, heartbeats, and Sentry metrics.
+
+### [`rag/`](./rag/)
+
+Retrieval-augmented generation, grounding, and long-term memory (Mem0, Gemini).
+
 ### [`features/`](./features/)
 
-Miscellaneous features: sound effects, wake phrases, observers, audio recording, live translation, service switching, and more.
+Miscellaneous features: wake phrases, live translation, service switching, voice switching, and more.
 
 ## Advanced Usage
 
