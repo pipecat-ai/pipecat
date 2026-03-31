@@ -19,6 +19,7 @@ import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     InputAudioRawFrame,
@@ -27,6 +28,7 @@ from pipecat.frames.frames import (
     OutputImageRawFrame,
     StartFrame,
     TranscriptionFrame,
+    UserAudioRawFrame,
     UserImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
@@ -147,13 +149,14 @@ class VonageClientListener:
         on_connected: Async callback when session is connected.
         on_disconnected: Async callback when session is disconnected.
         on_error: Async callback for session errors.
-        on_audio_in: Async callback for incoming audio data.
+        on_audio_in: Async callback for incoming mixed audio data (session-level).
         on_stream_received: Async callback when a stream is received.
         on_stream_dropped: Async callback when a stream is dropped.
         on_subscriber_connected: Async callback when a subscriber connects.
         on_subscriber_disconnected: Async callback when a subscriber disconnects.
-        on_video_in: Async callback when a subscriber receives a video frame.
         on_caption_text_in: Async callback when a subscriber receives caption text.
+        on_audio_in_per_subscriber: Async callback for processed per-subscriber audio frames.
+        on_video_in: Async callback for processed per-subscriber video frames.
     """
 
     on_connected: Callable[[Session], Awaitable[None]] = async_noop
@@ -164,6 +167,9 @@ class VonageClientListener:
     on_stream_dropped: Callable[[Session, Stream], Awaitable[None]] = async_noop
     on_subscriber_connected: Callable[[Subscriber], Awaitable[None]] = async_noop
     on_subscriber_disconnected: Callable[[Subscriber], Awaitable[None]] = async_noop
+    on_audio_in_per_subscriber: Callable[[Subscriber, UserAudioRawFrame], Awaitable[None]] = (
+        async_noop
+    )
     on_video_in: Callable[[Subscriber, UserImageRawFrame], Awaitable[None]] = async_noop
     on_caption_text_in: Callable[
         [Subscriber, TranscriptionFrame | InterimTranscriptionFrame], Awaitable[None]
@@ -284,7 +290,11 @@ class VonageClient:
         self._publisher: Publisher | None = None
         self._session = Session(id=session_id)
 
+        # Session-level mixed audio gets its own resampler
         self._resampler = create_stream_resampler()
+        # Per-subscriber resamplers — stream resamplers are stateful so each
+        # audio source needs its own instance to avoid interleaved-state corruption.
+        self._subscriber_resamplers: dict[str, BaseAudioResampler] = {}
 
         self._task_manager: BaseTaskManager | None = None
         self._loop_thread_id = threading.get_ident()
@@ -818,6 +828,7 @@ class VonageClient:
                 on_connected_cb=on_connected_cb,
                 on_disconnected_cb=on_subscriber_disconnected_cb,
                 on_render_frame_cb=self._on_subscriber_video_data_cb,
+                on_audio_data_cb=self._on_subscriber_audio_data_cb,
                 on_caption_text_cb=self._on_subscriber_caption_text_cb,
             ):
                 subscribed_future.cancel()
@@ -1051,12 +1062,48 @@ class VonageClient:
                 self._client.unsubscribe(stream)
                 self._session_subscriptions.pop(stream.id, None)
             self._session_streams.pop(stream.id, None)
+            # Clean up per-subscriber resampler and frame counter
+            self._subscriber_resamplers.pop(stream.id, None)
 
             await self._notify_listeners(
                 lambda listener: listener.on_stream_dropped(session, stream)
             )
 
         self._sdk_event_cb_to_loop(async_cb())
+
+    def _on_subscriber_audio_data_cb(self, subscriber: Subscriber, audio_data: AudioData) -> None:
+        """Callback for incoming per-subscriber audio data."""
+        # we need to keep a copy of the audio data as it is a memory view and it will be lost when processed async later
+        stream_id = subscriber.stream.id
+        audio_frame = UserAudioRawFrame(
+            user_id=stream_id,
+            audio=audio_data.sample_buffer.tobytes(),
+            sample_rate=audio_data.sample_rate,
+            num_channels=audio_data.number_of_channels,
+        )
+
+        async def async_cb() -> None:
+            # Get or create a per-subscriber resampler — stream resamplers are
+            # stateful so each audio source needs its own instance.
+            # This must run on the main event loop thread to avoid race conditions
+            # with _on_stream_dropped_cb which also mutates _subscriber_resamplers.
+            if stream_id not in self._subscriber_resamplers:
+                self._subscriber_resamplers[stream_id] = create_stream_resampler()
+            sub_resampler = self._subscriber_resamplers[stream_id]
+
+            target_audio_props = AudioProps(
+                sample_rate=self._audio_in_sample_rate,
+                is_stereo=self._params.audio_in_channels == 2,
+            )
+            # _process_audio_if_needed preserves the concrete type via dataclasses.replace
+            proc_audio_frame: UserAudioRawFrame = await self._process_audio_if_needed(
+                audio_frame, target_audio_props, resampler=sub_resampler
+            )  # type: ignore[assignment]
+            await self._notify_listeners(
+                lambda listener: listener.on_audio_in_per_subscriber(subscriber, proc_audio_frame)
+            )
+
+        self._sdk_audio_cb_to_loop(async_cb())
 
     def _on_subscriber_video_data_cb(self, subscriber: Subscriber, frame: VideoFrame) -> None:
         """Callback for incoming per stream data for all the subscribers in the session."""
@@ -1119,7 +1166,12 @@ class VonageClient:
 
         self._sdk_event_cb_to_loop(async_cb())
 
-    async def _process_audio_if_needed(self, audio_frame: TA, target_props: AudioProps) -> TA:
+    async def _process_audio_if_needed(
+        self,
+        audio_frame: TA,
+        target_props: AudioProps,
+        resampler: BaseAudioResampler | None = None,
+    ) -> TA:
         check_audio_data(audio_frame.audio, audio_frame.num_frames, audio_frame.num_channels)
 
         current_audio_props = AudioProps(
@@ -1129,7 +1181,7 @@ class VonageClient:
         if current_audio_props != target_props:
             audio_np = np.frombuffer(audio_frame.audio, dtype=np.int16)
             processed_audio_np = await process_audio(
-                self._resampler,
+                resampler or self._resampler,
                 audio_np,
                 current_audio_props,
                 target_props,

@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputImageRawFrame,
     StartFrame,
+    UserAudioRawFrame,
     UserImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -206,6 +207,7 @@ class SubscriberCallbacks:
     on_connected_cb: Callable[[MockSubscriber], None]
     on_disconnected_cb: Callable[[MockSubscriber], None]
     on_render_frame_cb: Callable[[MockSubscriber, MockVideoFrame], None]
+    on_audio_data_cb: Optional[Callable[[MockSubscriber, MockAudioData], None]] = None
 
 
 @dataclass(frozen=True)
@@ -377,6 +379,7 @@ class TestVonageVideoConnectorTransport:
             on_connected_cb: Callable[[MockSubscriber], None],
             on_disconnected_cb: Callable[[MockSubscriber], None],
             on_render_frame_cb: Callable[[MockSubscriber, MockVideoFrame], None],
+            on_audio_data_cb: Optional[Callable[[MockSubscriber, MockAudioData], None]] = None,
             **__: Any,
         ) -> bool:
             self._subscriber_callbacks[stream.id] = SubscriberCallbacks(
@@ -384,6 +387,7 @@ class TestVonageVideoConnectorTransport:
                 on_connected_cb=on_connected_cb,
                 on_disconnected_cb=on_disconnected_cb,
                 on_render_frame_cb=on_render_frame_cb,
+                on_audio_data_cb=on_audio_data_cb,
             )
             return True
 
@@ -1765,6 +1769,7 @@ class TestVonageVideoConnectorTransport:
             on_connected_cb=callbacks.on_connected_cb,
             on_disconnected_cb=callbacks.on_disconnected_cb,
             on_render_frame_cb=client._on_subscriber_video_data_cb,
+            on_audio_data_cb=client._on_subscriber_audio_data_cb,
             on_caption_text_cb=client._on_subscriber_caption_text_cb,
         )
         listener.on_stream_received.reset_mock()
@@ -1874,6 +1879,87 @@ class TestVonageVideoConnectorTransport:
         assert processed_image[0, 0, 0] == 200  # R channel (was B in BGR)
         assert processed_image[0, 0, 1] == 150  # G channel (unchanged)
         assert processed_image[0, 0, 2] == 100  # B channel (was R in BGR)
+
+    @pytest.mark.asyncio
+    async def test_on_subscriber_audio_data_cb_produces_user_audio_frame(self) -> None:
+        """Test that _on_subscriber_audio_data_cb notifies listeners with a UserAudioRawFrame."""
+        params = self.VonageVideoConnectorTransportParams(
+            audio_in_enabled=True,
+            audio_in_sample_rate=48000,
+            audio_in_channels=1,
+        )
+        client = await self._create_client(params)
+
+        on_audio_in_per_subscriber_mock = AsyncMock()
+        listener = self.VonageClientListener(
+            on_audio_in_per_subscriber=on_audio_in_per_subscriber_mock
+        )
+        client.add_listener(listener)
+
+        stream_id = "subscriber-audio-stream"
+        stream = vonage_video_mock.models.Stream(id=stream_id, connection=DUMMY_CONNECTION)
+        subscriber = vonage_video_mock.models.Subscriber(stream=stream)
+
+        audio_buffer = np.array([100, 200, 300, 400], dtype=np.int16)
+        mock_audio_data = vonage_video_mock.models.AudioData(
+            sample_buffer=memoryview(audio_buffer),
+            number_of_frames=4,
+            number_of_channels=1,
+            sample_rate=48000,
+        )
+
+        client._on_subscriber_audio_data_cb(subscriber, mock_audio_data)
+        await self._wait_for_condition(lambda: on_audio_in_per_subscriber_mock.await_count > 0)
+
+        on_audio_in_per_subscriber_mock.assert_awaited_once()
+        call_args = on_audio_in_per_subscriber_mock.call_args[0]
+        assert call_args[0] == subscriber
+
+        frame: UserAudioRawFrame = call_args[1]
+        assert isinstance(frame, UserAudioRawFrame)
+        assert frame.user_id == stream_id
+        assert frame.audio == audio_buffer.tobytes()
+        assert frame.sample_rate == 48000
+        assert frame.num_channels == 1
+
+    @pytest.mark.asyncio
+    async def test_on_subscriber_audio_data_cb_multiple_subscribers(self) -> None:
+        """Test that audio from different subscribers produces frames with distinct user_ids."""
+        params = self.VonageVideoConnectorTransportParams(
+            audio_in_enabled=True,
+            audio_in_sample_rate=48000,
+            audio_in_channels=1,
+        )
+        client = await self._create_client(params)
+
+        received: list[UserAudioRawFrame] = []
+
+        async def on_audio_in_per_subscriber(subscriber: Any, frame: UserAudioRawFrame) -> None:
+            received.append(frame)
+
+        listener = self.VonageClientListener(on_audio_in_per_subscriber=on_audio_in_per_subscriber)
+        client.add_listener(listener)
+
+        audio_buffer = np.array([1, 2, 3, 4], dtype=np.int16)
+        mock_audio_data = vonage_video_mock.models.AudioData(
+            sample_buffer=memoryview(audio_buffer),
+            number_of_frames=4,
+            number_of_channels=1,
+            sample_rate=48000,
+        )
+
+        stream1 = vonage_video_mock.models.Stream(id="stream-1", connection=DUMMY_CONNECTION)
+        stream2 = vonage_video_mock.models.Stream(id="stream-2", connection=DUMMY_CONNECTION)
+        sub1 = vonage_video_mock.models.Subscriber(stream=stream1)
+        sub2 = vonage_video_mock.models.Subscriber(stream=stream2)
+
+        client._on_subscriber_audio_data_cb(sub1, mock_audio_data)
+        client._on_subscriber_audio_data_cb(sub2, mock_audio_data)
+        await self._wait_for_condition(lambda: len(received) >= 2)
+
+        assert len(received) == 2
+        user_ids = {f.user_id for f in received}
+        assert user_ids == {"stream-1", "stream-2"}
 
     @pytest.mark.asyncio
     async def test_vonage_input_transport_initialization(self) -> None:

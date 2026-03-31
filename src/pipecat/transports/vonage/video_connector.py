@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     OutputImageRawFrame,
     StartFrame,
     TranscriptionFrame,
+    UserAudioRawFrame,
     UserImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -89,6 +90,7 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
             self._listener_id = self._client.add_listener(
                 VonageClientListener(
                     on_audio_in=self._audio_in_cb,
+                    on_audio_in_per_subscriber=self._audio_in_per_subscriber_cb,
                     on_video_in=self._video_in_cb,
                     on_caption_text_in=self._caption_in_cb,
                     on_error=self._on_error_cb,
@@ -130,6 +132,12 @@ class VonageVideoConnectorInputTransport(BaseInputTransport):
             await self.push_frame(frame)
 
     async def _audio_in_cb(self, _session: Session, audio: InputAudioRawFrame) -> None:
+        if self._connected and self._params.audio_in_enabled:
+            await self.push_audio_frame(audio)
+
+    async def _audio_in_per_subscriber_cb(
+        self, _subscriber: Subscriber, audio: UserAudioRawFrame
+    ) -> None:
         if self._connected and self._params.audio_in_enabled:
             await self.push_audio_frame(audio)
 
