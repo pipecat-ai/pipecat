@@ -54,7 +54,6 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 try:
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.exceptions import ConnectionClosed
-    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
@@ -404,7 +403,7 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
     async def _connect_websocket(self):
         """Establish the WebSocket connection."""
         try:
-            if self._websocket and self._websocket.state is not State.CLOSED:
+            if self._websocket:
                 return
             self._websocket = await websocket_connect(
                 uri=self._ws_url,
