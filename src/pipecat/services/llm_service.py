@@ -1051,6 +1051,7 @@ class WebsocketLLMService(LLMService, WebsocketService):
         """
         LLMService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        self._register_event_handler("on_connection_error")
 
     # -- lifecycle ------------------------------------------------------------
 
