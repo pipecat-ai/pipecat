@@ -994,31 +994,31 @@ class WebsocketReconnectedError(Exception):
     """Raised by ``_ws_send``/``_ws_recv`` after a transparent reconnection.
 
     Signals that the WebSocket connection was lost and automatically
-    re-established.  Callers should treat this as a prompt to restart
-    the current transaction — any connection-local state on the server
-    (e.g. cached responses) is gone.
+    re-established.  The current inference should be restarted — any
+    connection-local state on the server (e.g. cached responses) is gone.
     """
 
     pass
 
 
 class WebsocketLLMService(LLMService, WebsocketService):
-    """Base class for websocket-based LLM services using a transactional model.
+    """Base class for websocket-based LLM services.
 
+    Each inference is a self-contained exchange: send a request, receive
+    events inline until a terminal event, then move on to the next.
     Unlike ``WebsocketTTSService`` / ``WebsocketSTTService`` which run a
-    continuous background receive loop (``_receive_task_handler``), LLM
-    services follow a **transactional** pattern: send a request, receive
-    events inline until a terminal event, then process the next request.
-    This class does **not** start ``_receive_task_handler``.
+    continuous background receive loop (``_receive_task_handler``), this
+    class does **not** start one.
 
     Provides connection lifecycle management (connect on start, disconnect
     on stop/cancel), automatic reconnection with exponential backoff, and
-    transactional helpers (``_ws_send``, ``_ws_recv``, ``_ensure_connected``).
+    helpers for the per-inference exchange (``_ws_send``, ``_ws_recv``,
+    ``_ensure_connected``).
 
     ``_ws_send`` and ``_ws_recv`` catch ``ConnectionClosed`` transparently,
     auto-reconnect via ``_try_reconnect``, and raise
-    ``WebsocketReconnectedError`` so callers know the transaction must
-    restart.  If reconnection fails, the original ``ConnectionClosed``
+    ``WebsocketReconnectedError`` so callers know the inference must be
+    restarted.  If reconnection fails, the original ``ConnectionClosed``
     propagates.
 
     Subclasses must implement:
@@ -1084,15 +1084,15 @@ class WebsocketLLMService(LLMService, WebsocketService):
         await super().cancel(frame)
         await self._disconnect()
 
-    # -- transactional helpers ------------------------------------------------
+    # -- per-inference helpers ------------------------------------------------
 
     async def _ws_send(self, message: dict):
         """Send a JSON message over the websocket.
 
         Guards against sends during intentional disconnect.  If the send
         fails with ``ConnectionClosed``, attempts to reconnect and raises
-        ``WebsocketReconnectedError`` on success so callers can restart
-        the transaction.  If reconnection fails, the original
+        ``WebsocketReconnectedError`` on success so the caller can restart
+        the inference.  If reconnection fails, the original
         ``ConnectionClosed`` propagates.
 
         Args:
@@ -1149,14 +1149,14 @@ class WebsocketLLMService(LLMService, WebsocketService):
     # -- WebsocketService interface -------------------------------------------
 
     async def _receive_messages(self):
-        """Not used — WebsocketLLMService uses transactional message reception.
+        """Not used — messages are received inline during each inference.
 
         This satisfies the ``WebsocketService`` abstract method but is never
         called because ``_receive_task_handler`` is never started.
         """
         raise NotImplementedError(
-            "WebsocketLLMService uses transactional message reception, "
-            "not continuous background receiving"
+            "WebsocketLLMService receives messages inline during inference, "
+            "not via a continuous background loop"
         )
 
     async def _report_error(self, error: ErrorFrame):
