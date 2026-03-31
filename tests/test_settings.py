@@ -8,8 +8,8 @@
 
 from unittest.mock import patch
 
+from pipecat.services.deepgram.sagemaker.stt import DeepgramSageMakerSTTSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
-from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTSettings
 from pipecat.services.openai.realtime import events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMSettings
 from pipecat.services.settings import (

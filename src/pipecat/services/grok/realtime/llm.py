@@ -6,7 +6,7 @@
 
 """Grok Realtime LLM service.
 
-.. deprecated::
+.. deprecated:: 0.0.108
     This module is deprecated. Please use GrokRealtimeLLMService from
     pipecat.services.xai.realtime.llm instead.
 """

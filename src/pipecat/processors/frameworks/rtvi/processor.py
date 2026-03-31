@@ -57,7 +57,6 @@ class RTVIProcessor(FrameProcessor):
         """Initialize the RTVI processor.
 
         Args:
-            config: Initial RTVI configuration.
             transport: Transport layer for communication.
             **kwargs: Additional arguments passed to parent class.
         """
@@ -66,9 +65,8 @@ class RTVIProcessor(FrameProcessor):
         self._bot_ready = False
         self._client_ready = False
         self._client_ready_id = ""
-        # Default to 0.3.0 which is the last version before actually having a
-        # "client-version".
-        self._client_version = [0, 3, 0]
+        # Default to 0.0.0 to indicate unknown version.
+        self._client_version = [0, 0, 0]
         self._llm_skip_tts: bool = False  # Keep in sync with llm_service.py's configuration.
 
         # A task to process incoming transport messages.
@@ -270,13 +268,19 @@ class RTVIProcessor(FrameProcessor):
             match message.type:
                 case "client-ready":
                     data = None
-                    try:
-                        data = RTVI.ClientReadyData.model_validate(message.data)
-                    except ValidationError:
-                        # Not all clients have been updated to RTVI 1.0.0.
-                        # For now, that's okay, we just log their info as unknown.
-                        data = None
-                        pass
+                    raw = message.data or {}
+                    version = raw.get("version")
+                    if isinstance(version, str):
+                        about = RTVI.AboutClientData(library="unknown")
+                        about_raw = raw.get("about")
+                        if about_raw is not None:
+                            try:
+                                about = RTVI.AboutClientData.model_validate(about_raw)
+                            except ValidationError:
+                                logger.warning(
+                                    "Invalid 'about' data in client-ready message, ignoring."
+                                )
+                        data = RTVI.ClientReadyData(version=version, about=about)
                     await self._handle_client_ready(message.id, data)
                 case "disconnect-bot":
                     await self.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
@@ -306,12 +310,26 @@ class RTVIProcessor(FrameProcessor):
         """Handle the client-ready message from the client."""
         version = data.version if data else None
         logger.debug(f"Received client-ready: version {version}")
+        version_error = None
         if version:
             try:
-                self._client_version = [int(v) for v in version.split(".")]
+                parts = [int(v) for v in version.split(".")]
+                if len(parts) != 3:
+                    raise ValueError
+                self._client_version = parts
+                protocol_major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
+                if self._client_version[0] != protocol_major:
+                    version_error = f"RTVI version {version} is not compatible with server protocol {RTVI.PROTOCOL_VERSION}."
             except ValueError:
-                logger.warning(f"Invalid client version format: {version}")
+                version_error = f"Invalid client version format ({version})."
+        else:
+            version_error = "Client version unknown."
         about = data.about if data else {"library": "unknown"}
+        if version_error:
+            version_error += " Compatibility issues may occur."
+            logger.warning(version_error)
+            await self._send_error_response(request_id, version_error)
+
         logger.debug(f"Client Details: {about}")
         if self._input_transport:
             await self._input_transport.start_audio_in_streaming()
@@ -413,7 +431,3 @@ class RTVIProcessor(FrameProcessor):
         """Send an error response message."""
         message = RTVI.ErrorResponse(id=id, data=RTVI.ErrorResponseData(error=error))
         await self.push_transport_message(message)
-
-    def _action_id(self, service: str, action: str) -> str:
-        """Generate an action ID from service and action names."""
-        return f"{service}:{action}"
