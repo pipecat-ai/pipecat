@@ -813,6 +813,7 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
             _PreviousResponseNotFoundError: Server couldn't find previous response.
             _ConnectionLimitReachedError: 60-minute connection limit reached.
             WebsocketReconnectedError: Connection was lost and auto-recovered.
+            ConnectionClosed: Connection was lost and could not be recovered.
         """
         function_calls: Dict[str, Dict[str, str]] = {}
         current_arguments: Dict[str, str] = {}
