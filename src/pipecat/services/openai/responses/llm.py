@@ -622,6 +622,10 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
         state and returns — ``_ensure_connected`` will handle reconnection
         before the next inference.
         """
+        if not self._websocket:
+            self._clear_cancellation_state()
+            return
+
         logger.debug(f"{self}: Draining cancelled response events")
         try:
             while True:
