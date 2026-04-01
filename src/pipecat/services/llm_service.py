@@ -185,7 +185,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     def __init__(
         self,
         run_in_parallel: bool = True,
-        function_call_timeout_secs: float = 10.0,
+        function_call_timeout_secs: Optional[float] = None,
         settings: Optional[LLMSettings] = None,
         **kwargs,
     ):
@@ -194,8 +194,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         Args:
             run_in_parallel: Whether to run function calls in parallel or sequentially.
                 Defaults to True.
-            function_call_timeout_secs: Timeout in seconds for deferred function calls.
-                Defaults to 10.0 seconds.
+            function_call_timeout_secs: Optional timeout in seconds for deferred function
+                calls.
             settings: The runtime-updatable settings for the LLM service.
             **kwargs: Additional arguments passed to the parent AIService.
 
@@ -753,11 +753,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         # Start a timeout task for deferred function calls
         async def timeout_handler():
             try:
-                effective_timeout = (
-                    item.timeout_secs
-                    if item.timeout_secs is not None
-                    else self._function_call_timeout_secs
-                )
+                effective_timeout = item.timeout_secs or self._function_call_timeout_secs
                 await asyncio.sleep(effective_timeout)
                 logger.warning(
                     f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {effective_timeout} seconds."
@@ -768,13 +764,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             except asyncio.CancelledError:
                 raise
 
-        timeout_task = self.create_task(timeout_handler())
+        if item.timeout_secs or self._function_call_timeout_secs:
+            timeout_task = self.create_task(timeout_handler())
+
+        # Yield to the event loop so the timeout task coroutine gets entered
+        # before it could be cancelled. Without this, cancelling the task before
+        # it starts would leave the coroutine in a "never awaited" state.
+        await asyncio.sleep(0)
 
         try:
-            # Yield to the event loop so the timeout task coroutine gets entered
-            # before it could be cancelled. Without this, cancelling the task before
-            # it starts would leave the coroutine in a "never awaited" state.
-            await asyncio.sleep(0)
             if isinstance(item.handler, DirectFunctionWrapper):
                 # Handler is a DirectFunctionWrapper
                 await item.handler.invoke(
