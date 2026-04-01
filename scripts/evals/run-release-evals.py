@@ -235,7 +235,7 @@ TESTS_REALTIME = [
 TESTS_VIDEO_AVATAR = [
     ("video-avatar/video-avatar-tavus-video-service.py", EVAL_SIMPLE_MATH),
     ("video-avatar/video-avatar-heygen-video-service.py", EVAL_SIMPLE_MATH),
-    ("video-avatar/video-avatar-simli-layer.py", EVAL_SIMPLE_MATH),
+    ("video-avatar/video-avatar-simli-video-service.py", EVAL_SIMPLE_MATH),
     ("video-avatar/video-avatar-lemonslice-transport.py", EVAL_SIMPLE_MATH),
 ]
 
