@@ -149,6 +149,7 @@ TESTS_VOICE = [
     ("voice/voice-smallest.py", EVAL_SIMPLE_MATH),
     ("voice/voice-openai-responses.py", EVAL_SIMPLE_MATH),
     ("voice/voice-openai-responses-http.py", EVAL_SIMPLE_MATH),
+    ("voice/voice-together.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
     # ("voice/voice-xtts.py", EVAL_SIMPLE_MATH),
 ]
