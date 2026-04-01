@@ -8,9 +8,10 @@
 
 import base64
 import json
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import AsyncGenerator, List, Optional
+from typing import Any, AsyncGenerator, List, Optional
 
 import aiohttp
 from loguru import logger
@@ -589,6 +590,33 @@ class CartesiaTTSService(WebsocketTTSService):
         logger.trace(f"{self}: flushing audio")
         msg = self._build_msg(text="", continue_transcript=False, context_id=flush_id)
         await self._websocket.send(msg)
+
+    async def _update_settings(self, delta: CartesiaTTSSettings) -> dict[str, Any]:
+        """Apply a TTS settings delta, flushing the context if needed.
+
+        Voice, model, and language are locked per Cartesia context. If any of
+        these change, the current context is flushed so the next sentence opens
+        a fresh one with the updated settings.
+
+        Args:
+            delta: A TTS settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        if not changed:
+            return changed
+
+        if changed.keys() & {"voice", "model", "language"}:
+            if self._turn_context_id and self.audio_context_available(self._turn_context_id):
+                await self.flush_audio(context_id=self._turn_context_id)
+            # Assign a new turn context ID so subsequent sentences in this
+            # turn open a new Cartesia context with the updated settings.
+            if self._turn_context_id:
+                self._turn_context_id = str(uuid.uuid4())
+
+        return changed
 
     async def _process_messages(self):
         async for message in self._get_websocket():
