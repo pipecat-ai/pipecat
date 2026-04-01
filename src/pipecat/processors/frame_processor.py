@@ -133,6 +133,65 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
         return item
 
 
+class UninterruptibleProcessQueue(asyncio.Queue):
+    """An asyncio.Queue that tracks whether any UninterruptibleFrame is enqueued.
+
+    Extends ``asyncio.Queue`` and maintains an O(1) ``has_uninterruptible``
+    flag so interrupt-handling code can decide whether to cancel a task or
+    merely drain non-uninterruptible items without scanning the queue.
+
+    Items may be raw ``Frame`` objects or tuples whose first element is a
+    ``Frame`` (e.g. ``(frame, direction, callback)``).  Pass a ``frame_getter``
+    callable to extract the frame from each item; the default treats the item
+    itself as the frame.
+
+    Also exposes a ``reset()`` helper that drains all non-``UninterruptibleFrame``
+    items while keeping uninterruptible ones in place.
+    """
+
+    def __init__(self, frame_getter: Callable[[Any], Frame] = lambda item: item):
+        """Initialize the UninterruptibleProcessQueue.
+
+        Args:
+            frame_getter: Callable that extracts a ``Frame`` from a queue item.
+                Defaults to the identity function (item is a raw ``Frame``).
+                Pass ``lambda item: item[0]`` when items are
+                ``(frame, direction, callback)`` tuples.
+        """
+        super().__init__()
+        self._frame_getter = frame_getter
+        self._uninterruptible_count: int = 0
+
+    @property
+    def has_uninterruptible(self) -> bool:
+        """Return True if any UninterruptibleFrame is currently in the queue."""
+        return self._uninterruptible_count > 0
+
+    def _put(self, item: Any) -> None:
+        if isinstance(self._frame_getter(item), UninterruptibleFrame):
+            self._uninterruptible_count += 1
+        super()._put(item)
+
+    def _get(self) -> Any:
+        item = super()._get()
+        if isinstance(self._frame_getter(item), UninterruptibleFrame):
+            self._uninterruptible_count -= 1
+        return item
+
+    def reset(self) -> None:
+        """Remove all non-UninterruptibleFrame items, keeping uninterruptible ones."""
+        kept: asyncio.Queue = asyncio.Queue()
+        while not self.empty():
+            item = self.get_nowait()
+            if isinstance(self._frame_getter(item), UninterruptibleFrame):
+                kept.put_nowait(item)
+            self.task_done()
+        while not kept.empty():
+            item = kept.get_nowait()
+            self.put_nowait(item)
+            kept.task_done()
+
+
 # Timeout in seconds for cancelling the input frame processing task.
 # This prevents hanging if a library swallows asyncio.CancelledError.
 INPUT_TASK_CANCEL_TIMEOUT_SECS = 3
@@ -234,7 +293,7 @@ class FrameProcessor(BaseObject):
         # called. To resume processing frames we need to call
         # `resume_processing_frames()` which will wake up the event.
         self.__should_block_frames = False
-        self.__process_queue = asyncio.Queue()
+        self.__process_queue = UninterruptibleProcessQueue(frame_getter=lambda item: item[0])
         self.__process_event: Optional[asyncio.Event] = None
         self.__process_frame_task: Optional[asyncio.Task] = None
         self.__process_current_frame: Optional[Frame] = None
@@ -868,10 +927,7 @@ class FrameProcessor(BaseObject):
             current_is_uninterruptible = isinstance(
                 self.__process_current_frame, UninterruptibleFrame
             )
-            queue_has_uninterruptible = any(
-                isinstance(item[0], UninterruptibleFrame) for item in self.__process_queue._queue
-            )
-            if current_is_uninterruptible or queue_has_uninterruptible:
+            if current_is_uninterruptible or self.__process_queue.has_uninterruptible:
                 # We don't want to cancel an UninterruptibleFrame (either the
                 # one currently being processed or one waiting in the queue),
                 # so we simply cleanup the queue keeping only
@@ -975,22 +1031,7 @@ class FrameProcessor(BaseObject):
 
     def __reset_process_queue(self):
         """Reset non-system frame processing queue."""
-        # Create a new queue to insert UninterruptibleFrame frames.
-        new_queue = asyncio.Queue()
-
-        # Process current queue and keep UninterruptibleFrame frames.
-        while not self.__process_queue.empty():
-            item = self.__process_queue.get_nowait()
-            frame = item[0]
-            if isinstance(frame, UninterruptibleFrame):
-                new_queue.put_nowait(item)
-            self.__process_queue.task_done()
-
-        # Put back UninterruptibleFrame frames into our process queue.
-        while not new_queue.empty():
-            item = new_queue.get_nowait()
-            self.__process_queue.put_nowait(item)
-            new_queue.task_done()
+        self.__process_queue.reset()
 
     async def __cancel_process_task(self):
         """Cancel the non-system frame processing task."""
