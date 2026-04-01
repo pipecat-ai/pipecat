@@ -195,6 +195,7 @@ TESTS_FUNCTION_CALLING = [
     ("function-calling/function-calling-mistral.py", EVAL_WEATHER),
     ("function-calling/function-calling-sarvam.py", EVAL_WEATHER),
     ("function-calling/function-calling-novita.py", EVAL_WEATHER),
+    ("function-calling/function-calling-deepseek.py", EVAL_WEATHER),
     # Video
     ("function-calling/function-calling-anthropic-video.py", EVAL_VISION_CAMERA),
     ("function-calling/function-calling-aws-video.py", EVAL_VISION_CAMERA),
@@ -205,8 +206,6 @@ TESTS_FUNCTION_CALLING = [
     ("function-calling/function-calling-openai-responses-video-http.py", EVAL_VISION_CAMERA),
     # Currently not working.
     # ("function-calling/function-calling-together.py", EVAL_WEATHER),
-    # ("function-calling/function-calling-deepseek.py", EVAL_WEATHER),
-    # ("function-calling/function-calling-gemini-openai-format.py", EVAL_WEATHER),
 ]
 
 TESTS_FEATURES = [
@@ -218,12 +217,9 @@ TESTS_FEATURES = [
 
 TESTS_REALTIME = [
     ("realtime/realtime-openai.py", EVAL_WEATHER),
-    ("realtime/realtime-openai-beta.py", EVAL_WEATHER),
     # OpenAI Realtime not released on Azure yet
     # ("realtime/realtime-azure.py", EVAL_WEATHER),
-    ("realtime/realtime-azure-beta.py", EVAL_WEATHER),
     ("realtime/realtime-openai-text.py", EVAL_WEATHER),
-    ("realtime/realtime-openai-beta-text.py", EVAL_WEATHER),
     ("realtime/realtime-openai-live-video.py", EVAL_VISION_CAMERA),
     ("realtime/realtime-gemini-live.py", EVAL_SIMPLE_MATH),
     ("realtime/realtime-gemini-live-local-vad.py", EVAL_SIMPLE_MATH),
@@ -231,8 +227,6 @@ TESTS_REALTIME = [
     ("realtime/realtime-gemini-live-video.py", EVAL_VISION_CAMERA),
     ("realtime/realtime-gemini-live-google-search.py", EVAL_ONLINE_SEARCH),
     ("realtime/realtime-gemini-live-vertex-function-calling.py", EVAL_WEATHER),
-    # Currently not working.
-    # ("realtime/realtime-gemini-live-text.py", EVAL_SIMPLE_MATH),
     ("realtime/realtime-aws-nova-sonic.py", EVAL_SIMPLE_MATH),
     ("realtime/realtime-ultravox.py", EVAL_ORDER),
     ("realtime/realtime-grok.py", EVAL_WEATHER),
