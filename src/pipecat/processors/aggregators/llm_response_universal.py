@@ -1055,13 +1055,22 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 ],
             }
         )
-        self._context.add_message(
-            {
-                "role": "tool",
-                "content": "IN_PROGRESS",
-                "tool_call_id": frame.tool_call_id,
-            }
-        )
+        if frame.is_async:
+            self._context.add_message(
+                {
+                    "role": "tool",
+                    "content": json.dumps({"type": "async_tool", "status": "started"}),
+                    "tool_call_id": frame.tool_call_id,
+                }
+            )
+        else:
+            self._context.add_message(
+                {
+                    "role": "tool",
+                    "content": "IN_PROGRESS",
+                    "tool_call_id": frame.tool_call_id,
+                }
+            )
 
         self._function_calls_in_progress[frame.tool_call_id] = frame
 
@@ -1091,7 +1100,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._context.add_message(
                 {
                     "role": "developer",
-                    "content": json.dumps({"tool_call_id": frame.tool_call_id, "result": result}),
+                    "content": json.dumps(
+                        {
+                            "type": "async_tool",
+                            "tool_call_id": frame.tool_call_id,
+                            "status": "finished",
+                            "result": result,
+                        }
+                    ),
                 }
             )
         else:
