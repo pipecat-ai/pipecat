@@ -866,6 +866,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_image_results: Dict[str, UserImageRawFrame] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
+        self._user_speaking: bool = False
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -968,6 +970,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, AssistantImageRawFrame):
             await self._handle_assistant_image_frame(frame)
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_speaking = False
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -1110,7 +1118,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # If this is the last function call in progress, run the LLM.
                 run_llm = not bool(self._function_calls_in_progress)
 
-        if run_llm:
+        if run_llm and not self._user_speaking:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
         # Call the `on_context_updated` callback once the function call result
