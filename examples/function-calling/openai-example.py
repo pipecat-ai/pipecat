@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -12,7 +13,10 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
+from pipecat.frames.frames import (
+    LLMRunFrame,
+    TTSSpeakFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -35,6 +39,8 @@ load_dotenv(override=True)
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
+    # Simulate a long-running API call, so we can test async function calls.
+    await asyncio.sleep(20)
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
@@ -89,7 +95,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function(
-        "get_current_weather", fetch_weather_from_api, cancel_on_interruption=False, is_async=True
+        "get_current_weather",
+        fetch_weather_from_api,
+        cancel_on_interruption=False,
+        is_async=True,
+        timeout_secs=30,
     )
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
