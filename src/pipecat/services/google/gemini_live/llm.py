@@ -380,7 +380,6 @@ class GeminiLiveLLMService(LLMService):
         self,
         *,
         api_key: str,
-        base_url: Optional[str] = None,
         model: Optional[str] = None,
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
@@ -398,13 +397,6 @@ class GeminiLiveLLMService(LLMService):
 
         Args:
             api_key: Google AI API key for authentication.
-            base_url: API endpoint base URL. Defaults to the official Gemini Live endpoint.
-
-                .. deprecated:: 0.0.90
-                    This parameter is deprecated and no longer has any effect.
-                    Please use `http_options` to customize requests made by the
-                    API client.
-
             model: Model identifier to use.
 
                 .. deprecated:: 0.0.105
@@ -431,18 +423,6 @@ class GeminiLiveLLMService(LLMService):
             http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        # Check for deprecated parameter usage
-        if base_url is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'base_url' is deprecated and no longer has any effect. Please use 'http_options' to customize requests made by the API client.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="models/gemini-2.5-flash-native-audio-preview-12-2025",
@@ -515,13 +495,11 @@ class GeminiLiveLLMService(LLMService):
             )
 
         super().__init__(
-            base_url=base_url,
             settings=default_settings,
             **kwargs,
         )
 
         self._last_sent_time = 0
-        self._base_url = base_url
 
         self._system_instruction_from_init = self._settings.system_instruction
         self._tools_from_init = tools
