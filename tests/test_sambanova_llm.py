@@ -56,8 +56,7 @@ async def test_sambanova_llm_stream_closed_on_cancellation():
 
         mock_stream = MockAsyncStream()
 
-        service._stream_chat_completions_specific_context = AsyncMock(return_value=mock_stream)
-        service._stream_chat_completions_universal_context = AsyncMock(return_value=mock_stream)
+        service.get_chat_completions = AsyncMock(return_value=mock_stream)
         service.start_ttfb_metrics = AsyncMock()
         service.stop_ttfb_metrics = AsyncMock()
         service.start_llm_usage_metrics = AsyncMock()

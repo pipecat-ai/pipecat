@@ -55,11 +55,6 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
 )
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import LLMSettings
@@ -110,7 +105,7 @@ class FunctionCallParams:
     tool_call_id: str
     arguments: Mapping[str, Any]
     llm: "LLMService"
-    context: OpenAILLMContext | LLMContext
+    context: LLMContext
     result_callback: FunctionCallResultCallback
 
 
@@ -160,7 +155,7 @@ class FunctionCallRunnerItem:
     function_name: str
     tool_call_id: str
     arguments: Mapping[str, Any]
-    context: OpenAILLMContext | LLMContext
+    context: LLMContext
     run_llm: Optional[bool] = None
     group_id: Optional[str] = None
 
@@ -261,7 +256,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
     async def run_inference(
         self,
-        context: LLMContext | OpenAILLMContext,
+        context: LLMContext,
         max_tokens: Optional[int] = None,
         system_instruction: Optional[str] = None,
     ) -> Optional[str]:
@@ -280,41 +275,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             The LLM's response as a string, or None if no response is generated.
         """
         raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
-
-    def create_context_aggregator(
-        self,
-        context: OpenAILLMContext,
-        *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> Any:
-        """Create a context aggregator for managing LLM conversation context.
-
-        Must be implemented by subclasses.
-
-        Args:
-            context: The LLM context to create an aggregator for.
-            user_params: Parameters for user message aggregation.
-            assistant_params: Parameters for assistant message aggregation.
-
-        Returns:
-            A context aggregator instance.
-
-        .. deprecated:: 0.0.99
-            `create_context_aggregator()` is deprecated and will be removed in a future version.
-            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-            See `OpenAILLMContext` docstring for migration guide.
-        """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "create_context_aggregator() is deprecated and will be removed in a future version. "
-                "Use the universal LLMContext and LLMContextAggregatorPair directly instead. "
-                "See OpenAILLMContext docstring for migration guide.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        pass
 
     async def start(self, frame: StartFrame):
         """Start the LLM service.
