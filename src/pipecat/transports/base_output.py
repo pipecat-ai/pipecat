@@ -46,7 +46,11 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import (
+    FrameDirection,
+    FrameProcessor,
+    UninterruptibleProcessQueue,
+)
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import nanoseconds_to_seconds
 
@@ -520,15 +524,21 @@ class BaseOutputTransport(FrameProcessor):
             if not self._transport._allow_interruptions:
                 return
 
-            # Cancel tasks.
-            await self._cancel_audio_task()
+            # Cancel all tasks.
             await self._cancel_clock_task()
             await self._cancel_video_task()
+
+            if self._audio_queue.has_uninterruptible:
+                # Keep the audio task running but drain all interruptible frames
+                # so the pending UninterruptibleFrames are still delivered.
+                self._audio_queue.reset()
+            else:
+                await self._cancel_audio_task()
+                self._create_audio_task()
 
             # Create tasks.
             self._create_video_task()
             self._create_clock_task()
-            self._create_audio_task()
 
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
@@ -612,7 +622,7 @@ class BaseOutputTransport(FrameProcessor):
         def _create_audio_task(self):
             """Create the audio processing task."""
             if not self._audio_task:
-                self._audio_queue = asyncio.Queue()
+                self._audio_queue = UninterruptibleProcessQueue()
                 self._audio_task = self._transport.create_task(self._audio_task_handler())
 
         async def _cancel_audio_task(self):
