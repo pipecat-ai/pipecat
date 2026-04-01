@@ -245,7 +245,6 @@ class GladiaSTTService(WebsocketSTTService):
         encoding: str = "wav/pcm",
         bit_depth: int = 16,
         channels: int = 1,
-        confidence: Optional[float] = None,
         sample_rate: Optional[int] = None,
         model: Optional[str] = None,
         params: Optional[GladiaInputParams] = None,
@@ -264,12 +263,6 @@ class GladiaSTTService(WebsocketSTTService):
             encoding: Audio encoding format. Defaults to ``"wav/pcm"``.
             bit_depth: Audio bit depth. Defaults to 16.
             channels: Number of audio channels. Defaults to 1.
-            confidence: Minimum confidence threshold for transcriptions (0.0-1.0).
-
-                .. deprecated:: 0.0.86
-                    The 'confidence' parameter is deprecated and will be removed in a future version.
-                    No confidence threshold is applied.
-
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             model: Model to use for transcription.
 
@@ -291,16 +284,6 @@ class GladiaSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService parent class.
         """
-        if confidence:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'confidence' parameter is deprecated and will be removed in a future version. "
-                    "No confidence threshold is applied.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="solaria-1",
