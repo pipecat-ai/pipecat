@@ -33,9 +33,6 @@ from PIL import Image
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
 
-if TYPE_CHECKING:
-    from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-
 # "Re-export" types from OpenAI that we're using as universal context types.
 # NOTE: if universal message types need to someday diverge from OpenAI's, we
 # should consider managing our own definitions. But we should do so carefully,
@@ -69,51 +66,6 @@ class LLMContext:
     content for LLM conversations. Provides methods for message manipulation,
     and content formatting.
     """
-
-    @staticmethod
-    def from_openai_context(openai_context: "OpenAILLMContext") -> "LLMContext":
-        """Create a universal LLM context from an OpenAI-specific context.
-
-        NOTE: this should only be used internally, for facilitating migration
-        from OpenAILLMContext to LLMContext. New user code should use
-        LLMContext directly.
-
-        .. deprecated:: 0.0.99
-            `from_openai_context()` is deprecated and will be removed in a future version.
-            Directly use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-            See `OpenAILLMContext` docstring for migration guide.
-
-        Args:
-            openai_context: The OpenAI LLM context to convert.
-
-        Returns:
-            New LLMContext instance with converted messages and settings.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "from_openai_context() (likely invoked by create_context_aggregator()) is deprecated and will be removed in a future version. "
-                "Directly use the universal LLMContext and LLMContextAggregatorPair instead. "
-                "See OpenAILLMContext docstring for migration guide.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        # Convert tools to ToolsSchema if needed.
-        # If the tools are already a ToolsSchema, this is a no-op.
-        # Otherwise, we wrap them in a shim ToolsSchema.
-        converted_tools = openai_context.tools
-        if isinstance(converted_tools, list):
-            converted_tools = ToolsSchema(
-                standard_tools=[], custom_tools={AdapterType.SHIM: converted_tools}
-            )
-        return LLMContext(
-            messages=openai_context.get_messages(),
-            tools=converted_tools,
-            tool_choice=openai_context.tool_choice,
-        )
 
     def __init__(
         self,
@@ -244,33 +196,6 @@ class LLMContext:
         Returns:
             List of conversation messages.
         """
-        return self.get_messages()
-
-    def get_messages_for_persistent_storage(self) -> List[LLMContextMessage]:
-        """Get messages suitable for persistent storage.
-
-        NOTE: the only reason this method exists is because we're "silently"
-        switching from OpenAILLMContext to LLMContext under the hood in some
-        services and don't want to trip up users who may have been relying on
-        this method, which is part of the public API of OpenAILLMContext but
-        doesn't need to be for LLMContext.
-
-        .. deprecated:: 0.0.92
-            Use `get_messages()` instead.
-
-        Returns:
-            List of conversation messages.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "get_messages_for_persistent_storage() is deprecated, use get_messages() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         return self.get_messages()
 
     def get_messages(self, llm_specific_filter: Optional[str] = None) -> List[LLMContextMessage]:

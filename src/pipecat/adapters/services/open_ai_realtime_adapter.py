@@ -236,18 +236,4 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
             List of function definitions in OpenAI Realtime format.
         """
         functions_schema = tools_schema.standard_tools
-        standard_tools = [
-            self._to_openai_realtime_function_format(func) for func in functions_schema
-        ]
-
-        # For backward compatibility, OpenAI Realtime can still be used with
-        # tools in dict format, even though it always uses `LLMContext` under
-        # the hood (via `LLMContext.from_openai_context()`).
-        # To support this behavior, we use "shimmed" custom tools here.
-        # (We maintain this backward compatibility because users aren't
-        # *knowingly* opting into the new `LLMContext`.)
-        shimmed_tools = []
-        if tools_schema.custom_tools:
-            shimmed_tools = tools_schema.custom_tools.get(AdapterType.SHIM, [])
-
-        return standard_tools + shimmed_tools
+        return [self._to_openai_realtime_function_format(func) for func in functions_schema]

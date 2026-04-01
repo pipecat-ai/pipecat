@@ -480,7 +480,7 @@ class BaseInputTransport(FrameProcessor):
         self, audio_frame: InputAudioRawFrame, vad_state: VADState
     ) -> VADState:
         """Handle Voice Activity Detection results and generate appropriate frames."""
-        if self._params.turn_analyzer or self._deprecated_openaillmcontext:
+        if self._params.turn_analyzer:
             return await self._deprecated_old_handle_vad(audio_frame, vad_state)
         else:
             return await self._deprecated_new_handle_vad(audio_frame, vad_state)

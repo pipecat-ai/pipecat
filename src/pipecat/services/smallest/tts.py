@@ -19,6 +19,7 @@ from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -298,7 +299,11 @@ class SmallestTTSService(InterruptibleTTSService):
 
             self._websocket = await websocket_connect(
                 self._build_websocket_url(),
-                additional_headers={"Authorization": f"Bearer {self._api_key}"},
+                additional_headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "X-Source": "pipecat",
+                    "X-Pipecat-Version": pipecat_version(),
+                },
             )
 
             await self._call_event_handler("on_connected")
