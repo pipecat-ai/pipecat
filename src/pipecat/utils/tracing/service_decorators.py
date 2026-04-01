@@ -491,6 +491,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                             # Handle system message for different services
                             # settings.system_instruction takes priority (matches service behavior)
+                            system_message = None
                             if hasattr(self, "_settings") and getattr(
                                 self._settings, "system_instruction", None
                             ):
