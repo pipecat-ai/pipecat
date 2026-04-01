@@ -54,10 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = TogetherSTTService(api_key=os.getenv("TOGETHER_API_KEY"))
 
-    tts = TogetherTTSService(
-        api_key=os.getenv("TOGETHER_API_KEY"),
-        voice="tara",
-    )
+    tts = TogetherTTSService(api_key=os.getenv("TOGETHER_API_KEY"))
 
     llm = TogetherLLMService(api_key=os.getenv("TOGETHER_API_KEY"))
 
