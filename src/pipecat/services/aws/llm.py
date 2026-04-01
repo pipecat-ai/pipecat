@@ -66,11 +66,16 @@ class AWSBedrockLLMSettings(LLMSettings):
     Parameters:
         stop_sequences: List of strings that stop generation.
         latency: Performance mode - "standard" or "optimized".
+        enable_prompt_caching: Whether to enable prompt caching by adding cachePoint
+            markers to system prompts and tool definitions. Can reduce TTFT by up to
+            85% for multi-turn conversations. See:
+            https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html
         additional_model_request_fields: Additional model-specific parameters.
     """
 
     stop_sequences: List[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latency: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     additional_model_request_fields: Dict[str, Any] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -454,6 +459,24 @@ class AWSBedrockLLMService(LLMService):
             # Add performance config if latency is specified
             if self._settings.latency in ["standard", "optimized"]:
                 request_params["performanceConfig"] = {"latency": self._settings.latency}
+
+            # Add cache checkpoints to system prompts and tool definitions.
+            # This enables prompt caching for providers that support it (e.g.
+            # Anthropic Claude on Bedrock), reducing TTFT by up to 85% on
+            # multi-turn conversations where the system prompt stays constant.
+            if self._settings.enable_prompt_caching:
+                if "system" in request_params and request_params["system"]:
+                    system_list = request_params["system"]
+                    if not any("cachePoint" in item for item in system_list):
+                        system_list.append({"cachePoint": {"type": "default"}})
+                if (
+                    "toolConfig" in request_params
+                    and "tools" in request_params["toolConfig"]
+                    and request_params["toolConfig"]["tools"]
+                ):
+                    tools_list = request_params["toolConfig"]["tools"]
+                    if not any("cachePoint" in t for t in tools_list):
+                        tools_list.append({"cachePoint": {"type": "default"}})
 
             # Log request params with messages redacted for logging
             adapter = self.get_llm_adapter()
