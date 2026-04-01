@@ -1077,6 +1077,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         in_progress_frame = self._function_calls_in_progress[frame.tool_call_id]
         is_async = in_progress_frame.is_async if in_progress_frame else False
+        group_id = in_progress_frame.group_id if in_progress_frame else None
+
         del self._function_calls_in_progress[frame.tool_call_id]
 
         properties = frame.properties
@@ -1115,8 +1117,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # If the frame is indicating we should run the LLM, do it.
                 run_llm = frame.run_llm
             else:
-                # If this is the last function call in progress, run the LLM.
-                run_llm = not bool(self._function_calls_in_progress)
+                # Run the LLM when this is the last function call in the group
+                # to complete. If group_id is set, only consider sibling calls;
+                # otherwise always execute as soon as we receive the result.
+                if group_id:
+                    run_llm = not any(
+                        f is not None and f.group_id == group_id
+                        for f in self._function_calls_in_progress.values()
+                    )
+                else:
+                    run_llm = True
 
         if run_llm and not self._user_speaking:
             await self.push_context_frame(FrameDirection.UPSTREAM)

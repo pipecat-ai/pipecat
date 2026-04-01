@@ -7,8 +7,8 @@
 """Base classes for Large Language Model services with function calling support."""
 
 import asyncio
-import inspect
 import json
+import uuid
 import warnings
 from dataclasses import dataclass
 from typing import (
@@ -151,6 +151,9 @@ class FunctionCallRunnerItem:
         arguments: The arguments for the function.
         context: The LLM context.
         run_llm: Optional flag to control LLM execution after function call.
+        group_id: Shared identifier for all function calls from the same LLM
+            response batch. Used to trigger the LLM exactly once when the last
+            call in the group completes.
     """
 
     registry_item: FunctionCallRegistryItem
@@ -159,6 +162,7 @@ class FunctionCallRunnerItem:
     arguments: Mapping[str, Any]
     context: OpenAILLMContext | LLMContext
     run_llm: Optional[bool] = None
+    group_id: Optional[str] = None
 
 
 class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
@@ -695,6 +699,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=function_calls)
 
+        # All function calls from the same LLM response share a group_id so the
+        # aggregator can trigger the LLM exactly once when the last one completes.
+        group_id = str(uuid.uuid4())
+
         runner_items = []
         for function_call in function_calls:
             if function_call.function_name in self._functions.keys():
@@ -714,6 +722,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     tool_call_id=function_call.tool_call_id,
                     arguments=function_call.arguments,
                     context=function_call.context,
+                    group_id=group_id,
                 )
             )
 
@@ -783,6 +792,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             arguments=runner_item.arguments,
             cancel_on_interruption=item.cancel_on_interruption,
             is_async=item.is_async,
+            group_id=runner_item.group_id,
         )
 
         timeout_task: Optional[asyncio.Task] = None

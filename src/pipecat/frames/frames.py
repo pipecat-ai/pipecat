@@ -1921,6 +1921,9 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
         is_async: Whether this function call runs asynchronously. When True,
             the LLM continues the conversation immediately without waiting for
             the result. The result is injected later via a developer message.
+        group_id: Identifier shared by all function calls originating from the
+            same LLM response batch. Used to determine when the last call in a
+            group completes so the LLM can be triggered exactly once.
     """
 
     function_name: str
@@ -1928,6 +1931,7 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
     arguments: Any
     cancel_on_interruption: bool = False
     is_async: bool = False
+    group_id: Optional[str] = None
 
 
 @dataclass
