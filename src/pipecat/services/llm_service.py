@@ -198,6 +198,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     def __init__(
         self,
         run_in_parallel: bool = True,
+        group_parallel_tools: bool = True,
         function_call_timeout_secs: float = 10.0,
         settings: Optional[LLMSettings] = None,
         **kwargs,
@@ -207,6 +208,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         Args:
             run_in_parallel: Whether to run function calls in parallel or sequentially.
                 Defaults to True.
+            group_parallel_tools: Whether to group parallel function calls so the LLM
+                is triggered exactly once after all calls in the batch complete. When
+                False, each function call result triggers the LLM independently as it
+                arrives. Defaults to True.
             function_call_timeout_secs: Timeout in seconds for deferred function calls.
                 Defaults to 10.0 seconds.
             settings: The runtime-updatable settings for the LLM service.
@@ -221,6 +226,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             **kwargs,
         )
         self._run_in_parallel = run_in_parallel
+        self._group_parallel_tools = group_parallel_tools
         self._function_call_timeout_secs = function_call_timeout_secs
         self._filter_incomplete_user_turns: bool = False
         self._base_system_instruction: Optional[str] = None
@@ -699,9 +705,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=function_calls)
 
-        # All function calls from the same LLM response share a group_id so the
-        # aggregator can trigger the LLM exactly once when the last one completes.
-        group_id = str(uuid.uuid4())
+        # When group_parallel_tools is True all calls share a group_id so the
+        # aggregator triggers the LLM exactly once after the last one completes.
+        # When False, group_id is None and each result triggers inference independently.
+        group_id = str(uuid.uuid4()) if self._group_parallel_tools else None
 
         runner_items = []
         for function_call in function_calls:
