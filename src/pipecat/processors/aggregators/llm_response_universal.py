@@ -1081,7 +1081,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._context.add_message(
                 {
                     "role": "developer",
-                    "content": f"Async function with id '{frame.tool_call_id}' completed with result: {result}",
+                    "content": json.dumps({"tool_call_id": frame.tool_call_id, "result": result}),
                 }
             )
         else:
