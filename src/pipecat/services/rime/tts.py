@@ -82,7 +82,7 @@ class RimeTTSSettings(TTSSettings):
         speedAlpha: Speech speed multiplier (mistv2 only).
         reduceLatency: Whether to reduce latency at potential quality cost (mistv2 only).
         pauseBetweenBrackets: Whether to add pauses between bracketed content (mistv2 and mistv3).
-        phonemizeBetweenBrackets: Whether to phonemize bracketed content (mistv2 and mistv3).
+        phonemizeBetweenBrackets: Whether to phonemize bracketed content (mistv2 only).
         noTextNormalization: Whether to disable text normalization (mistv2 only).
         saveOovs: Whether to save out-of-vocabulary words (mistv2 only).
         inlineSpeedAlpha: Inline speed control markup.
@@ -153,7 +153,7 @@ class RimeTTSService(AudioContextTTSService):
             speed_alpha: Speech speed multiplier (mistv2 and mistv3 only).
             reduce_latency: Whether to reduce latency at potential quality cost (mistv2 only).
             pause_between_brackets: Whether to add pauses between bracketed content (mistv2 and mistv3 only).
-            phonemize_between_brackets: Whether to phonemize bracketed content (mistv2 and mistv3 only).
+            phonemize_between_brackets: Whether to phonemize bracketed content (mistv2 only).
             no_text_normalization: Whether to disable text normalization (mistv2 and mistv3 only).
             save_oovs: Whether to save out-of-vocabulary words (mistv2 and mistv3 only).
         """
@@ -314,10 +314,6 @@ class RimeTTSService(AudioContextTTSService):
                 params["speedAlpha"] = self._settings.speedAlpha
             if self._settings.pauseBetweenBrackets is not None:
                 params["pauseBetweenBrackets"] = json.dumps(self._settings.pauseBetweenBrackets)
-            if self._settings.phonemizeBetweenBrackets is not None:
-                params["phonemizeBetweenBrackets"] = json.dumps(
-                    self._settings.phonemizeBetweenBrackets
-                )
             if self._settings.noTextNormalization is not None:
                 params["noTextNormalization"] = json.dumps(self._settings.noTextNormalization)
             if self._settings.saveOovs is not None:
@@ -752,10 +748,10 @@ class RimeHttpTTSService(TTSService):
             "lang": self._settings.language,
             "speedAlpha": self._settings.speedAlpha,
             "pauseBetweenBrackets": self._settings.pauseBetweenBrackets,
-            "phonemizeBetweenBrackets": self._settings.phonemizeBetweenBrackets,
         }
         if self._settings.model == "mistv2":
             payload["reduceLatency"] = self._settings.reduceLatency
+            payload["phonemizeBetweenBrackets"] = self._settings.phonemizeBetweenBrackets
         if self._settings.inlineSpeedAlpha is not None:
             payload["inlineSpeedAlpha"] = self._settings.inlineSpeedAlpha
         payload["text"] = text
