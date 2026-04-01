@@ -12,7 +12,6 @@ Waves API for real-time text-to-speech synthesis.
 
 import asyncio
 import base64
-import importlib.metadata
 import json
 from dataclasses import dataclass, field
 from enum import Enum
@@ -20,8 +19,7 @@ from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
-_PIPECAT_VERSION = importlib.metadata.version("pipecat-ai")
-
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -304,7 +302,7 @@ class SmallestTTSService(InterruptibleTTSService):
                 additional_headers={
                     "Authorization": f"Bearer {self._api_key}",
                     "X-Source": "pipecat",
-                    "X-Pipecat-Version": _PIPECAT_VERSION,
+                    "X-Pipecat-Version": pipecat_version(),
                 },
             )
 

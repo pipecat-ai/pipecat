@@ -13,7 +13,6 @@ This module provides a STT service using Smallest AI's Waves API:
 """
 
 import asyncio
-import importlib.metadata
 import json
 from dataclasses import dataclass, field
 from enum import Enum
@@ -22,8 +21,7 @@ from urllib.parse import urlencode
 
 from loguru import logger
 
-_PIPECAT_VERSION = importlib.metadata.version("pipecat-ai")
-
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -143,7 +141,7 @@ class SmallestSTTService(WebsocketSTTService):
         stt = SmallestSTTService(
             api_key="your-api-key",
             settings=SmallestSTTService.Settings(
-                language="en",
+                language=Language.EN,
                 word_timestamps=True,
             ),
         )
@@ -176,7 +174,7 @@ class SmallestSTTService(WebsocketSTTService):
         """
         default_settings = self.Settings(
             model=SmallestSTTModel.PULSE.value,
-            language=language_to_smallest_stt_language(Language.EN),
+            language=Language.EN,
             word_timestamps=False,
             full_transcript=False,
             sentence_timestamps=False,
@@ -208,6 +206,17 @@ class SmallestSTTService(WebsocketSTTService):
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
         return True
+
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Smallest service language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Smallest-specific language code, or None if not supported.
+        """
+        return language_to_smallest_stt_language(language)
 
     async def start(self, frame: StartFrame):
         """Start the service and connect to the WebSocket."""
@@ -256,6 +265,7 @@ class SmallestSTTService(WebsocketSTTService):
                 await self._websocket.send(audio)
             except Exception as e:
                 yield ErrorFrame(error=f"Smallest STT error: {e}")
+                return
 
         yield None
 
@@ -319,7 +329,7 @@ class SmallestSTTService(WebsocketSTTService):
                 additional_headers={
                     "Authorization": f"Bearer {self._api_key}",
                     "X-Source": "pipecat",
-                    "X-Pipecat-Version": _PIPECAT_VERSION,
+                    "X-Pipecat-Version": pipecat_version(),
                 },
             )
             await self._call_event_handler("on_connected")
