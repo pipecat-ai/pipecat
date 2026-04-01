@@ -4,12 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Together AI speech-to-text service implementation."""
+"""Together AI speech-to-text service implementation.
+
+This module provides a STT service using Together AI's WebSocket API:
+
+- ``TogetherSTTService``: WebSocket-based real-time STT using an
+  OpenAI-compatible realtime transcription endpoint.
+"""
 
 import base64
 import json
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -43,15 +49,9 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 @dataclass
 class TogetherSTTSettings(STTSettings):
-    """Settings for the Together AI STT service.
+    """Settings for the Together AI STT service."""
 
-    Parameters:
-        model: Together AI transcription model to use.
-        language: Language of the audio input.
-    """
-
-    model: str = "openai/whisper-large-v3"
-    language: Language = Language.EN
+    pass
 
 
 class TogetherSTTService(WebsocketSTTService):
@@ -59,18 +59,28 @@ class TogetherSTTService(WebsocketSTTService):
 
     Provides real-time speech recognition using Together AI's WebSocket API
     with OpenAI-compatible speech-to-text endpoints.
+
+    Example::
+
+        stt = TogetherSTTService(
+            api_key="your-api-key",
+            settings=TogetherSTTService.Settings(
+                model="openai/whisper-large-v3",
+                language=Language.EN,
+            ),
+        )
     """
 
-    _settings: TogetherSTTSettings
+    Settings = TogetherSTTSettings
+    _settings: Settings
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: str = "openai/whisper-large-v3",
-        language: Language = Language.EN,
-        sample_rate: int = 16000,
-        base_url: str = "wss://api.together.xyz/v1",
+        sample_rate: Optional[int] = None,
+        base_url: str = "wss://api.together.ai/v1",
+        settings: Optional[Settings] = None,
         ttfs_p99_latency: float = TOGETHER_TTFS_P99,
         **kwargs,
     ):
@@ -78,21 +88,25 @@ class TogetherSTTService(WebsocketSTTService):
 
         Args:
             api_key: Together AI API key for authentication.
-            model: Together AI transcription model. Defaults to "openai/whisper-large-v3".
-            language: Language of the audio input. Defaults to English.
-            sample_rate: Audio sample rate (default: 16000). Together AI requires 16kHz input.
+            sample_rate: Audio sample rate in Hz. If None, uses the pipeline's rate.
             base_url: The URL of the Together AI WebSocket API.
+            settings: Runtime-updatable settings for the STT service.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
-            **kwargs: Additional arguments passed to the parent WebsocketSTTService.
+            **kwargs: Additional arguments passed to WebsocketSTTService.
         """
+        default_settings = self.Settings(
+            model="openai/whisper-large-v3",
+            language=Language.EN,
+        )
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=TogetherSTTSettings(
-                model=model,
-                language=language,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -101,12 +115,29 @@ class TogetherSTTService(WebsocketSTTService):
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
+        """Check if this service can generate processing metrics."""
+        return True
+
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Together AI language format.
+
+        Args:
+            language: The language to convert.
 
         Returns:
-            True, as Together STT service supports metrics generation.
+            The language code string, or None if not supported.
         """
-        return True
+        return str(language)
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect if anything changed."""
+        changed = await super()._update_settings(delta)
+
+        if changed:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the Together AI STT service.
