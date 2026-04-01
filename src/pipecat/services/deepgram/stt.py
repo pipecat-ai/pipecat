@@ -314,7 +314,6 @@ class DeepgramSTTService(STTService):
         self,
         *,
         api_key: str,
-        url: str = "",
         base_url: str = "",
         encoding: str = "linear16",
         channels: int = 1,
@@ -335,11 +334,6 @@ class DeepgramSTTService(STTService):
 
         Args:
             api_key: Deepgram API key for authentication.
-            url: Custom Deepgram API base URL.
-
-                .. deprecated:: 0.0.64
-                    Parameter `url` is deprecated, use `base_url` instead.
-
             base_url: Custom Deepgram API base URL.
             encoding: Audio encoding format. Defaults to "linear16".
             channels: Number of audio channels. Defaults to 1.
@@ -374,17 +368,6 @@ class DeepgramSTTService(STTService):
         Note:
             The `vad_events` option in LiveOptions is deprecated as of version 0.0.99 and will be removed in a future version. Please use the Silero VAD instead.
         """
-        if url:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'url' is deprecated, use 'base_url' instead.",
-                    DeprecationWarning,
-                )
-            base_url = url
-
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="nova-3-general",
