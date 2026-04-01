@@ -21,7 +21,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.together.llm import TogetherLLMService
 from pipecat.services.together.stt import TogetherSTTService
 from pipecat.services.together.tts import TogetherTTSService
