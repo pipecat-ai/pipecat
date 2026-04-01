@@ -348,6 +348,8 @@ class RimeTTSService(WebsocketTTSService):
                 params["temperature"] = self._settings.temperature
             if self._settings.top_p is not None:
                 params["top_p"] = self._settings.top_p
+        elif self._settings.model == "mistv3":
+            pass  # only speedAlpha applies, already added above
         else:  # mistv2/mist
             if self._settings.reduceLatency is not None:
                 params["reduceLatency"] = self._settings.reduceLatency
