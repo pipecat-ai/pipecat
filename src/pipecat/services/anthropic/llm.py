@@ -130,11 +130,6 @@ class AnthropicLLMService(LLMService):
 
         Parameters:
             enable_prompt_caching: Whether to enable the prompt caching feature.
-            enable_prompt_caching_beta (deprecated): Whether to enable the beta prompt caching feature.
-
-                .. deprecated:: 0.0.84
-                    Use the `enable_prompt_caching` parameter instead.
-
             max_tokens: Maximum tokens to generate. Must be at least 1.
             temperature: Sampling temperature between 0.0 and 1.0.
             top_k: Top-k sampling parameter.
@@ -147,7 +142,6 @@ class AnthropicLLMService(LLMService):
         """
 
         enable_prompt_caching: Optional[bool] = None
-        enable_prompt_caching_beta: Optional[bool] = None
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
@@ -156,18 +150,6 @@ class AnthropicLLMService(LLMService):
             default_factory=lambda: NOT_GIVEN
         )
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
-
-        def model_post_init(self, __context):
-            """Post-initialization to handle deprecated parameters."""
-            if self.enable_prompt_caching_beta is not None:
-                import warnings
-
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "enable_prompt_caching_beta is deprecated. Use enable_prompt_caching instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
 
     def __init__(
         self,
@@ -237,22 +219,8 @@ class AnthropicLLMService(LLMService):
                 default_settings.thinking = params.thinking
                 if isinstance(params.extra, dict):
                     default_settings.extra = params.extra
-                # Handle enable_prompt_caching / enable_prompt_caching_beta
-                enable_prompt_caching = params.enable_prompt_caching
-                if params.enable_prompt_caching_beta is not None:
-                    import warnings
-
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("always")
-                        warnings.warn(
-                            "enable_prompt_caching_beta is deprecated. "
-                            "Use enable_prompt_caching instead.",
-                            DeprecationWarning,
-                            stacklevel=2,
-                        )
-                    if enable_prompt_caching is None:
-                        enable_prompt_caching = params.enable_prompt_caching_beta
-                default_settings.enable_prompt_caching = enable_prompt_caching or False
+                if params.enable_prompt_caching is not None:
+                    default_settings.enable_prompt_caching = params.enable_prompt_caching
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
