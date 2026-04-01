@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -35,9 +35,10 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 load_dotenv(override=True)
 
 
-async def get_weather(params: FunctionCallParams):
-    location = params.arguments["location"]
-    await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
+async def fetch_weather_from_api(params: FunctionCallParams):
+    # Simulate a long-running API call, so we can test async function calls.
+    await asyncio.sleep(20)
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
 async def fetch_restaurant_recommendation(params: FunctionCallParams):
@@ -80,11 +81,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
-    llm.register_function("get_weather", get_weather)
+
+    # You can also register a function_name of None to get all functions
+    # sent to the same callback with an additional function_name parameter.
+    llm.register_function(
+        "get_current_weather",
+        fetch_weather_from_api,
+        cancel_on_interruption=False,
+        is_async=True,
+        timeout_secs=30,
+    )
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     weather_function = FunctionSchema(
-        name="get_weather",
+        name="get_current_weather",
         description="Get the current weather",
         properties={
             "location": {
