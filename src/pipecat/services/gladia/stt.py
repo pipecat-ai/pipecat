@@ -323,15 +323,6 @@ class GladiaSTTService(WebsocketSTTService):
         # 3. Apply params overrides — only if settings not provided
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
-            if params.language is not None:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "The 'language' parameter is deprecated and will be removed in a future "
-                        "version. Use 'language_config' instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
             if not settings:
                 # Extract init-only fields from params
                 if params.encoding is not None:
@@ -349,15 +340,8 @@ class GladiaSTTService(WebsocketSTTService):
                 default_settings.realtime_processing = params.realtime_processing
                 default_settings.messages_config = params.messages_config
                 default_settings.enable_vad = params.enable_vad
-                # Resolve deprecated language → language_config at init time
                 if params.language_config:
                     default_settings.language_config = params.language_config
-                elif params.language:
-                    language_code = self.language_to_service_language(params.language)
-                    if language_code:
-                        default_settings.language_config = LanguageConfig(
-                            languages=[language_code], code_switching=False
-                        )
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
