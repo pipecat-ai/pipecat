@@ -13,7 +13,6 @@ supporting multiple languages, custom vocabulary, and various audio processing o
 import asyncio
 import base64
 import json
-import warnings
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Literal, Optional
 
@@ -171,21 +170,6 @@ def language_to_gladia_language(language: Language) -> Optional[str]:
 
 
 # Deprecation warning for nested InputParams
-class _InputParamsDescriptor:
-    """Descriptor for backward compatibility with deprecation warning."""
-
-    def __get__(self, obj, objtype=None):
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "GladiaSTTService.InputParams is deprecated and will be removed in a future version. "
-                "Import and use GladiaInputParams directly instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return GladiaInputParams
-
-
 @dataclass
 class GladiaSTTSettings(STTSettings):
     """Settings for GladiaSTTService.
@@ -225,16 +209,10 @@ class GladiaSTTService(WebsocketSTTService):
     Provides automatic reconnection, audio buffering, and comprehensive error handling.
 
     For complete API documentation, see: https://docs.gladia.io/api-reference/v2/live/init
-
-    .. deprecated:: 0.0.62
-        Use :class:`~pipecat.services.gladia.config.GladiaInputParams` directly instead.
     """
 
     Settings = GladiaSTTSettings
     _settings: Settings
-
-    # Maintain backward compatibility
-    InputParams = _InputParamsDescriptor()
 
     def __init__(
         self,
