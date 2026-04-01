@@ -755,7 +755,7 @@ class GoogleSTTService(STTService):
     ) -> None:
         """Update service options dynamically.
 
-        .. deprecated::
+        .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame`` with ``GoogleSTTService.Settings(...)``
             instead.
 
