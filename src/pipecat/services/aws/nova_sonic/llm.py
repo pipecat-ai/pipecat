@@ -258,7 +258,6 @@ class AWSNovaSonicLLMService(LLMService):
         settings: Optional[Settings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
-        send_transcription_frames: bool = True,
         **kwargs,
     ):
         """Initializes the AWS Nova Sonic LLM service.
@@ -302,12 +301,6 @@ class AWSNovaSonicLLMService(LLMService):
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMService.Settings(system_instruction=...)`` instead.
             tools: Available tools/functions for the model to use.
-            send_transcription_frames: Whether to emit transcription frames.
-
-                .. deprecated:: 0.0.91
-                    This parameter is deprecated and will be removed in a future version.
-                    Transcription frames are always sent.
-
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -390,18 +383,6 @@ class AWSNovaSonicLLMService(LLMService):
                 "This parameter is only supported starting with Nova 2 Sonic (amazon.nova-2-sonic-v1:0)."
             )
             self._settings.endpointing_sensitivity = None
-
-        if not send_transcription_frames:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`send_transcription_frames` is deprecated and will be removed in a future version. "
-                    "Transcription frames are always sent.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
 
         self._context: Optional[LLMContext] = None
         self._stream: Optional[
