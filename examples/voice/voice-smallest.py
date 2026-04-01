@@ -24,6 +24,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.smallest.stt import SmallestSTTService
 from pipecat.services.smallest.tts import SmallestTTSService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -53,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = SmallestSTTService(
         api_key=os.getenv("SMALLEST_API_KEY"),
         settings=SmallestSTTService.Settings(
-            language="en",
+            language=Language.EN,
         ),
     )
 
