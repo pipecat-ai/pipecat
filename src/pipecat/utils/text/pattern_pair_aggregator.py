@@ -161,46 +161,6 @@ class PatternPairAggregator(SimpleTextAggregator):
         }
         return self
 
-    def add_pattern_pair(
-        self, pattern_id: str, start_pattern: str, end_pattern: str, remove_match: bool = True
-    ):
-        """Add a pattern pair to detect in the text.
-
-        .. deprecated:: 0.0.95
-            This function is deprecated and will be removed in a future version.
-            Use `add_pattern` with a type and MatchAction instead.
-
-            This method calls `add_pattern` setting type with the provided pattern_id and action
-            to either MatchAction.REMOVE or MatchAction.KEEP based on `remove_match`.
-
-        Args:
-            pattern_id: Identifier for this pattern pair. Should be unique and ideally descriptive.
-                        (e.g., 'code', 'speaker', 'custom'). pattern_id can not be 'sentence' or 'word'
-                        as those arereserved for the default behavior.
-            start_pattern: Pattern that marks the beginning of content.
-            end_pattern: Pattern that marks the end of content.
-            remove_match: If True, the matched pattern will be removed from the text. (Same as MatchAction.REMOVE)
-                          If False, it will be kept and treated as normal text. (Same as MatchAction.KEEP)
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("once")
-            warnings.warn(
-                "add_pattern_pair with a pattern_id or remove_match is deprecated and will be"
-                " removed in a future version. Use add_pattern with a type and MatchAction instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        action = MatchAction.REMOVE if remove_match else MatchAction.KEEP
-        return self.add_pattern(
-            type=pattern_id,
-            start_pattern=start_pattern,
-            end_pattern=end_pattern,
-            action=action,
-        )
-
     def on_pattern_match(
         self, type: str, handler: Callable[[PatternMatch], Awaitable[None]]
     ) -> "PatternPairAggregator":
