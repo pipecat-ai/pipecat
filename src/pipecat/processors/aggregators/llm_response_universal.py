@@ -50,7 +50,6 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
-    SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
@@ -74,7 +73,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     LLMContextSummarizer,
     SummaryAppliedEvent,
 )
-from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -82,7 +81,7 @@ from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedP
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
     LLMContextSummarizationConfig,
@@ -468,11 +467,6 @@ class LLMUserAggregator(LLMContextAggregator):
             self._vad_controller.add_event_handler("on_push_frame", self._on_push_frame)
             self._vad_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
 
-        # NOTE(aleix): Probably just needed temporarily. This was added to
-        # prevent processing self-queued frames (SpeechControlParamsFrame)
-        # pushed by strategies.
-        self._self_queued_frames = set()
-
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -528,8 +522,6 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
-        elif isinstance(frame, SpeechControlParamsFrame):
-            await self._handle_speech_control_params(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -643,17 +635,6 @@ class LLMUserAggregator(LLMContextAggregator):
         if frame.run_llm:
             await self.push_context_frame()
 
-    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
-        if frame.id in self._self_queued_frames:
-            return
-
-        if not frame.turn_params:
-            return
-
-        logger.warning(f"{self}: `turn_analyzer` in base input transport is deprecated.")
-
-        await self._user_turn_controller.update_strategies(ExternalUserTurnStrategies())
-
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
 
@@ -668,16 +649,6 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
-    async def _internal_queue_frame(
-        self,
-        frame: Frame,
-        direction: FrameDirection = FrameDirection.DOWNSTREAM,
-        callback: Optional[FrameCallback] = None,
-    ):
-        """Queues the given frame to ourselves."""
-        self._self_queued_frames.add(frame.id)
-        await self.queue_frame(frame, direction, callback)
-
     async def _queued_broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
         """Broadcasts a frame upstream and queues it for internal processing.
 
@@ -690,13 +661,13 @@ class LLMUserAggregator(LLMContextAggregator):
             **kwargs: Keyword arguments to be passed to the frame's constructor.
 
         """
-        await self._internal_queue_frame(frame_cls(**kwargs))
+        await self.queue_frame(frame_cls(**kwargs))
         await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
 
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ):
-        await self._internal_queue_frame(frame, direction)
+        await self.queue_frame(frame, direction)
 
     async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
         await self._queued_broadcast_frame(frame_cls, **kwargs)
