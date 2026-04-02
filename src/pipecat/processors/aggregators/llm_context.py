@@ -19,7 +19,7 @@ import base64
 import io
 import wave
 from dataclasses import dataclass
-from typing import Any, List, Optional, TypeAlias, Union
+from typing import Any, Callable, List, Optional, TypeAlias, Union
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -265,6 +265,17 @@ class LLMContext:
             messages: New list of messages to replace the current history.
         """
         self._messages[:] = messages
+
+    def transform_messages(
+        self, transform: Callable[[List[LLMContextMessage]], List[LLMContextMessage]]
+    ):
+        """Transform the current messages using the provided function.
+
+        Args:
+            transform: A function that takes the current list of messages and returns
+                a modified list of messages to set in the context.
+        """
+        self.set_messages(transform(self._messages))
 
     def set_tools(self, tools: ToolsSchema | NotGiven = NOT_GIVEN):
         """Set the available tools for the LLM.
