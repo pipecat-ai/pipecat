@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     LLMContextFrame,
+    LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     UserImageRawFrame,
@@ -589,6 +590,9 @@ class AWSBedrockLLMService(LLMService):
 
         if isinstance(frame, LLMContextFrame):
             await self._process_context(frame.context)
+        elif isinstance(frame, LLMEnablePromptCachingFrame):
+            logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
+            self._settings.enable_prompt_caching = frame.enable
         else:
             await self.push_frame(frame, direction)
 
