@@ -75,10 +75,10 @@ class RimeTTSSettings(TTSSettings):
 
     Parameters:
         segment: Text segmentation mode ("immediate", "bySentence", "never").
-        speedAlpha: Speech speed multiplier (mistv2 only).
+        speedAlpha: Speech speed multiplier (mist, mistv2, mistv3).
         reduceLatency: Whether to reduce latency at potential quality cost (mistv2 only).
-        pauseBetweenBrackets: Whether to add pauses between bracketed content (mistv2 only).
-        phonemizeBetweenBrackets: Whether to phonemize bracketed content (mistv2 only).
+        pauseBetweenBrackets: Whether to add pauses between bracketed content (mist, mistv2, mistv3).
+        phonemizeBetweenBrackets: Whether to phonemize bracketed content (mist, mistv2, mistv3).
         noTextNormalization: Whether to disable text normalization (mistv2 only).
         saveOovs: Whether to save out-of-vocabulary words (mistv2 only).
         inlineSpeedAlpha: Inline speed control markup.
@@ -146,8 +146,8 @@ class RimeTTSService(WebsocketTTSService):
             temperature: Sampling temperature (arcana only).
             top_p: Cumulative probability threshold (arcana only).
             reduce_latency: Whether to reduce latency at potential quality cost (mistv2 only).
-            pause_between_brackets: Whether to add pauses between bracketed content (mistv2 only).
-            phonemize_between_brackets: Whether to phonemize bracketed content (mistv2 only).
+            pause_between_brackets: Whether to add pauses between bracketed content (mist, mistv2, mistv3).
+            phonemize_between_brackets: Whether to phonemize bracketed content (mist, mistv2, mistv3).
             no_text_normalization: Whether to disable text normalization (mistv2 only).
             save_oovs: Whether to save out-of-vocabulary words (mistv2 only).
         """
@@ -349,7 +349,10 @@ class RimeTTSService(WebsocketTTSService):
             if self._settings.top_p is not None:
                 params["top_p"] = self._settings.top_p
         elif self._settings.model == "mistv3":
-            pass  # only speedAlpha applies, already added above
+            if self._settings.pauseBetweenBrackets is not None:
+                params["pauseBetweenBrackets"] = json.dumps(self._settings.pauseBetweenBrackets)
+            if self._settings.phonemizeBetweenBrackets is not None:
+                params["phonemizeBetweenBrackets"] = json.dumps(self._settings.phonemizeBetweenBrackets)
         else:  # mistv2/mist
             if self._settings.reduceLatency is not None:
                 params["reduceLatency"] = self._settings.reduceLatency
