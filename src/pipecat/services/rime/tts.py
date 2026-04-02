@@ -353,6 +353,8 @@ class RimeTTSService(WebsocketTTSService):
                 params["pauseBetweenBrackets"] = json.dumps(self._settings.pauseBetweenBrackets)
             if self._settings.phonemizeBetweenBrackets is not None:
                 params["phonemizeBetweenBrackets"] = json.dumps(self._settings.phonemizeBetweenBrackets)
+            if self._settings.inlineSpeedAlpha is not None:
+                params["inlineSpeedAlpha"] = self._settings.inlineSpeedAlpha
         else:  # mistv2/mist
             if self._settings.reduceLatency is not None:
                 params["reduceLatency"] = self._settings.reduceLatency
