@@ -73,7 +73,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     LLMContextSummarizer,
     SummaryAppliedEvent,
 )
-from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -467,11 +467,6 @@ class LLMUserAggregator(LLMContextAggregator):
             self._vad_controller.add_event_handler("on_push_frame", self._on_push_frame)
             self._vad_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
 
-        # NOTE(aleix): Probably just needed temporarily. This was added to
-        # prevent processing self-queued frames (SpeechControlParamsFrame)
-        # pushed by strategies.
-        self._self_queued_frames = set()
-
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -654,16 +649,6 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
-    async def _internal_queue_frame(
-        self,
-        frame: Frame,
-        direction: FrameDirection = FrameDirection.DOWNSTREAM,
-        callback: Optional[FrameCallback] = None,
-    ):
-        """Queues the given frame to ourselves."""
-        self._self_queued_frames.add(frame.id)
-        await self.queue_frame(frame, direction, callback)
-
     async def _queued_broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
         """Broadcasts a frame upstream and queues it for internal processing.
 
@@ -676,13 +661,13 @@ class LLMUserAggregator(LLMContextAggregator):
             **kwargs: Keyword arguments to be passed to the frame's constructor.
 
         """
-        await self._internal_queue_frame(frame_cls(**kwargs))
+        await self.queue_frame(frame_cls(**kwargs))
         await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
 
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ):
-        await self._internal_queue_frame(frame, direction)
+        await self.queue_frame(frame, direction)
 
     async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
         await self._queued_broadcast_frame(frame_cls, **kwargs)
