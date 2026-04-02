@@ -23,14 +23,12 @@ from typing import (
     Coroutine,
     List,
     Optional,
-    Sequence,
     Tuple,
     Type,
 )
 
 from loguru import logger
 
-from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     CancelFrame,
@@ -193,7 +191,6 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
-        self._interruption_strategies: List[BaseInterruptionStrategy] = []
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -331,19 +328,6 @@ class FrameProcessor(BaseObject):
             True if only initial time-to-first-byte should be reported.
         """
         return self._report_only_initial_ttfb
-
-    @property
-    def interruption_strategies(self) -> Sequence[BaseInterruptionStrategy]:
-        """Get the interruption strategies for this processor.
-
-        .. deprecated:: 0.0.99
-            This function is deprecated, use the new user and bot turn start
-            strategies insted.
-
-        Returns:
-            Sequence of interruption strategies.
-        """
-        return self._interruption_strategies
 
     @property
     def task_manager(self) -> BaseTaskManager:
@@ -796,7 +780,6 @@ class FrameProcessor(BaseObject):
         self.__started = True
         self._enable_metrics = frame.enable_metrics
         self._enable_usage_metrics = frame.enable_usage_metrics
-        self._interruption_strategies = frame.interruption_strategies
         self._report_only_initial_ttfb = frame.report_only_initial_ttfb
 
         self.__create_process_task()

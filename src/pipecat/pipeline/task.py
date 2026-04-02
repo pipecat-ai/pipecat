@@ -20,7 +20,6 @@ from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Set, Tupl
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
-from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
@@ -119,11 +118,6 @@ class PipelineParams(BaseModel):
         heartbeats_period_secs: Period between heartbeats in seconds.
         heartbeats_monitor_secs: Timeout (in seconds) before warning about
             missed heartbeats. Defaults to 10 seconds.
-        interruption_strategies: [deprecated] Strategies for bot interruption behavior.
-
-            .. deprecated:: 0.0.99
-                Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
-
         report_only_initial_ttfb: Whether to report only initial time to first byte.
         send_initial_empty_metrics: Whether to send initial empty metrics.
         start_metadata: Additional metadata for pipeline start.
@@ -138,7 +132,6 @@ class PipelineParams(BaseModel):
     enable_usage_metrics: bool = False
     heartbeats_period_secs: float = HEARTBEAT_SECS
     heartbeats_monitor_secs: float = HEARTBEAT_MONITOR_SECS
-    interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
     start_metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -778,7 +771,6 @@ class PipelineTask(BasePipelineTask):
             enable_tracing=self._enable_tracing,
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
-            interruption_strategies=self._params.interruption_strategies,
             tracing_context=self._tracing_context,
         )
         start_frame.metadata = self._create_start_metadata()
