@@ -652,20 +652,10 @@ class LiveKitInputTransport(BaseInputTransport):
 
         self._audio_in_task = None
         self._video_in_task = None
-        self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
         self._resampler = create_stream_resampler()
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
-
-    @property
-    def vad_analyzer(self) -> Optional[VADAnalyzer]:
-        """Get the Voice Activity Detection analyzer.
-
-        Returns:
-            The VAD analyzer instance if configured.
-        """
-        return self._vad_analyzer
 
     async def start(self, frame: StartFrame):
         """Start the input transport and connect to LiveKit room.

@@ -1711,17 +1711,6 @@ class DailyInputTransport(BaseInputTransport):
         # Audio task when using a virtual speaker (i.e. no user tracks).
         self._audio_in_task: Optional[asyncio.Task] = None
 
-        self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
-
-    @property
-    def vad_analyzer(self) -> Optional[VADAnalyzer]:
-        """Get the Voice Activity Detection analyzer.
-
-        Returns:
-            The VAD analyzer instance if configured.
-        """
-        return self._vad_analyzer
-
     async def start_audio_in_streaming(self):
         """Start receiving audio from participants."""
         if not self._params.audio_in_enabled:
