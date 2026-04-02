@@ -171,8 +171,7 @@ async def test_openai_llm_stream_closed_on_cancellation():
         mock_stream = MockAsyncStream()
 
         # Mock the stream creation methods
-        service._stream_chat_completions_specific_context = AsyncMock(return_value=mock_stream)
-        service._stream_chat_completions_universal_context = AsyncMock(return_value=mock_stream)
+        service.get_chat_completions = AsyncMock(return_value=mock_stream)
         service.start_ttfb_metrics = AsyncMock()
         service.stop_ttfb_metrics = AsyncMock()
         service.start_llm_usage_metrics = AsyncMock()
@@ -281,8 +280,7 @@ async def test_openai_llm_async_iterator_closed_on_stream_end():
         mock_iterator = MockAsyncIterator()
         mock_stream = MockAsyncStream(mock_iterator)
 
-        service._stream_chat_completions_specific_context = AsyncMock(return_value=mock_stream)
-        service._stream_chat_completions_universal_context = AsyncMock(return_value=mock_stream)
+        service.get_chat_completions = AsyncMock(return_value=mock_stream)
         service.start_ttfb_metrics = AsyncMock()
         service.stop_ttfb_metrics = AsyncMock()
         service.start_llm_usage_metrics = AsyncMock()

@@ -31,7 +31,6 @@ from pipecat.frames.frames import (
     VADParamsUpdateFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.text.pattern_pair_aggregator import (
@@ -444,7 +443,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
-        if isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame)):
+        if isinstance(frame, LLMContextFrame):
             # Extract messages and pass to IVR processor
             all_messages = frame.context.get_messages()
 

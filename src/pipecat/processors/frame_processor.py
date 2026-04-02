@@ -196,7 +196,6 @@ class FrameProcessor(BaseObject):
         # Other properties (deprecated)
         self._allow_interruptions = False
         self._interruption_strategies: List[BaseInterruptionStrategy] = []
-        self._deprecated_openaillmcontext = False
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -825,9 +824,6 @@ class FrameProcessor(BaseObject):
         self._enable_usage_metrics = frame.enable_usage_metrics
         self._interruption_strategies = frame.interruption_strategies
         self._report_only_initial_ttfb = frame.report_only_initial_ttfb
-
-        # NOTE(aleix): Remove when OpenAILLMContext/LLMUserContextAggregator is removed.
-        self._deprecated_openaillmcontext = "deprecated_openaillmcontext" in frame.metadata
 
         self.__create_process_task()
 

@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from opentelemetry import trace
 
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -459,40 +458,30 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             self.push_frame = traced_push_frame
 
                             # Get messages for logging
-                            # For OpenAILLMContext: use context's own get_messages_for_logging() method
-                            # For LLMContext: use adapter's get_messages_for_logging() which returns
+                            # Use adapter's get_messages_for_logging() which returns
                             # messages in provider's native format with sensitive data sanitized
                             messages = None
                             serialized_messages = None
 
-                            if isinstance(context, OpenAILLMContext):
-                                # OpenAILLMContext and subclasses have their own method
-                                messages = context.get_messages_for_logging()
-                            elif isinstance(context, LLMContext):
-                                # Universal LLMContext - use adapter for provider-native format
-                                if hasattr(self, "get_llm_adapter"):
-                                    adapter = self.get_llm_adapter()
-                                    messages = adapter.get_messages_for_logging(context)
+                            # Use adapter for provider-native format
+                            if hasattr(self, "get_llm_adapter"):
+                                adapter = self.get_llm_adapter()
+                                messages = adapter.get_messages_for_logging(context)
 
                             # Serialize messages if available
                             if messages:
                                 serialized_messages = json.dumps(messages)
 
                             # Get tools
-                            # For OpenAILLMContext: tools may need adapter conversion if set
-                            # For LLMContext: use adapter's from_standard_tools() to convert ToolsSchema
+                            # Use adapter's from_standard_tools() to convert ToolsSchema
                             tools = None
                             serialized_tools = None
                             tool_count = 0
 
-                            if isinstance(context, OpenAILLMContext):
-                                # OpenAILLMContext: tools property handles adapter conversion internally
-                                tools = context.tools
-                            elif isinstance(context, LLMContext):
-                                # Universal LLMContext - use adapter to convert ToolsSchema
-                                if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
-                                    adapter = self.get_llm_adapter()
-                                    tools = adapter.from_standard_tools(context.tools)
+                            # Use adapter to convert ToolsSchema
+                            if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
+                                adapter = self.get_llm_adapter()
+                                tools = adapter.from_standard_tools(context.tools)
 
                             # Serialize and count tools if available
                             # Check if tools is not None and not NOT_GIVEN
@@ -501,36 +490,28 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 tool_count = len(tools) if isinstance(tools, list) else 1
 
                             # Handle system message for different services
+                            # settings.system_instruction takes priority (matches service behavior)
                             system_message = None
-                            if isinstance(context, LLMContext):
-                                # settings.system_instruction takes priority (matches service behavior)
-                                if hasattr(self, "_settings") and getattr(
-                                    self._settings, "system_instruction", None
-                                ):
-                                    system_message = self._settings.system_instruction
-                                else:
-                                    # Fall back to extracting from context messages
-                                    ctx_messages = context.get_messages()
-                                    if ctx_messages:
-                                        first = ctx_messages[0]
-                                        if (
-                                            isinstance(first, dict)
-                                            and first.get("role") == "system"
-                                        ):
-                                            content = first.get("content")
-                                            if isinstance(content, str):
-                                                system_message = content
-                                            elif isinstance(content, list):
-                                                system_message = " ".join(
-                                                    part.get("text", "")
-                                                    for part in content
-                                                    if isinstance(part, dict)
-                                                    and part.get("type") == "text"
-                                                )
-                            elif hasattr(context, "system"):
-                                system_message = context.system
-                            elif hasattr(context, "system_message"):
-                                system_message = context.system_message
+                            if hasattr(self, "_settings") and getattr(
+                                self._settings, "system_instruction", None
+                            ):
+                                system_message = self._settings.system_instruction
+                            else:
+                                # Fall back to extracting from context messages
+                                ctx_messages = context.get_messages()
+                                if ctx_messages:
+                                    first = ctx_messages[0]
+                                    if isinstance(first, dict) and first.get("role") == "system":
+                                        content = first.get("content")
+                                        if isinstance(content, str):
+                                            system_message = content
+                                        elif isinstance(content, list):
+                                            system_message = " ".join(
+                                                part.get("text", "")
+                                                for part in content
+                                                if isinstance(part, dict)
+                                                and part.get("type") == "text"
+                                            )
 
                             # Use given_fields() defensively in case a service doesn't
                             # initialize all settings.

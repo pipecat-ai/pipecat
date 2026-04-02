@@ -26,15 +26,11 @@ from pipecat.frames.frames import (
     LLMTextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 def default_context_to_payload_transformer(
-    context: LLMContext | OpenAILLMContext,
+    context: LLMContext,
 ) -> Optional[str]:
     """Default transformer to create AgentCore payload from LLM context.
 
@@ -118,9 +114,7 @@ class AWSAgentCoreProcessor(FrameProcessor):
         aws_secret_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
         aws_region: Optional[str] = None,
-        context_to_payload_transformer: Optional[
-            Callable[[LLMContext | OpenAILLMContext], Optional[str]]
-        ] = None,
+        context_to_payload_transformer: Optional[Callable[[LLMContext], Optional[str]]] = None,
         response_to_output_transformer: Optional[Callable[[str], Optional[str]]] = None,
         **kwargs,
     ):
@@ -200,7 +194,7 @@ class AWSAgentCoreProcessor(FrameProcessor):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+        if isinstance(frame, LLMContextFrame):
             # Create payload to invoke AgentCore agent
             payload = self._context_to_payload_transformer(frame.context)
 

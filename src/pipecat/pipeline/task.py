@@ -48,7 +48,6 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
-from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIObserverParams, RTVIProcessor
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
@@ -1034,10 +1033,6 @@ class PipelineTask(BasePipelineTask):
     def _create_start_metadata(self) -> Dict[str, Any]:
         """Build and return start metadata including user-provided values."""
         start_metadata = {}
-
-        # NOTE(aleix): Remove when OpenAILLMContext/LLMUserContextAggregator is removed.
-        if self._find_processor(self._pipeline, LLMUserContextAggregator):
-            start_metadata["deprecated_openaillmcontext"] = True
 
         # Update with user provided metadata.
         start_metadata.update(self._params.start_metadata)
