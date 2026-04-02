@@ -180,6 +180,7 @@ class AWSBedrockLLMService(LLMService):
             user_turn_completion_config=None,
             stop_sequences=None,
             latency=None,
+            enable_prompt_caching=False,
             additional_model_request_fields={},
         )
 
