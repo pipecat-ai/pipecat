@@ -10,7 +10,7 @@ import base64
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import AsyncGenerator, List, Optional
+from typing import Any, AsyncGenerator, List, Optional
 
 import aiohttp
 from loguru import logger
@@ -28,7 +28,6 @@ from pipecat.frames.frames import (
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -240,7 +239,6 @@ class CartesiaTTSService(WebsocketTTSService):
         container: str = "raw",
         params: Optional[InputParams] = None,
         settings: Optional[Settings] = None,
-        text_aggregator: Optional[BaseTextAggregator] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         aggregate_sentences: Optional[bool] = None,
         **kwargs,
@@ -271,11 +269,6 @@ class CartesiaTTSService(WebsocketTTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
-            text_aggregator: Custom text aggregator for processing input text.
-
-                .. deprecated:: 0.0.95
-                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
-
             text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
 
@@ -337,20 +330,18 @@ class CartesiaTTSService(WebsocketTTSService):
             pause_frame_processing=False,
             sample_rate=sample_rate,
             push_start_frame=True,
-            text_aggregator=text_aggregator,
             settings=default_settings,
             **kwargs,
         )
 
-        if not text_aggregator:
-            # Always skip tags added for spelled-out text
-            # Note: This is primarily to support backwards compatibility.
-            #    The preferred way of taking advantage of Cartesia SSML Tags is
-            #    to use an LLMTextProcessor and/or a text_transformer to identify
-            #    and insert these tags for the purpose of the TTS service alone.
-            self._text_aggregator = SkipTagsAggregator(
-                [("<spell>", "</spell>")], aggregation_type=self._text_aggregation_mode
-            )
+        # Always skip tags added for spelled-out text
+        # Note: This is primarily to support backwards compatibility.
+        #    The preferred way of taking advantage of Cartesia SSML Tags is
+        #    to use an LLMTextProcessor and/or a text_transformer to identify
+        #    and insert these tags for the purpose of the TTS service alone.
+        self._text_aggregator = SkipTagsAggregator(
+            [("<spell>", "</spell>")], aggregation_type=self._text_aggregation_mode
+        )
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version
@@ -598,6 +589,34 @@ class CartesiaTTSService(WebsocketTTSService):
         logger.trace(f"{self}: flushing audio")
         msg = self._build_msg(text="", continue_transcript=False, context_id=flush_id)
         await self._websocket.send(msg)
+
+    async def _update_settings(self, delta: CartesiaTTSSettings) -> dict[str, Any]:
+        """Apply a TTS settings delta, flushing the context if needed.
+
+        Voice, model, and language are locked per Cartesia context. If any of
+        these change, the current context is flushed so the next sentence opens
+        a fresh one with the updated settings.
+
+        Args:
+            delta: A TTS settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+        if not changed:
+            return changed
+
+        if changed.keys() & {"voice", "model", "language"}:
+            if self._turn_context_id and self.audio_context_available(self._turn_context_id):
+                await self.flush_audio(context_id=self._turn_context_id)
+            # Assign a new turn context ID so subsequent sentences in this
+            # turn open a new Cartesia context with the updated settings.
+            if self._turn_context_id:
+                self._turn_context_id = None
+                self._turn_context_id = self.create_context_id()
+
+        return changed
 
     async def _process_messages(self):
         async for message in self._get_websocket():

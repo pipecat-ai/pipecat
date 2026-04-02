@@ -37,7 +37,6 @@ from pipecat.services.tts_service import (
     WebsocketTTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -176,7 +175,6 @@ class RimeTTSService(WebsocketTTSService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         settings: Optional[Settings] = None,
-        text_aggregator: Optional[BaseTextAggregator] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         aggregate_sentences: Optional[bool] = None,
         **kwargs,
@@ -204,11 +202,6 @@ class RimeTTSService(WebsocketTTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
-            text_aggregator: Custom text aggregator for processing input text.
-
-                .. deprecated:: 0.0.95
-                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
-
             text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
@@ -282,15 +275,14 @@ class RimeTTSService(WebsocketTTSService):
         self._audio_format = "pcm"
         self._sampling_rate = 0  # updated in start()
 
-        if not text_aggregator:
-            # Always skip tags added for spelled-out text
-            # Note: This is primarily to support backwards compatibility.
-            #    The preferred way of taking advantage of Rime spelling is
-            #    to use an LLMTextProcessor and/or a text_transformer to identify
-            #    and insert these tags for the purpose of the TTS service alone.
-            self._text_aggregator = SkipTagsAggregator(
-                [("spell(", ")")], aggregation_type=self._text_aggregation_mode
-            )
+        # Always skip tags added for spelled-out text
+        # Note: This is primarily to support backwards compatibility.
+        #    The preferred way of taking advantage of Rime spelling is
+        #    to use an LLMTextProcessor and/or a text_transformer to identify
+        #    and insert these tags for the purpose of the TTS service alone.
+        self._text_aggregator = SkipTagsAggregator(
+            [("spell(", ")")], aggregation_type=self._text_aggregation_mode
+        )
 
         # Store service configuration
         self._api_key = api_key

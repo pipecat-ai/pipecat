@@ -45,7 +45,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -54,6 +54,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.aggregators.llm_text_processor import LLMTextProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -100,31 +101,35 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     # Create pattern pair aggregator for voice switching
-    pattern_aggregator = PatternPairAggregator()
+    llm_text_aggregator = PatternPairAggregator()
 
     # Add pattern for voice switching
-    pattern_aggregator.add_pattern(
+    llm_text_aggregator.add_pattern(
         type="voice",
         start_pattern="<voice>",
         end_pattern="</voice>",
-        action=MatchAction.REMOVE,  # Remove tags from final text
+        action=MatchAction.AGGREGATE,
     )
 
     # Register handler for voice switching
     async def on_voice_tag(match: PatternMatch):
         voice_name = match.text.strip().lower()
         if voice_name in VOICE_IDS:
-            # First flush any existing audio to finish the current context
-            await tts.flush_audio()
-            # Then set the new voice
-            await tts.set_voice(VOICE_IDS[voice_name])
+            await llm_text_processor.push_frame(
+                TTSUpdateSettingsFrame(
+                    delta=CartesiaTTSService.Settings(voice=VOICE_IDS[voice_name])
+                )
+            )
             logger.info(f"Switched to {voice_name} voice")
         else:
             logger.warning(f"Unknown voice: {voice_name}")
 
-    pattern_aggregator.on_pattern_match("voice", on_voice_tag)
+    llm_text_aggregator.on_pattern_match("voice", on_voice_tag)
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+
+    # Process LLM text through the pattern aggregator before TTS
+    llm_text_processor = LLMTextProcessor(text_aggregator=llm_text_aggregator)
 
     # Initialize TTS with narrator voice as default
     tts = CartesiaTTSService(
@@ -132,7 +137,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=CartesiaTTSService.Settings(
             voice=VOICE_IDS["narrator"],
         ),
-        text_aggregator=pattern_aggregator,
+        skip_aggregator_types=["voice"],  # Skip voice tags in TTS speech
     )
 
     # System prompt for storytelling with voice switching
@@ -204,7 +209,8 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
             stt,
             user_aggregator,
             llm,
-            tts,  # TTS with pattern aggregator
+            llm_text_processor,
+            tts,
             transport.output(),
             assistant_aggregator,
         ]

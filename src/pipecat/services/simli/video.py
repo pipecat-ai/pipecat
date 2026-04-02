@@ -7,7 +7,6 @@
 """Simli video service for real-time avatar generation."""
 
 import asyncio
-import warnings
 from dataclasses import dataclass
 from typing import Optional
 
@@ -79,10 +78,8 @@ class SimliVideoService(AIService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        face_id: Optional[str] = None,
-        simli_config: Optional[SimliConfig] = None,
-        use_turn_server: bool = False,
+        api_key: str,
+        face_id: str,
         simli_url: str = "https://api.simli.ai",
         is_trinity_avatar: bool = False,
         params: Optional[InputParams] = None,
@@ -98,18 +95,6 @@ class SimliVideoService(AIService):
             api_key: Simli API key for authentication.
             face_id: Simli Face ID. For Trinity avatars, specify "faceId/emotionId"
                 to use a different emotion than the default.
-            simli_config: Configuration object for Simli client settings.
-                Use api_key and face_id instead.
-
-                .. deprecated:: 0.0.92
-                    The 'simli_config' parameter is deprecated and will be removed in a future version.
-                    Please use 'api_key' and 'face_id' parameters instead.
-
-            use_turn_server: Whether to use TURN server for connection. Defaults to False.
-
-                .. deprecated:: 0.0.95
-                    The 'use_turn_server' parameter is deprecated and will be removed in a future version.
-
             simli_url: URL of the simli servers. Can be changed for custom deployments
                 of enterprise users.
             is_trinity_avatar: Boolean to tell simli client that this is a Trinity avatar
@@ -147,49 +132,16 @@ class SimliVideoService(AIService):
         # 4. Call super
         super().__init__(settings=default_settings, **kwargs)
 
-        # Handle deprecated simli_config parameter
-        if simli_config is not None:
-            if api_key is not None or face_id is not None:
-                raise ValueError(
-                    "Cannot specify both simli_config and api_key/face_id. "
-                    "Please use api_key and face_id (simli_config is deprecated)."
-                )
+        # Build SimliConfig from parameters
+        config_kwargs = {
+            "faceId": face_id,
+        }
+        if max_session_length is not None:
+            config_kwargs["maxSessionLength"] = max_session_length
+        if max_idle_time is not None:
+            config_kwargs["maxIdleTime"] = max_idle_time
 
-            warnings.warn(
-                "The 'simli_config' parameter is deprecated and will be removed in a future version. "
-                "Please use 'api_key' and 'face_id' parameters instead, with optional 'params' for "
-                "max_session_length and max_idle_time configuration.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-            # Use the provided simli_config
-            config = simli_config
-        else:
-            # Validate new parameters
-            if api_key is None:
-                raise ValueError("api_key is required")
-            if face_id is None:
-                raise ValueError("face_id is required")
-
-            # Build SimliConfig from new parameters
-            # Only pass optional parameters if explicitly provided to use SimliConfig defaults
-            config_kwargs = {
-                "faceId": face_id,
-            }
-            if max_session_length is not None:
-                config_kwargs["maxSessionLength"] = max_session_length
-            if max_idle_time is not None:
-                config_kwargs["maxIdleTime"] = max_idle_time
-
-            config = SimliConfig(**config_kwargs)
-
-        if use_turn_server:
-            warnings.warn(
-                "The 'use_turn_server' parameter is deprecated and will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+        config = SimliConfig(**config_kwargs)
 
         self._initialized = False
         # Add buffer time to session limits
