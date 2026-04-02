@@ -518,7 +518,7 @@ class BaseInputTransport(FrameProcessor):
             )
 
             # Make sure we notify about interruptions quickly out-of-band.
-            if should_push_immediate_interruption and self._allow_interruptions:
+            if should_push_immediate_interruption:
                 await self.broadcast_interruption()
             elif self.interruption_strategies and self._bot_speaking:
                 logger.debug(

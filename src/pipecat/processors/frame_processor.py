@@ -193,8 +193,6 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
-        # Other properties (deprecated)
-        self._allow_interruptions = False
         self._interruption_strategies: List[BaseInterruptionStrategy] = []
 
         # Indicates whether we have received the StartFrame.
@@ -306,29 +304,6 @@ class FrameProcessor(BaseObject):
             The previous processor, or None if there's no previous processor.
         """
         return self._prev
-
-    @property
-    def interruptions_allowed(self):
-        """Check if interruptions are allowed for this processor.
-
-        .. deprecated:: 0.0.99
-            Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.
-
-        Returns:
-            True if interruptions are allowed.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`FrameProcessor.interruptions_allowed` is deprecated. "
-                "Use `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        return self._allow_interruptions
 
     @property
     def metrics_enabled(self):
@@ -819,7 +794,6 @@ class FrameProcessor(BaseObject):
             frame: The start frame containing initialization parameters.
         """
         self.__started = True
-        self._allow_interruptions = frame.allow_interruptions
         self._enable_metrics = frame.enable_metrics
         self._enable_usage_metrics = frame.enable_usage_metrics
         self._interruption_strategies = frame.interruption_strategies

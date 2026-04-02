@@ -731,7 +731,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
 
-        if params.enable_interruptions and self._allow_interruptions:
+        if params.enable_interruptions:
             await self.broadcast_interruption()
 
         await self._call_event_handler("on_user_turn_started", strategy)

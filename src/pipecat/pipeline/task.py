@@ -111,11 +111,6 @@ class PipelineParams(BaseModel):
     constructor arguments instead.
 
     Parameters:
-        allow_interruptions: Whether to allow pipeline interruptions.
-
-            .. deprecated:: 0.0.99
-                Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
-
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
         enable_heartbeats: Whether to enable heartbeat monitoring.
@@ -136,7 +131,6 @@ class PipelineParams(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    allow_interruptions: bool = True
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     enable_heartbeats: bool = False
@@ -778,7 +772,6 @@ class PipelineTask(BasePipelineTask):
         self._maybe_start_idle_task()
 
         start_frame = StartFrame(
-            allow_interruptions=self._params.allow_interruptions,
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
             enable_metrics=self._params.enable_metrics,

@@ -517,9 +517,6 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 _: The start interruption frame (unused).
             """
-            if not self._transport._allow_interruptions:
-                return
-
             # Cancel tasks.
             await self._cancel_audio_task()
             await self._cancel_clock_task()
