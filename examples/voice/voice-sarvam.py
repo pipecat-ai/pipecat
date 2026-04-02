@@ -96,7 +96,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
-            allow_interruptions=True,
         ),
     )
 

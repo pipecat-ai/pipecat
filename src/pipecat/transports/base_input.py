@@ -25,8 +25,6 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    EmulateUserStartedSpeakingFrame,
-    EmulateUserStoppedSpeakingFrame,
     EndFrame,
     FilterUpdateSettingsFrame,
     Frame,
@@ -313,12 +311,6 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._deprecated_handle_bot_stopped_speaking(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, EmulateUserStartedSpeakingFrame):
-            logger.debug("Emulating user started speaking")
-            await self._deprecated_handle_user_interruption(VADState.SPEAKING, emulated=True)
-        elif isinstance(frame, EmulateUserStoppedSpeakingFrame):
-            logger.debug("Emulating user stopped speaking")
-            await self._deprecated_handle_user_interruption(VADState.QUIET, emulated=True)
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
@@ -500,36 +492,21 @@ class BaseInputTransport(FrameProcessor):
         """Update bot speaking state when bot stops speaking."""
         self._bot_speaking = False
 
-    async def _deprecated_handle_user_interruption(
-        self, vad_state: VADState, emulated: bool = False
-    ):
+    async def _deprecated_handle_user_interruption(self, vad_state: VADState):
         """Handle user interruption events based on speaking state."""
         if vad_state == VADState.SPEAKING:
             logger.debug("User started speaking")
             self._user_speaking = True
 
-            await self.broadcast_frame(UserStartedSpeakingFrame, emulated=emulated)
-
-            # Only push InterruptionFrame if:
-            # 1. No interruption config is set, OR
-            # 2. Interruption config is set but bot is not speaking
-            should_push_immediate_interruption = (
-                not self.interruption_strategies or not self._bot_speaking
-            )
+            await self.broadcast_frame(UserStartedSpeakingFrame)
 
             # Make sure we notify about interruptions quickly out-of-band.
-            if should_push_immediate_interruption and self._allow_interruptions:
-                await self.broadcast_interruption()
-            elif self.interruption_strategies and self._bot_speaking:
-                logger.debug(
-                    "User started speaking while bot is speaking with interruption config - "
-                    "deferring interruption to aggregator"
-                )
+            await self.broadcast_interruption()
         elif vad_state == VADState.QUIET:
             logger.debug("User stopped speaking")
             self._user_speaking = False
 
-            await self.broadcast_frame(UserStoppedSpeakingFrame, emulated=emulated)
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _deprecated_old_handle_vad(
         self, audio_frame: InputAudioRawFrame, vad_state: VADState
