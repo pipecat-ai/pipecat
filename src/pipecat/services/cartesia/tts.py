@@ -8,7 +8,6 @@
 
 import base64
 import json
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator, List, Optional
@@ -614,7 +613,8 @@ class CartesiaTTSService(WebsocketTTSService):
             # Assign a new turn context ID so subsequent sentences in this
             # turn open a new Cartesia context with the updated settings.
             if self._turn_context_id:
-                self._turn_context_id = str(uuid.uuid4())
+                self._turn_context_id = None
+                self._turn_context_id = self.create_context_id()
 
         return changed
 
