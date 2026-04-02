@@ -7,8 +7,8 @@
 """Base classes for Large Language Model services with function calling support."""
 
 import asyncio
-import inspect
 import json
+import uuid
 import warnings
 from dataclasses import dataclass
 from typing import (
@@ -119,6 +119,9 @@ class FunctionCallRegistryItem:
         function_name: The name of the function (None for catch-all handler).
         handler: The handler for processing function call parameters.
         cancel_on_interruption: Whether to cancel the call on interruption.
+            When ``False`` the call is treated as asynchronous: the LLM
+            continues the conversation immediately without waiting for the
+            result, and the result is injected later via a developer message.
         timeout_secs: Optional per-tool timeout in seconds. Overrides the global
             ``function_call_timeout_secs`` for this specific function.
     """
@@ -142,6 +145,9 @@ class FunctionCallRunnerItem:
         arguments: The arguments for the function.
         context: The LLM context.
         run_llm: Optional flag to control LLM execution after function call.
+        group_id: Shared identifier for all function calls from the same LLM
+            response batch. Used to trigger the LLM exactly once when the last
+            call in the group completes.
     """
 
     registry_item: FunctionCallRegistryItem
@@ -150,6 +156,7 @@ class FunctionCallRunnerItem:
     arguments: Mapping[str, Any]
     context: LLMContext
     run_llm: Optional[bool] = None
+    group_id: Optional[str] = None
 
 
 class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
@@ -185,6 +192,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     def __init__(
         self,
         run_in_parallel: bool = True,
+        group_parallel_tools: bool = True,
         function_call_timeout_secs: Optional[float] = None,
         settings: Optional[LLMSettings] = None,
         **kwargs,
@@ -194,6 +202,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         Args:
             run_in_parallel: Whether to run function calls in parallel or sequentially.
                 Defaults to True.
+            group_parallel_tools: Whether to group parallel function calls so the LLM
+                is triggered exactly once after all calls in the batch complete. When
+                False, each function call result triggers the LLM independently as it
+                arrives. Defaults to True.
             function_call_timeout_secs: Optional timeout in seconds for deferred function
                 calls.
             settings: The runtime-updatable settings for the LLM service.
@@ -208,6 +220,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             **kwargs,
         )
         self._run_in_parallel = run_in_parallel
+        self._group_parallel_tools = group_parallel_tools
         self._function_call_timeout_secs = function_call_timeout_secs
         self._filter_incomplete_user_turns: bool = False
         self._base_system_instruction: Optional[str] = None
@@ -548,7 +561,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             handler: The function handler. Should accept a single FunctionCallParams
                 parameter.
             cancel_on_interruption: Whether to cancel this function call when an
-                interruption occurs. Defaults to True.
+                interruption occurs. When ``False`` the call is treated as
+                asynchronous: the LLM continues the conversation immediately
+                without waiting for the result, and the result is injected later
+                via a developer message. Defaults to True.
             timeout_secs: Optional per-tool timeout in seconds. Overrides the global
                 ``function_call_timeout_secs`` for this specific function. Defaults to
                 None, which uses the global timeout.
@@ -578,7 +594,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         Args:
             handler: The direct function to register. Must follow DirectFunction protocol.
             cancel_on_interruption: Whether to cancel this function call when an
-                interruption occurs. Defaults to True.
+                interruption occurs. When ``False`` the call is treated as
+                asynchronous: the LLM continues the conversation immediately
+                without waiting for the result, and the result is injected later
+                via a developer message. Defaults to True.
             timeout_secs: Optional per-tool timeout in seconds. Overrides the global
                 ``function_call_timeout_secs`` for this specific function. Defaults to
                 None, which uses the global timeout.
@@ -639,6 +658,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=function_calls)
 
+        # When group_parallel_tools is True all calls share a group_id so the
+        # aggregator triggers the LLM exactly once after the last one completes.
+        # When False, group_id is None and each result triggers inference independently.
+        group_id = str(uuid.uuid4()) if self._group_parallel_tools else None
+
         runner_items = []
         for function_call in function_calls:
             if function_call.function_name in self._functions.keys():
@@ -658,6 +682,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     tool_call_id=function_call.tool_call_id,
                     arguments=function_call.arguments,
                     context=function_call.context,
+                    group_id=group_id,
                 )
             )
 
@@ -726,6 +751,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             tool_call_id=runner_item.tool_call_id,
             arguments=runner_item.arguments,
             cancel_on_interruption=item.cancel_on_interruption,
+            group_id=runner_item.group_id,
         )
 
         timeout_task: Optional[asyncio.Task] = None
