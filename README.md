@@ -149,8 +149,8 @@ You can get started with Pipecat running on your local machine, then move your a
 
 ### Prerequisites
 
-**Minimum Python Version:** 3.10
-**Recommended Python Version:** 3.12
+**Minimum Python Version:** 3.11
+**Recommended Python Version:** >= 3.12
 
 ### Setup Steps
 
