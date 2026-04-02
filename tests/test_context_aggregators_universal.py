@@ -92,9 +92,13 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 ]
             )
         ]
+        expected_down_frames = [
+            SpeechControlParamsFrame  # no LLMContextFrame expected, run_llm defaults to False
+        ]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
         )
         assert context.messages[0]["content"] == "Hi there!"
 
@@ -135,9 +139,13 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 ]
             )
         ]
+        expected_down_frames = [
+            SpeechControlParamsFrame  # no LLMContextFrame expected, run_llm defaults to False
+        ]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
         )
         assert context.messages[0]["content"] == "Hi there!"
 
@@ -1038,6 +1046,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 )
             ],
             frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=[],  # no LLMContextFrame expected, run_llm defaults to False
         )
         assert context.messages[0]["content"] == "Hi there!"
 
@@ -1081,6 +1090,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 )
             ],
             frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=[],  # no LLMContextFrame expected, run_llm defaults to False
         )
         assert context.messages[0]["content"] == "Hi there!"
 
@@ -1125,6 +1135,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             aggregator,
             frames_to_send=[LLMMessagesTransformFrame(transform=keep_user_messages)],
             frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=[],  # no LLMContextFrame expected, run_llm defaults to False
         )
         assert len(context.messages) == 2
         assert context.messages[0]["content"] == "Hello"
