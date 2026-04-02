@@ -49,6 +49,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregator,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_mute import (
     FirstSpeechUserMuteStrategy,
@@ -1007,6 +1008,146 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The incomplete marker should be stripped (resulting in empty content)
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "")
+
+    async def test_llm_run(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        expected_up_frames = [LLMContextFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=[LLMRunFrame()],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=expected_up_frames,
+        )
+
+    async def test_llm_messages_append(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMMessagesAppendFrame(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "Hi there!",
+                        }
+                    ]
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+        )
+        assert context.messages[0]["content"] == "Hi there!"
+
+    async def test_llm_messages_append_run(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        expected_up_frames = [LLMContextFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMMessagesAppendFrame(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "Hi there!",
+                        }
+                    ],
+                    run_llm=True,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=expected_up_frames,
+        )
+        assert context.messages[0]["content"] == "Hi there!"
+
+    async def test_llm_messages_update(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMMessagesUpdateFrame(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "Hi there!",
+                        }
+                    ]
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+        )
+        assert context.messages[0]["content"] == "Hi there!"
+
+    async def test_llm_messages_update_run(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                LLMMessagesUpdateFrame(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "Hi there!",
+                        }
+                    ],
+                    run_llm=True,
+                )
+            ],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+        )
+        assert context.messages[0]["content"] == "Hi there!"
+
+    async def test_llm_messages_transform(self):
+        context = LLMContext()
+        context.set_messages(
+            [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+
+        aggregator = LLMAssistantAggregator(context)
+
+        # Transform that keeps only user messages
+        def keep_user_messages(messages):
+            return [m for m in messages if m["role"] == "user"]
+
+        await run_test(
+            aggregator,
+            frames_to_send=[LLMMessagesTransformFrame(transform=keep_user_messages)],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+        )
+        assert len(context.messages) == 2
+        assert context.messages[0]["content"] == "Hello"
+        assert context.messages[1]["content"] == "How are you?"
+
+    async def test_llm_messages_transform_run(self):
+        context = LLMContext()
+        context.set_messages([{"role": "user", "content": "Hello"}])
+
+        aggregator = LLMAssistantAggregator(context)
+
+        # Transform that modifies the content
+        def uppercase_content(messages):
+            return [{"role": m["role"], "content": m["content"].upper()} for m in messages]
+
+        expected_up_frames = [LLMContextFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=[LLMMessagesTransformFrame(transform=uppercase_content, run_llm=True)],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=expected_up_frames,
+        )
+        assert context.messages[0]["content"] == "HELLO"
 
 
 if __name__ == "__main__":
