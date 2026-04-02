@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
@@ -67,7 +68,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([LLMUserAggregator(context)])
 
         frames_to_send = [LLMRunFrame()]
-        expected_down_frames = [LLMContextFrame]
+        expected_down_frames = [SpeechControlParamsFrame, LLMContextFrame]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
@@ -110,7 +111,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 run_llm=True,
             )
         ]
-        expected_down_frames = [LLMContextFrame]
+        expected_down_frames = [SpeechControlParamsFrame, LLMContextFrame]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
@@ -450,7 +451,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         (down_frames, _) = await run_test(
             pipeline,
             frames_to_send=[],
-            expected_down_frames=[StartFrame, UserMuteStartedFrame],
+            expected_down_frames=[StartFrame, UserMuteStartedFrame, SpeechControlParamsFrame],
             ignore_start=False,
         )
 
@@ -467,6 +468,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         # TranscriptionUserTurnStartStrategy, so we expect turn-related frames
         # but NOT the InterimTranscriptionFrame itself.
         expected_down_frames = [
+            SpeechControlParamsFrame,
             UserStartedSpeakingFrame,
             InterruptionFrame,
         ]
@@ -485,11 +487,12 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             TranslationFrame(text="Hola!", user_id="", timestamp="now", language="es"),
         ]
-        # No downstream frames expected — translations are consumed.
+        # Only the SpeechControlParamsFrame from the default turn strategy on
+        # start is expected — the translation itself is consumed.
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
-            expected_down_frames=[],
+            expected_down_frames=[SpeechControlParamsFrame],
         )
 
 
