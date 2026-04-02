@@ -866,16 +866,9 @@ class UserStartedSpeakingFrame(SystemFrame):
 
     Emitted when the user turn starts, which usually means that some
     transcriptions are already available.
-
-    Parameters:
-        emulated: Whether this event was emulated rather than detected by VAD.
-
-            .. deprecated:: 0.0.99
-                This field is deprecated and will be removed in a future version.
-
     """
 
-    emulated: bool = False
+    pass
 
 
 @dataclass
@@ -884,16 +877,9 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
     Emitted when the user turn ends. This usually coincides with the start of
     the bot turn.
-
-    Parameters:
-        emulated: Whether this event was emulated rather than detected by VAD.
-
-            .. deprecated:: 0.0.99
-                This field is deprecated and will be removed in a future version.
-
     """
 
-    emulated: bool = False
+    pass
 
 
 @dataclass
@@ -926,56 +912,6 @@ class UserSpeakingFrame(SystemFrame):
     """
 
     pass
-
-
-@dataclass
-class EmulateUserStartedSpeakingFrame(SystemFrame):
-    """Frame to emulate user started speaking behavior.
-
-    Emitted by internal processors upstream to emulate VAD behavior when a
-    user starts speaking.
-
-    .. deprecated:: 0.0.99
-        This frame is deprecated and will be removed in a future version.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "EmulateUserStartedSpeakingFrame is deprecated and will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
-class EmulateUserStoppedSpeakingFrame(SystemFrame):
-    """Frame to emulate user stopped speaking behavior.
-
-    Emitted by internal processors upstream to emulate VAD behavior when a
-    user stops speaking.
-
-    .. deprecated:: 0.0.99
-        This frame is deprecated and will be removed in a future version.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "EmulateUserStoppedSpeakingFrame is deprecated and will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
 
 @dataclass
