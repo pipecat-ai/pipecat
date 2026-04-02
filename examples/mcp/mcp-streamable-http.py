@@ -63,18 +63,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    system_prompt = f"""
-    You are a helpful LLM in a voice call.
-    Your goal is to answer questions about the user's GitHub repositories and account.
-    You have access to a number of tools provided by Github. Use any and all tools to help users.
-    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
-    Don't overexplain what you are doing.
-    Just respond with short sentences when you are carrying out tool calls.
-    """
+    system_prompt = """\
+You are a helpful LLM in a voice call.
+Your goal is to answer questions about the user's GitHub repositories and account.
+You have access to a number of tools provided by Github. Use any and all tools to help users.
+Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
+Don't overexplain what you are doing.
+Just respond with short sentences when you are carrying out tool calls.
+"""
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_prompt,
+        settings=GoogleLLMService.Settings(
+            system_instruction=system_prompt,
+        ),
     )
 
     # Github MCP docs: https://github.com/github/github-mcp-server
@@ -89,7 +91,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ) as mcp:
         tools = await mcp.register_tools(llm)
 
-        context = LLMContext(tools=tools)
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Please introduce yourself."}],
+            tools=tools,
+        )
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
