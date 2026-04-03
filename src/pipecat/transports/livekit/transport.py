@@ -92,50 +92,6 @@ class LiveKitOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame
     participant_id: Optional[str] = None
 
 
-@dataclass
-class LiveKitTransportMessageFrame(LiveKitOutputTransportMessageFrame):
-    """Frame for transport messages in LiveKit rooms.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "LiveKitTransportMessageFrame is deprecated and will be removed in a future version. "
-                "Instead, use LiveKitOutputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
-class LiveKitTransportMessageUrgentFrame(LiveKitOutputTransportMessageUrgentFrame):
-    """Frame for urgent transport messages in LiveKit rooms.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "LiveKitTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
-                "Instead, use LiveKitOutputTransportMessageUrgentFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
 class LiveKitParams(TransportParams):
     """Configuration parameters for LiveKit transport.
 
