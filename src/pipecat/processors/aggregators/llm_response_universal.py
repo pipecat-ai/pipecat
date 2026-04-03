@@ -128,10 +128,6 @@ class LLMAssistantAggregatorParams:
     """Parameters for configuring LLM assistant aggregation behavior.
 
     Parameters:
-        expect_stripped_words: Whether to expect and handle stripped words
-            in text frames by adding spaces between tokens. This parameter is
-            ignored when used with the newer LLMAssistantAggregator, which
-            handles word spacing automatically.
         enable_auto_context_summarization: Enable automatic context summarization when token
             or message-count limits are reached (disabled by default). When enabled,
             older conversation messages are automatically compressed into summaries to
@@ -142,7 +138,6 @@ class LLMAssistantAggregatorParams:
             ``LLMAutoContextSummarizationConfig`` values.
     """
 
-    expect_stripped_words: bool = True
     enable_auto_context_summarization: bool = False
     auto_context_summarization_config: Optional[LLMAutoContextSummarizationConfig] = None
 
@@ -831,26 +826,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         super().__init__(context=context, role="assistant", **kwargs)
         self._params = params or LLMAssistantAggregatorParams()
-
-        if "expect_stripped_words" in kwargs:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'expect_stripped_words' is deprecated. "
-                    "LLMAssistantAggregator now handles word spacing automatically.",
-                    DeprecationWarning,
-                )
-
-            self._params.expect_stripped_words = kwargs["expect_stripped_words"]
-
-        if params and not params.expect_stripped_words:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "params.expect_stripped_words is deprecated. "
-                    "LLMAssistantAggregator now handles word spacing automatically.",
-                    DeprecationWarning,
-                )
 
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._function_calls_image_results: Dict[str, UserImageRawFrame] = {}
