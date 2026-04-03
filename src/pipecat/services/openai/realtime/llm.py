@@ -218,7 +218,6 @@ class OpenAIRealtimeLLMService(LLMService):
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         video_frame_detail: str = "auto",
-        send_transcription_frames: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize the OpenAI Realtime LLM service.
@@ -247,26 +246,8 @@ class OpenAIRealtimeLLMService(LLMService):
                 This sets the image_detail parameter in the OpenAI Realtime API.
                 "auto" lets the model decide, "low" is faster and uses fewer tokens,
                 "high" provides more detail. Defaults to "auto".
-            send_transcription_frames: Whether to emit transcription frames.
-
-                .. deprecated:: 0.0.92
-                    This parameter is deprecated and will be removed in a future version.
-                    Transcription frames are always sent.
-
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        if send_transcription_frames is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`send_transcription_frames` is deprecated and will be removed in a future version. "
-                    "Transcription frames are always sent.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="gpt-realtime-1.5",
@@ -289,11 +270,7 @@ class OpenAIRealtimeLLMService(LLMService):
             default_settings.model = model
 
         if session_properties is not None:
-            _warn_deprecated_param(
-                "session_properties",
-                self.Settings,
-                "session_properties",
-            )
+            self._warn_init_param_moved_to_settings("session_properties", "session_properties")
             default_settings.session_properties = session_properties
             # Sync model/instructions from the deprecated SP arg to top-level,
             # but only if the deprecated `model` arg didn't already set it.

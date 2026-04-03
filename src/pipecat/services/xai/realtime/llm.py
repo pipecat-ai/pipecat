@@ -252,11 +252,7 @@ class GrokRealtimeLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if session_properties is not None:
-            _warn_deprecated_param(
-                "session_properties",
-                self.Settings,
-                "session_properties",
-            )
+            self._warn_init_param_moved_to_settings("session_properties", "session_properties")
             default_settings.session_properties = session_properties
             # Sync instructions from the deprecated SP arg to top-level
             if session_properties.instructions is not None:

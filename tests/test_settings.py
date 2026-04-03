@@ -334,7 +334,6 @@ class TestDeepgramSTTSettingsApplyUpdate:
             smart_format=False,
             punctuate=True,
             profanity_filter=True,
-            vad_events=False,
         )
         defaults.update(kwargs)
         return DeepgramSTTSettings(**defaults)
@@ -430,7 +429,6 @@ class TestDeepgramSTTSettingsFromMapping:
             interim_results=True,
             punctuate=True,
             profanity_filter=True,
-            vad_events=False,
         )
 
         raw = {"punctuate": False, "diarize": True}

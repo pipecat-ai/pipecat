@@ -18,8 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
-from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.utils.base_object import BaseObject
 
@@ -54,11 +52,6 @@ class TransportParams(BaseModel):
         video_out_color_format: Video output color format string.
         video_out_codec: Preferred video codec for output (e.g., 'VP8', 'H264', 'H265').
         video_out_destinations: List of video output destination identifiers.
-        turn_analyzer: Turn-taking analyzer instance for conversation management.
-
-            .. deprecated:: 0.0.99
-                The `turn_analyzer` parameter is deprecated, use `LLMUSerAggregator`'s
-                new `user_turn_strategies` parameter instead.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
