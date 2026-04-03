@@ -4,6 +4,19 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Fix Pydantic v2 + Sphinx autodoc incompatibility: ConfigDict(extra="allow") fails
+# during Sphinx's import because __pydantic_extra__ annotation on BaseModel resolves to
+# `Dict[str, Any] | None` whose get_origin() is Union, not dict. Patch the check to
+# accept Union-wrapped dict types (i.e., Optional[Dict[str, Any]]).
+import pydantic._internal._generate_schema as _pydantic_gs
+
+_ORIG_DICT_TYPES = _pydantic_gs.DICT_TYPES
+# Expand the accepted types to include Union (Optional[Dict[str, Any]])
+import types
+import typing
+
+_pydantic_gs.DICT_TYPES = [*_ORIG_DICT_TYPES, typing.Union, types.UnionType]
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("sphinx-build")
