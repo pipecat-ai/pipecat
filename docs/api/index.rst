@@ -32,4 +32,5 @@ Quick Links
    Services <api/pipecat.services>
    Transcriptions <api/pipecat.transcriptions>
    Transports <api/pipecat.transports>
+   Turns <api/pipecat.turns>
    Utils <api/pipecat.utils>

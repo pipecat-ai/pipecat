@@ -76,16 +76,6 @@ autodoc_mock_imports = [
     "einops",
     "intel_extension_for_pytorch",
     "huggingface_hub",
-    # riva dependencies
-    "riva",
-    "riva.client",
-    "riva.client.Auth",
-    "riva.client.ASRService",
-    "riva.client.StreamingRecognitionConfig",
-    "riva.client.RecognitionConfig",
-    "riva.client.AudioEncoding",
-    "riva.client.proto.riva_tts_pb2",
-    "riva.client.SpeechSynthesisService",
     # MLX dependencies (Apple Silicon specific)
     "mlx",
     "mlx_whisper",  # Note: might need underscore format too
@@ -133,6 +123,8 @@ def import_core_modules():
         "pipecat.runner",
         "pipecat.serializers",
         "pipecat.transcriptions",
+        "pipecat.turns",
+        "pipecat.extensions",
         "pipecat.utils",
     ]
 
@@ -177,7 +169,6 @@ def setup(app):
     logger.info(f"Source directory: {source_dir}")
 
     excludes = [
-        str(project_root / "src/pipecat/pipeline/to_be_updated"),
         str(project_root / "src/pipecat/examples"),
         str(project_root / "src/pipecat/tests"),
         "**/test_*.py",
