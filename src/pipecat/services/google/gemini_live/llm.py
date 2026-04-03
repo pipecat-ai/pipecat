@@ -1360,6 +1360,9 @@ class GeminiLiveLLMService(LLMService):
         if self._run_llm_when_session_ready:
             self._run_llm_when_session_ready = False
             await self._create_initial_response()
+        elif self._context:
+            # Reconnect case: context already exists, no need for _create_initial_response
+            self._ready_for_realtime_input = True
 
     async def _handle_msg_model_turn(self, msg: LiveServerMessage):
         """Handle the model turn message."""
