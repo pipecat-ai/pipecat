@@ -9,7 +9,7 @@
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from pipecat.frames.frames import DataFrame, SystemFrame
+from pipecat.frames.frames import SystemFrame
 
 
 @dataclass

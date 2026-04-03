@@ -16,7 +16,6 @@ from pydantic import BaseModel
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    StartFrame,
 )
 from pipecat.services.deepgram.flux.base import (
     DeepgramFluxSTTBase,

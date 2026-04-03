@@ -19,7 +19,7 @@ import base64
 import io
 import wave
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
+from typing import Any, List, Optional, TypeAlias, Union
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -30,7 +30,7 @@ from openai.types.chat import (
 )
 from PIL import Image
 
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
 
 # "Re-export" types from OpenAI that we're using as universal context types.

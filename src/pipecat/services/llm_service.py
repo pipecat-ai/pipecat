@@ -7,7 +7,6 @@
 """Base classes for Large Language Model services with function calling support."""
 
 import asyncio
-import inspect
 import json
 import warnings
 from dataclasses import dataclass

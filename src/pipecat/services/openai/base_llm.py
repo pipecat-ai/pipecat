@@ -7,11 +7,10 @@
 """Base LLM service implementation for services that use the AsyncOpenAI client."""
 
 import asyncio
-import base64
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
 import httpx
 from loguru import logger
@@ -22,7 +21,7 @@ from openai import (
     AsyncStream,
     DefaultAsyncHttpxClient,
 )
-from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
