@@ -19,8 +19,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -45,8 +43,6 @@ try:
         ListenV1Finalize,
         ListenV1KeepAlive,
         ListenV1Results,
-        ListenV1SpeechStarted,
-        ListenV1UtteranceEnd,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -94,7 +90,6 @@ class LiveOptions:
         smart_format: Optional[bool] = None,
         tag: Optional[Any] = None,
         utterance_end_ms: Optional[int] = None,
-        vad_events: Optional[bool] = None,
         version: Optional[str] = None,
         **kwargs,
     ):
@@ -127,7 +122,6 @@ class LiveOptions:
             smart_format: Apply smart formatting to transcripts.
             tag: Custom billing tag (str or list of str).
             utterance_end_ms: Silence duration in ms before an utterance-end event.
-            vad_events: Enable Deepgram VAD speech-started / utterance-end events.
             version: Model version (e.g. ``"latest"``).
             **kwargs: Any additional Deepgram query parameters.
         """
@@ -157,7 +151,6 @@ class LiveOptions:
         self.smart_format = smart_format
         self.tag = tag
         self.utterance_end_ms = utterance_end_ms
-        self.vad_events = vad_events
         self.version = version
         self._extra = kwargs
 
@@ -201,7 +194,6 @@ class DeepgramSTTSettings(STTSettings):
         search: Search terms to highlight (str or list of str).
         smart_format: Apply smart formatting to transcripts.
         utterance_end_ms: Silence duration in ms before an utterance-end event.
-        vad_events: Enable Deepgram VAD speech-started / utterance-end events.
     """
 
     detect_entities: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -219,7 +211,6 @@ class DeepgramSTTSettings(STTSettings):
     search: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     smart_format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     utterance_end_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     def _sync_extra_to_fields(self) -> None:
         """Sync values from extra dict to declared fields.
@@ -294,17 +285,6 @@ class DeepgramSTTService(STTService):
 
     Provides real-time speech recognition using Deepgram's WebSocket API.
     Supports configurable models, languages, and various audio processing options.
-
-    Event handlers available (in addition to STTService events):
-
-    - on_speech_started(service): Deepgram detected start of speech
-    - on_utterance_end(service): Deepgram detected end of utterance
-
-    Example::
-
-        @stt.event_handler("on_speech_started")
-        async def on_speech_started(service):
-            ...
     """
 
     Settings = DeepgramSTTSettings
@@ -325,7 +305,6 @@ class DeepgramSTTService(STTService):
         mip_opt_out: Optional[bool] = None,
         live_options: Optional[LiveOptions] = None,
         addons: Optional[dict] = None,
-        should_interrupt: bool = True,
         settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = DEEPGRAM_TTFS_P99,
         **kwargs,
@@ -352,21 +331,12 @@ class DeepgramSTTService(STTService):
                     fields and direct init parameters for connection-level config.
 
             addons: Additional Deepgram features to enable.
-            should_interrupt: Whether to interrupt the bot when Deepgram VAD
-                detects the user is speaking.
-
-                .. deprecated:: 0.0.99
-                    This parameter will be removed along with `vad_events` support.
-
             settings: Runtime-updatable settings. When provided alongside
                 ``live_options``, ``settings`` values take precedence (applied
                 after the ``live_options`` merge).
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
-
-        Note:
-            The `vad_events` option in LiveOptions is deprecated as of version 0.0.99 and will be removed in a future version. Please use the Silero VAD instead.
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
@@ -387,7 +357,6 @@ class DeepgramSTTService(STTService):
             search=None,
             smart_format=False,
             utterance_end_ms=None,
-            vad_events=False,
         )
 
         # 2. (No step 2, as there are no deprecated direct args)
@@ -444,7 +413,6 @@ class DeepgramSTTService(STTService):
         )
 
         self._addons = addons
-        self._should_interrupt = should_interrupt
         self._encoding = encoding
         self._channels = channels
         self._multichannel = multichannel
@@ -452,18 +420,6 @@ class DeepgramSTTService(STTService):
         self._callback_method = callback_method
         self._tag = tag
         self._mip_opt_out = mip_opt_out
-
-        if self._settings.vad_events:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'vad_events' parameter is deprecated and will be removed in a future version. "
-                    "Please use the Silero VAD instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
 
         # Build client - support optional custom base URL via DeepgramClientEnvironment
         if base_url:
@@ -487,19 +443,6 @@ class DeepgramSTTService(STTService):
 
         self._connection = None
         self._connection_task = None
-
-        if self.vad_enabled:
-            self._register_event_handler("on_speech_started")
-            self._register_event_handler("on_utterance_end")
-
-    @property
-    def vad_enabled(self):
-        """Check if Deepgram VAD events are enabled.
-
-        Returns:
-            True if VAD events are enabled in the current settings.
-        """
-        return self._settings.vad_events
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -705,17 +648,6 @@ class DeepgramSTTService(STTService):
         # Reconnection is handled automatically by the retry loop in
         # _connection_handler once start_listening() exits after the error.
 
-    async def _on_speech_started(self, message):
-        await self._start_metrics()
-        await self._call_event_handler("on_speech_started", message)
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
-
-    async def _on_utterance_end(self, message):
-        await self._call_event_handler("on_utterance_end", message)
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
-
     @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None
@@ -724,13 +656,7 @@ class DeepgramSTTService(STTService):
         pass
 
     async def _on_message(self, message):
-        if isinstance(message, ListenV1SpeechStarted):
-            if self.vad_enabled:
-                await self._on_speech_started(message)
-        elif isinstance(message, ListenV1UtteranceEnd):
-            if self.vad_enabled:
-                await self._on_utterance_end(message)
-        elif isinstance(message, ListenV1Results):
+        if isinstance(message, ListenV1Results):
             if not message.channel or len(message.channel.alternatives) == 0:
                 return
             is_final = message.is_final
@@ -778,8 +704,7 @@ class DeepgramSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame) and not self.vad_enabled:
-            # Start metrics if Deepgram VAD is disabled & pipeline VAD has detected speech
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
