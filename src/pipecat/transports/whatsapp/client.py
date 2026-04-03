@@ -37,7 +37,7 @@ class WhatsAppClient:
     events from WhatsApp, and maintains ongoing call state. It supports both
     incoming call handling and call termination through the WhatsApp Cloud API.
 
-    Attributes:
+    Parameters:
         _whatsapp_api: WhatsApp API instance for making API calls
         _ongoing_calls_map: Dictionary mapping call IDs to WebRTC connections
         _ice_servers: List of ICE servers for WebRTC connections

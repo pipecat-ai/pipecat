@@ -147,7 +147,7 @@ Remember: Focus on conversational completeness and how long the user might need.
 class UserTurnCompletionConfig:
     """Configuration for turn completion behavior.
 
-    Attributes:
+    Parameters:
         instructions: Custom instructions for turn completion. If not provided,
             uses default USER_TURN_COMPLETION_INSTRUCTIONS.
         incomplete_short_timeout: Seconds to wait after short incomplete (○) before prompting.

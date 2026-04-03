@@ -40,7 +40,7 @@ class TranscriptHandler:
     Maintains a list of conversation messages and outputs them either to a log
     or to a file as they are received. Each message includes its timestamp and role.
 
-    Attributes:
+    Parameters:
         messages: List of all processed transcript messages
         output_file: Optional path to file where transcript is saved. If None, outputs to log only.
     """

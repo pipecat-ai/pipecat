@@ -86,7 +86,7 @@ def language_to_sarvam_language(language: Language) -> str:
 class ModelConfig:
     """Immutable configuration for a Sarvam STT model.
 
-    Attributes:
+    Parameters:
         supports_prompt: Whether the model accepts prompt parameter.
         supports_mode: Whether the model accepts mode parameter.
         supports_language: Whether the model accepts language parameter.

@@ -123,7 +123,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         # Set output variables to return to Architect
         serializer.set_output_variables({"intent": "billing", "resolved": True})
 
-    Attributes:
+    Parameters:
         PROTOCOL_VERSION: The AudioHook protocol version (currently "2").
     """
 
@@ -132,7 +132,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
     class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for GenesysAudioHookSerializer.
 
-        Attributes:
+        Parameters:
             genesys_sample_rate: Sample rate used by Genesys (default: 8000 Hz).
             sample_rate: Optional override for pipeline input sample rate.
             channel: Which audio channels to process (external, internal, both).

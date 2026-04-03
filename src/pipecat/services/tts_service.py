@@ -67,7 +67,7 @@ from pipecat.utils.time import seconds_to_nanoseconds
 class TTSContext:
     """Context information for a TTS request.
 
-    Attributes:
+    Parameters:
         append_to_context: Whether this TTS output should be appended to the
             conversation context after it is spoken.
         push_assistant_aggregation: Whether to push an
