@@ -388,7 +388,7 @@ class LLMContextSummarizationUtil:
 
         A tool message is considered pending (unresolved) when its content is
         the synchronous ``"IN_PROGRESS"`` sentinel or the async
-        ``{"type": "async_tool", "status": "started"}`` marker — both indicate
+        ``{"type": "tool", "status": "started"}`` marker — both indicate
         that the actual result has not yet been written back to the context.
 
         Args:
@@ -403,7 +403,7 @@ class LLMContextSummarizationUtil:
             parsed = json.loads(content)
             if (
                 isinstance(parsed, dict)
-                and parsed.get("type") == "async_tool"
+                and parsed.get("type") == "tool"
                 and parsed.get("status") == "started"
             ):
                 return True
@@ -474,14 +474,14 @@ class LLMContextSummarizationUtil:
                         pending_tool_calls.pop(tool_call_id)
 
             # Check for async tool completion — a developer message with
-            # {"type": "async_tool", "status": "finished"} signals that the
+            # {"type": "tool", "status": "finished"} signals that the
             # async result has arrived and the call is now resolved.
             if role == "developer":
                 try:
                     parsed = json.loads(msg.get("content", ""))
                     if (
                         isinstance(parsed, dict)
-                        and parsed.get("type") == "async_tool"
+                        and parsed.get("type") == "tool"
                         and parsed.get("status") == "finished"
                     ):
                         tool_call_id = parsed.get("tool_call_id")

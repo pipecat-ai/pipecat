@@ -1061,7 +1061,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._context.add_message(
                 {
                     "role": "tool",
-                    "content": json.dumps({"type": "async_tool", "status": "started"}),
+                    "content": json.dumps({"type": "tool", "status": "started"}),
                     "tool_call_id": frame.tool_call_id,
                 }
             )
@@ -1104,7 +1104,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     "role": "developer",
                     "content": json.dumps(
                         {
-                            "type": "async_tool",
+                            "type": "tool",
                             "tool_call_id": frame.tool_call_id,
                             "status": "finished",
                             "result": result,
