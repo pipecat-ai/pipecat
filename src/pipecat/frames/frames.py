@@ -594,8 +594,6 @@ class LLMMessagesTransformFrame(DataFrame):
     A frame containing a transform function that takes the context's current list
     of LLM messages and returns a modified list.
 
-    Only compatible with LLMContext and not the deprecated OpenAILLMContext.
-
     Parameters:
         transform: A function that takes a list of messages and returns a
             modified list.
