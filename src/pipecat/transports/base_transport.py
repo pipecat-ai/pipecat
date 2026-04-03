@@ -18,8 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
-from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.utils.base_object import BaseObject
 

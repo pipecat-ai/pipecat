@@ -16,7 +16,6 @@ import base64
 import io
 import time
 import uuid
-import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
@@ -53,13 +52,11 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
-    UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.google.utils import update_google_client_http_options
@@ -81,10 +78,8 @@ try:
         AudioTranscriptionConfig,
         AutomaticActivityDetection,
         Blob,
-        Content,
         ContextWindowCompressionConfig,
         EndSensitivity,
-        FileData,
         FunctionResponse,
         GenerationConfig,
         GroundingMetadata,
@@ -94,7 +89,6 @@ try:
         LiveServerMessage,
         MediaResolution,
         Modality,
-        Part,
         ProactivityConfig,
         RealtimeInputConfig,
         SessionResumptionConfig,

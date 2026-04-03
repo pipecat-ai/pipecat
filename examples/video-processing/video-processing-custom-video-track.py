@@ -28,7 +28,6 @@ from pipecat.frames.frames import (
     Frame,
     OutputImageRawFrame,
     StartFrame,
-    SystemFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
