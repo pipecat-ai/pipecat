@@ -646,10 +646,14 @@ class FunctionCallResultProperties:
     Parameters:
         run_llm: Whether to run the LLM after receiving this result.
         on_context_updated: Callback to execute when context is updated.
+        is_final: Whether this is the final result for the function call. When
+            ``False`` the result is treated as an intermediate update. Defaults to ``True``.
+            Only meaningful for async function calls (``cancel_on_interruption=False``).
     """
 
     run_llm: Optional[bool] = None
     on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
+    is_final: bool = True
 
 
 @dataclass
