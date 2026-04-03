@@ -36,7 +36,7 @@ class FrameOrder(Enum):
     When multiple parallel pipelines produce output for the same input frame,
     this setting determines the order in which those output frames are pushed.
 
-    Attributes:
+    Parameters:
         ARRIVAL: Frames are pushed in the order they arrive from any pipeline.
             This is the default and matches the behavior of prior versions.
         PIPELINE: Frames are pushed in pipeline definition order — all frames

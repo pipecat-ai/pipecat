@@ -15,7 +15,7 @@ class ProcessFrameResult(Enum):
     Controls whether the strategy loop in the controller continues to the
     next strategy or stops early.
 
-    Attributes:
+    Parameters:
         CONTINUE: Continue to the next strategy in the loop.
         STOP: Stop evaluating further strategies for this frame.
     """

@@ -75,7 +75,7 @@ except ModuleNotFoundError as e:
 class SarvamTTSModel(str, Enum):
     """Available Sarvam TTS models.
 
-    Attributes:
+    Parameters:
         BULBUL_V2: Standard TTS model with pitch/loudness control.
             - Supports pitch, loudness, pace (0.3-3.0)
             - Default sample rate: 22050 Hz
@@ -145,7 +145,7 @@ class SarvamTTSSpeakerV3(str, Enum):
 class TTSModelConfig:
     """Immutable configuration for a Sarvam TTS model.
 
-    Attributes:
+    Parameters:
         supports_pitch: Whether the model accepts pitch parameter.
         supports_loudness: Whether the model accepts loudness parameter.
         supports_temperature: Whether the model accepts temperature parameter.

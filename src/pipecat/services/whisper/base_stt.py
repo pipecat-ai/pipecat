@@ -168,7 +168,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             include_prob_metrics: If True, enables probability metrics in API response.
                 Each service implements this differently (see child classes).
                 Defaults to False.
-            push_empty_transcripts: - If true, allow empty `TranscriptionFrame` frames to be
+            push_empty_transcripts: If true, allow empty `TranscriptionFrame` frames to be
                 pushed downstream instead of discarding them. This is intended for situations
                 where VAD fires even though the user did not speak. In these cases, it is
                 useful to know that nothing was transcribed so that the agent can resume

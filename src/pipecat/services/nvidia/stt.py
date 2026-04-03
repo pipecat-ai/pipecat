@@ -269,7 +269,9 @@ class NvidiaSTTService(STTService):
 
         .. deprecated:: 0.0.104
             Model cannot be changed after initialization for NVIDIA Riva streaming STT.
-            Set model and function id in the constructor instead, e.g.::
+            Set model and function id in the constructor instead.
+
+            Example::
 
                 NvidiaSTTService(
                     api_key=...,
