@@ -97,6 +97,8 @@ autodoc_mock_imports = [
     "fastapi.middleware",
     "fastapi.responses",
     "uvicorn",
+    # Deepgram dependencies
+    "deepgram",
 ]
 
 # HTML output settings

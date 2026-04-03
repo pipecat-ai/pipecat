@@ -95,8 +95,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
     - Text WebSocket frames for JSON control messages
     - Binary WebSocket frames for audio data
 
-    Example usage:
-        ```python
+    Example usage::
+
         serializer = GenesysAudioHookSerializer(
             params=GenesysAudioHookSerializer.InputParams(
                 channel=AudioHookChannel.EXTERNAL,
@@ -122,7 +122,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         # Set output variables to return to Architect
         serializer.set_output_variables({"intent": "billing", "resolved": True})
-        ```
 
     Attributes:
         PROTOCOL_VERSION: The AudioHook protocol version (currently "2").
@@ -246,8 +245,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Args:
             variables: Dictionary of custom variables to send to Genesys.
 
-        Example:
-            ```python
+        Example::
+
             # During the conversation, collect data and set it
             serializer.set_output_variables({
                 "intent": "billing_inquiry",
@@ -255,7 +254,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
                 "summary": "Customer asked about their bill",
                 "transfer_to": "billing_queue"
             })
-            ```
         """
         self._output_variables = variables
         logger.debug(f"Output variables set: {variables}")
@@ -413,8 +411,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Returns:
             Dictionary of the closed response message.
 
-        Example:
-            ```python
+        Example::
+
             # Pass custom data back to Genesys
             serializer.create_closed_response(
                 output_variables={
@@ -423,7 +421,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
                     "summary": "Customer asked about their bill"
                 }
             )
-            ```
         """
         parameters: Optional[Dict[str, Any]] = None
 
