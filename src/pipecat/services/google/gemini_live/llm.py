@@ -1355,11 +1355,28 @@ class GeminiLiveLLMService(LLMService):
     async def _handle_session_ready(self, session: AsyncSession):
         """Handle the session being ready."""
         self._session = session
-        # If we were just waititng for the session to be ready to run the LLM,
-        # do that now.
         if self._run_llm_when_session_ready:
+            # Initial connection: context arrived before session was ready.
             self._run_llm_when_session_ready = False
             await self._create_initial_response()
+        elif self._session_resumption_handle:
+            # Reconnect with session resumption: the server will restore
+            # session state, so we can accept realtime input right away.
+            self._ready_for_realtime_input = True
+        elif self._context:
+            # Reconnect without session resumption (e.g. error occurred
+            # before server sent a resumption handle).
+            # TODO: ideally we'd re-send conversation history here via
+            # _create_initial_response(), but that currently doesn't handle
+            # the reconnect case properly. This should be very rare — the
+            # connection would have to drop before we've received our first
+            # session_resumption_handle from the server.
+            self._ready_for_realtime_input = True
+        else:
+            # Initial connection: session is ready before context has
+            # arrived. Nothing to do — _handle_context will call
+            # _create_initial_response when the context arrives.
+            pass
 
     async def _handle_msg_model_turn(self, msg: LiveServerMessage):
         """Handle the model turn message."""
