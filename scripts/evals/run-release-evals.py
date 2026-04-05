@@ -237,6 +237,7 @@ TESTS_VIDEO_AVATAR = [
     ("video-avatar/video-avatar-heygen-video-service.py", EVAL_SIMPLE_MATH),
     ("video-avatar/video-avatar-simli-video-service.py", EVAL_SIMPLE_MATH),
     ("video-avatar/video-avatar-lemonslice-transport.py", EVAL_SIMPLE_MATH),
+    ("video-avatar/video-avatar-agenthuman-video-service.py", EVAL_SIMPLE_MATH),
 ]
 
 TESTS_TURN_MANAGEMENT = [
