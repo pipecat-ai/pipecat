@@ -1061,7 +1061,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._context.add_message(
                 {
                     "role": "tool",
-                    "content": json.dumps({"type": "tool", "status": "started"}),
+                    "content": json.dumps(
+                        {
+                            "type": "async_tool",
+                            "status": "started",
+                            "tool_call_id": frame.tool_call_id,
+                            "description": "The tool associated with this tool_call_id is still in progress, and the result is not yet available. It will be provided in a subsequent message with the same tool_call_id.",
+                        }
+                    ),
                     "tool_call_id": frame.tool_call_id,
                 }
             )
@@ -1104,7 +1111,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     "role": "developer",
                     "content": json.dumps(
                         {
-                            "type": "tool",
+                            "type": "async_tool",
                             "tool_call_id": frame.tool_call_id,
                             "status": "finished",
                             "result": result,
