@@ -151,9 +151,17 @@ class HathoraTTSService(TTSService):
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     url,
-                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Accept-Encoding": "gzip, deflate",
+                    },
                     json=payload,
                 ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        raise Exception(
+                            f"Hathora TTS API error {resp.status}: {error_text}"
+                        )
                     audio_data = await resp.read()
 
             pcm_audio, sample_rate, num_channels = _decode_audio_payload(
