@@ -10,8 +10,11 @@ This module provides a controller that wraps a VADAnalyzer to track speech state
 and emit events when speech starts, stops, or is actively detected.
 """
 
+import asyncio
 import time
-from typing import Type
+from typing import Optional, Type
+
+from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
@@ -22,6 +25,7 @@ from pipecat.frames.frames import (
     VADParamsUpdateFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -35,7 +39,8 @@ class VADController(BaseObject):
     Event handlers available:
 
     - on_speech_started: Called when speech begins.
-    - on_speech_stopped: Called when speech ends.
+    - on_speech_stopped: Called when speech ends, including forced stop on
+      audio starvation (no frames received while speaking).
     - on_speech_activity: Called periodically while speech is detected.
     - on_push_frame: Called when the controller wants to push a frame.
     - on_broadcast_frame: Called when the controller wants to broadcast a frame.
@@ -63,13 +68,23 @@ class VADController(BaseObject):
             ...
     """
 
-    def __init__(self, vad_analyzer: VADAnalyzer, *, speech_activity_period: float = 0.2):
+    def __init__(
+        self,
+        vad_analyzer: VADAnalyzer,
+        *,
+        speech_activity_period: float = 0.2,
+        audio_starvation_timeout: float = 1.0,
+    ):
         """Initialize the VAD controller.
 
         Args:
             vad_analyzer: The `VADAnalyzer` instance for processing audio.
             speech_activity_period: Minimum interval in seconds between
                 `on_speech_activity` events. Defaults to 0.2.
+            audio_starvation_timeout: Timeout in seconds to force speech stop
+                when no audio frames are received while in SPEAKING state.
+                This handles cases like mic mute mid-speech.
+                Set to 0 to disable. Defaults to 1.0.
         """
         super().__init__()
         self._vad_analyzer = vad_analyzer
@@ -81,11 +96,32 @@ class VADController(BaseObject):
         # be greater than the audio chunks to have any effect).
         self._speech_activity_period = speech_activity_period
 
+        # Audio starvation detection: force speech stop when no audio arrives
+        # while in SPEAKING state (e.g. user mutes mic mid-speech).
+        self._audio_starvation_timeout = audio_starvation_timeout
+        self._task_manager: Optional[BaseTaskManager] = None
+        self._audio_received_event = asyncio.Event()
+        self._starvation_task: Optional[asyncio.Task] = None
+
         self._register_event_handler("on_speech_started", sync=True)
         self._register_event_handler("on_speech_stopped", sync=True)
         self._register_event_handler("on_speech_activity", sync=True)
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
+
+    async def setup(self, task_manager: BaseTaskManager):
+        """Initialize the controller with the given task manager.
+
+        Args:
+            task_manager: The task manager to be associated with this instance.
+        """
+        self._task_manager = task_manager
+        self._audio_received_event.clear()
+        if self._audio_starvation_timeout > 0 and not self._starvation_task:
+            self._starvation_task = self._task_manager.create_task(
+                self._audio_starvation_handler(),
+                f"{self}::_audio_starvation_handler",
+            )
 
     async def process_frame(self, frame: Frame):
         """Process a frame and handle VAD-related events.
@@ -116,6 +152,10 @@ class VADController(BaseObject):
         It waits for all currently executing event handler tasks to finish
         before returning.
         """
+        await super().cleanup()
+        if self._starvation_task and self._task_manager:
+            await self._task_manager.cancel_task(self._starvation_task)
+            self._starvation_task = None
         if self._vad_analyzer:
             await self._vad_analyzer.cleanup()
 
@@ -128,6 +168,8 @@ class VADController(BaseObject):
         Args:
             frame: Audio frame to process.
         """
+        self._audio_received_event.set()
+
         self._vad_state = await self._handle_vad(frame.audio, self._vad_state)
 
         if self._vad_state == VADState.SPEAKING:
@@ -148,6 +190,26 @@ class VADController(BaseObject):
 
             vad_state = new_vad_state
         return vad_state
+
+    async def _audio_starvation_handler(self):
+        """Monitor for audio starvation while in SPEAKING state.
+
+        When no audio frames arrive for `audio_starvation_timeout` seconds
+        (e.g. user mutes mic mid-speech), forces a transition to QUIET and
+        emits `on_speech_stopped`.
+        """
+        while True:
+            try:
+                await asyncio.wait_for(
+                    self._audio_received_event.wait(),
+                    timeout=self._audio_starvation_timeout,
+                )
+                self._audio_received_event.clear()
+            except asyncio.TimeoutError:
+                if self._vad_state == VADState.SPEAKING:
+                    logger.warning(f"{self}: no audio received while speaking, forcing speech stop")
+                    self._vad_state = VADState.QUIET
+                    await self._call_event_handler("on_speech_stopped")
 
     async def _maybe_speech_activity(self):
         """Handle user speaking frame."""
