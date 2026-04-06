@@ -457,7 +457,15 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         Returns:
             True if the audio frame was written successfully, False otherwise.
         """
+        if not hasattr(self, "_waf_dbg"):
+            self._waf_dbg = 0
+        self._waf_dbg += 1
+        if self._waf_dbg <= 3:
+            print(f"[WAF_DBG] write_audio_frame called: closing={self._client.is_closing} connected={self._client.is_connected} audio_len={len(frame.audio)}", flush=True)
+
         if self._client.is_closing or not self._client.is_connected:
+            if self._waf_dbg <= 3:
+                print(f"[WAF_DBG] DROPPED! closing={self._client.is_closing} connected={self._client.is_connected}", flush=True)
             return False
 
         frame = OutputAudioRawFrame(
