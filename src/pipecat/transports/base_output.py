@@ -504,6 +504,10 @@ class BaseOutputTransport(FrameProcessor):
             await self._cancel_clock_task()
             await self._cancel_video_task()
 
+            # Stop audio mixer so it doesn't keep generating frames after cancellation.
+            if self._mixer:
+                await self._mixer.stop()
+
         async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
 
