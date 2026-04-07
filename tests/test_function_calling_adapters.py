@@ -299,10 +299,10 @@ class TestFunctionAdapters(unittest.TestCase):
 
     def test_openai_adapter_ignores_other_adapter_custom_tools(self):
         """Test that OpenAI adapter ignores custom tools for other adapters."""
+        expected = OpenAILLMAdapter().to_provider_tools_format(self.tools_def)
         tools_def = self.tools_def
         tools_def.custom_tools = {AdapterType.GEMINI: [{"google_search": {}}]}
-        result = OpenAILLMAdapter().to_provider_tools_format(tools_def)
-        assert len(result) == 1
+        assert OpenAILLMAdapter().to_provider_tools_format(tools_def) == expected
 
     def test_bedrock_adapter(self):
         """Test AWS Bedrock adapter format transformation."""

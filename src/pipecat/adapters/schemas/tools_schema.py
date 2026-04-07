@@ -22,7 +22,7 @@ class AdapterType(Enum):
 
     Parameters:
         GEMINI: Google Gemini adapter.
-        OPENAI: OpenAI adapter (Chat Completions and Responses API).
+        OPENAI: OpenAI adapter (Chat Completions, Responses, and Realtime API).
     """
 
     GEMINI = "gemini"
