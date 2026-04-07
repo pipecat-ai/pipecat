@@ -1038,7 +1038,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                             "type": "async_tool",
                             "status": "running",
                             "tool_call_id": frame.tool_call_id,
-                            "description": "The tool associated with this tool_call_id is still running. Zero or more messages may follow with intermediate results, 'status=running', and a final 'status=finished' message will deliver the complete result.",
+                            "description": "An asynchronous task associated with this tool_call_id has started running. "
+                            + "Expect results to arrive later as developer messages that look roughly like this one (with 'type=async_tool' and a matching tool_call_id) but with a 'result' field. "
+                            + "Note that there *may* be more than one result (i.e., a stream of results), but there doesn't have to be (there may be only one). "
+                            + "The last result will come in a message with 'status=finished'.",
                         }
                     ),
                     "tool_call_id": frame.tool_call_id,
@@ -1144,7 +1147,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
                         "type": "async_tool",
                         "tool_call_id": frame.tool_call_id,
                         "status": "running",
-                        "description": "Intermediate update. More updates or a final 'finished' message will follow.",
+                        "description": "This is an intermediate result for the asynchronous task associated with this tool_call_id. "
+                        + "The task is still running. More intermediate results may follow, or the next result may be the final one with 'status=finished'.",
                         "result": result,
                     }
                 ),
@@ -1176,7 +1180,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
                             "type": "async_tool",
                             "tool_call_id": frame.tool_call_id,
                             "status": "finished",
-                            "description": "Final result. No further messages for this tool_call_id.",
+                            "description": "This is the final result for the asynchronous task associated with this tool_call_id. "
+                            + "The task has completed. No further results will arrive for this tool_call_id.",
                             "result": result,
                         }
                     ),
