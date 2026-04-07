@@ -329,6 +329,19 @@ class LLMContext:
         message = await LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
         self.add_message(message)
 
+    def copy(self) -> "LLMContext":
+        """Return a shallow snapshot of this context.
+
+        The messages list is copied so future additions to the original context
+        do not affect the snapshot. Tools and tool_choice are shared references
+        because they are always replaced atomically (never mutated in place).
+
+        Returns:
+            A new LLMContext instance with a copy of the current messages.
+        """
+        messages_copy = list(self._messages)
+        return LLMContext(messages=messages_copy, tools=self._tools, tool_choice=self._tool_choice)
+
     @staticmethod
     def _normalize_and_validate_tools(tools: ToolsSchema | NotGiven) -> ToolsSchema | NotGiven:
         """Normalize and validate the given tools.

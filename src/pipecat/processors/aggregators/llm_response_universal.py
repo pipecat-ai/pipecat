@@ -284,7 +284,14 @@ class LLMContextAggregator(FrameProcessor):
         Returns:
             LLMContextFrame containing the current context.
         """
-        return LLMContextFrame(context=self._context)
+        # We pass a snapshot of the context rather than a live reference.
+        # LLMContextFrame processing is asynchronous: by the time the LLM
+        # service reads the frame, new messages may have already been added to
+        # the original context (e.g. a function-call result arriving while the
+        # LLM is still queued). Without a snapshot, all in-flight frames share
+        # the same object and see the same ever-growing message list, causing
+        # the LLM to generate redundant or duplicate replies.
+        return LLMContextFrame(context=self._context.copy())
 
     async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a context frame in the specified direction.
@@ -1115,6 +1122,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     run_llm = True
 
         if run_llm and not self._user_speaking:
+            logger.debug(f"{self}: Pushing context frame!")
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
         # Call the `on_context_updated` callback once the function call result
