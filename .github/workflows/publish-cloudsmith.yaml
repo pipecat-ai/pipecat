@@ -61,10 +61,9 @@ jobs:
         env:
           TWINE_USERNAME: ${{ secrets.CLOUDSMITH_USERNAME }}
           TWINE_PASSWORD: ${{ secrets.CLOUDSMITH_API_KEY }}
-          CLOUDSMITH_REPO: ${{ vars.CLOUDSMITH_REPO }}  # e.g. tonehq/tone
         run: |
           twine upload \
-            --repository-url "https://python.cloudsmith.io/${CLOUDSMITH_REPO}/" \
+            --repository-url "https://python.cloudsmith.io/tonehq/tone/" \
             dist/*
 
       - name: Summary
