@@ -130,9 +130,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "You are a helpful assistant in a voice conversation. "
                 "Your responses will be spoken aloud, so avoid emojis, bullet points, or other "
                 "formatting that can't be spoken. "
-                "You have access to a function that starts tracking a moving device's location and "
+                "You have access to a function that starts tracking the user's location and "
                 "provides regular updates on it. When you receive the final location, tell the user "
-                "the destination has been reached and announce the final city."
+                "the destination has been reached."
             ),
         ),
     )
@@ -152,7 +152,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     location_function = FunctionSchema(
         name="track_current_location",
-        description="Track the device's current GPS location during a road trip, reporting position updates as the vehicle moves through cities until it reaches the final destination.",
+        description="Start tracking the user's current GPS location, reporting position updates until the user reaches their destination.",
         properties={},
         required=[],
     )
