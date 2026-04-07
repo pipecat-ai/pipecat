@@ -869,7 +869,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 function_name="get_weather",
                 tool_call_id="1",
                 arguments={"location": "Los Angeles"},
-                cancel_on_interruption=False,
+                cancel_on_interruption=True,
             ),
             SleepFrame(),
             FunctionCallResultFrame(
@@ -901,7 +901,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 function_name="get_weather",
                 tool_call_id="1",
                 arguments={"location": "Los Angeles"},
-                cancel_on_interruption=False,
+                cancel_on_interruption=True,
             ),
             SleepFrame(),
             FunctionCallResultFrame(

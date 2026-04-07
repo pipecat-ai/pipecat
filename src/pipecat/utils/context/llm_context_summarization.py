@@ -10,6 +10,7 @@ This module provides reusable functionality for automatically compressing conver
 context when token limits are reached, enabling efficient long-running conversations.
 """
 
+import json
 import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional
@@ -384,6 +385,35 @@ class LLMContextSummarizationUtil:
         return total
 
     @staticmethod
+    def _is_tool_message_pending(content: str) -> bool:
+        """Return True if a tool message content represents an unresolved call.
+
+        A tool message is considered pending (unresolved) when its content is
+        the synchronous ``"IN_PROGRESS"`` sentinel or the async
+        ``{"type": "async_tool", "status": "started"}`` marker — both indicate
+        that the actual result has not yet been written back to the context.
+
+        Args:
+            content: The ``content`` field of a tool-role context message.
+
+        Returns:
+            True if the tool call should be treated as still in progress.
+        """
+        if content == "IN_PROGRESS":
+            return True
+        try:
+            parsed = json.loads(content)
+            if (
+                isinstance(parsed, dict)
+                and parsed.get("type") == "async_tool"
+                and parsed.get("status") == "started"
+            ):
+                return True
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return False
+
+    @staticmethod
     def _get_earliest_function_call_not_resolved_in_range(
         messages: List[dict], start_idx: int, summary_end: int
     ) -> int:
@@ -391,9 +421,13 @@ class LLMContextSummarizationUtil:
 
         Scans messages from ``start_idx`` up to (but not including)
         ``summary_end`` to identify tool calls whose responses either don't
-        exist yet or fall in the kept portion of the context (>= summary_end).
+        exist yet, fall in the kept portion of the context (>= summary_end),
+        or are still marked as ``IN_PROGRESS`` (async calls whose results have
+        not yet arrived).
+
         This prevents summarizing tool call requests when their responses would
-        remain in the kept context as orphans, which the OpenAI API rejects.
+        remain in the kept context as orphans, which the OpenAI API rejects,
+        and avoids summarizing async function calls before their results arrive.
 
         Args:
             messages: List of messages to check.
@@ -430,11 +464,33 @@ class LLMContextSummarizationUtil:
                             if tool_call_id:
                                 pending_tool_calls[tool_call_id] = i
 
-            # Check for tool results
+            # Check for tool results — treat IN_PROGRESS and async "started"
+            # messages as still pending so they are not summarized away before
+            # their results arrive.
             if role == "tool":
                 tool_call_id = msg.get("tool_call_id")
                 if tool_call_id and tool_call_id in pending_tool_calls:
-                    pending_tool_calls.pop(tool_call_id)
+                    if not LLMContextSummarizationUtil._is_tool_message_pending(
+                        msg.get("content", "")
+                    ):
+                        pending_tool_calls.pop(tool_call_id)
+
+            # Check for async tool completion — a developer message with
+            # {"type": "async_tool", "status": "finished"} signals that the
+            # async result has arrived and the call is now resolved.
+            if role == "developer":
+                try:
+                    parsed = json.loads(msg.get("content", ""))
+                    if (
+                        isinstance(parsed, dict)
+                        and parsed.get("type") == "async_tool"
+                        and parsed.get("status") == "finished"
+                    ):
+                        tool_call_id = parsed.get("tool_call_id")
+                        if tool_call_id and tool_call_id in pending_tool_calls:
+                            pending_tool_calls.pop(tool_call_id)
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
         # If we have pending tool calls, return the earliest index
         if pending_tool_calls:

@@ -831,6 +831,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_image_results: Dict[str, UserImageRawFrame] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
+        self._user_speaking: bool = False
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -935,6 +937,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, AssistantImageRawFrame):
             await self._handle_assistant_image_frame(frame)
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_speaking = False
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -1019,13 +1027,31 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 ],
             }
         )
-        self._context.add_message(
-            {
-                "role": "tool",
-                "content": "IN_PROGRESS",
-                "tool_call_id": frame.tool_call_id,
-            }
-        )
+
+        is_async = not frame.cancel_on_interruption
+        if is_async:
+            self._context.add_message(
+                {
+                    "role": "tool",
+                    "content": json.dumps(
+                        {
+                            "type": "async_tool",
+                            "status": "started",
+                            "tool_call_id": frame.tool_call_id,
+                            "description": "The tool associated with this tool_call_id is still in progress, and the result is not yet available. It will be provided in a subsequent message with the same tool_call_id.",
+                        }
+                    ),
+                    "tool_call_id": frame.tool_call_id,
+                }
+            )
+        else:
+            self._context.add_message(
+                {
+                    "role": "tool",
+                    "content": "IN_PROGRESS",
+                    "tool_call_id": frame.tool_call_id,
+                }
+            )
 
         self._function_calls_in_progress[frame.tool_call_id] = frame
 
@@ -1039,16 +1065,34 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
             return
 
+        in_progress_frame = self._function_calls_in_progress[frame.tool_call_id]
+        is_async = not in_progress_frame.cancel_on_interruption if in_progress_frame else False
+        group_id = in_progress_frame.group_id if in_progress_frame else None
+
         del self._function_calls_in_progress[frame.tool_call_id]
 
         properties = frame.properties
 
-        # Update context with the function call result
-        if frame.result:
-            result = json.dumps(frame.result, ensure_ascii=False)
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+
+        if is_async:
+            # For async function calls instead of updating the existing IN_PROGRESS tool message we inject
+            # a new developer message so the LLM is notified of the completed result.
+            self._context.add_message(
+                {
+                    "role": "developer",
+                    "content": json.dumps(
+                        {
+                            "type": "async_tool",
+                            "tool_call_id": frame.tool_call_id,
+                            "status": "finished",
+                            "result": result,
+                        }
+                    ),
+                }
+            )
         else:
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, "COMPLETED")
+            self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
 
         run_llm = False
 
@@ -1070,10 +1114,18 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # If the frame is indicating we should run the LLM, do it.
                 run_llm = frame.run_llm
             else:
-                # If this is the last function call in progress, run the LLM.
-                run_llm = not bool(self._function_calls_in_progress)
+                # Run the LLM when this is the last function call in the group
+                # to complete. If group_id is set, only consider sibling calls;
+                # otherwise always execute as soon as we receive the result.
+                if group_id:
+                    run_llm = not any(
+                        f is not None and f.group_id == group_id
+                        for f in self._function_calls_in_progress.values()
+                    )
+                else:
+                    run_llm = True
 
-        if run_llm:
+        if run_llm and not self._user_speaking:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
         # Call the `on_context_updated` callback once the function call result
