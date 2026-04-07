@@ -1,0 +1,74 @@
+name: publish-cloudsmith
+
+# Branch-driven publishing of `tone-pipecat` to the Cloudsmith private PyPI.
+#
+# Versioning scheme (PEP 440 local version):
+#   <BASE_VERSION>+<branch-slug>.<run_number>
+#
+# Examples:
+#   0.0.74+main.42
+#   0.0.74+dev.17
+#   0.0.74+feature-foo.3
+#
+# `<BASE_VERSION>` is the value of the `TONE_BASE_VERSION` env var below — bump
+# manually when you want a new base. Cloudsmith accepts PEP 440 local versions.
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+env:
+  TONE_BASE_VERSION: '0.0.74'
+
+jobs:
+  build-and-publish:
+    name: Build & publish to Cloudsmith
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compute version
+        id: version
+        run: |
+          BRANCH_SLUG="$(echo "${GITHUB_REF_NAME}" | tr '/' '-' | tr '_' '-')"
+          VERSION="${TONE_BASE_VERSION}+${BRANCH_SLUG}.${GITHUB_RUN_NUMBER}"
+          echo "branch_slug=${BRANCH_SLUG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}"        >> "$GITHUB_OUTPUT"
+          echo "Publishing version: ${VERSION}"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Build wheel and sdist
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.version }}
+        run: python -m build
+
+      - name: Verify artifacts
+        run: twine check dist/*
+
+      - name: Upload to Cloudsmith
+        env:
+          TWINE_USERNAME: ${{ secrets.CLOUDSMITH_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.CLOUDSMITH_API_KEY }}
+          CLOUDSMITH_REPO: ${{ vars.CLOUDSMITH_REPO }}  # e.g. tonehq/tone
+        run: |
+          twine upload \
+            --repository-url "https://python.cloudsmith.io/${CLOUDSMITH_REPO}/" \
+            dist/*
+
+      - name: Summary
+        run: |
+          echo "### Published \`tone-pipecat==${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Branch: \`${GITHUB_REF_NAME}\` → slug \`${{ steps.version.outputs.branch_slug }}\`" >> "$GITHUB_STEP_SUMMARY"
