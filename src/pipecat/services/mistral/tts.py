@@ -64,8 +64,6 @@ class MistralTTSService(TTSService):
         self,
         *,
         api_key: Optional[str] = None,
-        voice_id: Optional[str] = None,
-        model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         settings: Optional[Settings] = None,
         **kwargs,
@@ -75,38 +73,20 @@ class MistralTTSService(TTSService):
         Args:
             api_key: Mistral API key for authentication. If None, uses
                 MISTRAL_API_KEY environment variable.
-            voice_id: Voice ID to use for synthesis.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=MistralTTSService.Settings(voice=...)`` instead.
-
-            model: TTS model to use. Defaults to "voxtral-mini-tts-2603".
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=MistralTTSService.Settings(model=...)`` instead.
-
             sample_rate: Output audio sample rate in Hz. Audio is resampled from
                 Mistral's native 24kHz when a different rate is requested.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to TTSService.
         """
-        # 1. Initialize default_settings with hardcoded defaults
+        # Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="voxtral-mini-tts-2603",
             voice=None,
             language=None,
         )
 
-        # 2. Apply direct init arg overrides (deprecated)
-        if voice_id is not None:
-            self._warn_init_param_moved_to_settings("voice_id", "voice")
-            default_settings.voice = voice_id
-        if model is not None:
-            self._warn_init_param_moved_to_settings("model", "model")
-            default_settings.model = model
-
-        # 3. Apply settings delta (canonical API, always wins)
+        # Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
