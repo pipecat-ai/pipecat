@@ -13,8 +13,6 @@ configurations and event-driven processing.
 
 from typing import Optional
 
-from loguru import logger
-
 from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,

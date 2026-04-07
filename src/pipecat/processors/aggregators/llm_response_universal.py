@@ -16,7 +16,7 @@ import json
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Set, Type
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Type
 
 from loguru import logger
 
@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
     LLMRunFrame,
     LLMSetToolChoiceFrame,
@@ -50,7 +51,6 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
-    SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
@@ -74,7 +74,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     LLMContextSummarizer,
     SummaryAppliedEvent,
 )
-from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -82,7 +82,7 @@ from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedP
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.context.llm_context_summarization import (
     LLMAutoContextSummarizationConfig,
     LLMContextSummarizationConfig,
@@ -128,10 +128,6 @@ class LLMAssistantAggregatorParams:
     """Parameters for configuring LLM assistant aggregation behavior.
 
     Parameters:
-        expect_stripped_words: Whether to expect and handle stripped words
-            in text frames by adding spaces between tokens. This parameter is
-            ignored when used with the newer LLMAssistantAggregator, which
-            handles word spacing automatically.
         enable_auto_context_summarization: Enable automatic context summarization when token
             or message-count limits are reached (disabled by default). When enabled,
             older conversation messages are automatically compressed into summaries to
@@ -142,7 +138,6 @@ class LLMAssistantAggregatorParams:
             ``LLMAutoContextSummarizationConfig`` values.
     """
 
-    expect_stripped_words: bool = True
     enable_auto_context_summarization: bool = False
     auto_context_summarization_config: Optional[LLMAutoContextSummarizationConfig] = None
 
@@ -316,6 +311,17 @@ class LLMContextAggregator(FrameProcessor):
         """
         self._context.set_messages(messages)
 
+    def transform_messages(
+        self, transform: Callable[[List[LLMContextMessage]], List[LLMContextMessage]]
+    ):
+        """Transform the context messages using a provided function.
+
+        Args:
+            transform: A function that takes the current list of messages and returns
+                a modified list of messages to set in the context.
+        """
+        self._context.transform_messages(transform)
+
     def set_tools(self, tools: ToolsSchema | NotGiven):
         """Set tools in the context.
 
@@ -468,11 +474,6 @@ class LLMUserAggregator(LLMContextAggregator):
             self._vad_controller.add_event_handler("on_push_frame", self._on_push_frame)
             self._vad_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
 
-        # NOTE(aleix): Probably just needed temporarily. This was added to
-        # prevent processing self-queued frames (SpeechControlParamsFrame)
-        # pushed by strategies.
-        self._self_queued_frames = set()
-
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -518,6 +519,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._handle_llm_messages_append(frame)
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
+        elif isinstance(frame, LLMMessagesTransformFrame):
+            await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
             # Push the LLMSetToolsFrame as well, since speech-to-speech LLM
@@ -528,8 +531,6 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
-        elif isinstance(frame, SpeechControlParamsFrame):
-            await self._handle_speech_control_params(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -643,16 +644,10 @@ class LLMUserAggregator(LLMContextAggregator):
         if frame.run_llm:
             await self.push_context_frame()
 
-    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
-        if frame.id in self._self_queued_frames:
-            return
-
-        if not frame.turn_params:
-            return
-
-        logger.warning(f"{self}: `turn_analyzer` in base input transport is deprecated.")
-
-        await self._user_turn_controller.update_strategies(ExternalUserTurnStrategies())
+    async def _handle_llm_messages_transform(self, frame: LLMMessagesTransformFrame):
+        self.transform_messages(frame.transform)
+        if frame.run_llm:
+            await self.push_context_frame()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
@@ -668,16 +663,6 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
-    async def _internal_queue_frame(
-        self,
-        frame: Frame,
-        direction: FrameDirection = FrameDirection.DOWNSTREAM,
-        callback: Optional[FrameCallback] = None,
-    ):
-        """Queues the given frame to ourselves."""
-        self._self_queued_frames.add(frame.id)
-        await self.queue_frame(frame, direction, callback)
-
     async def _queued_broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
         """Broadcasts a frame upstream and queues it for internal processing.
 
@@ -690,13 +675,13 @@ class LLMUserAggregator(LLMContextAggregator):
             **kwargs: Keyword arguments to be passed to the frame's constructor.
 
         """
-        await self._internal_queue_frame(frame_cls(**kwargs))
+        await self.queue_frame(frame_cls(**kwargs))
         await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
 
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ):
-        await self._internal_queue_frame(frame, direction)
+        await self.queue_frame(frame, direction)
 
     async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
         await self._queued_broadcast_frame(frame_cls, **kwargs)
@@ -842,26 +827,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         super().__init__(context=context, role="assistant", **kwargs)
         self._params = params or LLMAssistantAggregatorParams()
 
-        if "expect_stripped_words" in kwargs:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'expect_stripped_words' is deprecated. "
-                    "LLMAssistantAggregator now handles word spacing automatically.",
-                    DeprecationWarning,
-                )
-
-            self._params.expect_stripped_words = kwargs["expect_stripped_words"]
-
-        if params and not params.expect_stripped_words:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "params.expect_stripped_words is deprecated. "
-                    "LLMAssistantAggregator now handles word spacing automatically.",
-                    DeprecationWarning,
-                )
-
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._function_calls_image_results: Dict[str, UserImageRawFrame] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
@@ -954,6 +919,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_llm_messages_append(frame)
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
+        elif isinstance(frame, LLMMessagesTransformFrame):
+            await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
@@ -1016,6 +983,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
+        if frame.run_llm:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
+
+    async def _handle_llm_messages_transform(self, frame: LLMMessagesTransformFrame):
+        self.transform_messages(frame.transform)
         if frame.run_llm:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 

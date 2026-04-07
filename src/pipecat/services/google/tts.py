@@ -520,8 +520,7 @@ class GoogleTTSSettings(TTSSettings):
     speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-#: .. deprecated:: 0.0.105
-#:     Use ``GoogleTTSService.Settings`` instead.
+#: *Deprecated since 0.0.105:* Use ``GoogleTTSService.Settings`` instead.
 GoogleStreamTTSSettings = GoogleTTSSettings
 
 

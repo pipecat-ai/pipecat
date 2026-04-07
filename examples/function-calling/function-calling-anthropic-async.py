@@ -36,7 +36,7 @@ load_dotenv(override=True)
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
-    # Simulate a long-running API call, so we can test async function calls.
+    # Simulate a long-running API call, so we can test async function calls (cancel_on_interruption=False).
     await asyncio.sleep(20)
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 

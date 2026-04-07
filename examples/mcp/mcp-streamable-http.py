@@ -63,83 +63,78 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    system_prompt = f"""
-    You are a helpful LLM in a voice call.
-    Your goal is to answer questions about the user's GitHub repositories and account.
-    You have access to a number of tools provided by Github. Use any and all tools to help users.
-    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
-    Don't overexplain what you are doing.
-    Just respond with short sentences when you are carrying out tool calls.
-    """
+    system_prompt = """\
+You are a helpful LLM in a voice call.
+Your goal is to answer questions about the user's GitHub repositories and account.
+You have access to a number of tools provided by Github. Use any and all tools to help users.
+Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
+Don't overexplain what you are doing.
+Just respond with short sentences when you are carrying out tool calls.
+"""
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_prompt,
-    )
-
-    try:
-        # Github MCP docs: https://github.com/github/github-mcp-server
-        # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
-        # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
-        # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
-        mcp = MCPClient(
-            server_params=StreamableHttpParameters(
-                url="https://api.githubcopilot.com/mcp/",
-                headers={"Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"},
-            )
-        )
-    except Exception as e:
-        logger.error(f"error setting up mcp")
-        logger.exception("error trace:")
-
-    tools = {}
-    try:
-        tools = await mcp.register_tools(llm)
-    except Exception as e:
-        logger.error(f"error registering tools")
-        logger.exception("error trace:")
-
-    context = LLMContext(tools=tools)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-    )
-
-    pipeline = Pipeline(
-        [
-            transport.input(),  # Transport user input
-            stt,
-            user_aggregator,  # User spoken responses
-            llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses and tool context
-        ]
-    )
-
-    task = PipelineTask(
-        pipeline,
-        params=PipelineParams(
-            enable_metrics=True,
-            enable_usage_metrics=True,
+        settings=GoogleLLMService.Settings(
+            system_instruction=system_prompt,
         ),
-        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        logger.info(f"Client connected: {client}")
-        # Kick off the conversation.
-        await task.queue_frames([LLMRunFrame()])
+    # Github MCP docs: https://github.com/github/github-mcp-server
+    # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
+    # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
+    # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
+    async with MCPClient(
+        server_params=StreamableHttpParameters(
+            url="https://api.githubcopilot.com/mcp/",
+            headers={"Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"},
+        )
+    ) as mcp:
+        tools = await mcp.register_tools(llm)
 
-    @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await task.cancel()
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Please introduce yourself."}],
+            tools=tools,
+        )
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        )
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                stt,
+                user_aggregator,  # User spoken responses
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                assistant_aggregator,  # Assistant spoken responses and tool context
+            ]
+        )
 
-    await runner.run(task)
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        )
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            logger.info(f"Client connected: {client}")
+            # Kick off the conversation.
+            await task.queue_frames([LLMRunFrame()])
+
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, client):
+            logger.info(f"Client disconnected")
+            await task.cancel()
+
+        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+
+        await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):

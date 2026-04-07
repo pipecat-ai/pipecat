@@ -10,9 +10,7 @@ This module provides Google Gemini integration for the Pipecat framework,
 including LLM services, context management, and message aggregation.
 """
 
-import base64
 import io
-import json
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -25,11 +23,7 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
-    AudioRawFrame,
     Frame,
-    FunctionCallCancelFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -59,14 +53,9 @@ try:
     from google import genai
     from google.api_core.exceptions import DeadlineExceeded
     from google.genai.types import (
-        Blob,
-        Content,
-        FunctionCall,
-        FunctionResponse,
         GenerateContentConfig,
         GenerateContentResponse,
         HttpOptions,
-        Part,
     )
 
     # Temporary hack to be able to process Nano Banana returned images.

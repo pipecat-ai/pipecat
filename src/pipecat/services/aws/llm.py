@@ -12,9 +12,6 @@ function calling.
 """
 
 import asyncio
-import base64
-import copy
-import io
 import json
 import os
 import re
@@ -22,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.bedrock_adapter import (
@@ -31,15 +27,11 @@ from pipecat.adapters.services.bedrock_adapter import (
 )
 from pipecat.frames.frames import (
     Frame,
-    FunctionCallCancelFrame,
     FunctionCallFromLLM,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     LLMContextFrame,
     LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext

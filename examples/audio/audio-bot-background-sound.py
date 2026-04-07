@@ -34,7 +34,7 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 load_dotenv(override=True)
 
 OFFICE_SOUND_FILE = os.path.join(
-    os.path.dirname(__file__), "assets", "office-ambience-24000-mono.mp3"
+    os.path.dirname(__file__), "../assets", "office-ambience-24000-mono.mp3"
 )
 
 # We use lambdas to defer transport parameter creation until the transport

@@ -24,7 +24,7 @@ class UserTurnStartedParams:
     contextual information about how the user turn should be handled by the user
     aggregator.
 
-    Attributes:
+    Parameters:
         enable_user_speaking_frames: Whether the user aggregator should emit
             frames indicating user speaking state (e.g., user started speaking)
             during the bot's turn. This is typically enabled by default, but may

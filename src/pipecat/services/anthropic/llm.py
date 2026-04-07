@@ -11,17 +11,13 @@ including support for function calling, vision, and prompt caching features.
 """
 
 import asyncio
-import base64
-import copy
-import io
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, Literal, Optional, Union
 
 import httpx
 from loguru import logger
-from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.anthropic_adapter import (
@@ -30,9 +26,6 @@ from pipecat.adapters.services.anthropic_adapter import (
 )
 from pipecat.frames.frames import (
     Frame,
-    FunctionCallCancelFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     LLMContextFrame,
     LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
@@ -40,7 +33,6 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
-    UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -51,7 +43,7 @@ from pipecat.services.settings import LLMSettings, _NotGiven, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
-    from anthropic import NOT_GIVEN, APITimeoutError, AsyncAnthropic, NotGiven
+    from anthropic import NOT_GIVEN, APITimeoutError, AsyncAnthropic
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`.")

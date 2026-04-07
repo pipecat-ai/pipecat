@@ -6,18 +6,10 @@
 
 """OpenAI LLM service implementation with context aggregators."""
 
-import json
-from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from openai import NOT_GIVEN
 
-from pipecat.frames.frames import (
-    FunctionCallCancelFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
-    UserImageRawFrame,
-)
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 
 

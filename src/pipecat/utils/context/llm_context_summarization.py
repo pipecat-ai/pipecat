@@ -169,7 +169,9 @@ class LLMContextSummarizationConfig:
 
     .. deprecated:: 0.0.104
         Use :class:`LLMAutoContextSummarizationConfig` with a nested
-        :class:`LLMContextSummaryConfig` instead::
+        :class:`LLMContextSummaryConfig` instead.
+
+        Example::
 
             LLMAutoContextSummarizationConfig(
                 max_context_tokens=8000,
