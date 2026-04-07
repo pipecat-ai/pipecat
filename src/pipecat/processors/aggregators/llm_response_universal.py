@@ -1036,9 +1036,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     "content": json.dumps(
                         {
                             "type": "async_tool",
-                            "status": "started",
+                            "status": "running",
                             "tool_call_id": frame.tool_call_id,
-                            "description": "The tool associated with this tool_call_id is still in progress, and the result is not yet available. It will be provided in a subsequent message with the same tool_call_id.",
+                            "description": "The tool associated with this tool_call_id is still running. Zero or more messages may follow with intermediate results, 'is_result_final=False', and a final 'status=finished' message will deliver the complete result.",
                         }
                     ),
                     "tool_call_id": frame.tool_call_id,
@@ -1132,7 +1132,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         removing the call from the in-progress map.
         """
         if not frame.result:
-            logger.warning(f"{self} function_call_update_callback called without a result!")
+            logger.warning(f"{self} result_callback called with is_final=False but no result!")
             return
 
         result = json.dumps(frame.result, ensure_ascii=False)
@@ -1143,8 +1143,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     {
                         "type": "async_tool",
                         "tool_call_id": frame.tool_call_id,
-                        "status": "updated",
+                        "status": "running",
+                        "description": "Intermediate update. More updates or a final 'finished' message will follow.",
                         "result": result,
+                        "is_result_final": False,
                     }
                 ),
             }
@@ -1175,7 +1177,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
                             "type": "async_tool",
                             "tool_call_id": frame.tool_call_id,
                             "status": "finished",
+                            "description": "Final result. No further messages for this tool_call_id.",
                             "result": result,
+                            "is_result_final": True,
                         }
                     ),
                 }
