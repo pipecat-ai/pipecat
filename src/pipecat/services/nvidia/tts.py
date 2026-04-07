@@ -1,5 +1,6 @@
 #
 # Copyright (c) 2024-2026, Daily
+# Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -379,8 +380,9 @@ class NvidiaTTSService(TTSService):
     def _synthesis_thread_handler(self):
         """Run ``SynthesizeOnline`` gRPC stream in a background thread.
 
-        Builds request objects directly to avoid a Python 3.12 compatibility
-        bug in ``riva.client.SpeechSynthesisService.synthesize_online``.
+        Uses a queue-backed generator to feed text chunks into a single
+        ``SynthesizeOnline`` call, enabling Magpie's cross-sentence stitching.
+        Audio responses are forwarded to the async response queue.
         """
         base_req = self._build_base_request()
 
