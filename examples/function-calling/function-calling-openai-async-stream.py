@@ -130,10 +130,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "You are a helpful assistant in a voice conversation. "
                 "Your responses will be spoken aloud, so avoid emojis, bullet points, or other "
                 "formatting that can't be spoken. "
-                "When you receive an tool update message, tell the user the current city "
-                "the device is passing through. "
-                "When you receive the final tool finished message, tell the user the "
-                "destination has been reached and announce the final city."
+                "You have access to a function that starts tracking a moving device's location and "
+                "provides regular updates on it. When you receive the final location, tell the user "
+                "the destination has been reached and announce the final city."
             ),
         ),
     )
