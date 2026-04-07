@@ -21,10 +21,12 @@ class AdapterType(Enum):
     """Supported adapter types for custom tools.
 
     Parameters:
-        GEMINI: Google Gemini adapter - currently the only service supporting custom tools.
+        GEMINI: Google Gemini adapter.
+        OPENAI: OpenAI adapter (Chat Completions and Responses API).
     """
 
-    GEMINI = "gemini"  # that is the only service where we are able to add custom tools for now
+    GEMINI = "gemini"
+    OPENAI = "openai"
 
 
 class ToolsSchema:

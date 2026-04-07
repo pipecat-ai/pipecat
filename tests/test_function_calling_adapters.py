@@ -15,6 +15,7 @@ from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
+from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
 
 
 class TestFunctionAdapters(unittest.TestCase):
@@ -175,6 +176,133 @@ class TestFunctionAdapters(unittest.TestCase):
         tools_def = self.tools_def
         tools_def.custom_tools = {AdapterType.GEMINI: [search_tool]}
         assert GeminiLLMAdapter().to_provider_tools_format(tools_def) == expected
+
+    def test_openai_adapter_with_custom_tools(self):
+        """Test OpenAI adapter appends custom tools."""
+        tool_search = {"type": "tool_search"}
+        expected = [
+            ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "get_weather",
+                    "description": "Get the weather in a given location",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "string",
+                                "description": "The city, e.g. San Francisco",
+                            },
+                            "format": {
+                                "type": "string",
+                                "enum": ["celsius", "fahrenheit"],
+                                "description": "The temperature unit to use.",
+                            },
+                        },
+                        "required": ["location", "format"],
+                    },
+                },
+            ),
+            tool_search,
+        ]
+        tools_def = self.tools_def
+        tools_def.custom_tools = {AdapterType.OPENAI: [tool_search]}
+        assert OpenAILLMAdapter().to_provider_tools_format(tools_def) == expected
+
+    def test_openai_responses_adapter_with_custom_tools(self):
+        """Test OpenAI Responses adapter appends custom tools."""
+        tool_search = {"type": "tool_search"}
+        expected = [
+            {
+                "type": "function",
+                "name": "get_weather",
+                "description": "Get the weather in a given location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city, e.g. San Francisco",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"],
+                            "description": "The temperature unit to use.",
+                        },
+                    },
+                    "required": ["location", "format"],
+                },
+                "strict": None,
+            },
+            tool_search,
+        ]
+        tools_def = self.tools_def
+        tools_def.custom_tools = {AdapterType.OPENAI: [tool_search]}
+        assert OpenAIResponsesLLMAdapter().to_provider_tools_format(tools_def) == expected
+
+    def test_openai_responses_adapter(self):
+        """Test OpenAI Responses adapter format transformation."""
+        expected = [
+            {
+                "type": "function",
+                "name": "get_weather",
+                "description": "Get the weather in a given location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city, e.g. San Francisco",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"],
+                            "description": "The temperature unit to use.",
+                        },
+                    },
+                    "required": ["location", "format"],
+                },
+                "strict": None,
+            }
+        ]
+        assert OpenAIResponsesLLMAdapter().to_provider_tools_format(self.tools_def) == expected
+
+    def test_openai_realtime_adapter_with_custom_tools(self):
+        """Test OpenAI Realtime adapter appends custom tools."""
+        tool_search = {"type": "tool_search"}
+        expected = [
+            {
+                "type": "function",
+                "name": "get_weather",
+                "description": "Get the weather in a given location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city, e.g. San Francisco",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"],
+                            "description": "The temperature unit to use.",
+                        },
+                    },
+                    "required": ["location", "format"],
+                },
+            },
+            tool_search,
+        ]
+        tools_def = self.tools_def
+        tools_def.custom_tools = {AdapterType.OPENAI: [tool_search]}
+        assert OpenAIRealtimeLLMAdapter().to_provider_tools_format(tools_def) == expected
+
+    def test_openai_adapter_ignores_other_adapter_custom_tools(self):
+        """Test that OpenAI adapter ignores custom tools for other adapters."""
+        tools_def = self.tools_def
+        tools_def.custom_tools = {AdapterType.GEMINI: [{"google_search": {}}]}
+        result = OpenAILLMAdapter().to_provider_tools_format(tools_def)
+        assert len(result) == 1
 
     def test_bedrock_adapter(self):
         """Test AWS Bedrock adapter format transformation."""
