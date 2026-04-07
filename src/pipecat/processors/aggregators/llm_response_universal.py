@@ -1038,7 +1038,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                             "type": "async_tool",
                             "status": "running",
                             "tool_call_id": frame.tool_call_id,
-                            "description": "The tool associated with this tool_call_id is still running. Zero or more messages may follow with intermediate results, 'is_result_final=False', and a final 'status=finished' message will deliver the complete result.",
+                            "description": "The tool associated with this tool_call_id is still running. Zero or more messages may follow with intermediate results, 'status=running', and a final 'status=finished' message will deliver the complete result.",
                         }
                     ),
                     "tool_call_id": frame.tool_call_id,
@@ -1128,7 +1128,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
     ):
         """Handle an intermediate result for an async function call.
 
-        Injects an ``"is_result_final=False"`` developer message into the context without
+        Injects an intermediate developer message into the context without
         removing the call from the in-progress map.
         """
         if not frame.result:
@@ -1146,7 +1146,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
                         "status": "running",
                         "description": "Intermediate update. More updates or a final 'finished' message will follow.",
                         "result": result,
-                        "is_result_final": False,
                     }
                 ),
             }
@@ -1179,7 +1178,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
                             "status": "finished",
                             "description": "Final result. No further messages for this tool_call_id.",
                             "result": result,
-                            "is_result_final": True,
                         }
                     ),
                 }
