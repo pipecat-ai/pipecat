@@ -7,7 +7,9 @@
 """Krisp turn analyzer for end-of-turn detection using Krisp VIVA SDK.
 
 This module provides a turn analyzer implementation using Krisp's turn detection
-(Tt) API to determine when a user has finished speaking in a conversation.
+v3 (Tt3) API to determine when a user has finished speaking in a conversation.
+The Tt3 API accepts an external VAD flag alongside audio frames, allowing the
+model to leverage voice activity information for more accurate turn detection.
 
 Note: This analyzer uses a different model than KrispVivaFilter. The model path
 can be specified via the KRISP_VIVA_TURN_MODEL_PATH environment variable or
@@ -54,8 +56,10 @@ class KrispTurnParams(BaseTurnParams):
 class KrispVivaTurn(BaseTurnAnalyzer):
     """Turn analyzer using Krisp VIVA SDK for end-of-turn detection.
 
-    Uses Krisp's turn detection (Tt) API to determine when a user has finished
-    speaking. This analyzer requires a valid Krisp model file to operate.
+    Uses Krisp's turn detection v3 (Tt3) API to determine when a user has
+    finished speaking. The Tt3 API receives an external VAD flag with each
+    audio frame, which the ``is_speech`` parameter of ``append_audio``
+    provides. This analyzer requires a valid Krisp model file to operate.
     """
 
     def __init__(
@@ -156,32 +160,34 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 logger.error(f"Error in __del__: {e}", exc_info=True)
 
     def _create_tt_session(self, sample_rate: int):
-        """Create a turn detection session with the specified sample rate.
+        """Create a Tt3 turn detection session with the specified sample rate.
 
         Args:
-            sample_rate: Sample rate for the session
+            sample_rate: Sample rate for the session.
 
         Returns:
-            krisp_audio.TtFloat instance
+            krisp_audio.Tt3Float instance.
 
         Raises:
-            ValueError: If sample rate or frame duration is not supported
-            RuntimeError: If session creation fails
+            ValueError: If sample rate or frame duration is not supported.
+            RuntimeError: If session creation fails.
         """
         try:
             model_info = krisp_audio.ModelInfo()
             model_info.path = self._model_path
 
-            tt_cfg = krisp_audio.TtSessionConfig()
-            tt_cfg.inputSampleRate = int_to_krisp_sample_rate(sample_rate)
-            tt_cfg.inputFrameDuration = int_to_krisp_frame_duration(self._params.frame_duration_ms)
-            tt_cfg.modelInfo = model_info
+            tt3_cfg = krisp_audio.Tt3SessionConfig()
+            tt3_cfg.inputSampleRate = int_to_krisp_sample_rate(sample_rate)
+            tt3_cfg.inputFrameDuration = int_to_krisp_frame_duration(
+                self._params.frame_duration_ms
+            )
+            tt3_cfg.modelInfo = model_info
 
             # Calculate samples per frame for this sample rate
             self._samples_per_frame = int((sample_rate * self._params.frame_duration_ms) / 1000)
 
-            tt_instance = krisp_audio.TtFloat.create(tt_cfg)
-            return tt_instance
+            tt3_instance = krisp_audio.Tt3Float.create(tt3_cfg)
+            return tt3_instance
         except Exception as e:
             logger.error(f"Failed to create Krisp turn detection session: {e}", exc_info=True)
             raise RuntimeError(f"Failed to create Krisp turn detection session: {e}") from e
@@ -307,12 +313,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 # Instead, we wait for the model's probability check below to confirm
                 # end-of-turn based on the threshold.
 
-                prob = self._tt_session.process(frame.tolist())
-
-                # Negative values indicate the model is not ready yet (working with 100ms data)
-                # Skip processing until we get positive probabilities
-                if prob < 0:
-                    continue
+                prob = self._tt_session.process(frame.tolist(), is_speech, False)
 
                 # Store the probability for external access
                 self._last_probability = prob
