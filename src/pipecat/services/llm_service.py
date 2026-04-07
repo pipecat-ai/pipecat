@@ -73,7 +73,10 @@ FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
 class FunctionCallResultCallback(Protocol):
     """Protocol for function call result callbacks.
 
-    Handles the result of an LLM function call execution.
+    Used for both final results and intermediate updates. Pass
+    ``properties=FunctionCallResultProperties(is_final=False)`` to send an
+    intermediate update (only valid for async function calls registered with
+    ``cancel_on_interruption=False``).
     """
 
     async def __call__(
@@ -82,29 +85,9 @@ class FunctionCallResultCallback(Protocol):
         """Call the result callback.
 
         Args:
-            result: The result of the function call.
-            properties: Optional properties for the result.
-        """
-        ...
-
-
-class FunctionCallUpdateCallback(Protocol):
-    """Protocol for function call intermediate update callbacks.
-
-    Used by async function calls (``cancel_on_interruption=False``) to push
-    incremental status updates before the final result is ready. Each
-    invocation adds an ``"updated"`` developer message to the context.
-    """
-
-    async def __call__(
-        self, result: Any, *, properties: Optional[FunctionCallResultProperties] = None
-    ) -> None:
-        """Call the update callback.
-
-        Args:
-            result: The intermediate result / status of the function call.
-            properties: Optional properties. ``is_final`` is forced to
-                ``False`` regardless of what is passed here.
+            result: The result of the function call, or an intermediate update.
+            properties: Optional properties. Set ``is_final=False`` to send an
+                intermediate update instead of the final result.
         """
         ...
 
@@ -119,11 +102,10 @@ class FunctionCallParams:
         arguments: The arguments for the function.
         llm: The LLMService instance being used.
         context: The LLM context.
-        update_callback: Callback to push intermediate updates before the final
-            result. Only valid for async function calls
-            (``cancel_on_interruption=False``); a warning is logged if called
-            on a sync call.
-        result_callback: Callback to handle the result of the function call.
+        result_callback: Callback to deliver the result of the function call.
+            For async function calls (``cancel_on_interruption=False``), call
+            it with ``properties=FunctionCallResultProperties(is_final=False)``
+            to push intermediate updates before the final result.
     """
 
     function_name: str
@@ -131,7 +113,6 @@ class FunctionCallParams:
     arguments: Mapping[str, Any]
     llm: "LLMService"
     context: LLMContext
-    update_callback: FunctionCallUpdateCallback
     result_callback: FunctionCallResultCallback
 
 
@@ -782,10 +763,21 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         timeout_task: Optional[asyncio.Task] = None
 
-        # Shared helper: broadcast a FunctionCallResultFrame.
-        async def _broadcast_result(
-            result: Any, properties: Optional[FunctionCallResultProperties]
+        # Single callback for both intermediate updates and final results.
+        # Pass properties=FunctionCallResultProperties(is_final=False) for updates.
+        async def function_call_result_callback(
+            result: Any, *, properties: Optional[FunctionCallResultProperties] = None
         ):
+            is_final = properties.is_final if properties else True
+            if not is_final and item.cancel_on_interruption:
+                logger.warning(
+                    f"{self} result_callback called with is_final=False on sync function call"
+                    f" [{runner_item.function_name}:{runner_item.tool_call_id}]."
+                    " Intermediate updates are only valid for async function calls"
+                    " (cancel_on_interruption=False)."
+                )
+                return
+
             nonlocal timeout_task
 
             # Cancel timeout task if it exists
@@ -801,32 +793,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 run_llm=runner_item.run_llm,
                 properties=properties,
             )
-
-        # Intermediate-update callback (async function calls only).
-        async def function_call_update_callback(
-            result: Any, *, properties: Optional[FunctionCallResultProperties] = None
-        ):
-            if item.cancel_on_interruption:
-                logger.warning(
-                    f"{self} function_call_update_callback called on sync function call"
-                    f" [{runner_item.function_name}:{runner_item.tool_call_id}]."
-                    " update_callback is only valid for async function calls"
-                    " (cancel_on_interruption=False)."
-                )
-                return
-            # Force is_final=False so the aggregator treats this as an update.
-            update_properties = FunctionCallResultProperties(
-                run_llm=properties.run_llm if properties else None,
-                on_context_updated=properties.on_context_updated if properties else None,
-                is_final=False,
-            )
-            await _broadcast_result(result, update_properties)
-
-        # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
-        async def function_call_result_callback(
-            result: Any, *, properties: Optional[FunctionCallResultProperties] = None
-        ):
-            await _broadcast_result(result, properties)
 
         # Start a timeout task for deferred function calls
         async def timeout_handler():
@@ -861,7 +827,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                         arguments=runner_item.arguments,
                         llm=self,
                         context=runner_item.context,
-                        update_callback=function_call_update_callback,
                         result_callback=function_call_result_callback,
                     ),
                 )
@@ -873,7 +838,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     arguments=runner_item.arguments,
                     llm=self,
                     context=runner_item.context,
-                    update_callback=function_call_update_callback,
                     result_callback=function_call_result_callback,
                 )
                 await item.handler(params)

@@ -8,10 +8,10 @@
 
 The ``track_current_location`` tool simulates a GPS tracker reporting the
 device's position during a road trip from San Francisco to San Diego.  It
-sends two intermediate updates (via ``params.update_callback``) as the vehicle
-passes through cities along the way, then delivers the final destination (via
-``params.result_callback``).  Each update returns the same structure with a
-different city:
+sends two intermediate updates (via ``params.result_callback`` with
+``is_final=False``) as the vehicle passes through cities along the way, then
+delivers the final destination (via ``params.result_callback``).  Each update
+returns the same structure with a different city:
 
   Update 1 – {gps, city: "San Francisco"}   ← trip start
   Update 2 – {gps, city: "Los Angeles"}     ← passing through
@@ -32,6 +32,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
+    FunctionCallResultProperties,
     LLMRunFrame,
     TTSSpeakFrame,
 )
@@ -66,12 +67,18 @@ async def track_current_location(params: FunctionCallParams):
 
     # First update: initial city estimate.
     gps = {"lat": 37.7310, "lng": -122.4527}
-    await params.update_callback({"gps": gps, "city": "San Francisco"})
+    await params.result_callback(
+        {"gps": gps, "city": "San Francisco"},
+        properties=FunctionCallResultProperties(is_final=False),
+    )
 
     # Second update: revised city estimate.
     await asyncio.sleep(10)
     gps = {"lat": 33.96003, "lng": -118.40639}
-    await params.update_callback({"gps": gps, "city": "Los Angeles"})
+    await params.result_callback(
+        {"gps": gps, "city": "Los Angeles"},
+        properties=FunctionCallResultProperties(is_final=False),
+    )
 
     # Final result: confirmed city.
     await asyncio.sleep(10)
