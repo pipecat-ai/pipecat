@@ -1073,7 +1073,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if is_final:
             await self._handle_function_call_finished(frame, in_progress_frame)
         else:
-            await self._handle_function_call_updated(frame, in_progress_frame)
+            await self._handle_function_call_intermediate_result(frame, in_progress_frame)
 
         run_llm = False
 
@@ -1123,12 +1123,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._context_updated_tasks.add(task)
             task.add_done_callback(self._context_updated_task_finished)
 
-    async def _handle_function_call_updated(
+    async def _handle_function_call_intermediate_result(
         self, frame: FunctionCallResultFrame, in_progress_frame: FunctionCallInProgressFrame
     ):
-        """Handle an intermediate update for an async function call.
+        """Handle an intermediate result for an async function call.
 
-        Injects an ``"updated"`` developer message into the context without
+        Injects an ``"is_result_final=False"`` developer message into the context without
         removing the call from the in-progress map.
         """
         if not frame.result:
