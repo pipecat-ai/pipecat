@@ -6,7 +6,7 @@
 
 """Example: async function call with intermediate updates.
 
-The ``get_current_location`` tool simulates a GPS tracker reporting the
+The ``track_current_location`` tool simulates a GPS tracker reporting the
 device's position during a road trip from San Francisco to San Diego.  It
 sends two intermediate updates (via ``params.update_callback``) as the vehicle
 passes through cities along the way, then delivers the final destination (via
@@ -56,7 +56,7 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 load_dotenv(override=True)
 
 
-async def get_current_location(params: FunctionCallParams):
+async def track_current_location(params: FunctionCallParams):
     """Simulate a GPS tracker reporting position during a road trip.
 
     Step 1 – San Francisco (trip start)     (update)
@@ -134,8 +134,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # cancel_on_interruption=False makes this an async function call: the LLM
     # continues the conversation immediately and receives updates/result later.
     llm.register_function(
-        "get_current_location",
-        get_current_location,
+        "track_current_location",
+        track_current_location,
         cancel_on_interruption=False,
         timeout_secs=30,
     )
@@ -145,7 +145,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await tts.queue_frame(TTSSpeakFrame("Sure, tracking your location now."))
 
     location_function = FunctionSchema(
-        name="get_current_location",
+        name="track_current_location",
         description="Track the device's current GPS location during a road trip, reporting position updates as the vehicle moves through cities until it reaches the final destination.",
         properties={},
         required=[],
