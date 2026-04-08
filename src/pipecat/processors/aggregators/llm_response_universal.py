@@ -983,7 +983,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._bot_speaking = False
             await self.push_frame(frame, direction)
             if self._pending_context_frame and not self._user_speaking:
-                self._pending_context_frame = False
                 logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
                 await self.push_context_frame(FrameDirection.UPSTREAM)
         else:
@@ -1015,6 +1014,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self.push_frame(timestamp_frame)
 
         return aggregation
+
+    async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a context frame in the specified direction.
+
+        Args:
+            direction: The direction to push the frame (upstream or downstream).
+        """
+        await super().push_context_frame(direction)
+        self._pending_context_frame = False
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -1158,7 +1166,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     run_llm = True
 
         if run_llm and not self._user_speaking:
-            if self._bot_speaking:
+            if self.has_queued_frame(FunctionCallResultFrame):
+                # Another FunctionCallResultFrame is already waiting in the queue. Defer
+                # the context push so all results are bundled into a single LLM call
+                # instead of triggering one inference pass per result.
+                logger.debug(
+                    f"{self}: More FunctionCallResultFrames queued — deferring context frame push."
+                )
+                self._pending_context_frame = True
+            elif self._bot_speaking:
                 # Defer the context frame push until the bot finishes speaking. If multiple
                 # function call results arrive while the bot is speaking, they all accumulate
                 # in the context and a single push is performed once speaking stops, preventing
