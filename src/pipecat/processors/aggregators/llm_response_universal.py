@@ -785,22 +785,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
     The aggregator manages function calls in progress and coordinates between
     text generation and tool execution phases of LLM responses.
 
-    **Deferred context frame push (bot-speaking guard)**
-
-    When a function call result arrives while the bot is already speaking (i.e., a
-    ``BotStartedSpeakingFrame`` has been seen but no matching ``BotStoppedSpeakingFrame``
-    yet), pushing a context frame immediately would cause the LLM to start a new inference
-    pass while the current TTS output is still playing. If several function call results
-    arrive in rapid succession during that window they would each trigger a separate LLM
-    run, leading to duplicated or overlapping responses.
-
-    To prevent this, the aggregator sets an internal ``_pending_context_frame`` flag
-    instead of pushing immediately. When ``BotStoppedSpeakingFrame`` is finally received
-    — meaning TTS has finished — the aggregator checks the flag and, if set, pushes a
-    single context frame upstream. Because all results that arrived during the speaking
-    window have already been added to the context, the LLM sees them in one combined
-    call rather than multiple staggered ones.
-
     Event handlers available:
 
     - on_assistant_turn_started: Called when the assistant turn starts
@@ -856,7 +840,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # re-invocation until the bot stops speaking. This flag is set to True in that case
         # so that `BotStoppedSpeakingFrame` knows to push a context frame. Multiple results
         # arriving in the same speaking window are bundled into a single deferred push.
-        self._pending_context_frame: bool = False
+        self._push_context_on_bot_stopped_speaking: bool = False
 
         self._assistant_turn_start_timestamp = ""
 
@@ -897,7 +881,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Reset the aggregation state."""
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
-        self._pending_context_frame = False
+        self._push_context_on_bot_stopped_speaking = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -975,7 +959,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
             await self.push_frame(frame, direction)
-            if self._pending_context_frame and not self._user_speaking:
+            if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
                 logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
                 await self.push_context_frame(FrameDirection.UPSTREAM)
         else:
@@ -1015,7 +999,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             direction: The direction to push the frame (upstream or downstream).
         """
         await super().push_context_frame(direction)
-        self._pending_context_frame = False
+        self._push_context_on_bot_stopped_speaking = False
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -1160,9 +1144,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         if run_llm and not self._user_speaking:
             if self.has_queued_frame(FunctionCallResultFrame):
-                # Another FunctionCallResultFrame is already waiting in the queue. Defer
-                # the context push so all results are bundled into a single LLM call
-                # instead of triggering one inference pass per result.
+                # Another FunctionCallResultFrame is already queued. Defer the context push
+                # to bundle all results into a single LLM call instead of triggering one
+                # inference pass per result. The context will be pushed once the last
+                # function call in the queue is processed.
                 logger.debug(
                     f"{self}: More FunctionCallResultFrames queued — deferring context frame push."
                 )
@@ -1172,7 +1157,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # in the context and a single push is performed once speaking stops, preventing
                 # the LLM from running multiple times and producing duplicated responses.
                 logger.debug(f"{self}: Bot is speaking — deferring context frame push.")
-                self._pending_context_frame = True
+                self._push_context_on_bot_stopped_speaking = True
             else:
                 logger.debug(f"{self}: Pushing context frame!")
                 await self.push_context_frame(FrameDirection.UPSTREAM)
