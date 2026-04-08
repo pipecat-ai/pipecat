@@ -25,6 +25,8 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -790,6 +792,22 @@ class LLMAssistantAggregator(LLMContextAggregator):
     The aggregator manages function calls in progress and coordinates between
     text generation and tool execution phases of LLM responses.
 
+    **Deferred context frame push (bot-speaking guard)**
+
+    When a function call result arrives while the bot is already speaking (i.e., a
+    ``BotStartedSpeakingFrame`` has been seen but no matching ``BotStoppedSpeakingFrame``
+    yet), pushing a context frame immediately would cause the LLM to start a new inference
+    pass while the current TTS output is still playing. If several function call results
+    arrive in rapid succession during that window they would each trigger a separate LLM
+    run, leading to duplicated or overlapping responses.
+
+    To prevent this, the aggregator sets an internal ``_pending_context_frame`` flag
+    instead of pushing immediately. When ``BotStoppedSpeakingFrame`` is finally received
+    — meaning TTS has finished — the aggregator checks the flag and, if set, pushes a
+    single context frame upstream. Because all results that arrived during the speaking
+    window have already been added to the context, the LLM sees them in one combined
+    call rather than multiple staggered ones.
+
     Event handlers available:
 
     - on_assistant_turn_started: Called when the assistant turn starts
@@ -839,6 +857,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
         self._user_speaking: bool = False
+        self._bot_speaking: bool = False
+
+        # When a function call result arrives while the bot is speaking, we defer the LLM
+        # re-invocation until the bot stops speaking. This flag is set to True in that case
+        # so that `BotStoppedSpeakingFrame` knows to push a context frame. Multiple results
+        # arriving in the same speaking window are bundled into a single deferred push.
+        self._pending_context_frame: bool = False
 
         self._assistant_turn_start_timestamp = ""
 
@@ -879,6 +904,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Reset the aggregation state."""
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
+        self._pending_context_frame = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -950,6 +976,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            await self.push_frame(frame, direction)
+            if self._pending_context_frame and not self._user_speaking:
+                self._pending_context_frame = False
+                logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
+                await self.push_context_frame(FrameDirection.UPSTREAM)
         else:
             await self.push_frame(frame, direction)
 
@@ -1122,8 +1158,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     run_llm = True
 
         if run_llm and not self._user_speaking:
-            logger.debug(f"{self}: Pushing context frame!")
-            await self.push_context_frame(FrameDirection.UPSTREAM)
+            if self._bot_speaking:
+                # Defer the context frame push until the bot finishes speaking. If multiple
+                # function call results arrive while the bot is speaking, they all accumulate
+                # in the context and a single push is performed once speaking stops, preventing
+                # the LLM from running multiple times and producing duplicated responses.
+                logger.debug(f"{self}: Bot is speaking — deferring context frame push.")
+                self._pending_context_frame = True
+            else:
+                logger.debug(f"{self}: Pushing context frame!")
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
         # Call the `on_context_updated` callback once the function call result
         # is added to the context. Also, run this in a separate task to make
