@@ -155,7 +155,7 @@ class IBMTTSService(TTSService):
 
         voice: Optional[str] = None
         language: Optional[Language] = Language.EN_US
-        accept: str = "audio/wav;rate=16000"
+        accept: str = "audio/l16;rate=16000"
         rate_percentage: Optional[int] = None
         pitch_percentage: Optional[int] = None
         spell_out_mode: Optional[str] = None

@@ -54,19 +54,19 @@ async def test_ibm_tts():
                 "name": "US English Female (Ellie)",
                 "voice": "en-US_EllieNatural",
                 "language": Language.EN_US,
-                "accept": "audio/wav;rate=24000",
+                "accept": "audio/l16;rate=24000",
             },
             {
                 "name": "US English Male (Ethan)",
                 "voice": "en-US_EthanNatural",
                 "language": Language.EN_US,
-                "accept": "audio/wav;rate=24000",
+                "accept": "audio/l16;rate=24000",
             },
             {
                 "name": "UK English Female (Chloe)",
                 "voice": "en-GB_ChloeNatural",
                 "language": Language.EN_GB,
-                "accept": "audio/wav;rate=24000",
+                "accept": "audio/l16;rate=24000",
             },
         ]
         

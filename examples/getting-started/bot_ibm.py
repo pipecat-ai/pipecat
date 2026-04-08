@@ -94,7 +94,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         url=os.getenv("IBM_TTS_URL"),
         params=IBMTTSService.InputParams(
             voice="en-US_EmmaNatural",  # Default voice
-            accept="audio/wav;rate=24000",  # Audio format
+            accept="audio/l16;rate=24000",  # Audio format
             # Optional: adjust speaking rate and pitch
             # rate_percentage=10,  # 10% faster
             # pitch_percentage=0,  # Default pitch
