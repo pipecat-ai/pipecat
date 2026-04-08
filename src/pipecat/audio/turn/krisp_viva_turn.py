@@ -178,9 +178,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
 
             tt3_cfg = krisp_audio.Tt3SessionConfig()
             tt3_cfg.inputSampleRate = int_to_krisp_sample_rate(sample_rate)
-            tt3_cfg.inputFrameDuration = int_to_krisp_frame_duration(
-                self._params.frame_duration_ms
-            )
+            tt3_cfg.inputFrameDuration = int_to_krisp_frame_duration(self._params.frame_duration_ms)
             tt3_cfg.modelInfo = model_info
 
             # Calculate samples per frame for this sample rate
