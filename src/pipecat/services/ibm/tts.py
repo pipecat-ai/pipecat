@@ -535,4 +535,3 @@ class IBMTTSService(TTSService):
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame(context_id=context_id)
 
-# Made with Bob

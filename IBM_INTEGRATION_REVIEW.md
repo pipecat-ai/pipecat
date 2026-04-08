@@ -1,14 +1,14 @@
-# IBM Watson STT/TTS Integration Review
+# IBM Speech Services STT/TTS Integration Review
 
 ## Overview
-This document summarizes the review of the IBM Watson Speech-to-Text (STT) and Text-to-Speech (TTS) integration against Pipecat's contribution guidelines.
+This document summarizes the review of the IBM Speech Services Speech-to-Text (STT) and Text-to-Speech (TTS) integration against Pipecat's contribution guidelines.
 
 ## Review Date
 2026-04-08
 
 ## Files Reviewed
-- `src/pipecat/services/ibm/stt.py` - Watson STT WebSocket service
-- `src/pipecat/services/ibm/tts.py` - Watson TTS WebSocket service  
+- `src/pipecat/services/ibm/stt.py` - IBM STT WebSocket service
+- `src/pipecat/services/ibm/tts.py` - IBM TTS WebSocket service
 - `src/pipecat/services/ibm/__init__.py` - Package exports
 
 ## Compliance Checklist
@@ -87,7 +87,7 @@ This document summarizes the review of the IBM Watson Speech-to-Text (STT) and T
 
 ## Integration-Specific Features
 
-### Watson STT
+### IBM STT
 - WebSocket-based real-time transcription
 - Supports interim results
 - Word-level timestamps and confidence scores
@@ -95,12 +95,12 @@ This document summarizes the review of the IBM Watson Speech-to-Text (STT) and T
 - Speaker diarization support
 - Extensive configuration parameters from chatty/texter.py
 
-### Watson TTS
+### IBM TTS
 - WebSocket-based audio synthesis
 - Multiple audio format support (WAV, OGG, MP3, FLAC, etc.)
 - Voice customization (rate, pitch, spell-out mode)
 - Custom voice model support
-- Opt-out of Watson request logging
+- Opt-out of IBM request logging
 
 ## Changelog Requirements
 
@@ -111,7 +111,7 @@ When submitting as a PR, create changelog file(s) in `changelog/` directory:
 
 **Suggested Content:**
 ```markdown
-- Added IBM Watson Speech-to-Text (STT) and Text-to-Speech (TTS) services with WebSocket support.
+- Added IBM Speech Services Speech-to-Text (STT) and Text-to-Speech (TTS) with WebSocket support.
   - Real-time transcription with interim results and word-level timestamps
   - Low-latency audio synthesis with multiple format support
   - IBM IAM authentication with automatic token refresh
@@ -150,9 +150,9 @@ If this integration is intended as a community integration (separate repository)
 
 ### Strengths
 ✅ Comprehensive docstrings following Google-style conventions  
-✅ Proper error handling with ErrorFrame propagation  
-✅ Extensive configuration options matching Watson API capabilities  
-✅ Latency tracking for performance monitoring  
+✅ Proper error handling with ErrorFrame propagation
+✅ Extensive configuration options matching IBM API capabilities
+✅ Latency tracking for performance monitoring
 ✅ Clean separation of concerns  
 ✅ Proper use of async/await patterns  
 ✅ Token caching and automatic refresh  
@@ -162,7 +162,7 @@ If this integration is intended as a community integration (separate repository)
 - **Documentation**: Excellent inline documentation with usage examples
 - **Error Handling**: Robust error handling with meaningful messages
 - **Latency Observability**: Comprehensive latency tracking at key points
-- **Configuration**: Extensive parameter support from Watson API
+- **Configuration**: Extensive parameter support from IBM API
 - **Code Organization**: Clean, readable code structure
 
 ## Recommendations
@@ -174,7 +174,7 @@ If this integration is intended as a community integration (separate repository)
 
 ## Conclusion
 
-The IBM Watson STT/TTS integration **FULLY COMPLIES** with Pipecat's contribution guidelines:
+The IBM Speech Services STT/TTS integration **FULLY COMPLIES** with Pipecat's contribution guidelines:
 
 - ✅ Code style and linting (ruff)
 - ✅ Docstring conventions (Google-style)
@@ -188,4 +188,4 @@ The IBM Watson STT/TTS integration **FULLY COMPLIES** with Pipecat's contributio
 **Status**: Ready for PR submission pending changelog creation with PR number.
 
 ---
-*Review completed by Bob on 2026-04-08*
+*Review completed on 2026-04-08*

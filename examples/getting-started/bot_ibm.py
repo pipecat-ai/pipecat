@@ -4,16 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Pipecat Quickstart Example with IBM Watson Services.
+"""Pipecat Quickstart Example with IBM Speech Services.
 
 The example runs a simple voice AI bot that you can connect to using your
-browser and speak with it. This version uses IBM Watson services for
+browser and speak with it. This version uses IBM Speech Services for
 speech-to-text and text-to-speech.
 
 Required AI services:
-- IBM Watson Speech-to-Text
+- IBM Speech-to-Text
 - Google Gemini (LLM)
-- IBM Watson Text-to-Speech
+- IBM Text-to-Speech
 
 Environment variables required:
 - IBM_STT_API_KEY: Your IBM STT API key
@@ -32,7 +32,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-print("🚀 Starting Pipecat bot with IBM Watson services...")
+print("🚀 Starting Pipecat bot with IBM Speech Services...")
 print("⏳ Loading models and imports (20 seconds, first run only)\n")
 
 logger.info("Loading Silero VAD model...")
@@ -44,6 +44,8 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 
 logger.info("Loading pipeline components...")
+import sys
+
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -55,13 +57,12 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 
-import sys
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from pipecat.services.ibm.stt import WatsonSTTService
-from pipecat.services.ibm.tts import WatsonTTSService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.ibm.stt import IBMSTTService
+from pipecat.services.ibm.tts import IBMTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
@@ -71,15 +72,15 @@ load_dotenv(override=True)
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot with IBM Watson services")
+    logger.info(f"Starting bot with IBM Speech Services")
 
-    # IBM Watson Speech-to-Text
-    stt = WatsonSTTService(
+    # IBM Speech-to-Text
+    stt = IBMSTTService(
         api_key=os.getenv("IBM_STT_API_KEY"),
         url=os.getenv("IBM_STT_URL"),
         # Optional: specify model, default is en-US_BroadbandModel
         model="en-US",
-        params=WatsonSTTService.InputParams(
+        params=IBMSTTService.InputParams(
             interim_results=True,
             smart_formatting=True,
             timestamps=True,
@@ -87,11 +88,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    # IBM Watson Text-to-Speech
-    tts = WatsonTTSService(
+    # IBM Text-to-Speech
+    tts = IBMTTSService(
         api_key=os.getenv("IBM_TTS_API_KEY"),
         url=os.getenv("IBM_TTS_URL"),
-        params=WatsonTTSService.InputParams(
+        params=IBMTTSService.InputParams(
             voice="en-US_EmmaNatural",  # Default voice
             accept="audio/wav;rate=24000",  # Audio format
             # Optional: adjust speaking rate and pitch
@@ -109,7 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a friendly AI assistant powered by IBM Watson. Respond naturally and keep your answers conversational.",
+            "content": "You are a friendly AI assistant powered by IBM Speech Services. Respond naturally and keep your answers conversational.",
         },
     ]
 
@@ -124,10 +125,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # IBM Watson STT
+            stt,  # IBM STT
             user_aggregator,  # User responses
             llm,  # LLM
-            tts,  # IBM Watson TTS
+            tts,  # IBM TTS
             transport.output(),  # Transport bot output
             assistant_aggregator,  # Assistant spoken responses
         ]
@@ -171,7 +172,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages.append(
             {
                 "role": "system",
-                "content": "Say hello and briefly introduce yourself as an AI assistant powered by IBM Watson.",
+                "content": "Say hello and briefly introduce yourself as an AI assistant powered by IBM Speech Services.",
             }
         )
         await task.queue_frames([LLMRunFrame()])
@@ -210,4 +211,3 @@ if __name__ == "__main__":
 
     main()
 
-# Made with Bob
