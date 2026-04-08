@@ -12,7 +12,7 @@ speech-to-text and text-to-speech.
 
 Required AI services:
 - IBM Watson Speech-to-Text
-- OpenAI (LLM)
+- Google Gemini (LLM)
 - IBM Watson Text-to-Speech
 
 Environment variables required:
@@ -20,7 +20,7 @@ Environment variables required:
 - IBM_STT_URL: Your IBM STT service URL
 - IBM_TTS_API_KEY: Your IBM TTS API key
 - IBM_TTS_URL: Your IBM TTS service URL
-- OPENAI_API_KEY: Your OpenAI API key
+- GOOGLE_API_KEY: Your Google API key
 
 Run the bot using::
 
@@ -41,6 +41,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 logger.info("✅ Silero VAD model loaded")
 
 from pipecat.frames.frames import LLMRunFrame
+from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 
 logger.info("Loading pipeline components...")
 from pipecat.pipeline.pipeline import Pipeline
@@ -60,7 +61,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 from pipecat.services.ibm.stt import WatsonSTTService
 from pipecat.services.ibm.tts import WatsonTTSService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
@@ -91,16 +92,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("IBM_TTS_API_KEY"),
         url=os.getenv("IBM_TTS_URL"),
         params=WatsonTTSService.InputParams(
-            voice="en-US_EllieNatural",  # Default voice
-            accept="audio/wav;rate=16000",  # Audio format
+            voice="en-US_EmmaNatural",  # Default voice
+            accept="audio/wav;rate=24000",  # Audio format
             # Optional: adjust speaking rate and pitch
             # rate_percentage=10,  # 10% faster
             # pitch_percentage=0,  # Default pitch
         ),
     )
 
-    # OpenAI LLM
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    # Google Gemini LLM
+    llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        model="gemini-2.5-flash-lite"  # Higher quota: 1500 requests/day vs 20 for gemini-2.5-flash-lite
+    )
 
     messages = [
         {
@@ -110,9 +114,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
+
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+     #   user_kwargs={"aggregation_timeout": 0},  # Remove 1-second latency
     )
 
     pipeline = Pipeline(
@@ -134,6 +140,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
     )
+
+    # Add UserBotLatencyObserver to track user-to-bot latency with per-service breakdown
+    latency_observer = UserBotLatencyObserver()
+    
+    @latency_observer.event_handler("on_latency_measured")
+    async def on_latency_measured(observer, latency_seconds: float):
+        """Called when overall user-to-bot latency is measured."""
+        logger.info(f"🎯 User-to-bot latency: {latency_seconds:.3f}s ({latency_seconds * 1000:.0f}ms)")
+    
+    @latency_observer.event_handler("on_latency_breakdown")
+    async def on_latency_breakdown(observer, breakdown):
+        """Called with per-service latency breakdown."""
+        logger.info("📊 Latency breakdown:")
+        for event in breakdown.chronological_events():
+            logger.info(f"  {event}")
+    
+    @latency_observer.event_handler("on_first_bot_speech_latency")
+    async def on_first_bot_speech_latency(observer, latency_seconds: float):
+        """Called when time to first bot speech is measured."""
+        logger.info(f"🗣️  First bot speech: {latency_seconds:.3f}s ({latency_seconds * 1000:.0f}ms) after client connected")
+    
+    # Add observer to task
+    task.add_observer(latency_observer)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

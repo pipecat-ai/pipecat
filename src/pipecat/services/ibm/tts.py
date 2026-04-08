@@ -4,12 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""IBM Watson Text-to-Speech service implementation.
+"""IBM Speech Services Text-to-Speech service implementation.
 
-This module provides integration with IBM Watson's Text-to-Speech API using
+This module provides integration with IBM's Text-to-Speech API using
 the WebSocket streaming interface for low-latency audio synthesis.
 
-Watson TTS WebSocket API reference:
+IBM TTS WebSocket API reference:
     https://cloud.ibm.com/apidocs/text-to-speech#synthesizewebsocket
 
 Supported audio formats (accept parameter):
@@ -25,10 +25,10 @@ Supported audio formats (accept parameter):
 
 Usage example::
 
-    tts = WatsonTTSService(
+    tts = IBMTTSService(
         api_key="your-api-key",
         url="https://api.us-south.text-to-speech.watson.cloud.ibm.com",
-        params=WatsonTTSService.InputParams(
+        params=IBMTTSService.InputParams(
             voice="en-US_MichaelV3Voice",
             accept="audio/wav;rate=16000",
         ),
@@ -63,7 +63,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use IBM Watson TTS, you need to `pip install pipecat-ai[ibm]`."
+        "In order to use IBM Speech Services TTS, you need to `pip install pipecat-ai[ibm]`."
     )
     raise Exception(f"Missing module: {e}")
 
@@ -72,7 +72,7 @@ except ModuleNotFoundError as e:
 # Voice → language helpers
 # ---------------------------------------------------------------------------
 
-# Map from pipecat Language enum to a default Watson TTS voice name.
+# Map from pipecat Language enum to a default IBM TTS voice name.
 # Full voice list: https://cloud.ibm.com/docs/text-to-speech?topic=text-to-speech-voices
 _LANGUAGE_TO_DEFAULT_VOICE = {
     Language.EN: "en-US_EllieNatural",
@@ -92,31 +92,31 @@ _LANGUAGE_TO_DEFAULT_VOICE = {
 }
 
 
-def language_to_watson_tts_voice(language: Language) -> Optional[str]:
-    """Return a default Watson TTS voice name for the given language.
+def language_to_ibm_tts_voice(language: Language) -> Optional[str]:
+    """Return a default IBM TTS voice name for the given language.
 
     Args:
         language: A pipecat :class:`Language` enum value.
 
     Returns:
-        A Watson voice name string, or ``None`` if the language is not mapped.
+        A IBM voice name string, or ``None`` if the language is not mapped.
     """
     return _LANGUAGE_TO_DEFAULT_VOICE.get(language)
 
 
 # ---------------------------------------------------------------------------
-# WatsonTTSService
+# IBMTTSService
 # ---------------------------------------------------------------------------
 
 
-class WatsonTTSService(TTSService):
-    """IBM Watson Text-to-Speech WebSocket service.
+class IBMTTSService(TTSService):
+    """IBM Speech Services Text-to-Speech WebSocket service.
 
-    Streams synthesized audio from Watson TTS over a WebSocket connection.
+    Streams synthesized audio from IBM TTS over a WebSocket connection.
     Each call to :meth:`run_tts` opens a new WebSocket, sends the text
     message, collects all binary audio chunks, and closes the connection.
 
-    Watson TTS WebSocket protocol summary:
+    IBM TTS WebSocket protocol summary:
 
     1. Connect to ``wss://<host>/v1/synthesize?voice=<voice>&access_token=<token>``
     2. Send a JSON *open* message: ``{"text": "<text>", "accept": "<mime-type>"}``
@@ -128,10 +128,10 @@ class WatsonTTSService(TTSService):
     """
 
     class InputParams(BaseModel):
-        """Watson TTS synthesis parameters.
+        """IBM TTS synthesis parameters.
 
         Parameters:
-            voice: Watson voice name (e.g. ``"en-US_MichaelV3Voice"``).
+            voice: IBM voice name (e.g. ``"en-US_MichaelV3Voice"``).
                    If *None*, a default voice is chosen based on *language*.
             language: Pipecat language used to pick a default voice when
                       *voice* is not specified.
@@ -167,15 +167,15 @@ class WatsonTTSService(TTSService):
         *,
         api_key: str,
         url: str,
-        params: Optional["WatsonTTSService.InputParams"] = None,
+        params: Optional["IBMTTSService.InputParams"] = None,
         sample_rate: Optional[int] = None,
         **kwargs,
     ):
-        """Initialise the Watson TTS service.
+        """Initialise the IBM TTS service.
 
         Args:
             api_key: IBM Cloud API key used to obtain IAM access tokens.
-            url: Watson TTS service URL, e.g.
+            url: IBM TTS service URL, e.g.
                  ``"https://api.us-south.text-to-speech.watson.cloud.ibm.com"``.
             params: Optional :class:`InputParams` for voice and synthesis
                     configuration.
@@ -189,10 +189,10 @@ class WatsonTTSService(TTSService):
         # Normalise URL: strip trailing slash, ensure no trailing path
         self._base_url = url.rstrip("/")
 
-        self._params = params or WatsonTTSService.InputParams()
+        self._params = params or IBMTTSService.InputParams()
 
         # Resolve voice: explicit > language-derived > hard-coded fallback
-        voice = self._params.voice or language_to_watson_tts_voice(
+        voice = self._params.voice or language_to_ibm_tts_voice(
             self._params.language or Language.EN_US
         ) or "en-US_MichaelV3Voice"
 
@@ -203,7 +203,7 @@ class WatsonTTSService(TTSService):
             push_stop_frames=True,
             sample_rate=sample_rate,
             settings=TTSSettings(
-                model=None,  # Watson TTS doesn't expose model selection
+                model=None,  # IBM TTS doesn't expose model selection
                 voice=voice,
                 language=self._params.language,
             ),
@@ -284,11 +284,11 @@ class WatsonTTSService(TTSService):
                 self._access_token = token
                 # Refresh 5 minutes before the token expires
                 self._token_expiry = time.time() + result.get("expires_in", 3600) - 300
-                logger.debug("Obtained new IAM access token for Watson TTS")
+                logger.debug("Obtained new IAM access token for IBM TTS")
                 return token
 
     def _build_ws_url(self, token: str) -> str:
-        """Build the Watson TTS WebSocket URL.
+        """Build the IBM TTS WebSocket URL.
 
         Args:
             token: A valid IAM bearer token.
@@ -311,7 +311,7 @@ class WatsonTTSService(TTSService):
         return url + "?" + "&".join(query_parts)
 
     def _build_open_message(self, text: str) -> str:
-        """Build the JSON *open* message sent to Watson TTS.
+        """Build the JSON *open* message sent to IBM TTS.
 
         Args:
             text: The text to synthesise.
@@ -324,7 +324,7 @@ class WatsonTTSService(TTSService):
             "accept": self._params.accept,
         }
 
-        # Optional SSML-equivalent parameters expressed as Watson JSON fields
+        # Optional SSML-equivalent parameters expressed as IBM JSON fields
         if self._params.rate_percentage is not None:
             msg["rate_percentage"] = self._params.rate_percentage
         if self._params.pitch_percentage is not None:
@@ -339,34 +339,34 @@ class WatsonTTSService(TTSService):
     # ------------------------------------------------------------------
 
     def can_generate_metrics(self) -> bool:
-        """Return ``True``; Watson TTS supports TTFB and usage metrics."""
+        """Return ``True``; IBM TTS supports TTFB and usage metrics."""
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
-        """Convert a pipecat :class:`Language` to a Watson voice name.
+        """Convert a pipecat :class:`Language` to a IBM voice name.
 
         Args:
             language: The language to convert.
 
         Returns:
-            A Watson voice name string, or ``None`` if not mapped.
+            A IBM voice name string, or ``None`` if not mapped.
         """
-        return language_to_watson_tts_voice(language)
+        return language_to_ibm_tts_voice(language)
 
     async def set_voice(self, voice: str):
-        """Change the Watson voice used for synthesis.
+        """Change the IBM voice used for synthesis.
 
         Args:
-            voice: Watson voice name, e.g. ``"en-US_AllisonV3Voice"``.
+            voice: IBM voice name, e.g. ``"en-US_AllisonV3Voice"``.
         """
-        logger.debug(f"{self}: Setting Watson TTS voice to [{voice}]")
+        logger.debug(f"{self}: Setting IBM TTS voice to [{voice}]")
         self._voice_id = voice
 
     async def set_model(self, model: str):
-        """Set the model name (maps to Watson voice for compatibility).
+        """Set the model name (maps to IBM voice for compatibility).
 
         Args:
-            model: Watson voice name.
+            model: IBM voice name.
         """
         await super().set_model(model)
         await self.set_voice(model)
@@ -379,7 +379,7 @@ class WatsonTTSService(TTSService):
                    triggers service startup.
         """
         await super().start(frame)
-        logger.debug(f"{self}: Watson TTS service started (voice={self._voice_id})")
+        logger.debug(f"{self}: IBM TTS service started (voice={self._voice_id})")
 
     async def stop(self, frame: EndFrame):
         """Stop the TTS service.
@@ -405,12 +405,12 @@ class WatsonTTSService(TTSService):
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
-        """Synthesise *text* using the Watson TTS WebSocket API.
+        """Synthesise *text* using the IBM TTS WebSocket API.
 
         Opens a new WebSocket connection for each utterance, sends the text,
         collects all binary audio chunks, and closes the connection.
 
-        Watson TTS WebSocket protocol:
+        IBM TTS WebSocket protocol:
 
         1. Connect to ``wss://<host>/v1/synthesize?voice=<voice>&access_token=<token>``
         2. Send JSON: ``{"text": "<text>", "accept": "<mime-type>", ...}``
@@ -428,12 +428,12 @@ class WatsonTTSService(TTSService):
             :class:`~pipecat.frames.frames.TTSStoppedFrame`, or
             :class:`~pipecat.frames.frames.ErrorFrame` on failure.
         """
-        logger.debug(f"{self}: Generating Watson TTS [{text}]")
+        logger.debug(f"{self}: Generating IBM TTS [{text}]")
 
         try:
             token = await self._get_access_token()
         except Exception as e:
-            yield ErrorFrame(error=f"Watson TTS auth error: {e}")
+            yield ErrorFrame(error=f"IBM TTS auth error: {e}")
             return
 
         ws_url = self._build_ws_url(token)
@@ -461,15 +461,18 @@ class WatsonTTSService(TTSService):
                 # Log WebSocket connection time
                 if self._synthesis_start_time:
                     connect_latency = (time.time() - self._synthesis_start_time) * 1000
-                    logger.info(f"Watson TTS WebSocket connected in {connect_latency:.2f}ms")
+                    logger.info(f"IBM TTS WebSocket connected in {connect_latency:.2f}ms")
                 
                 await self._call_event_handler("on_connected")
 
                 # Send the synthesis request
                 await websocket.send(open_message)
-                logger.debug(f"{self}: Sent Watson TTS open message")
+                logger.debug(f"{self}: Sent IBM TTS open message")
 
                 # Receive audio chunks until the server closes the connection
+                # Track if we've seen the first chunk to handle WAV headers
+                first_chunk = True
+                
                 async for message in websocket:
                     if isinstance(message, bytes):
                         # Binary message → audio data
@@ -478,17 +481,30 @@ class WatsonTTSService(TTSService):
                             if self._first_audio_time is None and self._synthesis_start_time:
                                 self._first_audio_time = time.time()
                                 first_audio_latency = (self._first_audio_time - self._synthesis_start_time) * 1000
-                                logger.info(f"Watson TTS first audio chunk received in {first_audio_latency:.2f}ms")
+                                logger.info(f"IBM TTS first audio chunk received in {first_audio_latency:.2f}ms")
                             
                             await self.stop_ttfb_metrics()
-                            yield TTSAudioRawFrame(
-                                audio=message,
-                                sample_rate=self._sample_rate,
-                                num_channels=1,
-                                context_id=context_id,
-                            )
+                            
+                            # IBM TTS WebSocket returns chunks with WAV headers
+                            # Strip the 44-byte WAV header from each chunk to avoid clicks
+                            # when chunks are concatenated for playback
+                            audio_data = message
+                            if len(audio_data) > 44 and audio_data.startswith(b"RIFF"):
+                                logger.debug(f"{self}: Stripping WAV header from chunk ({len(audio_data)} bytes)")
+                                audio_data = audio_data[44:]
+                            
+                            # Only yield if we have audio data after header stripping
+                            if len(audio_data) > 0:
+                                yield TTSAudioRawFrame(
+                                    audio=audio_data,
+                                    sample_rate=self._sample_rate,
+                                    num_channels=1,
+                                    context_id=context_id,
+                                )
+                            
+                            first_chunk = False
                     else:
-                        # Text message → Watson error or status JSON
+                        # Text message → IBM error or status JSON
                         try:
                             data = json.loads(message)
                         except json.JSONDecodeError:
@@ -499,22 +515,22 @@ class WatsonTTSService(TTSService):
 
                         if "error" in data:
                             error_msg = data["error"]
-                            logger.error(f"{self}: Watson TTS error: {error_msg}")
-                            yield ErrorFrame(error=f"Watson TTS error: {error_msg}")
+                            logger.error(f"{self}: IBM TTS error: {error_msg}")
+                            yield ErrorFrame(error=f"IBM TTS error: {error_msg}")
                             return
                         elif "warnings" in data:
                             for warning in data["warnings"]:
-                                logger.warning(f"{self}: Watson TTS warning: {warning}")
+                                logger.warning(f"{self}: IBM TTS warning: {warning}")
                         else:
                             logger.debug(
-                                f"{self}: Watson TTS text message: {message}"
+                                f"{self}: IBM TTS text message: {message}"
                             )
 
                 await self._call_event_handler("on_disconnected")
 
         except Exception as e:
-            logger.error(f"{self}: Watson TTS exception: {e}")
-            yield ErrorFrame(error=f"Watson TTS error: {e}")
+            logger.error(f"{self}: IBM TTS exception: {e}")
+            yield ErrorFrame(error=f"IBM TTS error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame(context_id=context_id)

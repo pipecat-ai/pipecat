@@ -1,0 +1,8 @@
+- Added IBM Speech-to-Text (STT) and Text-to-Speech (TTS) services with WebSocket support.
+  - Real-time transcription with interim results, word-level timestamps, and confidence scores
+  - Low-latency audio synthesis with multiple format support (WAV, OGG, MP3, FLAC, etc.)
+  - IBM IAM authentication with automatic token refresh
+  - Comprehensive latency tracking and metrics (WebSocket connect, first byte, first result)
+  - Support for IBM-specific features: smart formatting, profanity filtering, speaker diarization (STT)
+  - Voice customization options: rate, pitch, spell-out mode (TTS)
+  - Custom voice model support

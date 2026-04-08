@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IBM Watson TTS test with text-to-speech synthesis"""
+"""IBM Speech Services TTS test with text-to-speech synthesis"""
 import asyncio
 import os
 import sys
@@ -8,12 +8,12 @@ import wave
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from pipecat.services.ibm.tts import WatsonTTSService
+from pipecat.services.ibm.tts import IBMTTSService
 from pipecat.transcriptions.language import Language
 
 
-async def test_watson_tts():
-    """Test Watson TTS with text synthesis"""
+async def test_ibm_tts():
+    """Test IBM TTS with text synthesis"""
     
     api_key = os.getenv("IBM_TTS_API_KEY")
     url = os.getenv("IBM_TTS_URL", "https://api.us-south.text-to-speech.watson.cloud.ibm.com")
@@ -25,7 +25,7 @@ async def test_watson_tts():
         return False
     
     print("=" * 70)
-    print("IBM Watson TTS Audio Synthesis Test")
+    print("IBM Speech Services TTS Audio Synthesis Test")
     print("=" * 70)
     print(f"✓ API Key: {api_key[:10]}...")
     print(f"✓ URL: {url}")
@@ -33,7 +33,7 @@ async def test_watson_tts():
     
     # Test phrases
     test_phrases = [
-        "Hello, this is a test of IBM Watson Text to Speech.",
+        "Hello, this is a test of IBM Speech Services Text to Speech.",
         "The quick brown fox jumps over the lazy dog.",
         "Testing speech synthesis with multiple sentences. This is the second sentence.",
     ]
@@ -54,19 +54,19 @@ async def test_watson_tts():
                 "name": "US English Female (Ellie)",
                 "voice": "en-US_EllieNatural",
                 "language": Language.EN_US,
-                "accept": "audio/wav;rate=22050",
+                "accept": "audio/wav;rate=24000",
             },
             {
                 "name": "US English Male (Ethan)",
                 "voice": "en-US_EthanNatural",
                 "language": Language.EN_US,
-                "accept": "audio/wav;rate=22050",
+                "accept": "audio/wav;rate=24000",
             },
             {
                 "name": "UK English Female (Chloe)",
                 "voice": "en-GB_ChloeNatural",
                 "language": Language.EN_GB,
-                "accept": "audio/wav;rate=22050",
+                "accept": "audio/wav;rate=24000",
             },
         ]
         
@@ -85,11 +85,11 @@ async def test_watson_tts():
         print()
         
         # Create TTS service
-        print("2. Creating Watson TTS service...")
-        tts = WatsonTTSService(
+        print("2. Creating IBM TTS service...")
+        tts = IBMTTSService(
             api_key=api_key,
             url=url,
-            params=WatsonTTSService.InputParams(
+            params=IBMTTSService.InputParams(
                 voice=config['voice'],
                 language=config['language'],
                 accept=config['accept'],
@@ -107,7 +107,12 @@ async def test_watson_tts():
         
         # Run TTS and collect audio
         async for frame in tts.run_tts(test_phrases[0], context_id="test-context"):
-            from pipecat.frames.frames import TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame, ErrorFrame
+            from pipecat.frames.frames import (
+                ErrorFrame,
+                TTSAudioRawFrame,
+                TTSStartedFrame,
+                TTSStoppedFrame,
+            )
             
             if isinstance(frame, TTSStartedFrame):
                 print("   🎤 TTS started...")
@@ -190,7 +195,7 @@ if __name__ == "__main__":
     print("   3. UK English Female (Charlotte)")
     print()
     
-    success = asyncio.run(test_watson_tts())
+    success = asyncio.run(test_ibm_tts())
     sys.exit(0 if success else 1)
 
 # Made with Bob

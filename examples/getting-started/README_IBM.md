@@ -6,7 +6,7 @@ This example demonstrates how to build a voice AI bot using IBM Watson Speech-to
 
 - **IBM Watson Speech-to-Text**: Real-time speech recognition with WebSocket streaming
 - **IBM Watson Text-to-Speech**: Natural-sounding voice synthesis
-- **OpenAI LLM**: Conversational AI powered by GPT models
+- **Google Gemini LLM**: Conversational AI powered by Google's Gemini models
 - **Silero VAD**: Voice Activity Detection for natural conversation flow
 
 ## Prerequisites
@@ -15,7 +15,7 @@ This example demonstrates how to build a voice AI bot using IBM Watson Speech-to
 2. **IBM Watson Services**:
    - Create a Speech-to-Text service instance
    - Create a Text-to-Speech service instance
-3. **OpenAI API Key**: Get from https://platform.openai.com
+3. **Google API Key**: Get from https://aistudio.google.com/app/apikey
 
 ## Setup
 
@@ -39,8 +39,8 @@ IBM_STT_URL=https://api.us-south.speech-to-text.watson.cloud.ibm.com
 IBM_TTS_API_KEY=your-tts-api-key
 IBM_TTS_URL=https://api.us-south.text-to-speech.watson.cloud.ibm.com
 
-# OpenAI
-OPENAI_API_KEY=your-openai-api-key
+# Google Gemini
+GOOGLE_API_KEY=your-google-api-key
 ```
 
 ### 2. Get IBM Watson Credentials

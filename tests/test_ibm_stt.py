@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Watson STT test with downloadable real speech audio"""
+"""IBM STT test with downloadable real speech audio"""
 import asyncio
 import os
 import sys
@@ -8,8 +8,9 @@ import urllib.request
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from pipecat.services.ibm.stt import WatsonSTTService
+from pipecat.services.ibm.stt import IBMSTTService
 from pipecat.transcriptions.language import Language
+
 
 def download_sample_audio():
     """Download a sample speech audio file for testing.
@@ -30,8 +31,8 @@ def download_sample_audio():
         print(f"   ❌ Download failed: {e}")
         return None
 
-async def test_watson_real_audio():
-    """Test Watson STT with real speech audio"""
+async def test_ibm_real_audio():
+    """Test IBM STT with real speech audio"""
     
     api_key = os.getenv("IBM_STT_API_KEY")
     url = os.getenv("IBM_STT_URL", "https://api.us-south.speech-to-text.watson.cloud.ibm.com")
@@ -41,7 +42,7 @@ async def test_watson_real_audio():
         return False
     
     print("=" * 70)
-    print("Watson STT Real Speech Audio Test")
+    print("IBM STT Real Speech Audio Test")
     print("=" * 70)
     print(f"✓ API Key: {api_key[:10]}...")
     print(f"✓ URL: {url}")
@@ -93,14 +94,14 @@ async def test_watson_real_audio():
                 audio_data = struct.pack(f'<{len(mono_samples)}h', *mono_samples)
                 print(f"   ✓ Converted to mono ({len(audio_data)} bytes)")
         
-        # Create Watson STT
-        print("\n3. Creating Watson STT service...")
-        stt = WatsonSTTService(
+        # Create IBM STT
+        print("\n3. Creating IBM STT service...")
+        stt = IBMSTTService(
             api_key=api_key,
             url=url,
             model="en-US",
             sample_rate=sample_rate,
-            params=WatsonSTTService.InputParams(
+            params=IBMSTTService.InputParams(
                 language=Language.EN_US,
                 interim_results=True,
                 timestamps=True,
@@ -111,7 +112,7 @@ async def test_watson_real_audio():
         print(f"   ✓ Service created (sample rate: {stt.sample_rate} Hz)")
         
         # Connect
-        print("\n4. Connecting to Watson STT...")
+        print("\n4. Connecting to IBM STT...")
         await stt._connect_websocket()
         print("   ✓ Connected")
         
@@ -129,7 +130,7 @@ async def test_watson_real_audio():
                     if "state" in data:
                         state = data["state"]
                         if state == "listening":
-                            print(f"   📡 Watson is listening...")
+                            print(f"   📡 IBM is listening...")
                     
                     if "results" in data:
                         for result in data["results"]:
@@ -159,7 +160,7 @@ async def test_watson_real_audio():
         receive_task = asyncio.create_task(collect_results())
         
         # Send audio
-        print("\n5. Streaming audio to Watson STT...")
+        print("\n5. Streaming audio to IBM STT...")
         chunk_size = 16000  # ~0.5 seconds at 16kHz, 16-bit
         total_chunks = (len(audio_data) + chunk_size - 1) // chunk_size
         
@@ -259,7 +260,7 @@ if __name__ == "__main__":
     print(f"   python3 {sys.argv[0]} your_audio.wav     # Use your own audio\n")
     print("   Audio requirements: WAV format, 16kHz, mono, 16-bit PCM\n")
     
-    success = asyncio.run(test_watson_real_audio())
+    success = asyncio.run(test_ibm_real_audio())
     sys.exit(0 if success else 1)
 
 # Made with Bob

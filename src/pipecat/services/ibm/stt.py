@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""IBM Watson speech-to-text service implementation.
+"""IBM Speech Services speech-to-text service implementation.
 
 This module provides integration with IBM's Speech-to-Text API for transcription
 using segmented audio processing. The service uploads audio files and receives
@@ -16,7 +16,7 @@ import io
 import json
 import time
 from enum import Enum
-from typing import AsyncGenerator, Optional, List
+from typing import AsyncGenerator, List, Optional
 
 import aiohttp
 from loguru import logger
@@ -51,10 +51,10 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_watson_model(language: Language) -> Optional[str]:
-    """Convert Language enum to Watson STT model name.
+def language_to_ibm_model(language: Language) -> Optional[str]:
+    """Convert Language enum to IBM STT model name.
 
-    Watson uses model names like 'en-US_BroadbandModel', 'es-ES_BroadbandModel'
+    IBM uses model names like 'en-US_BroadbandModel', 'es-ES_BroadbandModel'
 
     Source: https://cloud.ibm.com/docs/speech-to-text?topic=speech-to-text-models
     """
@@ -82,19 +82,19 @@ def language_to_watson_model(language: Language) -> Optional[str]:
     return LANGUAGE_MODEL_MAP.get(language)
 
 
-class WatsonSTTService(WebsocketSTTService):
-    """Watson Speech-to-Text WebSocket service.
+class IBMSTTService(WebsocketSTTService):
+    """IBM Speech-to-Text WebSocket service.
 
-    Uses IBM Watson's WebSocket API for real-time transcription.
+    Uses IBM's WebSocket API for real-time transcription.
     Supports interim results, timestamps, and word confidence scores.
     """
 
     class InputParams(BaseModel):
-        """Watson STT configuration parameters.
+        """IBM STT configuration parameters.
 
         Parameters:
-            language: Target language (converted to Watson model)
-            model: Watson model name (overrides language if provided)
+            language: Target language (converted to IBM model)
+            model: IBM model name (overrides language if provided)
             interim_results: Enable interim transcription results
             smart_formatting: Enable smart formatting (dates, times, etc.)
             profanity_filter: Enable profanity filtering
@@ -158,16 +158,27 @@ class WatsonSTTService(WebsocketSTTService):
             ttfs_p99_latency: Optional[float] = None,
             **kwargs,
     ):
+        """Initialize the IBM STT service.
+
+        Args:
+            api_key: IBM Cloud API key for authentication.
+            url: IBM STT service URL (e.g., "https://api.us-south.speech-to-text.watson.cloud.ibm.com").
+            model: IBM model name (overrides language-derived model if provided).
+            sample_rate: Audio sample rate in Hz.
+            params: Optional :class:`InputParams` for STT configuration.
+            ttfs_p99_latency: Expected P99 latency for time-to-first-speech metrics.
+            **kwargs: Additional keyword arguments forwarded to :class:`~pipecat.services.stt_service.WebsocketSTTService`.
+        """
         super().__init__(
             sample_rate=sample_rate,
-            ttfs_p99_latency=ttfs_p99_latency or 0.5,  # Watson is typically fast
+            ttfs_p99_latency=ttfs_p99_latency or 0.5,  # IBM is typically fast
             **kwargs,
         )
 
         self._api_key = api_key
         self._url = url
-        self._params = params or WatsonSTTService.InputParams()
-        self._model = model or language_to_watson_model(self._params.language)
+        self._params = params or IBMSTTService.InputParams()
+        self._model = model or language_to_ibm_model(self._params.language)
         self._access_token = None
         self._token_expiry = 0
         self._receive_task = None
@@ -185,7 +196,7 @@ class WatsonSTTService(WebsocketSTTService):
     async def _get_access_token(self) -> str:
         """Get IAM access token using API key.
 
-        Watson requires IAM authentication. Token expires after 1 hour.
+        IBM requires IAM authentication. Token expires after 1 hour.
         """
         import time
 
@@ -216,14 +227,14 @@ class WatsonSTTService(WebsocketSTTService):
                 return self._access_token
 
     async def _connect_websocket(self):
-        """Connect to Watson STT WebSocket endpoint."""
+        """Connect to IBM STT WebSocket endpoint."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
             # Start timing
             self._connect_start_time = time.time()
-            logger.debug("Connecting to Watson STT WebSocket")
+            logger.debug("Connecting to IBM STT WebSocket")
 
             # Get access token
             token = await self._get_access_token()
@@ -246,7 +257,7 @@ class WatsonSTTService(WebsocketSTTService):
             
             # Log connection latency
             connect_latency = (time.time() - self._connect_start_time) * 1000
-            logger.info(f"Watson STT WebSocket connected in {connect_latency:.2f}ms")
+            logger.info(f"IBM STT WebSocket connected in {connect_latency:.2f}ms")
 
             # Send start message
             await self._send_start_message()
@@ -256,16 +267,16 @@ class WatsonSTTService(WebsocketSTTService):
             self._first_result_time = None
 
             await self._call_event_handler("on_connected")
-            logger.debug("Connected to Watson STT")
+            logger.debug("Connected to IBM STT")
 
         except Exception as e:
             await self.push_error(
-                error_msg=f"Unable to connect to Watson STT: {e}",
+                error_msg=f"Unable to connect to IBM STT: {e}",
                 exception=e
             )
 
     async def _connect(self):
-        """Establish WebSocket connection to Watson STT."""
+        """Establish WebSocket connection to IBM STT."""
         await super()._connect()
 
         await self._connect_websocket()
@@ -329,15 +340,15 @@ class WatsonSTTService(WebsocketSTTService):
         """Check if the service can generate processing metrics.
 
         Returns:
-            True, as Watson STT service supports metrics generation.
+            True, as IBM STT service supports metrics generation.
         """
         return True
 
     async def _disconnect_websocket(self):
-        """Disconnect from Watson STT WebSocket."""
+        """Disconnect from IBM STT WebSocket."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
-                logger.debug("Disconnecting from Watson STT")
+                logger.debug("Disconnecting from IBM STT")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
@@ -355,7 +366,7 @@ class WatsonSTTService(WebsocketSTTService):
             Changing language requires reconnecting to the WebSocket.
         """
         logger.info(f"Switching STT language to: [{language}]")
-        new_model = language_to_watson_model(language)
+        new_model = language_to_ibm_model(language)
         if new_model:
             self._model = new_model
             self._params.language = language
@@ -391,7 +402,7 @@ class WatsonSTTService(WebsocketSTTService):
         await self.start_processing_metrics()
 
     async def _send_start_message(self):
-        """Send start message to Watson STT."""
+        """Send start message to IBM STT."""
         # Determine content type based on sample rate
         content_type = f"audio/l16;rate={self.sample_rate}"
 
@@ -413,7 +424,7 @@ class WatsonSTTService(WebsocketSTTService):
         logger.debug(f"Sent start message: {start_message}")
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Stream audio to Watson STT.
+        """Stream audio to IBM STT.
 
         Args:
             audio: Raw PCM audio bytes (16-bit, mono)
@@ -427,22 +438,22 @@ class WatsonSTTService(WebsocketSTTService):
 
         if self._websocket and self._websocket.state is State.OPEN:
             try:
-                # Watson expects raw PCM audio, not base64
+                # IBM expects raw PCM audio, not base64
                 await self._websocket.send(audio)
             except Exception as e:
-                yield ErrorFrame(f"Watson STT error: {str(e)}")
+                yield ErrorFrame(f"IBM STT error: {str(e)}")
 
         yield None
 
     async def _receive_messages(self):
-        """Receive and process messages from Watson STT."""
+        """Receive and process messages from IBM STT."""
         async for message in self._get_websocket():
             try:
                 # Log first byte received
                 if self._first_byte_time is None and self._connect_start_time:
                     self._first_byte_time = time.time()
                     first_byte_latency = (self._first_byte_time - self._connect_start_time) * 1000
-                    logger.info(f"Watson STT first byte received in {first_byte_latency:.2f}ms")
+                    logger.info(f"IBM STT first byte received in {first_byte_latency:.2f}ms")
                 
                 data = json.loads(message)
                 await self._process_response(data)
@@ -452,9 +463,9 @@ class WatsonSTTService(WebsocketSTTService):
                 logger.error(f"Error processing message: {e}")
 
     async def _process_response(self, data: dict):
-        """Process Watson STT response message.
+        """Process IBM STT response message.
 
-        Watson response format:
+        IBM response format:
         {
             "results": [{
                 "alternatives": [{
@@ -471,13 +482,13 @@ class WatsonSTTService(WebsocketSTTService):
         if "state" in data:
             state = data["state"]
             if state == "listening":
-                logger.debug("Watson STT is listening")
+                logger.debug("IBM STT is listening")
             return
 
         # Handle error messages
         if "error" in data:
             error_msg = data["error"]
-            await self.push_error(error_msg=f"Watson STT error: {error_msg}")
+            await self.push_error(error_msg=f"IBM STT error: {error_msg}")
             return
 
         # Handle transcription results
@@ -505,7 +516,7 @@ class WatsonSTTService(WebsocketSTTService):
                 if self._first_result_time is None and self._connect_start_time:
                     self._first_result_time = time.time()
                     first_result_latency = (self._first_result_time - self._connect_start_time) * 1000
-                    logger.info(f"Watson STT first transcription result in {first_result_latency:.2f}ms")
+                    logger.info(f"IBM STT first transcription result in {first_result_latency:.2f}ms")
 
                 is_final = result.get("final", False)
                 confidence = alternative.get("confidence")
@@ -554,6 +565,6 @@ class WatsonSTTService(WebsocketSTTService):
                 try:
                     stop_message = {"action": "stop"}
                     await self._websocket.send(json.dumps(stop_message))
-                    logger.trace("Sent stop message to Watson STT")
+                    logger.trace("Sent stop message to IBM STT")
                 except Exception as e:
                     logger.warning(f"Failed to send stop: {e}")
