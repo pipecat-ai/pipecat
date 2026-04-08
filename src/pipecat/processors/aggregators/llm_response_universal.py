@@ -1156,6 +1156,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # function call results arrive while the bot is speaking, they all accumulate
                 # in the context and a single push is performed once speaking stops, preventing
                 # the LLM from running multiple times and producing duplicated responses.
+                # This should be an edge case, since it would require a FunctionCallResultFrame
+                # being queued between an LLM response start and end frame.
                 logger.debug(f"{self}: Bot is speaking — deferring context frame push.")
                 self._push_context_on_bot_stopped_speaking = True
             else:
