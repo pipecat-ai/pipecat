@@ -199,6 +199,7 @@ class SessionProperties(BaseModel):
     audio: Optional[AudioConfiguration] = None
     # Tools can be ToolsSchema when provided by user, or list of dicts for API
     tools: Optional[ToolsSchema | List[InworldTool]] = None
+    provider_data: Optional[Dict[str, Any]] = None
 
 
 #

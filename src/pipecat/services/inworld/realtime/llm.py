@@ -412,19 +412,12 @@ class InworldRealtimeLLMService(LLMService):
             return rate
         return getattr(self, "_output_sample_rate", 24000)
 
-    def _is_turn_detection_enabled(self) -> bool:
-        """Check if server-side turn detection is enabled."""
-        sp = self._settings.session_properties
-        if sp.audio and sp.audio.input and sp.audio.input.turn_detection:
-            return sp.audio.input.turn_detection.type in ("server_vad", "semantic_vad")
-        return False
-
     async def _handle_interruption(self):
-        """Handle user interruption of assistant speech."""
-        if not self._is_turn_detection_enabled():
-            await self.send_client_event(events.InputAudioBufferClearEvent())
-            await self.send_client_event(events.ResponseCancelEvent())
+        """Handle user interruption of assistant speech.
 
+        Inworld's server-side VAD handles response cancellation and buffer
+        cleanup automatically, so we only need to clean up local state.
+        """
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
 
@@ -439,16 +432,10 @@ class InworldRealtimeLLMService(LLMService):
     async def _handle_user_stopped_speaking(self, frame):
         """Handle user stopped speaking event.
 
-        When server-side turn detection is disabled, pipecat's local VAD
-        drives commit + response. When enabled, the server handles it.
+        Inworld's server-side VAD handles commit and response creation,
+        so this is a no-op. Metrics are started in _handle_evt_speech_stopped.
         """
-        if not self._is_turn_detection_enabled():
-            # Metrics started here for the local-VAD path; the server-VAD path
-            # starts them in _handle_evt_speech_stopped instead.
-            await self.send_client_event(events.InputAudioBufferCommitEvent())
-            await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
-            await self.send_client_event(events.ResponseCreateEvent())
+        pass
 
     async def _handle_bot_stopped_speaking(self):
         """Handle bot stopped speaking event."""
@@ -607,7 +594,7 @@ class InworldRealtimeLLMService(LLMService):
                 auth_header = f"Basic {self.api_key}"
 
             # Inworld requires key and protocol query parameters
-            session_key = f"voice-{int(time.time() * 1000)}"
+            session_key = f"pipecat-realtime-{int(time.time() * 1000)}"
             params = urllib.parse.urlencode({"key": session_key, "protocol": "realtime"})
             separator = "&" if "?" in self.base_url else "?"
             uri = f"{self.base_url}{separator}{params}"
@@ -692,6 +679,8 @@ class InworldRealtimeLLMService(LLMService):
         # Convert ToolsSchema to list of dicts if needed
         if settings.tools and isinstance(settings.tools, ToolsSchema):
             settings.tools = adapter.from_standard_tools(settings.tools)
+
+        settings.provider_data = {"metadata": {"sdk": "pipecat-realtime"}}
 
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
 
@@ -1038,7 +1027,7 @@ class InworldRealtimeLLMService(LLMService):
             chunk = self._audio_buffer[:chunk_bytes]
             self._audio_buffer = self._audio_buffer[chunk_bytes:]
             payload = base64.b64encode(chunk).decode("utf-8")
-            await self._ws_send({"type": "input_audio_buffer.append", "audio": payload})
+            await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
     async def _send_tool_result(self, tool_call_id: str, result: str):
         """Send a tool call result to Inworld."""
