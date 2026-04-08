@@ -46,10 +46,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAISTTService
-from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -107,20 +107,13 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = OpenAISTTService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAISTTService.Settings(
-            model="gpt-4o-transcribe",
-            prompt="Expect words related to location, GPS, city names, road trips, and travel.",
-        ),
-    )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = OpenAITTSService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAITTSService.Settings(
-            voice="ballad",
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        settings=CartesiaTTSService.Settings(
+            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
-        instructions="Please speak clearly and at a moderate pace.",
     )
 
     llm = OpenAILLMService(
