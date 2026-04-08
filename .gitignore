@@ -37,6 +37,11 @@ MANIFEST
 .env*
 fly.toml
 
+# IBM Examples (local only)
+examples/getting-started/bot_ibm.py
+examples/getting-started/README_IBM.md
+examples/getting-started/.env.example.ibm
+
 # Examples
 examples/**/node_modules/
 examples/**/.expo/
