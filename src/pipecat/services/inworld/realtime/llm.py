@@ -284,6 +284,7 @@ class InworldRealtimeLLMService(LLMService):
         """
         default_model = llm_model or "openai/gpt-4.1-mini"
         default_voice = voice or "Clive"
+        default_tts_model = tts_model or "inworld-tts-1.5-max"
 
         default_settings = self.Settings(
             model=default_model,
@@ -315,7 +316,7 @@ class InworldRealtimeLLMService(LLMService):
                     ),
                     output=events.AudioOutput(
                         format=events.PCMAudioFormat(rate=24000),
-                        model=tts_model,
+                        model=default_tts_model,
                         voice=default_voice,
                     ),
                 ),
