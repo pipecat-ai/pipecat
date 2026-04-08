@@ -73,6 +73,7 @@ def add_tts_span_attributes(
     character_count: Optional[int] = None,
     operation_name: str = "tts",
     ttfb: Optional[float] = None,
+    text_aggregation: Optional[float] = None,
     **kwargs,
 ) -> None:
     """Add TTS-specific attributes to a span.
@@ -87,6 +88,7 @@ def add_tts_span_attributes(
         character_count: Number of characters in the text.
         operation_name: Name of the operation (default: "tts").
         ttfb: Time to first byte in seconds.
+        text_aggregation: Text aggregation time in seconds (first LLM token to first complete sentence).
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
@@ -105,6 +107,9 @@ def add_tts_span_attributes(
 
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
+
+    if text_aggregation is not None:
+        span.set_attribute("metrics.text_aggregation", text_aggregation)
 
     # Use given_fields() defensively in case a service doesn't initialize all settings.
     if settings:

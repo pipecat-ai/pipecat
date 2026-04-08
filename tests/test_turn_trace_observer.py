@@ -501,5 +501,99 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(conv_id), 0)
 
 
+@unittest.skipUnless(HAS_OPENTELEMETRY, "opentelemetry not installed")
+class TestTextAggregationOnTTSSpan(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        from unittest.mock import patch
+
+        from opentelemetry import trace as trace_api
+
+        self._exporter = _InMemorySpanExporter()
+        self._provider = TracerProvider()
+        self._provider.add_span_processor(SimpleSpanProcessor(self._exporter))
+        self._tracer = self._provider.get_tracer("pipecat")
+        self._patcher = patch.object(trace_api, "get_tracer", return_value=self._tracer)
+        self._patcher.start()
+
+    def tearDown(self):
+        self._patcher.stop()
+        self._provider.shutdown()
+
+    def _get_spans_by_name(self, name):
+        return [s for s in self._exporter.get_finished_spans() if s.name == name]
+
+    def _create_fake_tts(self, ttfb, text_aggregation):
+        from unittest.mock import MagicMock
+
+        from pipecat.utils.tracing.service_decorators import traced_tts
+
+        tracing_context = MagicMock()
+        tracing_context.get_turn_context.return_value = None
+
+        metrics = MagicMock()
+        metrics.ttfb = ttfb
+        metrics.consume_text_aggregation.return_value = text_aggregation
+
+        settings = MagicMock()
+        settings.voice = "test-voice"
+        settings.given_fields.return_value = {}
+
+        class FakeTTS:
+            _tracing_enabled = True
+            _tracing_context = tracing_context
+            _metrics = metrics
+            _settings = settings
+
+            @traced_tts
+            async def run_tts(self, text):
+                pass
+
+        return FakeTTS()
+
+    async def test_text_aggregation_on_tts_span(self):
+        fake = self._create_fake_tts(ttfb=0.123, text_aggregation=0.456)
+        await fake.run_tts("Hello world")
+
+        tts_spans = self._get_spans_by_name("tts")
+        self.assertEqual(len(tts_spans), 1)
+        self.assertIn("metrics.text_aggregation", tts_spans[0].attributes)
+        self.assertAlmostEqual(tts_spans[0].attributes["metrics.text_aggregation"], 0.456, places=3)
+        self.assertAlmostEqual(tts_spans[0].attributes["metrics.ttfb"], 0.123, places=3)
+
+    async def test_text_aggregation_none_omitted_from_span(self):
+        fake = self._create_fake_tts(ttfb=0.1, text_aggregation=None)
+        await fake.run_tts("Hello world")
+
+        tts_spans = self._get_spans_by_name("tts")
+        self.assertEqual(len(tts_spans), 1)
+        self.assertNotIn("metrics.text_aggregation", tts_spans[0].attributes)
+
+
+class TestTextAggregationProperty(unittest.IsolatedAsyncioTestCase):
+    async def test_consume_text_aggregation_lifecycle(self):
+        from pipecat.metrics.metrics import MetricsData
+        from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
+
+        metrics = FrameProcessorMetrics()
+        metrics.set_core_metrics_data(MetricsData(processor="test"))
+        self.assertIsNone(metrics.consume_text_aggregation())
+
+        await metrics.start_text_aggregation_metrics()
+        result = await metrics.stop_text_aggregation_metrics()
+        self.assertIsNotNone(result)
+
+        value = metrics.consume_text_aggregation()
+        self.assertIsNotNone(value)
+        self.assertGreater(value, 0)
+
+        self.assertIsNone(metrics.consume_text_aggregation())
+
+    async def test_consume_text_aggregation_none_before_measurement(self):
+        from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
+
+        metrics = FrameProcessorMetrics()
+        self.assertIsNone(metrics.consume_text_aggregation())
+
+
 if __name__ == "__main__":
     unittest.main()
