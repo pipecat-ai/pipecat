@@ -1166,7 +1166,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 logger.debug(
                     f"{self}: More FunctionCallResultFrames queued — deferring context frame push."
                 )
-                self._pending_context_frame = True
             elif self._bot_speaking:
                 # Defer the context frame push until the bot finishes speaking. If multiple
                 # function call results arrive while the bot is speaking, they all accumulate
