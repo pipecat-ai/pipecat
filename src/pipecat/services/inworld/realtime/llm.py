@@ -48,14 +48,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-)
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
@@ -451,6 +443,8 @@ class InworldRealtimeLLMService(LLMService):
         drives commit + response. When enabled, the server handles it.
         """
         if not self._is_turn_detection_enabled():
+            # Metrics started here for the local-VAD path; the server-VAD path
+            # starts them in _handle_evt_speech_stopped instead.
             await self.send_client_event(events.InputAudioBufferCommitEvent())
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
@@ -471,7 +465,9 @@ class InworldRealtimeLLMService(LLMService):
     def _ensure_audio_config(self, input_sample_rate: int, output_sample_rate: int):
         """Ensure session_properties.audio has input and output configs.
 
-        Preserves Inworld-specific fields (turn_detection, voice, model).
+        Preserves Inworld-specific fields (turn_detection, voice, model) and
+        syncs the format sample rates with the transport's actual rates so
+        Inworld knows the correct input/output sample rates.
 
         Args:
             input_sample_rate: Sample rate for audio input (Hz).
@@ -486,6 +482,12 @@ class InworldRealtimeLLMService(LLMService):
             props.audio.input = events.AudioInput()
         if not props.audio.output:
             props.audio.output = events.AudioOutput()
+        if not props.audio.input.format:
+            props.audio.input.format = events.PCMAudioFormat()
+        if not props.audio.output.format:
+            props.audio.output.format = events.PCMAudioFormat()
+        props.audio.input.format.rate = input_sample_rate
+        props.audio.output.format.rate = output_sample_rate
 
     async def start(self, frame: StartFrame):
         """Start the service and establish WebSocket connection."""
@@ -775,6 +777,13 @@ class InworldRealtimeLLMService(LLMService):
         """Handle audio delta event — streaming audio from assistant."""
         await self.stop_ttfb_metrics()
 
+        if self._current_audio_response and self._current_audio_response.item_id != evt.item_id:
+            logger.warning(
+                f"Received a new audio delta for an already completed audio response before receiving the BotStoppedSpeakingFrame."
+            )
+            logger.debug("Forcing previous audio response to None")
+            self._current_audio_response = None
+
         if not self._current_audio_response:
             self._current_audio_response = CurrentAudioResponse(
                 item_id=evt.item_id,
@@ -1039,26 +1048,3 @@ class InworldRealtimeLLMService(LLMService):
             output=json.dumps(result, ensure_ascii=False),
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
-
-    def create_context_aggregator(
-        self,
-        context: OpenAILLMContext,
-        *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> LLMContextAggregatorPair:
-        """Create context aggregators for the Inworld Realtime service.
-
-        Args:
-            context: The LLM context.
-            user_params: User aggregator parameters.
-            assistant_params: Assistant aggregator parameters.
-
-        Returns:
-            LLMContextAggregatorPair for user and assistant context aggregation.
-        """
-        context = LLMContext.from_openai_context(context)
-        assistant_params.expect_stripped_words = False
-        return LLMContextAggregatorPair(
-            context, user_params=user_params, assistant_params=assistant_params
-        )

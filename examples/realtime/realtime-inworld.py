@@ -24,8 +24,8 @@ Requirements:
     - pip install pipecat-ai[inworld]
 
 Usage:
-    python 19zb-inworld-realtime.py --transport webrtc
-    python 19zb-inworld-realtime.py --transport daily
+    python realtime-inworld.py --transport webrtc
+    python realtime-inworld.py --transport daily
 """
 
 import os
@@ -127,7 +127,7 @@ Always be helpful and proactive in offering assistance.""",
 
     # Create context with initial message and tools
     context = LLMContext(
-        [{"role": "user", "content": "Say hello and introduce yourself!"}],
+        [{"role": "developer", "content": "Say hello and introduce yourself!"}],
         tools,
     )
 
@@ -147,8 +147,6 @@ Always be helpful and proactive in offering assistance.""",
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            audio_in_sample_rate=24000,
-            audio_out_sample_rate=24000,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),

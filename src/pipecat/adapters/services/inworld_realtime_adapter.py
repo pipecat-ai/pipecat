@@ -136,6 +136,11 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
             if not messages:
                 return self.ConvertedMessages(messages=[], system_instruction=system_instruction)
 
+        # Convert any remaining "system"/"developer" messages to "user"
+        for msg in messages:
+            if msg.get("role") in ("system", "developer"):
+                msg["role"] = "user"
+
         # Single user message can be sent normally
         if len(messages) == 1 and messages[0].get("role") == "user":
             return self.ConvertedMessages(
