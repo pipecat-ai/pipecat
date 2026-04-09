@@ -64,12 +64,7 @@ from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
 )
-from pipecat.utils.tracing.setup import is_tracing_available
-
-if is_tracing_available():
-    from opentelemetry import trace
-
-    from pipecat.utils.tracing.service_attributes import add_function_call_span_attributes
+from pipecat.utils.tracing.service_decorators import traced_function_call
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -742,6 +737,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         for runner_item in runner_items:
             await self._sequential_runner_queue.put(runner_item)
 
+    @traced_function_call
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
         if runner_item.function_name in self._functions.keys():
             item = self._functions[runner_item.function_name]
@@ -768,25 +764,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         )
 
         timeout_task: Optional[asyncio.Task] = None
-        span = None
-
-        tracing_enabled = (
-            is_tracing_available()
-            and getattr(self, "_tracing_enabled", False)
-            and getattr(self, "_tracing_context", None) is not None
-        )
-
-        if tracing_enabled:
-            parent_context = self._tracing_context.get_turn_context()
-            tracer = trace.get_tracer("pipecat")
-            span = tracer.start_span("function_call", context=parent_context)
-            args_str = json.dumps(dict(runner_item.arguments)) if runner_item.arguments else None
-            add_function_call_span_attributes(
-                span=span,
-                function_name=runner_item.function_name,
-                tool_call_id=runner_item.tool_call_id,
-                arguments=args_str,
-            )
 
         # Single callback for both intermediate updates and final results.
         # Pass properties=FunctionCallResultProperties(is_final=False) for updates.
@@ -809,15 +786,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             if timeout_task and not timeout_task.done():
                 await self.cancel_task(timeout_task)
 
+            span = getattr(self, "_current_function_call_span", None)
             if span and is_final:
-                result_str = json.dumps(result) if result is not None else None
-                add_function_call_span_attributes(
-                    span=span,
-                    function_name=runner_item.function_name,
-                    tool_call_id=runner_item.tool_call_id,
-                    result=result_str,
-                    result_status="success",
-                )
+                span.set_attribute("tool.result", json.dumps(result) if result is not None else "")
+                span.set_attribute("tool.result_status", "success")
 
             await self.broadcast_frame(
                 FunctionCallResultFrame,
@@ -877,15 +849,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 )
                 await item.handler(params)
         except Exception as e:
-            if span:
-                span.set_attribute("tool.result_status", "error")
-                span.record_exception(e)
             error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
             logger.error(f"{self} {error_message}")
             await self.push_error(error_msg=error_message, exception=e, fatal=False)
         finally:
-            if span:
-                span.end()
             if timeout_task and not timeout_task.done():
                 await self.cancel_task(timeout_task)
 
