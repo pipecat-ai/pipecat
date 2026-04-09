@@ -46,7 +46,6 @@ class FrameProcessorMetrics(BaseObject):
         self._start_processing_time = 0
         self._start_text_aggregation_time = 0
         self._last_ttfb_time = 0
-        self._last_text_aggregation_time = 0
         self._should_report_ttfb = True
 
     async def setup(self, task_manager: BaseTaskManager):
@@ -84,21 +83,6 @@ class FrameProcessorMetrics(BaseObject):
         if self._start_ttfb_time > 0:
             return time.time() - self._start_ttfb_time
 
-        return None
-
-    def consume_text_aggregation(self) -> Optional[float]:
-        """Get and reset the last text aggregation time in seconds.
-
-        Returns the value once, then clears it so subsequent TTS spans
-        in the same turn do not repeat a stale measurement.
-
-        Returns:
-            The text aggregation time in seconds, or None if not measured.
-        """
-        value = self._last_text_aggregation_time
-        if value > 0:
-            self._last_text_aggregation_time = 0
-            return value
         return None
 
     def _processor_name(self):
@@ -245,7 +229,6 @@ class FrameProcessorMetrics(BaseObject):
 
         value = time.time() - self._start_text_aggregation_time
         logger.debug(f"{self._processor_name()} text aggregation time: {value}")
-        self._last_text_aggregation_time = value
         aggregation = TextAggregationMetricsData(
             processor=self._processor_name(), value=value, model=self._model_name()
         )

@@ -502,97 +502,78 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
 
 
 @unittest.skipUnless(HAS_OPENTELEMETRY, "opentelemetry not installed")
-class TestTextAggregationOnTTSSpan(unittest.IsolatedAsyncioTestCase):
+class TestTextAggregationOnTurnSpan(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from unittest.mock import patch
-
-        from opentelemetry import trace as trace_api
-
         self._exporter = _InMemorySpanExporter()
         self._provider = TracerProvider()
         self._provider.add_span_processor(SimpleSpanProcessor(self._exporter))
-        self._tracer = self._provider.get_tracer("pipecat")
-        self._patcher = patch.object(trace_api, "get_tracer", return_value=self._tracer)
-        self._patcher.start()
+        self._tracer = self._provider.get_tracer("pipecat.turn")
 
     def tearDown(self):
-        self._patcher.stop()
         self._provider.shutdown()
 
     def _get_spans_by_name(self, name):
         return [s for s in self._exporter.get_finished_spans() if s.name == name]
 
-    def _create_fake_tts(self, ttfb, text_aggregation):
-        from unittest.mock import MagicMock
+    def _create_observers(self):
+        tracing_context = TracingContext()
+        turn_tracker = TurnTrackingObserver(turn_end_timeout_secs=0.2)
+        latency_tracker = UserBotLatencyObserver()
+        trace_observer = TurnTraceObserver(
+            turn_tracker,
+            latency_tracker=latency_tracker,
+            tracing_context=tracing_context,
+        )
+        trace_observer._tracer = self._tracer
+        return turn_tracker, latency_tracker, trace_observer
 
-        from pipecat.utils.tracing.service_decorators import traced_tts
+    async def test_text_aggregation_on_turn_span(self):
+        from pipecat.observers.user_bot_latency_observer import (
+            LatencyBreakdown,
+            TextAggregationBreakdownMetrics,
+        )
 
-        tracing_context = MagicMock()
-        tracing_context.get_turn_context.return_value = None
+        _, _, trace_observer = self._create_observers()
 
-        metrics = MagicMock()
-        metrics.ttfb = ttfb
-        metrics.consume_text_aggregation.return_value = text_aggregation
+        trace_observer.start_conversation_tracing("test-conv")
+        await trace_observer._handle_turn_started(1)
 
-        settings = MagicMock()
-        settings.voice = "test-voice"
-        settings.given_fields.return_value = {}
+        breakdown = LatencyBreakdown(
+            text_aggregation=TextAggregationBreakdownMetrics(
+                processor="CartesiaTTSService#0",
+                start_time=1000.0,
+                duration_secs=0.119,
+            )
+        )
+        await trace_observer._handle_latency_breakdown(breakdown)
+        await trace_observer._handle_turn_ended(1, duration=2.0, was_interrupted=False)
 
-        class FakeTTS:
-            _tracing_enabled = True
-            _tracing_context = tracing_context
-            _metrics = metrics
-            _settings = settings
+        trace_observer.end_conversation_tracing()
 
-            @traced_tts
-            async def run_tts(self, text):
-                pass
+        turn_spans = self._get_spans_by_name("turn")
+        self.assertEqual(len(turn_spans), 1)
+        self.assertIn("turn.text_aggregation_seconds", turn_spans[0].attributes)
+        self.assertAlmostEqual(
+            turn_spans[0].attributes["turn.text_aggregation_seconds"], 0.119, places=3
+        )
 
-        return FakeTTS()
+    async def test_no_text_aggregation_when_absent(self):
+        from pipecat.observers.user_bot_latency_observer import LatencyBreakdown
 
-    async def test_text_aggregation_on_tts_span(self):
-        fake = self._create_fake_tts(ttfb=0.123, text_aggregation=0.456)
-        await fake.run_tts("Hello world")
+        _, _, trace_observer = self._create_observers()
 
-        tts_spans = self._get_spans_by_name("tts")
-        self.assertEqual(len(tts_spans), 1)
-        self.assertIn("metrics.text_aggregation", tts_spans[0].attributes)
-        self.assertAlmostEqual(tts_spans[0].attributes["metrics.text_aggregation"], 0.456, places=3)
-        self.assertAlmostEqual(tts_spans[0].attributes["metrics.ttfb"], 0.123, places=3)
+        trace_observer.start_conversation_tracing("test-conv")
+        await trace_observer._handle_turn_started(1)
 
-    async def test_text_aggregation_none_omitted_from_span(self):
-        fake = self._create_fake_tts(ttfb=0.1, text_aggregation=None)
-        await fake.run_tts("Hello world")
+        breakdown = LatencyBreakdown()
+        await trace_observer._handle_latency_breakdown(breakdown)
+        await trace_observer._handle_turn_ended(1, duration=1.0, was_interrupted=False)
 
-        tts_spans = self._get_spans_by_name("tts")
-        self.assertEqual(len(tts_spans), 1)
-        self.assertNotIn("metrics.text_aggregation", tts_spans[0].attributes)
+        trace_observer.end_conversation_tracing()
 
-
-class TestTextAggregationProperty(unittest.IsolatedAsyncioTestCase):
-    async def test_consume_text_aggregation_lifecycle(self):
-        from pipecat.metrics.metrics import MetricsData
-        from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
-
-        metrics = FrameProcessorMetrics()
-        metrics.set_core_metrics_data(MetricsData(processor="test"))
-        self.assertIsNone(metrics.consume_text_aggregation())
-
-        await metrics.start_text_aggregation_metrics()
-        result = await metrics.stop_text_aggregation_metrics()
-        self.assertIsNotNone(result)
-
-        value = metrics.consume_text_aggregation()
-        self.assertIsNotNone(value)
-        self.assertGreater(value, 0)
-
-        self.assertIsNone(metrics.consume_text_aggregation())
-
-    async def test_consume_text_aggregation_none_before_measurement(self):
-        from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
-
-        metrics = FrameProcessorMetrics()
-        self.assertIsNone(metrics.consume_text_aggregation())
+        turn_spans = self._get_spans_by_name("turn")
+        self.assertEqual(len(turn_spans), 1)
+        self.assertNotIn("turn.text_aggregation_seconds", turn_spans[0].attributes)
 
 
 if __name__ == "__main__":

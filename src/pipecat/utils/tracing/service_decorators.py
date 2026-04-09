@@ -239,11 +239,6 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     ttfb: Optional[float] = getattr(getattr(self, "_metrics", None), "ttfb", None)
                     if ttfb is not None:
                         span.set_attribute("metrics.ttfb", ttfb)
-                    _metrics = getattr(self, "_metrics", None)
-                    if _metrics is not None:
-                        text_agg = _metrics.consume_text_aggregation()
-                        if text_agg is not None:
-                            span.set_attribute("metrics.text_aggregation", text_agg)
 
         if is_async_generator:
 
