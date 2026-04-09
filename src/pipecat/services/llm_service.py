@@ -73,7 +73,10 @@ FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
 class FunctionCallResultCallback(Protocol):
     """Protocol for function call result callbacks.
 
-    Handles the result of an LLM function call execution.
+    Used for both final results and intermediate updates. Pass
+    ``properties=FunctionCallResultProperties(is_final=False)`` to send an
+    intermediate update (only valid for async function calls registered with
+    ``cancel_on_interruption=False``).
     """
 
     async def __call__(
@@ -82,8 +85,9 @@ class FunctionCallResultCallback(Protocol):
         """Call the result callback.
 
         Args:
-            result: The result of the function call.
-            properties: Optional properties for the result.
+            result: The result of the function call, or an intermediate update.
+            properties: Optional properties. Set ``is_final=False`` to send an
+                intermediate update instead of the final result.
         """
         ...
 
@@ -98,7 +102,10 @@ class FunctionCallParams:
         arguments: The arguments for the function.
         llm: The LLMService instance being used.
         context: The LLM context.
-        result_callback: Callback to handle the result of the function call.
+        result_callback: Callback to deliver the result of the function call.
+            For async function calls (``cancel_on_interruption=False``), call
+            it with ``properties=FunctionCallResultProperties(is_final=False)``
+            to push intermediate updates before the final result.
     """
 
     function_name: str
@@ -756,10 +763,21 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         timeout_task: Optional[asyncio.Task] = None
 
-        # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
+        # Single callback for both intermediate updates and final results.
+        # Pass properties=FunctionCallResultProperties(is_final=False) for updates.
         async def function_call_result_callback(
             result: Any, *, properties: Optional[FunctionCallResultProperties] = None
         ):
+            is_final = properties.is_final if properties else True
+            if not is_final and item.cancel_on_interruption:
+                logger.warning(
+                    f"{self} result_callback called with is_final=False on sync function call"
+                    f" [{runner_item.function_name}:{runner_item.tool_call_id}]."
+                    " Intermediate updates are only valid for async function calls"
+                    " (cancel_on_interruption=False)."
+                )
+                return
+
             nonlocal timeout_task
 
             # Cancel timeout task if it exists

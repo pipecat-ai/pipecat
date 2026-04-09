@@ -25,6 +25,8 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -832,6 +834,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
         self._user_speaking: bool = False
+        self._bot_speaking: bool = False
+
+        # When a function call result arrives while the bot is speaking, we defer the LLM
+        # re-invocation until the bot stops speaking. This flag is set to True in that case
+        # so that `BotStoppedSpeakingFrame` knows to push a context frame. Multiple results
+        # arriving in the same speaking window are bundled into a single deferred push.
+        self._push_context_on_bot_stopped_speaking: bool = False
 
         self._assistant_turn_start_timestamp = ""
 
@@ -872,6 +881,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Reset the aggregation state."""
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
+        self._push_context_on_bot_stopped_speaking = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -943,6 +953,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            await self.push_frame(frame, direction)
+            if self._push_context_on_bot_stopped_speaking and not self._user_speaking:
+                logger.debug(f"{self}: Bot stopped speaking — pushing deferred context frame!")
+                await self.push_context_frame(FrameDirection.UPSTREAM)
         else:
             await self.push_frame(frame, direction)
 
@@ -972,6 +991,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self.push_frame(timestamp_frame)
 
         return aggregation
+
+    async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a context frame in the specified direction.
+
+        Args:
+            direction: The direction to push the frame (upstream or downstream).
+        """
+        await super().push_context_frame(direction)
+        self._push_context_on_bot_stopped_speaking = False
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -1036,9 +1064,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     "content": json.dumps(
                         {
                             "type": "async_tool",
-                            "status": "started",
+                            "status": "running",
                             "tool_call_id": frame.tool_call_id,
-                            "description": "The tool associated with this tool_call_id is still in progress, and the result is not yet available. It will be provided in a subsequent message with the same tool_call_id.",
+                            "description": "An asynchronous task associated with this tool_call_id has started running. "
+                            + "Expect results to arrive later as developer messages that look roughly like this one (with 'type=async_tool' and a matching tool_call_id) but with a 'result' field. "
+                            + "Note that there *may* be more than one result (i.e., a stream of results), but there doesn't have to be (there may be only one). "
+                            + "The last result will come in a message with 'status=finished'.",
                         }
                     ),
                     "tool_call_id": frame.tool_call_id,
@@ -1066,33 +1097,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return
 
         in_progress_frame = self._function_calls_in_progress[frame.tool_call_id]
-        is_async = not in_progress_frame.cancel_on_interruption if in_progress_frame else False
         group_id = in_progress_frame.group_id if in_progress_frame else None
-
-        del self._function_calls_in_progress[frame.tool_call_id]
-
         properties = frame.properties
+        is_final = frame.properties.is_final if frame.properties else True
 
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
-
-        if is_async:
-            # For async function calls instead of updating the existing IN_PROGRESS tool message we inject
-            # a new developer message so the LLM is notified of the completed result.
-            self._context.add_message(
-                {
-                    "role": "developer",
-                    "content": json.dumps(
-                        {
-                            "type": "async_tool",
-                            "tool_call_id": frame.tool_call_id,
-                            "status": "finished",
-                            "result": result,
-                        }
-                    ),
-                }
-            )
+        if is_final:
+            await self._handle_function_call_finished(frame, in_progress_frame)
         else:
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+            await self._handle_function_call_intermediate_result(frame, in_progress_frame)
 
         run_llm = False
 
@@ -1119,14 +1131,38 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 # otherwise always execute as soon as we receive the result.
                 if group_id:
                     run_llm = not any(
-                        f is not None and f.group_id == group_id
+                        f is not None
+                        and f.group_id == group_id
+                        # We are now able to receive "updates", so the current
+                        # frame can still be in the in progress list, and we need to
+                        # ignore it.
+                        and f.tool_call_id != frame.tool_call_id
                         for f in self._function_calls_in_progress.values()
                     )
                 else:
                     run_llm = True
 
         if run_llm and not self._user_speaking:
-            await self.push_context_frame(FrameDirection.UPSTREAM)
+            if self.has_queued_frame(FunctionCallResultFrame):
+                # Another FunctionCallResultFrame is already queued. Defer the context push
+                # to bundle all results into a single LLM call instead of triggering one
+                # inference pass per result. The context will be pushed once the last
+                # function call in the queue is processed.
+                logger.debug(
+                    f"{self}: More FunctionCallResultFrames queued — deferring context frame push."
+                )
+            elif self._bot_speaking:
+                # Defer the context frame push until the bot finishes speaking. If multiple
+                # function call results arrive while the bot is speaking, they all accumulate
+                # in the context and a single push is performed once speaking stops, preventing
+                # the LLM from running multiple times and producing duplicated responses.
+                # This should be an edge case, since it would require a FunctionCallResultFrame
+                # being queued between an LLM response start and end frame.
+                logger.debug(f"{self}: Bot is speaking — deferring context frame push.")
+                self._push_context_on_bot_stopped_speaking = True
+            else:
+                logger.debug(f"{self}: Pushing context frame!")
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
         # Call the `on_context_updated` callback once the function call result
         # is added to the context. Also, run this in a separate task to make
@@ -1136,6 +1172,70 @@ class LLMAssistantAggregator(LLMContextAggregator):
             task = self.create_task(properties.on_context_updated(), task_name)
             self._context_updated_tasks.add(task)
             task.add_done_callback(self._context_updated_task_finished)
+
+    async def _handle_function_call_intermediate_result(
+        self, frame: FunctionCallResultFrame, in_progress_frame: FunctionCallInProgressFrame
+    ):
+        """Handle an intermediate result for an async function call.
+
+        Injects an intermediate developer message into the context without
+        removing the call from the in-progress map.
+        """
+        if not frame.result:
+            logger.warning(f"{self} result_callback called with is_final=False but no result!")
+            return
+
+        result = json.dumps(frame.result, ensure_ascii=False)
+        self._context.add_message(
+            {
+                "role": "developer",
+                "content": json.dumps(
+                    {
+                        "type": "async_tool",
+                        "tool_call_id": frame.tool_call_id,
+                        "status": "running",
+                        "description": "This is an intermediate result for the asynchronous task associated with this tool_call_id. "
+                        + "The task is still running. More intermediate results may follow, or the next result may be the final one with 'status=finished'.",
+                        "result": result,
+                    }
+                ),
+            }
+        )
+
+    async def _handle_function_call_finished(
+        self, frame: FunctionCallResultFrame, in_progress_frame: FunctionCallInProgressFrame
+    ):
+        """Handle the final result of a function call.
+
+        Removes the call from the in-progress map, updates the context, and
+        triggers LLM inference when appropriate.
+        """
+        is_async = not in_progress_frame.cancel_on_interruption
+        del self._function_calls_in_progress[frame.tool_call_id]
+
+        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+
+        if is_async:
+            # For async function calls inject a developer message so the LLM is
+            # notified of the completed result instead of updating the IN_PROGRESS
+            # tool message.
+            self._context.add_message(
+                {
+                    "role": "developer",
+                    "content": json.dumps(
+                        {
+                            "type": "async_tool",
+                            "tool_call_id": frame.tool_call_id,
+                            "status": "finished",
+                            "description": "This is the final result for the asynchronous task associated with this tool_call_id. "
+                            + "The task has completed. No further results will arrive for this tool_call_id.",
+                            "result": result,
+                        }
+                    ),
+                }
+            )
+        else:
+            self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
 
     async def _handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
         logger.debug(
