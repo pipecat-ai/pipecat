@@ -15,6 +15,7 @@ from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -48,6 +49,20 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     def __init__(self):
         """Initialize the adapter."""
         self._warned_system_instruction = False
+        self._builtin_tools: List[FunctionSchema] = []
+
+    @property
+    def builtin_tools(self) -> List[FunctionSchema]:
+        """Built-in tools automatically merged into every inference request.
+
+        Mixins (e.g. ``AsyncToolCancellationLLMServiceMixin``) append their
+        tool schemas here so that the tools are injected transparently without
+        the user having to add them to their ``ToolsSchema``.
+
+        Returns:
+            Mutable list of ``FunctionSchema`` instances.
+        """
+        return self._builtin_tools
 
     @property
     @abstractmethod
@@ -122,6 +137,9 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     def from_standard_tools(self, tools: Any) -> List[Any] | NotGiven:
         """Convert tools from standard format to provider format.
 
+        Built-in tools are automatically merged into the schema before conversion so that every
+        inference request receives them without the user having to declare them explicitly.
+
         Args:
             tools: Tools in standard format or provider-specific format.
 
@@ -129,8 +147,26 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             List of tools converted to provider format, or original tools
             if not in standard format.
         """
+        if self._builtin_tools:
+            if isinstance(tools, ToolsSchema):
+                tools = ToolsSchema(
+                    standard_tools=tools.standard_tools + self._builtin_tools,
+                    custom_tools=tools.custom_tools,
+                )
+            else:
+                # User supplied tools in a legacy/provider-specific format;
+                # we cannot safely merge — build a schema from builtins only.
+                if tools is not None:
+                    logger.warning(
+                        "Built-in tools could not be merged because the supplied tools are not"
+                        " a ToolsSchema instance. Only built-in tools will be sent."
+                    )
+                tools = ToolsSchema(standard_tools=self._builtin_tools)
+
         if isinstance(tools, ToolsSchema):
             logger.debug(f"Retrieving the tools using the adapter: {type(self)}")
+            tool_names = [tool.name for tool in tools.standard_tools]
+            logger.debug(f"Tool names: {tool_names}")
             return self.to_provider_tools_format(tools)
         # Fallback to return the same tools in case they are not in a standard format
         return tools
