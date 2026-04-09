@@ -504,46 +504,9 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(conv_id)
         self.assertGreater(len(conv_id), 0)
 
-
-@unittest.skipUnless(HAS_OPENTELEMETRY, "opentelemetry not installed")
-class TestLatencyBreakdownOnTurnSpan(unittest.IsolatedAsyncioTestCase):
-    """Tests for latency breakdown attributes on turn spans."""
-
-    def setUp(self):
-        """Set up a fresh provider and exporter for each test."""
-        self._exporter = _InMemorySpanExporter()
-        self._provider = TracerProvider()
-        self._provider.add_span_processor(SimpleSpanProcessor(self._exporter))
-        self._tracer = self._provider.get_tracer("pipecat.turn")
-
-    def tearDown(self):
-        """Shut down the provider to flush spans."""
-        self._provider.shutdown()
-
-    def _get_spans_by_name(self, name):
-        """Return finished spans with the given name."""
-        return [s for s in self._exporter.get_finished_spans() if s.name == name]
-
-    def _create_observers(self):
-        """Create a standard set of turn/trace observers.
-
-        Returns:
-            Tuple of (turn_tracker, latency_tracker, trace_observer).
-        """
-        tracing_context = TracingContext()
-        turn_tracker = TurnTrackingObserver(turn_end_timeout_secs=0.2)
-        latency_tracker = UserBotLatencyObserver()
-        trace_observer = TurnTraceObserver(
-            turn_tracker,
-            latency_tracker=latency_tracker,
-            tracing_context=tracing_context,
-        )
-        trace_observer._tracer = self._tracer
-        return turn_tracker, latency_tracker, trace_observer
-
     async def test_text_aggregation_on_turn_span(self):
         """Test that text aggregation is added to the turn span."""
-        _, _, trace_observer = self._create_observers()
+        _, _, trace_observer, _ = self._create_observers()
 
         trace_observer.start_conversation_tracing("test-conv")
         await trace_observer._handle_turn_started(1)
@@ -569,7 +532,7 @@ class TestLatencyBreakdownOnTurnSpan(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_text_aggregation_when_absent(self):
         """Test that text aggregation is omitted when not in the breakdown."""
-        _, _, trace_observer = self._create_observers()
+        _, _, trace_observer, _ = self._create_observers()
 
         trace_observer.start_conversation_tracing("test-conv")
         await trace_observer._handle_turn_started(1)
@@ -586,7 +549,7 @@ class TestLatencyBreakdownOnTurnSpan(unittest.IsolatedAsyncioTestCase):
 
     async def test_user_turn_seconds_on_turn_span(self):
         """Test that user turn duration is added to the turn span."""
-        _, _, trace_observer = self._create_observers()
+        _, _, trace_observer, _ = self._create_observers()
 
         trace_observer.start_conversation_tracing("test-conv")
         await trace_observer._handle_turn_started(1)
@@ -604,7 +567,7 @@ class TestLatencyBreakdownOnTurnSpan(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_user_turn_seconds_when_absent(self):
         """Test that user turn duration is omitted when not in the breakdown."""
-        _, _, trace_observer = self._create_observers()
+        _, _, trace_observer, _ = self._create_observers()
 
         trace_observer.start_conversation_tracing("test-conv")
         await trace_observer._handle_turn_started(1)
