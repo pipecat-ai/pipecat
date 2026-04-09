@@ -275,6 +275,37 @@ def add_llm_span_attributes(
             span.set_attribute(key, value)
 
 
+def add_function_call_span_attributes(
+    span: "Span",
+    function_name: str,
+    tool_call_id: str,
+    arguments: Optional[str] = None,
+    result: Optional[str] = None,
+    result_status: Optional[str] = None,
+) -> None:
+    """Add function call attributes to a span.
+
+    Args:
+        span: The span to add attributes to.
+        function_name: The name of the function being called.
+        tool_call_id: The unique identifier for the tool call.
+        arguments: JSON-serialized arguments passed to the function.
+        result: JSON-serialized result from the function.
+        result_status: Status of the result (e.g., "success", "error").
+    """
+    span.set_attribute("tool.function_name", function_name)
+    span.set_attribute("tool.call_id", tool_call_id)
+
+    if arguments is not None:
+        span.set_attribute("tool.arguments", arguments)
+
+    if result is not None:
+        span.set_attribute("tool.result", result)
+
+    if result_status is not None:
+        span.set_attribute("tool.result_status", result_status)
+
+
 def add_gemini_live_span_attributes(
     span: "Span",
     service_name: str,
