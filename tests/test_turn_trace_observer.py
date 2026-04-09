@@ -5,12 +5,11 @@
 #
 
 import asyncio
-import threading
 import unittest
 
 try:
     from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     HAS_OPENTELEMETRY = True
 except ImportError:
@@ -30,30 +29,7 @@ from pipecat.utils.tracing.tracing_context import TracingContext
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
 if HAS_OPENTELEMETRY:
-
-    class _InMemorySpanExporter(SpanExporter):
-        """Simple in-memory span exporter for testing."""
-
-        def __init__(self):
-            """Initialize the exporter."""
-            self._spans = []
-            self._lock = threading.Lock()
-
-        def export(self, spans):
-            """Export spans to memory."""
-            with self._lock:
-                self._spans.extend(spans)
-            return SpanExportResult.SUCCESS
-
-        def get_finished_spans(self):
-            """Return collected spans."""
-            with self._lock:
-                return list(self._spans)
-
-        def clear(self):
-            """Clear collected spans."""
-            with self._lock:
-                self._spans.clear()
+    from pipecat.tests.utils import InMemorySpanExporter
 
 
 @unittest.skipUnless(HAS_OPENTELEMETRY, "opentelemetry not installed")
@@ -66,7 +42,7 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
         We create a dedicated TracerProvider per test and inject its tracer
         directly into the observer, avoiding the global provider singleton.
         """
-        self._exporter = _InMemorySpanExporter()
+        self._exporter = InMemorySpanExporter()
         self._provider = TracerProvider()
         self._provider.add_span_processor(SimpleSpanProcessor(self._exporter))
         self._tracer = self._provider.get_tracer("pipecat.turn")

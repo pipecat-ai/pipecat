@@ -4,42 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import threading
 import unittest
 
 try:
     from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     HAS_OPENTELEMETRY = True
 except ImportError:
     HAS_OPENTELEMETRY = False
 
 if HAS_OPENTELEMETRY:
-
-    class _InMemorySpanExporter(SpanExporter):
-        """Simple in-memory span exporter for testing."""
-
-        def __init__(self):
-            """Initialize the exporter."""
-            self._spans = []
-            self._lock = threading.Lock()
-
-        def export(self, spans):
-            """Export spans to memory."""
-            with self._lock:
-                self._spans.extend(spans)
-            return SpanExportResult.SUCCESS
-
-        def get_finished_spans(self):
-            """Return collected spans."""
-            with self._lock:
-                return list(self._spans)
-
-        def clear(self):
-            """Clear collected spans."""
-            with self._lock:
-                self._spans.clear()
+    from pipecat.tests.utils import InMemorySpanExporter
 
 
 @unittest.skipUnless(HAS_OPENTELEMETRY, "opentelemetry not installed")
@@ -54,7 +30,7 @@ class TestFunctionCallSpan(unittest.IsolatedAsyncioTestCase):
         """Set up a shared TracerProvider for all tests in this class."""
         from opentelemetry.trace import set_tracer_provider
 
-        cls._exporter = _InMemorySpanExporter()
+        cls._exporter = InMemorySpanExporter()
         cls._provider = TracerProvider()
         cls._provider.add_span_processor(SimpleSpanProcessor(cls._exporter))
         set_tracer_provider(cls._provider)
