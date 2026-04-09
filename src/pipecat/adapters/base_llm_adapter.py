@@ -10,6 +10,7 @@ This module provides the abstract base class for implementing LLM provider-speci
 adapters that handle tool format conversion and standardization.
 """
 
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Generic, List, Optional, TypeVar
 
@@ -49,18 +50,19 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     def __init__(self):
         """Initialize the adapter."""
         self._warned_system_instruction = False
-        self._builtin_tools: List[FunctionSchema] = []
+        self._builtin_tools: Dict[str, FunctionSchema] = {}
 
     @property
-    def builtin_tools(self) -> List[FunctionSchema]:
+    def builtin_tools(self) -> Dict[str, FunctionSchema]:
         """Built-in tools automatically merged into every inference request.
 
-        Mixins (e.g. ``AsyncToolCancellationLLMServiceMixin``) append their
-        tool schemas here so that the tools are injected transparently without
-        the user having to add them to their ``ToolsSchema``.
+        Keyed by tool name for O(1) lookup, insertion, and removal.  The
+        service injects tools here so they are sent transparently on every
+        inference request without the user having to add them to their
+        ``ToolsSchema``.
 
         Returns:
-            Mutable list of ``FunctionSchema`` instances.
+            Mutable dict mapping tool name to ``FunctionSchema``.
         """
         return self._builtin_tools
 
@@ -150,23 +152,28 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         if self._builtin_tools:
             if isinstance(tools, ToolsSchema):
                 tools = ToolsSchema(
-                    standard_tools=tools.standard_tools + self._builtin_tools,
+                    standard_tools=tools.standard_tools + list(self._builtin_tools.values()),
                     custom_tools=tools.custom_tools,
                 )
             else:
-                # User supplied tools in a legacy/provider-specific format;
-                # we cannot safely merge — build a schema from builtins only.
+                # User supplied tools in a legacy/provider-specific format.
+                # Built-in tools cannot be safely merged, so they will not be injected.
+                # Migrate to ToolsSchema to enable built-in tool support; use custom_tools
+                # as an escape hatch for any provider-specific tools that don't fit the
+                # standard schema.
                 if tools is not None:
-                    logger.warning(
-                        "Built-in tools could not be merged because the supplied tools are not"
-                        " a ToolsSchema instance. Only built-in tools will be sent."
+                    warnings.warn(
+                        "Built-in tools (e.g. async tool cancellation) could not be injected "
+                        "because the supplied tools are not a ToolsSchema instance. "
+                        "Migrate to ToolsSchema to enable built-in tool support. "
+                        "Use ToolsSchema(custom_tools=...) as an escape hatch for any "
+                        "provider-specific tools that don't fit the standard schema.",
+                        DeprecationWarning,
+                        stacklevel=2,
                     )
-                tools = ToolsSchema(standard_tools=self._builtin_tools)
+                # Fall through and return the original tools unchanged.
 
         if isinstance(tools, ToolsSchema):
-            logger.debug(f"Retrieving the tools using the adapter: {type(self)}")
-            tool_names = [tool.name for tool in tools.standard_tools]
-            logger.debug(f"Tool names: {tool_names}")
             return self.to_provider_tools_format(tools)
         # Fallback to return the same tools in case they are not in a standard format
         return tools
