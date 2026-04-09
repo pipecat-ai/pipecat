@@ -1006,7 +1006,7 @@ class PipelineTask(BasePipelineTask):
         """Log any dangling tasks that haven't been properly cleaned up."""
         tasks = [t.get_name() for t in self._task_manager.current_tasks()]
         if tasks:
-            logger.warning(f"Dangling tasks detected: {tasks}")
+            logger.warning(f"{self} dangling tasks detected: {tasks}")
 
     def _create_start_metadata(self) -> Dict[str, Any]:
         """Build and return start metadata including user-provided values."""
