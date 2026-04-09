@@ -116,10 +116,16 @@ class TurnTraceObserver(BaseObserver):
         Args:
             breakdown: The LatencyBreakdown containing per-service metrics.
         """
-        if self._current_span and is_tracing_available() and breakdown.text_aggregation:
+        if not self._current_span or not is_tracing_available():
+            return
+
+        if breakdown.text_aggregation:
             self._current_span.set_attribute(
                 "turn.text_aggregation_seconds", breakdown.text_aggregation.duration_secs
             )
+
+        if breakdown.user_turn_secs is not None:
+            self._current_span.set_attribute("turn.user_turn_seconds", breakdown.user_turn_secs)
 
     async def on_push_frame(self, data: FramePushed):
         """Process a frame without modifying it.

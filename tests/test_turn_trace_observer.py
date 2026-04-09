@@ -506,8 +506,8 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
 
 
 @unittest.skipUnless(HAS_OPENTELEMETRY, "opentelemetry not installed")
-class TestTextAggregationOnTurnSpan(unittest.IsolatedAsyncioTestCase):
-    """Tests for text aggregation attributes on turn spans."""
+class TestLatencyBreakdownOnTurnSpan(unittest.IsolatedAsyncioTestCase):
+    """Tests for latency breakdown attributes on turn spans."""
 
     def setUp(self):
         """Set up a fresh provider and exporter for each test."""
@@ -583,6 +583,41 @@ class TestTextAggregationOnTurnSpan(unittest.IsolatedAsyncioTestCase):
         turn_spans = self._get_spans_by_name("turn")
         self.assertEqual(len(turn_spans), 1)
         self.assertNotIn("turn.text_aggregation_seconds", turn_spans[0].attributes)
+
+    async def test_user_turn_seconds_on_turn_span(self):
+        """Test that user turn duration is added to the turn span."""
+        _, _, trace_observer = self._create_observers()
+
+        trace_observer.start_conversation_tracing("test-conv")
+        await trace_observer._handle_turn_started(1)
+
+        breakdown = LatencyBreakdown(user_turn_secs=0.321)
+        await trace_observer._handle_latency_breakdown(breakdown)
+        await trace_observer._handle_turn_ended(1, duration=2.0, was_interrupted=False)
+
+        trace_observer.end_conversation_tracing()
+
+        turn_spans = self._get_spans_by_name("turn")
+        self.assertEqual(len(turn_spans), 1)
+        self.assertIn("turn.user_turn_seconds", turn_spans[0].attributes)
+        self.assertAlmostEqual(turn_spans[0].attributes["turn.user_turn_seconds"], 0.321, places=3)
+
+    async def test_no_user_turn_seconds_when_absent(self):
+        """Test that user turn duration is omitted when not in the breakdown."""
+        _, _, trace_observer = self._create_observers()
+
+        trace_observer.start_conversation_tracing("test-conv")
+        await trace_observer._handle_turn_started(1)
+
+        breakdown = LatencyBreakdown()
+        await trace_observer._handle_latency_breakdown(breakdown)
+        await trace_observer._handle_turn_ended(1, duration=1.0, was_interrupted=False)
+
+        trace_observer.end_conversation_tracing()
+
+        turn_spans = self._get_spans_by_name("turn")
+        self.assertEqual(len(turn_spans), 1)
+        self.assertNotIn("turn.user_turn_seconds", turn_spans[0].attributes)
 
 
 if __name__ == "__main__":
