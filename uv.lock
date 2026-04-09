@@ -4248,6 +4248,9 @@ heygen = [
 hume = [
     { name = "hume" },
 ]
+inworld = [
+    { name = "websockets" },
+]
 koala = [
     { name = "pvkoala" },
 ]
@@ -4470,6 +4473,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'google'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'gradium'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'heygen'" },
+    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'inworld'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'lmnt'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'neuphonic'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'openai'" },
