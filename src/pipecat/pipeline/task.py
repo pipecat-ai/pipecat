@@ -613,9 +613,6 @@ class PipelineTask(BasePipelineTask):
         self._process_push_task = self._task_manager.create_task(
             self._process_push_queue(), f"{self}::_process_push_queue"
         )
-
-        await self._observer.start()
-
         return self._process_push_task
 
     def _maybe_start_heartbeat_tasks(self):
@@ -637,8 +634,6 @@ class PipelineTask(BasePipelineTask):
 
     async def _cancel_tasks(self):
         """Cancel all running pipeline tasks."""
-        await self._observer.stop()
-
         if self._process_push_task:
             await self._task_manager.cancel_task(self._process_push_task)
             self._process_push_task = None
@@ -720,12 +715,6 @@ class PipelineTask(BasePipelineTask):
 
     async def _setup(self, params: PipelineTaskParams):
         """Set up the pipeline task and all processors."""
-        # Do any additional pipeline task setup externally.
-        await self._load_setup_files()
-
-        # Load additional observers.
-        await self._load_observer_files()
-
         mgr_params = TaskManagerParams(loop=params.loop)
         self._task_manager.setup(mgr_params)
 
@@ -736,14 +725,21 @@ class PipelineTask(BasePipelineTask):
         )
         await self._pipeline.setup(setup)
 
+        # Do any additional pipeline task setup externally.
+        await self._load_setup_files()
+        await self._load_observer_files()
+
+        # Start task observer.
+        await self._observer.start()
+
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline task and processors."""
         # Cleanup base object.
         await self.cleanup()
 
         # Cleanup observers.
-        if self._observer:
-            await self._observer.cleanup()
+        await self._observer.stop()
+        await self._observer.cleanup()
 
         # End conversation tracing if it's active - this will also close any active turn span
         if self._enable_tracing and hasattr(self, "_turn_trace_observer"):
