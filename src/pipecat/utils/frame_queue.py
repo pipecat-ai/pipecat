@@ -7,7 +7,7 @@
 """Frame queue utilities for Pipecat pipeline processors."""
 
 import asyncio
-from typing import Any, Callable
+from typing import Any, Callable, Type, Union
 
 from pipecat.frames.frames import Frame, UninterruptibleFrame
 
@@ -40,6 +40,27 @@ class FrameQueue(asyncio.Queue):
         super().__init__()
         self._frame_getter = frame_getter
         self._uninterruptible_count: int = 0
+
+    def has_frame(self, frame_type: Union[Type[Frame], Type[UninterruptibleFrame]]) -> bool:
+        """Return True if any frame of the given type is in the queue.
+
+        ``frame_type`` may be ``Frame``, ``UninterruptibleFrame`` (a mixin, not a
+        ``Frame`` subclass), or any concrete frame type.
+
+        Note:
+            This inspects the internal `_queue` (deque) of asyncio.Queue.
+            This is not part of the public API but is stable in CPython.
+
+        Args:
+            frame_type: The frame class to check for.
+
+        Returns:
+            True if at least one enqueued frame is an instance of ``frame_type``.
+        """
+        for item in self._queue:
+            if isinstance(self._frame_getter(item), frame_type):
+                return True
+        return False
 
     @property
     def has_uninterruptible(self) -> bool:

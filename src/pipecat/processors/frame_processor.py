@@ -25,6 +25,7 @@ from typing import (
     Optional,
     Tuple,
     Type,
+    Union,
 )
 
 from loguru import logger
@@ -927,6 +928,21 @@ class FrameProcessor(BaseObject):
     def __reset_process_queue(self):
         """Reset non-system frame processing queue."""
         self.__process_queue.reset()
+
+    def has_queued_frame(self, frame_type: Union[Type[Frame], Type[UninterruptibleFrame]]) -> bool:
+        """Return True if a frame of the given type is waiting in the processing queue.
+
+        Delegates to :meth:`FrameQueue.has_frame` so the check is O(distinct
+        enqueued types) with no queue scanning.  ``frame_type`` may be any
+        ``Frame`` subclass or ``UninterruptibleFrame`` (a mixin).
+
+        Args:
+            frame_type: The frame class (or mixin) to look for.
+
+        Returns:
+            True if at least one matching frame is queued.
+        """
+        return self.__process_queue.has_frame(frame_type)
 
     async def __cancel_process_task(self):
         """Cancel the non-system frame processing task."""
