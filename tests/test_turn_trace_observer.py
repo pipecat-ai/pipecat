@@ -23,7 +23,11 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
-from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
+from pipecat.observers.user_bot_latency_observer import (
+    LatencyBreakdown,
+    TextAggregationBreakdownMetrics,
+    UserBotLatencyObserver,
+)
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -503,19 +507,29 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(HAS_OPENTELEMETRY, "opentelemetry not installed")
 class TestTextAggregationOnTurnSpan(unittest.IsolatedAsyncioTestCase):
+    """Tests for text aggregation attributes on turn spans."""
+
     def setUp(self):
+        """Set up a fresh provider and exporter for each test."""
         self._exporter = _InMemorySpanExporter()
         self._provider = TracerProvider()
         self._provider.add_span_processor(SimpleSpanProcessor(self._exporter))
         self._tracer = self._provider.get_tracer("pipecat.turn")
 
     def tearDown(self):
+        """Shut down the provider to flush spans."""
         self._provider.shutdown()
 
     def _get_spans_by_name(self, name):
+        """Return finished spans with the given name."""
         return [s for s in self._exporter.get_finished_spans() if s.name == name]
 
     def _create_observers(self):
+        """Create a standard set of turn/trace observers.
+
+        Returns:
+            Tuple of (turn_tracker, latency_tracker, trace_observer).
+        """
         tracing_context = TracingContext()
         turn_tracker = TurnTrackingObserver(turn_end_timeout_secs=0.2)
         latency_tracker = UserBotLatencyObserver()
@@ -528,11 +542,7 @@ class TestTextAggregationOnTurnSpan(unittest.IsolatedAsyncioTestCase):
         return turn_tracker, latency_tracker, trace_observer
 
     async def test_text_aggregation_on_turn_span(self):
-        from pipecat.observers.user_bot_latency_observer import (
-            LatencyBreakdown,
-            TextAggregationBreakdownMetrics,
-        )
-
+        """Test that text aggregation is added to the turn span."""
         _, _, trace_observer = self._create_observers()
 
         trace_observer.start_conversation_tracing("test-conv")
@@ -558,8 +568,7 @@ class TestTextAggregationOnTurnSpan(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_no_text_aggregation_when_absent(self):
-        from pipecat.observers.user_bot_latency_observer import LatencyBreakdown
-
+        """Test that text aggregation is omitted when not in the breakdown."""
         _, _, trace_observer = self._create_observers()
 
         trace_observer.start_conversation_tracing("test-conv")

@@ -26,6 +26,8 @@ from pipecat.utils.tracing.tracing_context import TracingContext
 if TYPE_CHECKING:
     from opentelemetry.trace import Span, SpanContext
 
+    from pipecat.observers.user_bot_latency_observer import LatencyBreakdown
+
 if is_tracing_available():
     from opentelemetry import trace
     from opentelemetry.trace import Span, SpanContext
@@ -106,7 +108,7 @@ class TurnTraceObserver(BaseObserver):
                 f"Turn {self._current_turn_number} user-bot latency: {latency_seconds:.3f}s"
             )
 
-    async def _handle_latency_breakdown(self, breakdown):
+    async def _handle_latency_breakdown(self, breakdown: "LatencyBreakdown"):
         """Handle latency breakdown events.
 
         Adds text aggregation time to the current turn span when available.
