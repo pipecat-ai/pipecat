@@ -359,7 +359,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         model: Optional[str] = None,
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
-        auto_mode: bool = True,
+        auto_mode: Optional[bool] = None,
         enable_ssml_parsing: Optional[bool] = None,
         enable_logging: Optional[bool] = None,
         pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None,
@@ -385,7 +385,13 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
-            auto_mode: Whether to enable automatic mode optimization.
+            auto_mode: Whether to enable ElevenLabs' auto mode, which reduces
+                latency by disabling server-side chunk scheduling and buffering.
+                Recommended when sending complete sentences or phrases. When
+                None (default), auto mode is enabled for ``SENTENCE``
+                aggregation and disabled for ``TOKEN`` aggregation — because
+                token streaming relies on the server-side chunk scheduler to
+                accumulate enough text for natural-sounding synthesis.
             enable_ssml_parsing: Whether to parse SSML tags in text.
             enable_logging: Whether to enable ElevenLabs server-side logging.
             pronunciation_dictionary_locators: List of pronunciation dictionary
@@ -490,6 +496,17 @@ class ElevenLabsTTSService(WebsocketTTSService):
         self._url = url
 
         # Init-only WebSocket URL params (not runtime-updatable).
+        #
+        # ElevenLabs' auto mode reduces latency by disabling server-side chunk
+        # scheduling and buffering — it's designed for inputs that are already
+        # complete sentences or phrases. In TOKEN mode we stream individual LLM
+        # tokens, so we need the server-side scheduler to accumulate enough
+        # text for natural-sounding synthesis; enabling auto mode there would
+        # hurt quality. When the caller hasn't set auto_mode explicitly, we
+        # derive the right default from the text aggregation strategy.
+        if auto_mode is None:
+            auto_mode = self._text_aggregation_mode != TextAggregationMode.TOKEN
+
         self._auto_mode = auto_mode
         self._enable_ssml_parsing = enable_ssml_parsing
         self._enable_logging = enable_logging
