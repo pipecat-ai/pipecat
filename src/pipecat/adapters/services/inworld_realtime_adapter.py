@@ -19,7 +19,7 @@ from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.services.inworld.realtime import events
 
@@ -251,13 +251,5 @@ class InworldRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             List of tool definitions in Inworld Realtime format.
         """
-        # Convert standard function tools
         functions_schema = tools_schema.standard_tools
-        standard_tools = [self._to_inworld_function_format(func) for func in functions_schema]
-
-        # Support shimmed custom tools for backward compatibility
-        shimmed_tools = []
-        if tools_schema.custom_tools:
-            shimmed_tools = tools_schema.custom_tools.get(AdapterType.SHIM, [])
-
-        return standard_tools + shimmed_tools
+        return [self._to_inworld_function_format(func) for func in functions_schema]

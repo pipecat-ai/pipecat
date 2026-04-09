@@ -285,6 +285,7 @@ class InworldRealtimeLLMService(LLMService):
         default_model = llm_model or "openai/gpt-4.1-mini"
         default_voice = voice or "Clive"
         default_tts_model = tts_model or "inworld-tts-1.5-max"
+        default_stt_model = stt_model or "assemblyai/u3-rt-pro"
 
         default_settings = self.Settings(
             model=default_model,
@@ -304,12 +305,10 @@ class InworldRealtimeLLMService(LLMService):
                 audio=events.AudioConfiguration(
                     input=events.AudioInput(
                         format=events.PCMAudioFormat(rate=24000),
-                        transcription=(
-                            events.InputTranscription(model=stt_model) if stt_model else None
-                        ),
+                        transcription=events.InputTranscription(model=default_stt_model),
                         turn_detection=events.TurnDetection(
                             type="semantic_vad",
-                            eagerness="high",
+                            eagerness="low",
                             create_response=True,
                             interrupt_response=True,
                         ),
