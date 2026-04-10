@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import unittest
 from typing import List
 
@@ -11,6 +12,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import Frame, InputAudioRawFrame, SpeechControlParamsFrame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 
 class MockVADAnalyzer(VADAnalyzer):
@@ -204,6 +206,65 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(broadcast_calls[0][0], SpeechControlParamsFrame)
         self.assertIn("vad_params", broadcast_calls[0][1])
         self.assertIsInstance(broadcast_calls[0][1]["vad_params"], VADParams)
+
+
+AUDIO_IDLE_TIMEOUT = 0.1
+
+
+class TestVADControllerAudioIdle(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.task_manager = TaskManager()
+        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def test_audio_idle_forces_speech_stop(self):
+        """Test that on_speech_stopped fires when no audio arrives while SPEAKING."""
+        analyzer = MockVADAnalyzer()
+        controller = VADController(analyzer, audio_idle_timeout=AUDIO_IDLE_TIMEOUT)
+
+        speech_stopped = False
+
+        @controller.event_handler("on_speech_stopped")
+        async def on_speech_stopped(_controller):
+            nonlocal speech_stopped
+            speech_stopped = True
+
+        start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
+        await controller.process_frame(start_frame)
+        await controller.setup(self.task_manager)
+
+        # Enter SPEAKING state
+        audio_frame = InputAudioRawFrame(audio=b"\x00" * 1024, sample_rate=16000, num_channels=1)
+        analyzer.set_next_state(VADState.SPEAKING)
+        await controller.process_frame(audio_frame)
+        self.assertFalse(speech_stopped)
+
+        # Stop sending audio, wait for idle timeout
+        await asyncio.sleep(AUDIO_IDLE_TIMEOUT + 0.1)
+        self.assertTrue(speech_stopped)
+
+        await controller.cleanup()
+
+    async def test_audio_idle_does_not_fire_when_quiet(self):
+        """Test that idle timeout does NOT fire when VAD is in QUIET state."""
+        analyzer = MockVADAnalyzer()
+        controller = VADController(analyzer, audio_idle_timeout=AUDIO_IDLE_TIMEOUT)
+
+        speech_stopped = False
+
+        @controller.event_handler("on_speech_stopped")
+        async def on_speech_stopped(_controller):
+            nonlocal speech_stopped
+            speech_stopped = True
+
+        start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
+        await controller.process_frame(start_frame)
+        await controller.setup(self.task_manager)
+
+        # Stay in QUIET state, wait past idle timeout
+        await asyncio.sleep(AUDIO_IDLE_TIMEOUT + 0.1)
+        self.assertFalse(speech_stopped)
+
+        await controller.cleanup()
 
 
 if __name__ == "__main__":

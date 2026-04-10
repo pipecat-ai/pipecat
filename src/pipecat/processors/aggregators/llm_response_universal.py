@@ -107,6 +107,9 @@ class LLMUserAggregatorParams:
             has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
+        audio_idle_timeout: Timeout in seconds to force speech stop when
+            no audio frames are received while in SPEAKING state (e.g. user mutes
+            mic mid-speech). Set to 0 to disable. Defaults to 1.0.
         filter_incomplete_user_turns: Whether to filter out incomplete user turns.
             When enabled, the LLM outputs a turn completion marker at the start of
             each response: ✓ (complete), ○ (incomplete short), or ◐ (incomplete long).
@@ -121,6 +124,7 @@ class LLMUserAggregatorParams:
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
     vad_analyzer: Optional[VADAnalyzer] = None
+    audio_idle_timeout: float = 1.0
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
 
@@ -467,7 +471,10 @@ class LLMUserAggregator(LLMContextAggregator):
         # VAD controller
         self._vad_controller: Optional[VADController] = None
         if self._params.vad_analyzer:
-            self._vad_controller = VADController(self._params.vad_analyzer)
+            self._vad_controller = VADController(
+                self._params.vad_analyzer,
+                audio_idle_timeout=self._params.audio_idle_timeout,
+            )
             self._vad_controller.add_event_handler("on_speech_started", self._on_vad_speech_started)
             self._vad_controller.add_event_handler("on_speech_stopped", self._on_vad_speech_stopped)
             self._vad_controller.add_event_handler(
@@ -553,6 +560,9 @@ class LLMUserAggregator(LLMContextAggregator):
         return aggregation
 
     async def _start(self, frame: StartFrame):
+        if self._vad_controller:
+            await self._vad_controller.setup(self.task_manager)
+
         await self._user_turn_controller.setup(self.task_manager)
 
         await self._user_idle_controller.setup(self.task_manager)
@@ -584,6 +594,8 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._cleanup()
 
     async def _cleanup(self):
+        if self._vad_controller:
+            await self._vad_controller.cleanup()
         await self._user_turn_controller.cleanup()
         await self._user_idle_controller.cleanup()
 
