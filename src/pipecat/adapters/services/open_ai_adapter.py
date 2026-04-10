@@ -17,7 +17,7 @@ from openai.types.chat import (
 )
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -107,10 +107,14 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             with ChatCompletion API.
         """
         functions_schema = tools_schema.standard_tools
-        return [
+        formatted_standard_tools = [
             ChatCompletionToolParam(type="function", function=func.to_default_dict())
             for func in functions_schema
         ]
+        custom_openai_tools = []
+        if tools_schema.custom_tools:
+            custom_openai_tools = tools_schema.custom_tools.get(AdapterType.OPENAI, [])
+        return formatted_standard_tools + custom_openai_tools
 
     def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about OpenAI.

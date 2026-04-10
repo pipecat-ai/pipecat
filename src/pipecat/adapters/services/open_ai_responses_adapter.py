@@ -10,10 +10,10 @@ import copy
 from typing import Any, Dict, List, Optional, TypedDict
 
 from openai._types import NotGiven as OpenAINotGiven
-from openai.types.responses import FunctionToolParam, ResponseInputItemParam
+from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -25,7 +25,7 @@ class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
     """Context-based parameters for invoking OpenAI Responses API."""
 
     input: List[ResponseInputItemParam]
-    tools: List[FunctionToolParam] | OpenAINotGiven
+    tools: List[ToolParam] | OpenAINotGiven
     instructions: str
 
 
@@ -106,7 +106,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
 
         return params
 
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[FunctionToolParam]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[ToolParam]:
         """Convert function schemas to Responses API function tool format.
 
         Args:
@@ -128,7 +128,10 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             if "description" in d:
                 tool["description"] = d["description"]
             result.append(tool)
-        return result
+        custom_openai_tools = []
+        if tools_schema.custom_tools:
+            custom_openai_tools = tools_schema.custom_tools.get(AdapterType.OPENAI, [])
+        return result + custom_openai_tools
 
     def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
         """Get messages from context in a format ready for logging.
