@@ -125,16 +125,22 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         """
         return LLMSpecificMessage(llm=self.id_for_llm_specific_messages, message=message)
 
-    def get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
+    def get_messages(
+        self, context: LLMContext, *, elide_large_values: bool = False
+    ) -> List[LLMContextMessage]:
         """Get messages from the LLM context, including standard and LLM-specific messages.
 
         Args:
             context: The LLM context containing messages.
+            elide_large_values: If True, return deep copies of messages with
+                large values replaced by short placeholders.
 
         Returns:
             List of messages including standard and LLM-specific messages.
         """
-        return context.get_messages(self.id_for_llm_specific_messages)
+        return context.get_messages(
+            self.id_for_llm_specific_messages, elide_large_values=elide_large_values
+        )
 
     def from_standard_tools(self, tools: Any) -> List[Any] | NotGiven:
         """Convert tools from standard format to provider format.

@@ -77,7 +77,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
     def get_messages_for_logging(self, context) -> List[Dict[str, Any]]:
         """Get messages from context in a format safe for logging.
 
-        Removes or truncates sensitive data like audio content.
+        Binary data (images, audio) is replaced with short placeholders.
 
         Args:
             context: The LLM context containing messages.
@@ -85,18 +85,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             List of messages with sensitive data redacted.
         """
-        msgs = []
-        for message in self.get_messages(context):
-            msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    for item in msg["content"]:
-                        if item.get("type") == "input_audio":
-                            item["audio"] = "..."
-                        if item.get("type") == "audio":
-                            item["audio"] = "..."
-            msgs.append(msg)
-        return msgs
+        return self.get_messages(context, elide_large_values=True)
 
     @dataclass
     class ConvertedMessages:

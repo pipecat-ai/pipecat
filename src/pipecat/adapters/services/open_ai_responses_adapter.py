@@ -6,7 +6,6 @@
 
 """OpenAI Responses API adapter for Pipecat."""
 
-import copy
 from typing import Any, Dict, List, Optional, TypedDict
 
 from openai._types import NotGiven as OpenAINotGiven
@@ -136,7 +135,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
     def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
         """Get messages from context in a format ready for logging.
 
-        Removes or truncates sensitive data like image content for safe logging.
+        Binary data (images, audio) is replaced with short placeholders.
 
         Args:
             context: The LLM context containing messages.
@@ -144,19 +143,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         Returns:
             List of messages in a format ready for logging.
         """
-        msgs = []
-        for message in self.get_messages(context):
-            msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    for item in msg["content"]:
-                        if item.get("type") == "image_url":
-                            if item["image_url"]["url"].startswith("data:image/"):
-                                item["image_url"]["url"] = "data:image/..."
-                        if item.get("type") == "input_audio":
-                            item["input_audio"]["data"] = "..."
-            msgs.append(msg)
-        return msgs
+        return self.get_messages(context, elide_large_values=True)
 
     def _convert_messages_to_input(
         self, messages: List[LLMContextMessage]
