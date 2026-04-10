@@ -7,6 +7,8 @@
 import unittest
 
 from openai.types.chat import ChatCompletionToolParam
+from openai.types.responses.function_tool_param import FunctionToolParam
+from openai.types.responses.tool_search_tool_param import ToolSearchToolParam
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -213,11 +215,11 @@ class TestFunctionAdapters(unittest.TestCase):
         """Test OpenAI Responses adapter appends custom tools."""
         tool_search = {"type": "tool_search"}
         expected = [
-            {
-                "type": "function",
-                "name": "get_weather",
-                "description": "Get the weather in a given location",
-                "parameters": {
+            FunctionToolParam(
+                type="function",
+                name="get_weather",
+                description="Get the weather in a given location",
+                parameters={
                     "type": "object",
                     "properties": {
                         "location": {
@@ -232,9 +234,9 @@ class TestFunctionAdapters(unittest.TestCase):
                     },
                     "required": ["location", "format"],
                 },
-                "strict": None,
-            },
-            tool_search,
+                strict=None,
+            ),
+            ToolSearchToolParam(type="tool_search"),
         ]
         tools_def = self.tools_def
         tools_def.custom_tools = {AdapterType.OPENAI: [tool_search]}

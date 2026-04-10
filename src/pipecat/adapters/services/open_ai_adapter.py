@@ -96,7 +96,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             "tool_choice": context.tool_choice,
         }
 
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Any]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[ChatCompletionToolParam]:
         """Convert function schemas to OpenAI's function-calling format.
 
         Args:

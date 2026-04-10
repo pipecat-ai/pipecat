@@ -10,7 +10,7 @@ import copy
 from typing import Any, Dict, List, Optional, TypedDict
 
 from openai._types import NotGiven as OpenAINotGiven
-from openai.types.responses import FunctionToolParam, ResponseInputItemParam
+from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -25,7 +25,7 @@ class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
     """Context-based parameters for invoking OpenAI Responses API."""
 
     input: List[ResponseInputItemParam]
-    tools: List[FunctionToolParam] | OpenAINotGiven
+    tools: List[ToolParam] | OpenAINotGiven
     instructions: str
 
 
@@ -106,7 +106,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
 
         return params
 
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Any]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[ToolParam]:
         """Convert function schemas to Responses API function tool format.
 
         Args:
