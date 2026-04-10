@@ -131,8 +131,8 @@ class TaskObserver(BaseObserver):
         if not self._proxies:
             return
 
-        for proxy in self._proxies:
-            await proxy.cleanup()
+        for observer in self._proxies:
+            await observer.cleanup()
 
     async def on_pipeline_started(self):
         """Forward pipeline started signal to all managed observers."""
