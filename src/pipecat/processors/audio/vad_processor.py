@@ -46,7 +46,7 @@ class VADProcessor(FrameProcessor):
         *,
         vad_analyzer: VADAnalyzer,
         speech_activity_period: float = 0.2,
-        audio_starvation_timeout: float = 1.0,
+        audio_idle_timeout: float = 1.0,
         **kwargs,
     ):
         """Initialize the VAD processor.
@@ -55,7 +55,7 @@ class VADProcessor(FrameProcessor):
             vad_analyzer: The VADAnalyzer instance for processing audio.
             speech_activity_period: Minimum interval in seconds between
                 UserSpeakingFrame pushes. Defaults to 0.2.
-            audio_starvation_timeout: Timeout in seconds to force speech stop
+            audio_idle_timeout: Timeout in seconds to force speech stop
                 when no audio frames are received while in SPEAKING state.
                 Set to 0 to disable. Defaults to 1.0.
             **kwargs: Additional arguments passed to parent class.
@@ -64,7 +64,7 @@ class VADProcessor(FrameProcessor):
         self._vad_controller = VADController(
             vad_analyzer,
             speech_activity_period=speech_activity_period,
-            audio_starvation_timeout=audio_starvation_timeout,
+            audio_idle_timeout=audio_idle_timeout,
         )
 
         # Push VAD frames when speech events are detected

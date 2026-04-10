@@ -208,18 +208,18 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(broadcast_calls[0][1]["vad_params"], VADParams)
 
 
-AUDIO_STARVATION_TIMEOUT = 0.1
+AUDIO_IDLE_TIMEOUT = 0.1
 
 
-class TestVADControllerStarvation(unittest.IsolatedAsyncioTestCase):
+class TestVADControllerAudioIdle(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.task_manager = TaskManager()
         self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
-    async def test_audio_starvation_forces_speech_stop(self):
+    async def test_audio_idle_forces_speech_stop(self):
         """Test that on_speech_stopped fires when no audio arrives while SPEAKING."""
         analyzer = MockVADAnalyzer()
-        controller = VADController(analyzer, audio_starvation_timeout=AUDIO_STARVATION_TIMEOUT)
+        controller = VADController(analyzer, audio_idle_timeout=AUDIO_IDLE_TIMEOUT)
 
         speech_stopped = False
 
@@ -238,16 +238,16 @@ class TestVADControllerStarvation(unittest.IsolatedAsyncioTestCase):
         await controller.process_frame(audio_frame)
         self.assertFalse(speech_stopped)
 
-        # Stop sending audio, wait for starvation timeout
-        await asyncio.sleep(AUDIO_STARVATION_TIMEOUT + 0.1)
+        # Stop sending audio, wait for idle timeout
+        await asyncio.sleep(AUDIO_IDLE_TIMEOUT + 0.1)
         self.assertTrue(speech_stopped)
 
         await controller.cleanup()
 
-    async def test_audio_starvation_does_not_fire_when_quiet(self):
-        """Test that starvation timeout does NOT fire when VAD is in QUIET state."""
+    async def test_audio_idle_does_not_fire_when_quiet(self):
+        """Test that idle timeout does NOT fire when VAD is in QUIET state."""
         analyzer = MockVADAnalyzer()
-        controller = VADController(analyzer, audio_starvation_timeout=AUDIO_STARVATION_TIMEOUT)
+        controller = VADController(analyzer, audio_idle_timeout=AUDIO_IDLE_TIMEOUT)
 
         speech_stopped = False
 
@@ -260,8 +260,8 @@ class TestVADControllerStarvation(unittest.IsolatedAsyncioTestCase):
         await controller.process_frame(start_frame)
         await controller.setup(self.task_manager)
 
-        # Stay in QUIET state, wait past starvation timeout
-        await asyncio.sleep(AUDIO_STARVATION_TIMEOUT + 0.1)
+        # Stay in QUIET state, wait past idle timeout
+        await asyncio.sleep(AUDIO_IDLE_TIMEOUT + 0.1)
         self.assertFalse(speech_stopped)
 
         await controller.cleanup()

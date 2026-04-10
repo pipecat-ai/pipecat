@@ -107,7 +107,7 @@ class LLMUserAggregatorParams:
             has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
-        audio_starvation_timeout: Timeout in seconds to force speech stop when
+        audio_idle_timeout: Timeout in seconds to force speech stop when
             no audio frames are received while in SPEAKING state (e.g. user mutes
             mic mid-speech). Set to 0 to disable. Defaults to 1.0.
         filter_incomplete_user_turns: Whether to filter out incomplete user turns.
@@ -124,7 +124,7 @@ class LLMUserAggregatorParams:
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
     vad_analyzer: Optional[VADAnalyzer] = None
-    audio_starvation_timeout: float = 1.0
+    audio_idle_timeout: float = 1.0
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
 
@@ -473,7 +473,7 @@ class LLMUserAggregator(LLMContextAggregator):
         if self._params.vad_analyzer:
             self._vad_controller = VADController(
                 self._params.vad_analyzer,
-                audio_starvation_timeout=self._params.audio_starvation_timeout,
+                audio_idle_timeout=self._params.audio_idle_timeout,
             )
             self._vad_controller.add_event_handler("on_speech_started", self._on_vad_speech_started)
             self._vad_controller.add_event_handler("on_speech_stopped", self._on_vad_speech_stopped)
