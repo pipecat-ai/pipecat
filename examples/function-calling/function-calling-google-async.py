@@ -142,8 +142,8 @@ indicate you should use the get_image tool are:
         await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     @llm.event_handler("on_function_calls_cancelled")
-    async def on_function_calls_cancelled(service, cancelled):
-        for item in cancelled:
+    async def on_function_calls_cancelled(service, function_calls):
+        for item in function_calls:
             logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
 
     weather_function = FunctionSchema(

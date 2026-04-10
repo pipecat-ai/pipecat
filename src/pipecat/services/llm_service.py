@@ -195,12 +195,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             logger.warning("LLM completion timed out")
 
         @task.event_handler("on_function_calls_started")
-        async def on_function_calls_started(service, function_calls):
+        async def on_function_calls_started(service, function_calls: List[FunctionCallFromLLM]):
             logger.info(f"Starting {len(function_calls)} function calls")
 
         @task.event_handler("on_function_calls_cancelled")
-        async def on_function_calls_cancelled(service, cancelled):
-            logger.info(f"Cancelled {len(cancelled)} async function calls")
+        async def on_function_calls_cancelled(service, function_calls: List[FunctionCallFromLLM]):
+            logger.info(f"Cancelled {len(function_calls)} function calls")
     """
 
     _settings: LLMSettings
@@ -987,7 +987,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     FunctionCallCancelFrame, function_name=name, tool_call_id=tool_call_id
                 )
 
-                cancelled_items.append(runner_item)
+                cancelled_items.append(
+                    FunctionCallFromLLM(
+                        function_name=runner_item.function_name,
+                        tool_call_id=runner_item.tool_call_id,
+                        arguments=runner_item.arguments,
+                        context=runner_item.context,
+                    )
+                )
                 logger.debug(f"{self} Async function call [{name}:{tool_call_id}] cancelled")
 
         for task in cancelled_tasks:
@@ -1018,7 +1025,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     FunctionCallCancelFrame, function_name=name, tool_call_id=tool_call_id
                 )
 
-                cancelled_items.append(runner_item)
+                cancelled_items.append(
+                    FunctionCallFromLLM(
+                        function_name=runner_item.function_name,
+                        tool_call_id=runner_item.tool_call_id,
+                        arguments=runner_item.arguments,
+                        context=runner_item.context,
+                    )
+                )
                 logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
 
         # Remove all cancelled tasks from our set.
