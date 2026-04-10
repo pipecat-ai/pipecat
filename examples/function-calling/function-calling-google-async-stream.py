@@ -144,6 +144,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_function_calls_started(service, function_calls):
         await tts.queue_frame(TTSSpeakFrame("Sure, tracking your location now."))
 
+    @llm.event_handler("on_function_calls_cancelled")
+    async def on_function_calls_cancelled(service, cancelled):
+        for item in cancelled:
+            logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
+
     location_function = FunctionSchema(
         name="track_current_location",
         description="Start tracking the user's current GPS location, reporting position updates until the user reaches their destination.",

@@ -93,6 +93,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
+    @llm.event_handler("on_function_calls_cancelled")
+    async def on_function_calls_cancelled(service, cancelled):
+        for item in cancelled:
+            logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
+
     weather_function = FunctionSchema(
         name="get_current_weather",
         description="Get the current weather",
