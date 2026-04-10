@@ -118,6 +118,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAIResponsesLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
+        enable_async_tool_cancellation=True,
         settings=OpenAIResponsesLLMService.Settings(
             system_instruction=(
                 "You are a helpful assistant in a voice conversation. "
