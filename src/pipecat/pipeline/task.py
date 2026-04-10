@@ -727,7 +727,6 @@ class PipelineTask(BasePipelineTask):
 
         # Do any additional pipeline task setup externally.
         await self._load_setup_files()
-        await self._load_observer_files()
 
         # Start task observer.
         await self._observer.start()
@@ -966,37 +965,6 @@ class PipelineTask(BasePipelineTask):
                         )
             except Exception as e:
                 logger.error(f"{self} error running external setup from {f}: {e}")
-
-    async def _load_observer_files(self):
-        """Dynamically load observers from files listed in PIPECAT_OBSERVER_FILES."""
-        observer_files = [f for f in os.environ.get("PIPECAT_OBSERVER_FILES", "").split(":") if f]
-        for f in observer_files:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Observer files (and environment variable `PIPECAT_OBSERVER_FILES`) is deprecated, use setup files instead (and `PIPECAT_SETUP_FILES`) instead.",
-                    DeprecationWarning,
-                )
-
-            try:
-                path = Path(f).resolve()
-                module_name = path.stem
-                spec = importlib.util.spec_from_file_location(module_name, str(path))
-                if spec:
-                    logger.debug(f"{self} loading observers from {path}")
-
-                    # Load module.
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-
-                    # Create observers.
-                    observers = await module.create_observers(self)
-                    for observer in observers:
-                        self.add_observer(observer)
-            except Exception as e:
-                logger.error(f"{self} error loading external observers from {f}: {e}")
 
     def _print_dangling_tasks(self):
         """Log any dangling tasks that haven't been properly cleaned up."""
