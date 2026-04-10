@@ -13,11 +13,6 @@ gRPC API for high-quality speech synthesis.
 Refer to the NVIDIA TTS NIM documentation for usage, customization,
 and local deployment steps:
 https://docs.nvidia.com/nim/speech/latest/tts/
-
-For zero-shot voice cloning, request access to the Magpie TTS Zero-Shot model:
-https://developer.nvidia.com/riva-tts-zeroshot-models
-
-Local or private cloud deployment is recommended for best zero-shot performance.
 """
 
 import asyncio
@@ -26,7 +21,6 @@ import queue
 import textwrap
 import threading
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -74,6 +68,19 @@ class NvidiaTTSSettings(TTSSettings):
     quality: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+@dataclass
+class _SynthesisStreamState:
+    """Runtime state for one active synthesis stream."""
+
+    context_id: str
+    text_queue: queue.Queue
+    response_queue: asyncio.Queue
+    stop_event: threading.Event
+    rpc_call: Any = None
+    synth_task: Optional[asyncio.Task] = None
+    response_task: Optional[asyncio.Task] = None
+
+
 class NvidiaTTSService(TTSService):
     """NVIDIA Nemotron Speech text-to-speech service.
 
@@ -116,8 +123,6 @@ class NvidiaTTSService(TTSService):
         use_ssl: bool = True,
         custom_dictionary: Optional[dict] = None,
         encoding: Optional[AudioEncoding] = AudioEncoding.LINEAR_PCM,
-        zero_shot_audio_prompt_file: Optional[Path] = None,
-        audio_prompt_encoding: Optional[AudioEncoding] = AudioEncoding.ENCODING_UNSPECIFIED,
         **kwargs,
     ):
         """Initialize the NVIDIA Nemotron Speech TTS service.
@@ -149,13 +154,6 @@ class NvidiaTTSService(TTSService):
                 https://docs.nvidia.com/nim/speech/latest/tts/phoneme-support.html
                 for the list of supported IPA phonemes.
             encoding: Output audio encoding format. Defaults to ``AudioEncoding.LINEAR_PCM``.
-            zero_shot_audio_prompt_file: Path to audio prompt file for zero-shot voice
-                cloning. Audio length should be between 3-10 seconds. The file
-                is read once at init time and cached in memory. Requires the
-                Magpie TTS Zero-Shot model. See
-                https://docs.nvidia.com/nim/speech/latest/tts/voice-cloning.html
-            audio_prompt_encoding: Encoding of the zero-shot audio prompt file.
-                Defaults to ``AudioEncoding.ENCODING_UNSPECIFIED``.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -202,31 +200,12 @@ class NvidiaTTSService(TTSService):
             entries = [f"{k}  {v}" for k, v in custom_dictionary.items()]
             self._custom_dictionary = ",".join(entries)
         self._encoding = encoding
-        self._audio_prompt_encoding = audio_prompt_encoding
-
-        self._zero_shot_audio_prompt_file = zero_shot_audio_prompt_file
-        self._zero_shot_audio_prompt: Optional[bytes] = None
-        if self._zero_shot_audio_prompt_file is not None:
-            if not self._zero_shot_audio_prompt_file.exists():
-                raise FileNotFoundError(
-                    f"Zero-shot audio prompt file not found: {self._zero_shot_audio_prompt_file}"
-                )
-            with self._zero_shot_audio_prompt_file.open("rb") as f:
-                self._zero_shot_audio_prompt = f.read()
-            logger.debug(
-                f"Loaded zero-shot audio prompt from {self._zero_shot_audio_prompt_file} "
-                f"({len(self._zero_shot_audio_prompt)} bytes)"
-            )
 
         self._service = None
         self._config = None
 
-        # Persistent gRPC stream state for cross-sentence stitching
-        self._text_queue: Optional[queue.Queue] = None
-        self._synth_thread: Optional[threading.Thread] = None
-        self._response_task: Optional[asyncio.Task] = None
-        self._response_queue: asyncio.Queue = asyncio.Queue()
-        self._active_context_id: Optional[str] = None
+        # Runtime state for the active streaming turn.
+        self._stream_state: Optional[_SynthesisStreamState] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate metrics.
@@ -244,7 +223,6 @@ class NvidiaTTSService(TTSService):
             Set model and function id in the constructor instead.
 
             Example::
-
 
                 NvidiaTTSService(
                     api_key=...,
@@ -320,19 +298,19 @@ class NvidiaTTSService(TTSService):
         logger.debug(f"Initialized NvidiaTTSService with model: {self._settings.model}")
 
     async def stop(self, frame: EndFrame):
-        """Stop the NVIDIA Nemotron Speech TTS service and clean up resources.
+        """Stop the NVIDIA Nemotron Speech TTS service.
 
         Args:
-            frame: EndFrame indicating pipeline stop.
+            frame: The end frame.
         """
         await super().stop(frame)
         await self._close_synthesis_stream()
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel the NVIDIA Nemotron Speech TTS service operation.
+        """Cancel the NVIDIA Nemotron Speech TTS service.
 
         Args:
-            frame: CancelFrame indicating operation cancellation.
+            frame: The cancel frame.
         """
         await super().cancel(frame)
         await self._close_synthesis_stream()
@@ -344,18 +322,20 @@ class NvidiaTTSService(TTSService):
         ``synthesize_online``. The gRPC stream stays open until a ``None``
         sentinel is pushed into the queue.
         """
-        self._text_queue = queue.Queue()
-        self._active_context_id = context_id
-        self._response_queue = asyncio.Queue()
-
-        self._synth_thread = threading.Thread(
-            target=self._synthesis_thread_handler,
-            daemon=True,
-            name="nvidia-tts-synth",
+        state = _SynthesisStreamState(
+            context_id=context_id,
+            text_queue=queue.Queue(),
+            response_queue=asyncio.Queue(),
+            stop_event=threading.Event(),
         )
-        self._synth_thread.start()
-        self._response_task = self.create_task(
-            self._response_consumer(), name="nvidia-tts-response"
+        self._stream_state = state
+        logger.debug(f"{self}: starting synthesis stream")
+
+        state.synth_task = self.create_task(
+            self._synth_task_handler(state), name="nvidia-tts-synth"
+        )
+        state.response_task = self.create_task(
+            self._process_responses(state), name="nvidia-tts-response"
         )
 
     def _build_base_request(self) -> rtts.SynthesizeSpeechRequest:
@@ -369,105 +349,212 @@ class NvidiaTTSService(TTSService):
         voice = self._settings.voice
         if voice:
             req.voice_name = voice
-        if self._zero_shot_audio_prompt is not None:
-            req.zero_shot_data.audio_prompt = self._zero_shot_audio_prompt
-            req.zero_shot_data.encoding = self._audio_prompt_encoding
-            req.zero_shot_data.quality = self._settings.quality
         if self._custom_dictionary:
             req.custom_dictionary = self._custom_dictionary
         return req
 
-    def _synthesis_thread_handler(self):
-        """Run ``SynthesizeOnline`` gRPC stream in a background thread.
+    def _synthesis_handler(self, state: _SynthesisStreamState):
+        """Run ``SynthesizeOnline`` gRPC stream in a blocking call.
 
         Uses a queue-backed generator to feed text chunks into a single
         ``SynthesizeOnline`` call, enabling Magpie's cross-sentence stitching.
         Audio responses are forwarded to the async response queue.
         """
+        event_loop = self.get_event_loop()
         base_req = self._build_base_request()
 
         def request_generator():
             while True:
-                text = self._text_queue.get()
-                if text is None:
+                if state.stop_event.is_set():
+                    break
+                text = state.text_queue.get()
+                if text is None or state.stop_event.is_set():
                     break
                 base_req.text = text
                 yield base_req
 
         try:
-            responses = self._service.stub.SynthesizeOnline(
+            call = self._service.stub.SynthesizeOnline(
                 request_generator(),
                 metadata=self._service.auth.get_auth_metadata(),
             )
-            for resp in responses:
-                asyncio.run_coroutine_threadsafe(
-                    self._response_queue.put(resp), self.get_event_loop()
-                )
-        except Exception as e:
-            logger.error(f"{self} gRPC synthesis stream error: {e}")
-            asyncio.run_coroutine_threadsafe(self._response_queue.put(e), self.get_event_loop())
-        finally:
-            asyncio.run_coroutine_threadsafe(self._response_queue.put(None), self.get_event_loop())
+            state.rpc_call = call
 
-    async def _response_consumer(self):
+            for resp in call:
+                if state.stop_event.is_set():
+                    break
+                asyncio.run_coroutine_threadsafe(state.response_queue.put(resp), event_loop)
+        except Exception as e:
+            if not state.stop_event.is_set():
+                logger.error(f"{self} gRPC synthesis stream error: {e}")
+                asyncio.run_coroutine_threadsafe(state.response_queue.put(e), event_loop)
+        finally:
+            state.rpc_call = None
+            asyncio.run_coroutine_threadsafe(state.response_queue.put(None), event_loop)
+
+    async def _synth_task_handler(self, state: _SynthesisStreamState):
+        """Wrap ``_synthesis_handler`` as an asyncio-managed task."""
+        await asyncio.to_thread(self._synthesis_handler, state)
+
+    def _cancel_stream_call(self, state: _SynthesisStreamState):
+        """Best-effort cancellation of in-flight gRPC call."""
+        call = state.rpc_call
+        if call is not None and hasattr(call, "cancel"):
+            try:
+                call.cancel()
+            except Exception as e:
+                logger.debug(f"{self}: failed to cancel gRPC stream call: {e}")
+
+    async def _process_responses(self, state: _SynthesisStreamState):
         """Consume gRPC responses and append audio to the active audio context."""
         while True:
-            item = await self._response_queue.get()
+            item = await state.response_queue.get()
             if item is None:
                 break
             if isinstance(item, Exception):
-                await self.push_error(f"{self} synthesis error: {item}")
+                # Ignore stale exceptions from interrupted streams.
+                if self._stream_state is state:
+                    await self.push_error(f"{self} synthesis error: {item}")
                 break
+
+            # Stale stream responses must never leak into a newer stream context.
+            if self._stream_state is not state:
+                continue
+
             await self.stop_ttfb_metrics()
             frame = TTSAudioRawFrame(
                 audio=item.audio,
                 sample_rate=self.sample_rate,
                 num_channels=1,
-                context_id=self._active_context_id,
+                context_id=state.context_id,
             )
-            await self.append_to_audio_context(self._active_context_id, frame)
+            await self.append_to_audio_context(state.context_id, frame)
+
+        # Finalize ownership once the stream drains naturally.
+        if self._stream_state is state and not state.stop_event.is_set():
+            self._stream_state = None
+
+    def _signal_synthesis_close(self, state: _SynthesisStreamState):
+        """Signal the active synthesis request generator to close."""
+        state.text_queue.put(None)
 
     async def _close_synthesis_stream(self):
-        """Close the active gRPC synthesis stream.
+        """Close the active gRPC synthesis stream gracefully.
 
-        Sends a sentinel to end the request generator, waits for the gRPC
-        thread to finish producing all remaining audio, then lets the
-        response consumer drain naturally before cleaning up.
+        Sends a sentinel to end the request generator, waits for the
+        synthesis task to finish producing all remaining audio, then lets
+        the response task drain naturally before cleaning up.
         """
-        if self._text_queue is not None:
-            self._text_queue.put(None)
+        state = self._stream_state
+        if state is None:
+            return
 
-        if self._synth_thread is not None:
-            await asyncio.to_thread(self._synth_thread.join)
-            self._synth_thread = None
+        self._signal_synthesis_close(state)
 
-        self._text_queue = None
-
-        if self._response_task is not None:
+        if state.synth_task is not None:
             try:
-                await self._response_task
+                await state.synth_task
             except asyncio.CancelledError:
                 pass
-            self._response_task = None
+            state.synth_task = None
 
-        self._active_context_id = None
+        if state.response_task is not None:
+            try:
+                await state.response_task
+            except asyncio.CancelledError:
+                pass
+            state.response_task = None
+
+        if self._stream_state is state:
+            self._stream_state = None
+
+    async def _wait_for_synthesis_close_interruptibly(self, state: _SynthesisStreamState):
+        """Wait for synthesis close unless interruption preempts this stream."""
+        while True:
+            if self._stream_state is not state or state.stop_event.is_set():
+                # Interruption took ownership of stream shutdown.
+                return
+
+            synth_done = state.synth_task is None or state.synth_task.done()
+            response_done = state.response_task is None or state.response_task.done()
+            if synth_done and response_done:
+                break
+
+            # Poll in short intervals to keep this wait interruptible.
+            await asyncio.sleep(0.05)
+
+        if state.synth_task is not None:
+            try:
+                await state.synth_task
+            except asyncio.CancelledError:
+                pass
+            state.synth_task = None
+
+        if state.response_task is not None:
+            try:
+                await state.response_task
+            except asyncio.CancelledError:
+                pass
+            state.response_task = None
+
+        if self._stream_state is state:
+            self._stream_state = None
+
+    async def _abort_synthesis_stream(self):
+        """Abort the active gRPC synthesis stream immediately.
+
+        Cancels the response task first to stop delivering audio, then
+        drains the text queue and signals the synthesis handler to stop.
+        Unlike ``_close_synthesis_stream``, pending audio is discarded.
+        """
+        state = self._stream_state
+        if state is None:
+            return
+
+        state.stop_event.set()
+
+        if state.response_task is not None:
+            await self.cancel_task(state.response_task)
+            state.response_task = None
+
+        while not state.text_queue.empty():
+            try:
+                state.text_queue.get_nowait()
+            except queue.Empty:
+                break
+        self._signal_synthesis_close(state)
+
+        self._cancel_stream_call(state)
+
+        if state.synth_task is not None:
+            await self.cancel_task(state.synth_task)
+            state.synth_task = None
+
+        if self._stream_state is state:
+            self._stream_state = None
 
     async def flush_audio(self, context_id: Optional[str] = None):
-        """Flush the synthesis stream at the end of an LLM turn.
-
-        Sends a sentinel to the gRPC stream, waits for remaining audio,
-        then delegates to the base class for audio context cleanup.
+        """Flush any pending audio and finalize the current context.
 
         Args:
-            context_id: The audio context to flush.
+            context_id: The specific context to flush. If None, falls back to the
+                currently active context.
         """
-        await self._close_synthesis_stream()
+        state = self._stream_state
+        if state is not None:
+            self._signal_synthesis_close(state)
+            await self._wait_for_synthesis_close_interruptibly(state)
         await super().flush_audio(context_id)
 
     async def on_audio_context_interrupted(self, context_id: str):
-        """Handle interruption by closing the active synthesis stream."""
+        """Cancel the active gRPC synthesis stream when the bot is interrupted.
+
+        Args:
+            context_id: The ID of the audio context that was interrupted.
+        """
         await self.stop_all_metrics()
-        await self._close_synthesis_stream()
+        await self._abort_synthesis_stream()
+        await super().on_audio_context_interrupted(context_id)
 
     @staticmethod
     def _split_text_into_chunks(text: str) -> list[str]:
@@ -530,9 +617,13 @@ class NvidiaTTSService(TTSService):
 
             logger.debug(f"{self}: Generating TTS [{text}]")
 
+            state = self._stream_state
+            if state is None:
+                raise RuntimeError("Synthesis stream not started")
+
             for chunk in self._split_text_into_chunks(text):
                 if any(c.isalnum() for c in chunk):
-                    self._text_queue.put(chunk)
+                    state.text_queue.put(chunk)
 
             await self.start_tts_usage_metrics(text)
             yield None
