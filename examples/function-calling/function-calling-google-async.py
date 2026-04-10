@@ -128,6 +128,7 @@ indicate you should use the get_image tool are:
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
+        enable_async_tool_cancellation=True,
         settings=GoogleLLMService.Settings(
             system_instruction=system_prompt,
         ),
@@ -139,6 +140,11 @@ indicate you should use the get_image tool are:
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
         await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+
+    @llm.event_handler("on_function_calls_cancelled")
+    async def on_function_calls_cancelled(service, function_calls):
+        for item in function_calls:
+            logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
 
     weather_function = FunctionSchema(
         name="get_weather",

@@ -77,6 +77,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = AnthropicLLMService(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
+        enable_async_tool_cancellation=True,
         settings=AnthropicLLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
@@ -91,6 +92,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         timeout_secs=30,
     )
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+
+    @llm.event_handler("on_function_calls_cancelled")
+    async def on_function_calls_cancelled(service, function_calls):
+        for item in function_calls:
+            logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
 
     weather_function = FunctionSchema(
         name="get_current_weather",

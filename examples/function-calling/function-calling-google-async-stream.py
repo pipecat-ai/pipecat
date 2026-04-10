@@ -118,6 +118,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
+        enable_async_tool_cancellation=True,
         settings=GoogleLLMService.Settings(
             system_instruction=(
                 "You are a helpful assistant in a voice conversation. "
@@ -142,6 +143,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
         await tts.queue_frame(TTSSpeakFrame("Sure, tracking your location now."))
+
+    @llm.event_handler("on_function_calls_cancelled")
+    async def on_function_calls_cancelled(service, function_calls):
+        for item in function_calls:
+            logger.info(f"Function call cancelled: {item.function_name} [{item.tool_call_id}]")
 
     location_function = FunctionSchema(
         name="track_current_location",

@@ -10,11 +10,13 @@ This module provides the abstract base class for implementing LLM provider-speci
 adapters that handle tool format conversion and standardization.
 """
 
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
@@ -48,6 +50,21 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     def __init__(self):
         """Initialize the adapter."""
         self._warned_system_instruction = False
+        self._builtin_tools: Dict[str, FunctionSchema] = {}
+
+    @property
+    def builtin_tools(self) -> Dict[str, FunctionSchema]:
+        """Built-in tools automatically merged into every inference request.
+
+        Keyed by tool name for O(1) lookup, insertion, and removal.  The
+        service injects tools here so they are sent transparently on every
+        inference request without the user having to add them to their
+        ``ToolsSchema``.
+
+        Returns:
+            Mutable dict mapping tool name to ``FunctionSchema``.
+        """
+        return self._builtin_tools
 
     @property
     @abstractmethod
@@ -122,6 +139,9 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     def from_standard_tools(self, tools: Any) -> List[Any] | NotGiven:
         """Convert tools from standard format to provider format.
 
+        Built-in tools are automatically merged into the schema before conversion so that every
+        inference request receives them without the user having to declare them explicitly.
+
         Args:
             tools: Tools in standard format or provider-specific format.
 
@@ -129,8 +149,31 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             List of tools converted to provider format, or original tools
             if not in standard format.
         """
+        if self._builtin_tools:
+            if isinstance(tools, ToolsSchema):
+                tools = ToolsSchema(
+                    standard_tools=tools.standard_tools + list(self._builtin_tools.values()),
+                    custom_tools=tools.custom_tools,
+                )
+            else:
+                # User supplied tools in a legacy/provider-specific format.
+                # Built-in tools cannot be safely merged, so they will not be injected.
+                # Migrate to ToolsSchema to enable built-in tool support; use custom_tools
+                # as an escape hatch for any provider-specific tools that don't fit the
+                # standard schema.
+                if tools is not None:
+                    warnings.warn(
+                        "Built-in tools (e.g. async tool cancellation) could not be injected "
+                        "because the supplied tools are not a ToolsSchema instance. "
+                        "Migrate to ToolsSchema to enable built-in tool support. "
+                        "Use ToolsSchema(custom_tools=...) as an escape hatch for any "
+                        "provider-specific tools that don't fit the standard schema.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                # Fall through and return the original tools unchanged.
+
         if isinstance(tools, ToolsSchema):
-            logger.debug(f"Retrieving the tools using the adapter: {type(self)}")
             return self.to_provider_tools_format(tools)
         # Fallback to return the same tools in case they are not in a standard format
         return tools
