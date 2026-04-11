@@ -30,12 +30,15 @@ async def test_openai_run_inference_with_llm_context():
     """Test run_inference with LLMContext returns expected response."""
     # Create service with mocked client and specific parameters
     with patch.object(OpenAILLMService, "create_client"):
-        from pipecat.services.openai.base_llm import BaseOpenAILLMService
-
-        params = BaseOpenAILLMService.InputParams(
-            temperature=0.7, max_tokens=100, frequency_penalty=0.5, seed=42
+        service = OpenAILLMService(
+            settings=OpenAILLMService.Settings(
+                model="gpt-4",
+                temperature=0.7,
+                max_tokens=100,
+                frequency_penalty=0.5,
+                seed=42,
+            )
         )
-        service = OpenAILLMService(model="gpt-4", params=params)
         service._client = AsyncMock()
 
         # Setup mocks
@@ -87,7 +90,7 @@ async def test_openai_run_inference_with_llm_context():
 async def test_openai_run_inference_client_exception():
     """Test that exceptions from the client are propagated."""
     with patch.object(OpenAILLMService, "create_client"):
-        service = OpenAILLMService(model="gpt-4")
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
@@ -108,9 +111,15 @@ async def test_anthropic_run_inference_with_llm_context():
     # Create service with mocked client and specific parameters
     from pipecat.services.anthropic.llm import AnthropicLLMService
 
-    params = AnthropicLLMService.InputParams(max_tokens=2048, temperature=0.6, top_k=50, top_p=0.95)
     service = AnthropicLLMService(
-        api_key="test-key", model="claude-3-sonnet-20240229", params=params
+        api_key="test-key",
+        settings=AnthropicLLMService.Settings(
+            model="claude-3-sonnet-20240229",
+            max_tokens=2048,
+            temperature=0.6,
+            top_k=50,
+            top_p=0.95,
+        ),
     )
     service._client = AsyncMock()
 
@@ -156,7 +165,9 @@ async def test_anthropic_run_inference_with_llm_context():
 @pytest.mark.asyncio
 async def test_anthropic_run_inference_client_exception():
     """Test that exceptions from the Anthropic client are propagated."""
-    service = AnthropicLLMService(api_key="test-key", model="claude-3-sonnet-20240229")
+    service = AnthropicLLMService(
+        api_key="test-key", settings=AnthropicLLMService.Settings(model="claude-3-sonnet-20240229")
+    )
     service._client = AsyncMock()
 
     mock_context = MagicMock(spec=LLMContext)
@@ -175,7 +186,9 @@ async def test_anthropic_run_inference_client_exception():
 async def test_google_run_inference_with_llm_context():
     """Test run_inference with LLMContext returns expected response for Google."""
     # Create service with mocked client
-    service = GoogleLLMService(api_key="test-key", model="gemini-2.0-flash")
+    service = GoogleLLMService(
+        api_key="test-key", settings=GoogleLLMService.Settings(model="gemini-2.0-flash")
+    )
     service._client = AsyncMock()
 
     # Setup mocks
@@ -213,7 +226,9 @@ async def test_google_run_inference_with_llm_context():
 @pytest.mark.asyncio
 async def test_google_run_inference_client_exception():
     """Test that exceptions from the Google client are propagated."""
-    service = GoogleLLMService(api_key="test-key", model="gemini-2.0-flash")
+    service = GoogleLLMService(
+        api_key="test-key", settings=GoogleLLMService.Settings(model="gemini-2.0-flash")
+    )
     service._client = AsyncMock()
 
     mock_context = MagicMock(spec=LLMContext)
@@ -238,8 +253,14 @@ async def test_aws_bedrock_run_inference_with_llm_context():
     # Create service with specific parameters
     from pipecat.services.aws.llm import AWSBedrockLLMService
 
-    params = AWSBedrockLLMService.InputParams(max_tokens=1024, temperature=0.5, top_p=0.85)
-    service = AWSBedrockLLMService(model="anthropic.claude-3-sonnet-20240229-v1:0", params=params)
+    service = AWSBedrockLLMService(
+        settings=AWSBedrockLLMService.Settings(
+            model="anthropic.claude-3-sonnet-20240229-v1:0",
+            max_tokens=1024,
+            temperature=0.5,
+            top_p=0.85,
+        )
+    )
 
     # Setup mocks
     mock_context = MagicMock(spec=LLMContext)
@@ -289,7 +310,9 @@ async def test_aws_bedrock_run_inference_with_llm_context():
 @pytest.mark.asyncio
 async def test_aws_bedrock_run_inference_client_exception():
     """Test that exceptions from the AWS Bedrock client are propagated."""
-    service = AWSBedrockLLMService(model="anthropic.claude-3-sonnet-20240229-v1:0")
+    service = AWSBedrockLLMService(
+        settings=AWSBedrockLLMService.Settings(model="anthropic.claude-3-sonnet-20240229-v1:0")
+    )
 
     mock_context = MagicMock(spec=LLMContext)
     mock_adapter = MagicMock()
@@ -319,7 +342,7 @@ async def test_aws_bedrock_run_inference_client_exception():
 async def test_openai_run_inference_system_instruction_overrides_context():
     """Test that system_instruction overrides the system message from context."""
     with patch.object(OpenAILLMService, "create_client"):
-        service = OpenAILLMService(model="gpt-4")
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
@@ -356,7 +379,7 @@ async def test_openai_run_inference_system_instruction_overrides_context():
 async def test_openai_run_inference_system_instruction_none_unchanged():
     """Test that when system_instruction is None, behavior is unchanged."""
     with patch.object(OpenAILLMService, "create_client"):
-        service = OpenAILLMService(model="gpt-4")
+        service = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-4"))
         service._client = AsyncMock()
 
         mock_context = MagicMock(spec=LLMContext)
@@ -387,7 +410,9 @@ async def test_openai_run_inference_system_instruction_none_unchanged():
 @pytest.mark.asyncio
 async def test_anthropic_run_inference_system_instruction_overrides_context():
     """Test that system_instruction overrides the system message for Anthropic."""
-    service = AnthropicLLMService(api_key="test-key", model="claude-3-sonnet-20240229")
+    service = AnthropicLLMService(
+        api_key="test-key", settings=AnthropicLLMService.Settings(model="claude-3-sonnet-20240229")
+    )
     service._client = AsyncMock()
 
     mock_context = MagicMock(spec=LLMContext)
@@ -417,7 +442,9 @@ async def test_anthropic_run_inference_system_instruction_overrides_context():
 @pytest.mark.asyncio
 async def test_anthropic_run_inference_system_instruction_none_unchanged():
     """Test that when system_instruction is None, Anthropic behavior is unchanged."""
-    service = AnthropicLLMService(api_key="test-key", model="claude-3-sonnet-20240229")
+    service = AnthropicLLMService(
+        api_key="test-key", settings=AnthropicLLMService.Settings(model="claude-3-sonnet-20240229")
+    )
     service._client = AsyncMock()
 
     mock_context = MagicMock(spec=LLMContext)
@@ -443,7 +470,9 @@ async def test_anthropic_run_inference_system_instruction_none_unchanged():
 @pytest.mark.asyncio
 async def test_google_run_inference_system_instruction_overrides_context():
     """Test that system_instruction overrides the system message for Google."""
-    service = GoogleLLMService(api_key="test-key", model="gemini-2.0-flash")
+    service = GoogleLLMService(
+        api_key="test-key", settings=GoogleLLMService.Settings(model="gemini-2.0-flash")
+    )
     service._client = AsyncMock()
 
     mock_context = MagicMock(spec=LLMContext)
@@ -475,7 +504,9 @@ async def test_google_run_inference_system_instruction_overrides_context():
 @pytest.mark.asyncio
 async def test_google_run_inference_system_instruction_none_unchanged():
     """Test that when system_instruction is None, Google behavior is unchanged."""
-    service = GoogleLLMService(api_key="test-key", model="gemini-2.0-flash")
+    service = GoogleLLMService(
+        api_key="test-key", settings=GoogleLLMService.Settings(model="gemini-2.0-flash")
+    )
     service._client = AsyncMock()
 
     mock_context = MagicMock(spec=LLMContext)
@@ -506,7 +537,9 @@ async def test_google_run_inference_system_instruction_none_unchanged():
 @pytest.mark.asyncio
 async def test_aws_bedrock_run_inference_system_instruction_overrides_context():
     """Test that system_instruction overrides the system message for AWS Bedrock."""
-    service = AWSBedrockLLMService(model="anthropic.claude-3-sonnet-20240229-v1:0")
+    service = AWSBedrockLLMService(
+        settings=AWSBedrockLLMService.Settings(model="anthropic.claude-3-sonnet-20240229-v1:0")
+    )
 
     mock_context = MagicMock(spec=LLMContext)
     mock_adapter = MagicMock()
@@ -542,7 +575,9 @@ async def test_aws_bedrock_run_inference_system_instruction_overrides_context():
 @pytest.mark.asyncio
 async def test_aws_bedrock_run_inference_system_instruction_none_unchanged():
     """Test that when system_instruction is None, AWS Bedrock behavior is unchanged."""
-    service = AWSBedrockLLMService(model="anthropic.claude-3-sonnet-20240229-v1:0")
+    service = AWSBedrockLLMService(
+        settings=AWSBedrockLLMService.Settings(model="anthropic.claude-3-sonnet-20240229-v1:0")
+    )
 
     mock_context = MagicMock(spec=LLMContext)
     mock_adapter = MagicMock()
