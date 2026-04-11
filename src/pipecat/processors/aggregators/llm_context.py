@@ -214,9 +214,9 @@ class LLMContext:
                 logged; this is intended to catch accidental use of
                 incompatible LLM-specific messages.
             truncate_large_values: If True, return deep copies of messages with
-                large values replaced by short placeholders. For standard
-                messages, known binary data (base64-encoded images, audio) is
-                fully truncated. For LLM-specific messages, long string values
+                large values shortened. For standard messages, known binary
+                data (base64-encoded images, audio) is replaced with short
+                placeholders. For LLM-specific messages, long string values
                 are truncated.
 
         Returns:
@@ -247,7 +247,7 @@ class LLMContext:
         """Return deep copies of messages with large values replaced by placeholders.
 
         For standard (universal-format) messages, the following known binary
-        patterns are fully truncated:
+        patterns are replaced with short placeholders:
 
         - ``image_url`` items with ``data:image/...`` base64 URLs
         - ``input_audio`` items with ``input_audio.data`` or ``audio`` fields
