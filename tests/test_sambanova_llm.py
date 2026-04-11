@@ -23,7 +23,9 @@ async def test_sambanova_llm_stream_closed_on_cancellation():
     See issue #3639.
     """
     with patch.object(SambaNovaLLMService, "create_client"):
-        service = SambaNovaLLMService(api_key="test-key", model="test-model")
+        service = SambaNovaLLMService(
+            api_key="test-key", settings=SambaNovaLLMService.Settings(model="test-model")
+        )
         service._client = AsyncMock()
 
         stream_closed = False
