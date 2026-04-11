@@ -126,7 +126,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         Returns:
             List of messages in a format ready for logging about OpenAI.
         """
-        return self.get_messages(context, elide_large_values=True)
+        return self.get_messages(context, truncate_large_values=True)
 
     def _from_universal_context_messages(
         self,

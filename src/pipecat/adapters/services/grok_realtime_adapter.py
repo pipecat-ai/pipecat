@@ -85,7 +85,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             List of messages with sensitive data redacted.
         """
-        return self.get_messages(context, elide_large_values=True)
+        return self.get_messages(context, truncate_large_values=True)
 
     @dataclass
     class ConvertedMessages:

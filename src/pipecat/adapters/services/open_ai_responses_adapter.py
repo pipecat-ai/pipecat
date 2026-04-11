@@ -143,7 +143,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         Returns:
             List of messages in a format ready for logging.
         """
-        return self.get_messages(context, elide_large_values=True)
+        return self.get_messages(context, truncate_large_values=True)
 
     def _convert_messages_to_input(
         self, messages: List[LLMContextMessage]

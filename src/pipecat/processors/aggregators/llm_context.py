@@ -203,7 +203,7 @@ class LLMContext:
         self,
         llm_specific_filter: Optional[str] = None,
         *,
-        elide_large_values: bool = False,
+        truncate_large_values: bool = False,
     ) -> List[LLMContextMessage]:
         """Get the current messages list.
 
@@ -213,10 +213,10 @@ class LLMContext:
                 messages. If messages end up being filtered, an error will be
                 logged; this is intended to catch accidental use of
                 incompatible LLM-specific messages.
-            elide_large_values: If True, return deep copies of messages with
+            truncate_large_values: If True, return deep copies of messages with
                 large values replaced by short placeholders. For standard
                 messages, known binary data (base64-encoded images, audio) is
-                fully elided. For LLM-specific messages, long string values
+                fully truncated. For LLM-specific messages, long string values
                 are truncated.
 
         Returns:
@@ -235,19 +235,19 @@ class LLMContext:
                     f"Attempted to use incompatible LLMSpecificMessages with LLM '{llm_specific_filter}'."
                 )
 
-        if elide_large_values:
-            messages = LLMContext._elide_large_values_from_messages(messages)
+        if truncate_large_values:
+            messages = LLMContext._truncate_large_values_from_messages(messages)
 
         return messages
 
     @staticmethod
-    def _elide_large_values_from_messages(
+    def _truncate_large_values_from_messages(
         messages: List[LLMContextMessage],
     ) -> List[LLMContextMessage]:
         """Return deep copies of messages with large values replaced by placeholders.
 
         For standard (universal-format) messages, the following known binary
-        patterns are fully elided:
+        patterns are fully truncated:
 
         - ``image_url`` items with ``data:image/...`` base64 URLs
         - ``input_audio`` items with ``input_audio.data`` or ``audio`` fields

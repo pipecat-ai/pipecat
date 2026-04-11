@@ -15,13 +15,13 @@ from pipecat.processors.aggregators.llm_context import (
 )
 
 
-class TestGetMessagesElideLargeValues(unittest.TestCase):
-    """Tests for LLMContext.get_messages(elide_large_values=True)."""
+class TestGetMessagesTruncateLargeValues(unittest.TestCase):
+    """Tests for LLMContext.get_messages(truncate_large_values=True)."""
 
     # -- Standard messages: binary elision -----------------------------------
 
     def test_default_preserves_all_data(self):
-        """elide_large_values defaults to False, preserving all data."""
+        """truncate_large_values defaults to False, preserving all data."""
         messages = [
             {
                 "role": "user",
@@ -57,7 +57,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(result[0]["content"][0]["text"], "Describe this image")
         self.assertEqual(result[0]["content"][1]["image_url"]["url"], "data:image/...")
@@ -76,7 +76,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(
             result[0]["content"][0]["image_url"]["url"],
@@ -98,7 +98,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(result[0]["content"][1]["input_audio"]["data"], "...")
         self.assertEqual(result[0]["content"][1]["input_audio"]["format"], "wav")
@@ -115,7 +115,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(result[0]["content"][0]["audio"], "...")
         self.assertEqual(result[0]["content"][1]["audio"], "...")
@@ -130,7 +130,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(result[0]["data"], "...")
         self.assertEqual(result[0]["mime_type"], "image/png")
@@ -154,7 +154,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(result[0]["content"][0]["text"], "Here is an image and audio")
         self.assertEqual(result[0]["content"][1]["image_url"]["url"], "data:image/...")
@@ -168,7 +168,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             {"role": "assistant", "content": "Hi there!"},
         ]
         context = LLMContext(messages=messages)
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(result, messages)
 
@@ -187,7 +187,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        _ = context.get_messages(elide_large_values=True)
+        _ = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(
             context.get_messages()[0]["content"][0]["image_url"]["url"],
@@ -216,7 +216,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             }
         ]
         context = LLMContext(messages=messages)
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(result[0]["content"][0]["image_url"]["url"], "data:image/...")
         self.assertEqual(result[0]["content"][1]["image_url"]["url"], "data:image/...")
@@ -226,7 +226,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
         )
 
     def test_works_with_llm_specific_filter(self):
-        """elide_large_values works together with llm_specific_filter."""
+        """truncate_large_values works together with llm_specific_filter."""
         adapter = OpenAILLMAdapter()
         std_msg = {
             "role": "user",
@@ -242,7 +242,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
         )
         context = LLMContext(messages=[std_msg, specific_msg])
 
-        result = context.get_messages("openai", elide_large_values=True)
+        result = context.get_messages("openai", truncate_large_values=True)
 
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["content"][0]["image_url"]["url"], "data:image/...")
@@ -253,7 +253,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
             {"role": "user", "content": "Just a string"},
         ]
         context = LLMContext(messages=messages)
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(result[0]["content"], "Just a string")
 
@@ -265,7 +265,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
         specific_msg = LLMSpecificMessage(llm="anthropic", message=inner)
         context = LLMContext(messages=[specific_msg])
 
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         self.assertIsInstance(result[0], LLMSpecificMessage)
         self.assertEqual(result[0].message["type"], "thought")
@@ -278,7 +278,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
         specific_msg = LLMSpecificMessage(llm="anthropic", message=inner)
         context = LLMContext(messages=[specific_msg])
 
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         msg = result[0].message
         self.assertEqual(msg["type"], "thought")
@@ -298,7 +298,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
         specific_msg = LLMSpecificMessage(llm="google", message=inner)
         context = LLMContext(messages=[specific_msg])
 
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         msg = result[0].message
         self.assertEqual(msg["type"], "thought_signature")
@@ -311,7 +311,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
         specific_msg = LLMSpecificMessage(llm="test", message=inner)
         context = LLMContext(messages=[specific_msg])
 
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         msg = result[0].message
         self.assertEqual(msg["items"][0], "short")
@@ -323,7 +323,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
         specific_msg = LLMSpecificMessage(llm="test", message=inner)
         context = LLMContext(messages=[specific_msg])
 
-        result = context.get_messages(elide_large_values=True)
+        result = context.get_messages(truncate_large_values=True)
 
         msg = result[0].message
         self.assertEqual(msg["count"], 42)
@@ -337,7 +337,7 @@ class TestGetMessagesElideLargeValues(unittest.TestCase):
         specific_msg = LLMSpecificMessage(llm="anthropic", message=inner)
         context = LLMContext(messages=[specific_msg])
 
-        _ = context.get_messages(elide_large_values=True)
+        _ = context.get_messages(truncate_large_values=True)
 
         self.assertEqual(specific_msg.message["signature"], long_sig)
 
