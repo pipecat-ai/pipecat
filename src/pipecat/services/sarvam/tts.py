@@ -621,6 +621,7 @@ class SarvamHttpTTSService(TTSService):
                     return
 
                 response_data = await response.json()
+                logger.debug(f"Received response: status={response}")
 
             await self.start_tts_usage_metrics(text)
 
@@ -1148,11 +1149,16 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _receive_messages(self):
         """Receive and process messages from Sarvam WebSocket."""
+        last_logged_context_id = None
         async for message in self._get_websocket():
             if isinstance(message, str):
                 msg = json.loads(message)
                 context_id = self.get_active_audio_context_id()
                 if msg.get("type") == "audio":
+                    if context_id != last_logged_context_id:
+                        request_id = msg.get("data", {}).get("request_id", "N/A")
+                        logger.debug(f"TTS request_id={request_id}, context_id={context_id}")
+                        last_logged_context_id = context_id
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
