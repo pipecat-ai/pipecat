@@ -621,7 +621,6 @@ class SarvamHttpTTSService(TTSService):
                     return
 
                 response_data = await response.json()
-                logger.debug(f"Received response: status={response}")
 
             await self.start_tts_usage_metrics(text)
 
