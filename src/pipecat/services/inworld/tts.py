@@ -41,9 +41,7 @@ from pipecat import version as pipecat_version
 
 USER_AGENT = f"pipecat/{pipecat_version()}"
 
-# Regex for stripping all non-word characters when comparing aligned words to
-# original text. Apostrophes (straight and curly) are also stripped so that
-# contractions like "don't" and "don\u2019t" compare as equal.
+# Strips non-word chars for punctuation-insensitive word comparison.
 _PUNCT_RE = re.compile(r"[^\w]")
 
 from pydantic import BaseModel
