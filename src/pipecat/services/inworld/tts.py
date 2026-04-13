@@ -16,6 +16,7 @@ Inworld’s text-to-speech (TTS) models offer ultra-realistic, context-aware spe
 import asyncio
 import base64
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import (
@@ -39,6 +40,12 @@ from loguru import logger
 from pipecat import version as pipecat_version
 
 USER_AGENT = f"pipecat/{pipecat_version()}"
+
+# Regex for stripping all non-word characters when comparing aligned words to
+# original text. Apostrophes (straight and curly) are also stripped so that
+# contractions like "don't" and "don\u2019t" compare as equal.
+_PUNCT_RE = re.compile(r"[^\w]")
+
 from pydantic import BaseModel
 
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
@@ -94,6 +101,48 @@ class InworldTTSSettings(TTSSettings):
         if isinstance(nested, dict):
             flat.setdefault("speaking_rate", nested.get("speakingRate"))
         return super().from_mapping(flat)
+
+
+def _restore_punctuation(
+    aligned_words: List[str],
+    original_tokens: List[str],
+    start_idx: int = 0,
+) -> Tuple[List[str], int]:
+    """Map aligned words back to original text tokens to restore punctuation.
+
+    Inworld's word alignment returns tokens with inconsistent punctuation
+    (varies by model and word position). This maps each aligned word to its
+    corresponding original whitespace-delimited token by comparing stripped
+    forms, then returns the original token which carries canonical punctuation.
+
+    Falls back to the bare aligned word when no match is found (e.g. number
+    expansion, hyphenated word splits).
+
+    Args:
+        aligned_words: Words from Inworld's wordAlignment response.
+        original_tokens: The original text split by whitespace.
+        start_idx: Cursor position in original_tokens to resume from.
+
+    Returns:
+        Tuple of (restored_words, new_cursor_position).
+    """
+    result: List[str] = []
+    idx = start_idx
+    for word in aligned_words:
+        stripped_word = _PUNCT_RE.sub("", word).lower()
+        matched = False
+        # Lookahead of 5 handles occasional non-spoken tokens (emojis,
+        # symbols) between spoken words without scanning the full list.
+        for j in range(idx, min(idx + 5, len(original_tokens))):
+            stripped_orig = _PUNCT_RE.sub("", original_tokens[j]).lower()
+            if stripped_orig == stripped_word:
+                result.append(original_tokens[j])
+                idx = j + 1
+                matched = True
+                break
+        if not matched:
+            result.append(word)
+    return result, idx
 
 
 class InworldHttpTTSService(TTSService):
@@ -219,6 +268,8 @@ class InworldHttpTTSService(TTSService):
 
         self._cumulative_time = 0.0
         self._current_run_had_timestamps = False
+        self._current_original_tokens: List[str] = []
+        self._current_restore_idx: int = 0
 
         # Init-only config (not runtime-updatable).
         self._audio_encoding = encoding
@@ -278,7 +329,10 @@ class InworldHttpTTSService(TTSService):
         end_times = alignment.get("wordEndTimeSeconds", [])
 
         if words and start_times and len(words) == len(start_times):
-            for i, word in enumerate(words):
+            restored, self._current_restore_idx = _restore_punctuation(
+                words, self._current_original_tokens, self._current_restore_idx
+            )
+            for i, word in enumerate(restored):
                 word_start = self._cumulative_time + start_times[i]
                 word_times.append((word, word_start))
 
@@ -302,6 +356,8 @@ class InworldHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}] (streaming={self._streaming})")
 
         self._current_run_had_timestamps = False
+        self._current_original_tokens = text.split()
+        self._current_restore_idx = 0
 
         audio_config = {
             "audioEncoding": self._audio_encoding,
@@ -686,6 +742,7 @@ class InworldTTSService(WebsocketTTSService):
         # portion that was spoken.
         self._context_texts: Dict[str, str] = {}
         self._contexts_with_timestamps: Set[str] = set()
+        self._context_text_word_idx: Dict[str, int] = {}
 
         # Init-only config (not runtime-updatable).
         self._audio_encoding = encoding
@@ -758,7 +815,9 @@ class InworldTTSService(WebsocketTTSService):
         except Exception as e:
             logger.warning(f"{self}: Failed to pre-open context: {e}")
 
-    def _calculate_word_times(self, timestamp_info: Dict[str, Any]) -> List[Tuple[str, float]]:
+    def _calculate_word_times(
+        self, timestamp_info: Dict[str, Any], context_id: Optional[str] = None
+    ) -> List[Tuple[str, float]]:
         """Calculate word timestamps from Inworld WebSocket API response.
 
         Adds cumulative time offset to maintain monotonically increasing timestamps
@@ -767,6 +826,7 @@ class InworldTTSService(WebsocketTTSService):
 
         Args:
             timestamp_info: The timestamp information from Inworld API.
+            context_id: Optional context ID for punctuation restoration.
 
         Returns:
             List of (word, timestamp) tuples with cumulative offset applied.
@@ -779,7 +839,13 @@ class InworldTTSService(WebsocketTTSService):
         end_times = alignment.get("wordEndTimeSeconds", [])
 
         if words and start_times and len(words) == len(start_times):
-            for i, word in enumerate(words):
+            original_text = self._context_texts.get(context_id, "") if context_id else ""
+            original_tokens = original_text.split()
+            start_idx = self._context_text_word_idx.get(context_id, 0) if context_id else 0
+            restored, new_idx = _restore_punctuation(words, original_tokens, start_idx)
+            if context_id:
+                self._context_text_word_idx[context_id] = new_idx
+            for i, word in enumerate(restored):
                 word_start = self._cumulative_time + start_times[i]
                 word_times.append((word, word_start))
 
@@ -834,6 +900,7 @@ class InworldTTSService(WebsocketTTSService):
         had_timestamps = context_id in self._contexts_with_timestamps
         text = self._context_texts.pop(context_id, "").strip()
         self._contexts_with_timestamps.discard(context_id)
+        self._context_text_word_idx.pop(context_id, None)
         if had_timestamps or not text:
             return
         logger.debug(f"{self}: No timestamps for context {context_id}, pushing fallback: [{text}]")
@@ -952,6 +1019,7 @@ class InworldTTSService(WebsocketTTSService):
             self._reset_generation_timing()
             self._context_texts.clear()
             self._contexts_with_timestamps.clear()
+            self._context_text_word_idx.clear()
             await self._call_event_handler("on_disconnected")
 
     async def _receive_messages(self):
@@ -1015,7 +1083,7 @@ class InworldTTSService(WebsocketTTSService):
             # timestampInfo is inside audioChunk
             timestamp_info = audio_chunk.get("timestampInfo")
             if timestamp_info:
-                word_times = self._calculate_word_times(timestamp_info)
+                word_times = self._calculate_word_times(timestamp_info, ctx_id)
                 if word_times:
                     if ctx_id:
                         self._contexts_with_timestamps.add(ctx_id)
