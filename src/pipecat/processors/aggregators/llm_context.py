@@ -16,6 +16,7 @@ service-specific adapter.
 
 import asyncio
 import base64
+import copy
 import io
 import wave
 from dataclasses import dataclass
@@ -198,7 +199,12 @@ class LLMContext:
         """
         return self.get_messages()
 
-    def get_messages(self, llm_specific_filter: Optional[str] = None) -> List[LLMContextMessage]:
+    def get_messages(
+        self,
+        llm_specific_filter: Optional[str] = None,
+        *,
+        truncate_large_values: bool = False,
+    ) -> List[LLMContextMessage]:
         """Get the current messages list.
 
         Args:
@@ -207,22 +213,110 @@ class LLMContext:
                 messages. If messages end up being filtered, an error will be
                 logged; this is intended to catch accidental use of
                 incompatible LLM-specific messages.
+            truncate_large_values: If True, return deep copies of messages with
+                large values shortened. For standard messages, known binary
+                data (base64-encoded images, audio) is replaced with short
+                placeholders. For LLM-specific messages, long string values
+                are truncated.
 
         Returns:
             List of conversation messages.
         """
         if llm_specific_filter is None:
-            return self._messages
-        filtered_messages = [
-            msg
-            for msg in self._messages
-            if not isinstance(msg, LLMSpecificMessage) or msg.llm == llm_specific_filter
-        ]
-        if len(filtered_messages) < len(self._messages):
-            logger.error(
-                f"Attempted to use incompatible LLMSpecificMessages with LLM '{llm_specific_filter}'."
-            )
-        return filtered_messages
+            messages = self._messages
+        else:
+            messages = [
+                msg
+                for msg in self._messages
+                if not isinstance(msg, LLMSpecificMessage) or msg.llm == llm_specific_filter
+            ]
+            if len(messages) < len(self._messages):
+                logger.error(
+                    f"Attempted to use incompatible LLMSpecificMessages with LLM '{llm_specific_filter}'."
+                )
+
+        if truncate_large_values:
+            messages = LLMContext._truncate_large_values_from_messages(messages)
+
+        return messages
+
+    @staticmethod
+    def _truncate_large_values_from_messages(
+        messages: List[LLMContextMessage],
+    ) -> List[LLMContextMessage]:
+        """Return deep copies of messages with large values replaced by placeholders.
+
+        For standard (universal-format) messages, the following known binary
+        patterns are replaced with short placeholders:
+
+        - ``image_url`` items with ``data:image/...`` base64 URLs
+        - ``input_audio`` items with ``input_audio.data`` or ``audio`` fields
+        - ``audio`` items with an ``audio`` field
+        - Top-level messages with a ``mime_type`` starting with ``image/``
+
+        For ``LLMSpecificMessage`` instances, long string values are truncated
+        since the internal structure is provider-specific.
+        """
+        result = []
+        for message in messages:
+            if isinstance(message, LLMSpecificMessage):
+                msg_copy = copy.deepcopy(message)
+                msg_copy.message = LLMContext._truncate_long_strings(msg_copy.message)
+                result.append(msg_copy)
+                continue
+
+            msg = copy.deepcopy(message)
+            content = msg.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    item_type = item.get("type")
+                    if item_type == "image_url":
+                        url = item.get("image_url", {}).get("url", "")
+                        if url.startswith("data:image/"):
+                            item["image_url"]["url"] = "data:image/..."
+                    elif item_type == "input_audio":
+                        if "input_audio" in item:
+                            item["input_audio"]["data"] = "..."
+                        if "audio" in item:
+                            item["audio"] = "..."
+                    elif item_type == "audio":
+                        if "audio" in item:
+                            item["audio"] = "..."
+
+            if msg.get("mime_type", "").startswith("image/"):
+                msg["data"] = "..."
+
+            result.append(msg)
+        return result
+
+    @staticmethod
+    def _truncate_long_strings(value: Any, *, max_length: int = 100) -> Any:
+        """Recursively truncate long strings in a nested structure.
+
+        Preserves the structure of dicts and lists while truncating any string
+        values that exceed ``max_length``.
+
+        Args:
+            value: The value to process (dict, list, str, or other).
+            max_length: Strings longer than this are truncated.
+
+        Returns:
+            A copy of the structure with long strings truncated.
+        """
+        if isinstance(value, str):
+            if len(value) > max_length:
+                return f"{value[:max_length]}...({len(value)} chars)"
+            return value
+        elif isinstance(value, dict):
+            return {
+                k: LLMContext._truncate_long_strings(v, max_length=max_length)
+                for k, v in value.items()
+            }
+        elif isinstance(value, list):
+            return [
+                LLMContext._truncate_long_strings(item, max_length=max_length) for item in value
+            ]
+        return value
 
     @property
     def tools(self) -> ToolsSchema | NotGiven:
