@@ -6,6 +6,7 @@
 
 from .base_user_turn_start_strategy import BaseUserTurnStartStrategy, UserTurnStartedParams
 from .external_user_turn_start_strategy import ExternalUserTurnStartStrategy
+from .krisp_viva_ip_user_turn_start_strategy import KrispVivaIPUserTurnStartStrategy
 from .min_words_user_turn_start_strategy import MinWordsUserTurnStartStrategy
 from .transcription_user_turn_start_strategy import TranscriptionUserTurnStartStrategy
 from .vad_user_turn_start_strategy import VADUserTurnStartStrategy
@@ -14,6 +15,7 @@ from .wake_phrase_user_turn_start_strategy import WakePhraseUserTurnStartStrateg
 __all__ = [
     "BaseUserTurnStartStrategy",
     "ExternalUserTurnStartStrategy",
+    "KrispVivaIPUserTurnStartStrategy",
     "MinWordsUserTurnStartStrategy",
     "TranscriptionUserTurnStartStrategy",
     "UserTurnStartedParams",
