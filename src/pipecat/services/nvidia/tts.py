@@ -413,6 +413,7 @@ class NvidiaTTSService(TTSService):
         while True:
             item = await state.response_queue.get()
             if item is None:
+                await self.remove_audio_context(state.context_id)
                 break
             if isinstance(item, Exception):
                 # Treat stream exceptions as terminal for this stream. Once
