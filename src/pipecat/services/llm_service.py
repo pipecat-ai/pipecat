@@ -725,7 +725,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 logger.warning(
                     f"{self} is calling '{function_call.function_name}', but it's not registered."
                 )
-                continue
+                item = FunctionCallRegistryItem(
+                    function_name=function_call.function_name,
+                    handler=self._missing_function_call_handler,
+                    cancel_on_interruption=True,
+                )
 
             runner_items.append(
                 FunctionCallRunnerItem(
@@ -782,12 +786,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self._sequential_runner_queue.put(runner_item)
 
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
-        if runner_item.function_name in self._functions.keys():
-            item = self._functions[runner_item.function_name]
-        elif None in self._functions.keys():
-            item = self._functions[None]
-        else:
-            return
+        item = runner_item.registry_item
 
         logger.debug(
             f"{self} Calling function [{runner_item.function_name}:{runner_item.tool_call_id}] with arguments {runner_item.arguments}"
@@ -893,6 +892,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         finally:
             if timeout_task and not timeout_task.done():
                 await self.cancel_task(timeout_task)
+
+    async def _missing_function_call_handler(self, params: FunctionCallParams):
+        """Return a terminal tool result when the LLM calls an unknown function."""
+        await params.result_callback(
+            f"Error: function '{params.function_name}' is not registered."
+        )
 
     def _has_async_tools(self) -> bool:
         """Return True if at least one non-builtin async tool is registered."""
