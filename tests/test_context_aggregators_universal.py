@@ -580,8 +580,10 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [LLMFullResponseStartFrame(), LLMFullResponseEndFrame()]
         await run_test(aggregator, frames_to_send=frames_to_send)
         self.assertTrue(should_start)
-        self.assertIsNone(should_stop)
-        self.assertIsNone(stop_message)
+        self.assertTrue(should_stop)
+        self.assertIsNotNone(stop_message)
+        self.assertFalse(stop_message.interrupted)
+        self.assertEqual(stop_message.content, "")
 
     async def test_simple(self):
         context = LLMContext()
@@ -616,6 +618,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
+        self.assertFalse(stop_message.interrupted)
         self.assertEqual(stop_message.content, "Hello from Pipecat!")
 
     async def test_multiple(self):
@@ -653,6 +656,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
+        self.assertFalse(stop_message.interrupted)
         self.assertEqual(stop_message.content, "Hello from Pipecat!")
 
     async def test_multiple_text_with_spaces(self):
@@ -858,7 +862,9 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(should_start, 2)
         self.assertEqual(should_stop, 2)
+        self.assertTrue(stop_messages[0].interrupted)
         self.assertEqual(stop_messages[0].content, "Hello")
+        self.assertFalse(stop_messages[1].interrupted)
         self.assertEqual(stop_messages[1].content, "Hello there!")
 
     async def test_function_call(self):

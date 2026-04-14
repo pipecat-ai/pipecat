@@ -209,12 +209,16 @@ class AssistantTurnStoppedMessage:
     content. This is the aggregated transcript that is then used in the context.
 
     Parameters:
-        content: The message content/text.
+        content: The message content/text. May be empty if the LLM
+            returned zero tokens (e.g. turn was interrupted before any tokens
+            were received or pushed)
+        interrupted: Whether the assistant turn was interrupted.
         timestamp: When the assistant turn started.
 
     """
 
     content: str
+    interrupted: bool
     timestamp: str
 
 
@@ -1032,11 +1036,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
-        await self._trigger_assistant_turn_stopped()
+        await self._trigger_assistant_turn_stopped(interrupted=True)
         await self.reset()
 
     async def _handle_end_or_cancel(self, frame: Frame):
-        await self._trigger_assistant_turn_stopped()
+        await self._trigger_assistant_turn_stopped(interrupted=isinstance(frame, CancelFrame))
         if self._summarizer:
             await self._summarizer.cleanup()
 
@@ -1394,17 +1398,23 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         await self._call_event_handler("on_assistant_turn_started")
 
-    async def _trigger_assistant_turn_stopped(self):
+    async def _trigger_assistant_turn_stopped(self, *, interrupted: bool = False):
+        if not self._assistant_turn_start_timestamp:
+            return
+
         aggregation = await self.push_aggregation()
         if aggregation:
             # Strip turn completion markers from the transcript
-            content = self._maybe_strip_turn_completion_markers(aggregation)
-            message = AssistantTurnStoppedMessage(
-                content=content, timestamp=self._assistant_turn_start_timestamp
-            )
-            await self._call_event_handler("on_assistant_turn_stopped", message)
+            aggregation = self._maybe_strip_turn_completion_markers(aggregation)
 
-            self._assistant_turn_start_timestamp = ""
+        message = AssistantTurnStoppedMessage(
+            content=aggregation,
+            interrupted=interrupted,
+            timestamp=self._assistant_turn_start_timestamp,
+        )
+        await self._call_event_handler("on_assistant_turn_stopped", message)
+
+        self._assistant_turn_start_timestamp = ""
 
     def _maybe_strip_turn_completion_markers(self, text: str) -> str:
         """Strip turn completion markers from assistant transcript.
