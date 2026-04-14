@@ -96,7 +96,7 @@ class TestReson8STTServiceBuildUrl(unittest.TestCase):
         service._sample_rate = 16000
         service._settings = Reson8STTSettings(
             model=None,
-            language=None,
+            language="en",
             include_timestamps=True,
             include_words=True,
             include_confidence=True,
@@ -104,6 +104,7 @@ class TestReson8STTServiceBuildUrl(unittest.TestCase):
             custom_model_id="model-123",
         )
         url = service._build_ws_url()
+        assert "language=en" in url
         assert "include_timestamps=true" in url
         assert "include_words=true" in url
         assert "include_confidence=true" in url
@@ -142,6 +143,39 @@ class TestReson8STTServiceBuildUrl(unittest.TestCase):
         url = service._build_ws_url()
         assert "custom_model_id=my-custom-model" in url
         assert "include_interim" not in url
+
+    def test_url_with_language(self):
+        service = Reson8STTService.__new__(Reson8STTService)
+        service._api_url = "https://api.reson8.dev"
+        service._sample_rate = 16000
+        service._settings = Reson8STTSettings(
+            model=None,
+            language="nl",
+            include_timestamps=None,
+            include_words=None,
+            include_confidence=None,
+            include_interim=True,
+            custom_model_id=None,
+        )
+        url = service._build_ws_url()
+        assert "language=nl" in url
+        assert "include_interim=true" in url
+
+    def test_url_without_language(self):
+        service = Reson8STTService.__new__(Reson8STTService)
+        service._api_url = "https://api.reson8.dev"
+        service._sample_rate = 16000
+        service._settings = Reson8STTSettings(
+            model=None,
+            language=None,
+            include_timestamps=None,
+            include_words=None,
+            include_confidence=None,
+            include_interim=None,
+            custom_model_id=None,
+        )
+        url = service._build_ws_url()
+        assert "language" not in url
 
     def test_url_with_interim_only(self):
         service = Reson8STTService.__new__(Reson8STTService)

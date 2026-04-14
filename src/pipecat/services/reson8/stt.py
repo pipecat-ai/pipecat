@@ -72,6 +72,7 @@ class Reson8STTService(WebsocketSTTService):
         *,
         api_key: str,
         api_url: str = "https://api.reson8.dev",
+        language: Optional[str] = None,
         sample_rate: Optional[int] = None,
         include_timestamps: Optional[bool] = None,
         include_words: Optional[bool] = None,
@@ -86,6 +87,7 @@ class Reson8STTService(WebsocketSTTService):
         Args:
             api_key: Reson8 API key.
             api_url: Reson8 API base URL.
+            language: Language code (e.g. "en", "nl", "de", "fr").
             sample_rate: Audio sample rate.
             include_timestamps: Enable word-level timestamps.
             include_words: Enable individual word results.
@@ -100,7 +102,7 @@ class Reson8STTService(WebsocketSTTService):
             ttfs_p99_latency=ttfs_p99_latency,
             settings=Reson8STTSettings(
                 model=None,
-                language=None,
+                language=language,
                 include_timestamps=include_timestamps,
                 include_words=include_words,
                 include_confidence=include_confidence,
@@ -300,6 +302,8 @@ class Reson8STTService(WebsocketSTTService):
             "sample_rate": str(self.sample_rate),
             "channels": "1",
         }
+        if s.language:
+            params["language"] = s.language
         if s.include_timestamps:
             params["include_timestamps"] = "true"
         if s.include_words:
