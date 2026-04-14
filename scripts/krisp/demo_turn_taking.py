@@ -32,6 +32,19 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# Load .env file from the script directory if present
+script_dir = Path(__file__).parent
+_env_file = script_dir / ".env"
+if _env_file.exists():
+    with open(_env_file) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _, _val = _line.partition("=")
+                _key, _val = _key.strip(), _val.strip()
+                if _key and _key not in os.environ:
+                    os.environ[_key] = _val
+
 try:
     import numpy as np
     import soundfile as sf  # noqa: F401
@@ -42,7 +55,6 @@ except ImportError as e:
     sys.exit(1)
 
 # Add src directory to Python path for development environment
-script_dir = Path(__file__).parent
 project_root = script_dir.parent.parent
 src_dir = project_root / "src"
 if src_dir.exists() and str(src_dir) not in sys.path:
