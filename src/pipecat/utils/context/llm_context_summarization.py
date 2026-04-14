@@ -522,25 +522,19 @@ class LLMContextSummarizationUtil:
         if len(messages) <= min_messages_to_keep:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
-        # Find first system message index. LLMSpecificMessage instances are excluded because
-        # they are not dict-like and never represent a system message; they hold
-        # service-specific metadata (e.g. thinking blocks) that is always paired with a
-        # standard message.
-        first_system_index = next(
-            (
-                i
-                for i, msg in enumerate(messages)
-                if not isinstance(msg, LLMSpecificMessage) and msg.get("role") == "system"
-            ),
-            -1,
+        # Check if the first message is a system message (initial system prompt).
+        # Only messages[0] is treated as the system message to preserve — system
+        # messages at other positions are mid-conversation injections and should be
+        # included in the summarization range.
+        first_msg = messages[0] if messages else None
+        first_is_system = (
+            first_msg is not None
+            and not isinstance(first_msg, LLMSpecificMessage)
+            and first_msg.get("role") == "system"
         )
 
-        # Messages to summarize are between first system and recent messages
-        # We exclude the first system message itself
-        if first_system_index >= 0:
-            summary_start = first_system_index + 1
-        else:
-            summary_start = 0
+        # Start summarization after the initial system message if present
+        summary_start = 1 if first_is_system else 0
 
         # Get messages to keep (last N messages)
         summary_end = len(messages) - min_messages_to_keep
