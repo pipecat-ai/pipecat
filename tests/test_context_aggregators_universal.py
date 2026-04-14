@@ -893,6 +893,60 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert json.loads(context.messages[-1]["content"]) == {"conditions": "Sunny"}
 
+    async def test_function_call_empty_dict_result_triggers_llm_and_preserves_result(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallInProgressFrame(
+                    function_name="get_weather",
+                    tool_call_id="1",
+                    arguments={"location": "Los Angeles"},
+                    cancel_on_interruption=True,
+                ),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="get_weather",
+                    tool_call_id="1",
+                    arguments={"location": "Los Angeles"},
+                    result={},
+                ),
+            ],
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+        self.assertEqual(json.loads(context.messages[-1]["content"]), {})
+
+    async def test_function_call_none_result_triggers_llm_and_preserves_result(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallInProgressFrame(
+                    function_name="get_weather",
+                    tool_call_id="1",
+                    arguments={"location": "Los Angeles"},
+                    cancel_on_interruption=True,
+                ),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="get_weather",
+                    tool_call_id="1",
+                    arguments={"location": "Los Angeles"},
+                    result=None,
+                ),
+            ],
+            expected_down_frames=[],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+        self.assertIsNone(json.loads(context.messages[-1]["content"]))
+
     async def test_function_call_on_context_updated(self):
         context_updated = False
 
