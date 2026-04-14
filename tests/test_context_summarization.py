@@ -121,6 +121,62 @@ class TestContextSummarizationMixin(unittest.TestCase):
         self.assertEqual(len(result.messages), 3)
         self.assertEqual(result.last_summarized_index, 2)
 
+    def test_get_messages_to_summarize_mid_conversation_system(self):
+        """Test that mid-conversation system messages are summarized, not treated as system prompt."""
+        context = LLMContext()
+
+        # No system message at index 0
+        context.add_message({"role": "assistant", "content": "Hello, how can I help?"})
+        context.add_message({"role": "user", "content": "I need help"})
+        context.add_message({"role": "assistant", "content": "Sure thing"})
+        context.add_message({"role": "user", "content": "Thanks"})
+        context.add_message({"role": "assistant", "content": "You're welcome"})
+        # Mid-conversation system message (e.g. idle-user prompt)
+        context.add_message(
+            {"role": "system", "content": "The user has been quiet. Ask if they're still there."}
+        )
+        context.add_message({"role": "assistant", "content": "Are you still there?"})
+        context.add_message({"role": "user", "content": "Yes"})
+
+        # Keep last 2 messages
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        # Should summarize indices 0-5 (everything except last 2)
+        self.assertEqual(len(result.messages), 6)
+        self.assertEqual(result.last_summarized_index, 5)
+        # The mid-conversation system message should be included in messages to summarize
+        system_msgs = [m for m in result.messages if m.get("role") == "system"]
+        self.assertEqual(len(system_msgs), 1)
+        self.assertIn("quiet", system_msgs[0]["content"])
+
+    def test_get_messages_to_summarize_system_at_zero_and_mid_conversation(self):
+        """Test system prompt at index 0 with a mid-conversation system message."""
+        context = LLMContext()
+
+        # System prompt at index 0
+        context.add_message({"role": "system", "content": "You are a helpful assistant"})
+        context.add_message({"role": "user", "content": "Message 1"})
+        context.add_message({"role": "assistant", "content": "Response 1"})
+        context.add_message({"role": "user", "content": "Message 2"})
+        context.add_message({"role": "assistant", "content": "Response 2"})
+        # Mid-conversation system message (e.g. idle-user prompt)
+        context.add_message(
+            {"role": "system", "content": "The user has been quiet. Ask if they're still there."}
+        )
+        context.add_message({"role": "assistant", "content": "Are you still there?"})
+        context.add_message({"role": "user", "content": "Yes"})
+
+        # Keep last 2 messages
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        # Should summarize indices 1-5 (skip system at 0, keep last 2)
+        self.assertEqual(len(result.messages), 5)
+        self.assertEqual(result.last_summarized_index, 5)
+        # The mid-conversation system message should be in the summarizable range
+        system_msgs = [m for m in result.messages if m.get("role") == "system"]
+        self.assertEqual(len(system_msgs), 1)
+        self.assertIn("quiet", system_msgs[0]["content"])
+
     def test_get_messages_to_summarize_insufficient(self):
         """Test when there aren't enough messages to summarize."""
         context = LLMContext()

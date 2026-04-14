@@ -429,17 +429,16 @@ class LLMContextSummarizer(BaseObject):
         config = self._auto_config.summary_config
         messages = self._context.messages
 
-        # Find the first system message to preserve. LLMSpecificMessage instances are excluded
-        # because they are not dict-like and never represent a system message; they hold
-        # service-specific metadata (e.g. thinking blocks) that is always paired with a
-        # standard message.
-        first_system_msg = next(
-            (
-                msg
-                for msg in messages
-                if not isinstance(msg, LLMSpecificMessage) and msg.get("role") == "system"
-            ),
-            None,
+        # Only preserve the initial system message (index 0). Mid-conversation
+        # system messages are regular context, not the system prompt.
+        first_system_msg = (
+            messages[0]
+            if (
+                messages
+                and not isinstance(messages[0], LLMSpecificMessage)
+                and messages[0].get("role") == "system"
+            )
+            else None
         )
 
         # Get recent messages to keep

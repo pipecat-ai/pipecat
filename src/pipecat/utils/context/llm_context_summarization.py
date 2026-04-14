@@ -505,7 +505,7 @@ class LLMContextSummarizationUtil:
         """Determine which messages should be included in summarization.
 
         Intelligently selects messages for summarization while preserving:
-        - The first system message (defines assistant behavior)
+        - The initial system message at index 0, if present (defines assistant behavior)
         - The last N messages (maintains immediate conversation context)
         - Incomplete function call sequences (preserves tool interaction integrity)
 
@@ -522,17 +522,17 @@ class LLMContextSummarizationUtil:
         if len(messages) <= min_messages_to_keep:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
-        # Find first system message index. LLMSpecificMessage instances are excluded because
-        # they are not dict-like and never represent a system message; they hold
-        # service-specific metadata (e.g. thinking blocks) that is always paired with a
-        # standard message.
-        first_system_index = next(
-            (
-                i
-                for i, msg in enumerate(messages)
-                if not isinstance(msg, LLMSpecificMessage) and msg.get("role") == "system"
-            ),
-            -1,
+        # Only treat the very first message as the system prompt to preserve.
+        # System messages injected mid-conversation (e.g. idle-user prompts) are
+        # regular context that should be eligible for summarization.
+        first_system_index = (
+            0
+            if (
+                messages
+                and not isinstance(messages[0], LLMSpecificMessage)
+                and messages[0].get("role") == "system"
+            )
+            else -1
         )
 
         # Messages to summarize are between first system and recent messages

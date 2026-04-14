@@ -213,6 +213,53 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
 
         await summarizer.cleanup()
 
+    async def test_apply_summary_ignores_mid_conversation_system_message(self):
+        """Test that _apply_summary only preserves system message at index 0."""
+        # Replace context with one that has no system message at index 0
+        self.context.set_messages([])
+        self.context.add_message({"role": "assistant", "content": "Hello"})
+        self.context.add_message({"role": "user", "content": "Hi"})
+        self.context.add_message({"role": "assistant", "content": "How can I help?"})
+        self.context.add_message({"role": "system", "content": "The user has been quiet."})
+        self.context.add_message({"role": "assistant", "content": "Still there?"})
+        self.context.add_message({"role": "user", "content": "Yes"})
+
+        config = LLMAutoContextSummarizationConfig(
+            max_context_tokens=50,
+            summary_config=LLMContextSummaryConfig(min_messages_after_summary=2),
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config)
+        await summarizer.setup(self.task_manager)
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        await summarizer.process_frame(LLMFullResponseStartFrame())
+        self.assertIsNotNone(request_frame)
+
+        # Simulate summary result covering indices 0-3
+        summary_result = LLMContextSummaryResultFrame(
+            request_id=request_frame.request_id,
+            summary="User greeted assistant and went idle.",
+            last_summarized_index=3,
+            error=None,
+        )
+
+        await summarizer.process_frame(summary_result)
+
+        # Context should be: [summary_message] + [2 recent messages] = 3
+        # The mid-conversation system message should NOT be preserved as a system prompt
+        self.assertEqual(len(self.context.messages), 3)
+        self.assertNotEqual(self.context.messages[0].get("role"), "system")
+        self.assertIn("Conversation summary:", self.context.messages[0].get("content", ""))
+
+        await summarizer.cleanup()
+
     async def test_interruption_cancels_summarization(self):
         """Test that an interruption cancels pending summarization."""
         config = LLMAutoContextSummarizationConfig(max_context_tokens=50)
