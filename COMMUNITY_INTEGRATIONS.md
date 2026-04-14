@@ -200,6 +200,7 @@ Pipecat supports telephony provider integration using websocket connections to e
 
 - [FalImageGenService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/fal/image.py)
 - [GoogleImageGenService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/google/image.py)
+- [ReplicateImageGenService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/replicate/image.py)
 
 #### Key requirements:
 
