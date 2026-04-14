@@ -1151,6 +1151,8 @@ class SarvamTTSService(InterruptibleTTSService):
                 msg = json.loads(message)
                 context_id = self.get_active_audio_context_id()
                 if msg.get("type") == "audio":
+                    request_id = msg.get("data", {}).get("request_id", "N/A")
+                    logger.trace(f"TTS request_id={request_id}, context_id={context_id}")
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
