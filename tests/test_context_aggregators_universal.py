@@ -867,6 +867,30 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stop_messages[1].interrupted)
         self.assertEqual(stop_messages[1].content, "Hello there!")
 
+    async def test_interruption_clears_stale_function_call_state(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallsStartedFrame(
+                    function_calls=[
+                        FunctionCallFromLLM(
+                            function_name="missing_tool",
+                            tool_call_id="call_1",
+                            arguments={},
+                            context=None,
+                        )
+                    ]
+                ),
+                InterruptionFrame(),
+            ],
+            expected_down_frames=[InterruptionFrame],
+        )
+
+        self.assertFalse(aggregator.has_function_calls_in_progress)
+
     async def test_function_call(self):
         context = LLMContext()
         aggregator = LLMAssistantAggregator(context)

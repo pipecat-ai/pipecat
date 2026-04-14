@@ -242,6 +242,8 @@ class MCPClient(BaseObject):
         except Exception as e:
             error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
             logger.error(error_msg)
+            await result_callback(error_msg)
+            return
 
         response = ""
         if results:
