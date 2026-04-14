@@ -673,11 +673,11 @@ class ElevenLabsTTSService(WebsocketTTSService):
             output_format = self._output_format
             url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={str(self._auto_mode).lower()}"
 
-            if self._enable_ssml_parsing:
-                url += f"&enable_ssml_parsing={self._enable_ssml_parsing}"
+            if self._enable_ssml_parsing is not None:
+                url += f"&enable_ssml_parsing={str(self._enable_ssml_parsing).lower()}"
 
-            if self._enable_logging:
-                url += f"&enable_logging={self._enable_logging}"
+            if self._enable_logging is not None:
+                url += f"&enable_logging={str(self._enable_logging).lower()}"
 
             if self._settings.apply_text_normalization is not None:
                 url += f"&apply_text_normalization={self._settings.apply_text_normalization}"
@@ -952,6 +952,7 @@ class ElevenLabsHttpTTSService(TTSService):
         model: Optional[str] = None,
         base_url: str = "https://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
+        enable_logging: Optional[bool] = None,
         pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None,
         params: Optional[InputParams] = None,
         settings: Optional[Settings] = None,
@@ -976,6 +977,8 @@ class ElevenLabsHttpTTSService(TTSService):
 
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
+            enable_logging: Whether to enable ElevenLabs server-side logging.
+                Set to False for zero retention mode (enterprise only).
             pronunciation_dictionary_locators: List of pronunciation dictionary
                 locators to use.
             params: Additional input parameters for voice customization.
@@ -1057,6 +1060,7 @@ class ElevenLabsHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = base_url
         self._session = aiohttp_session
+        self._enable_logging = enable_logging
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
@@ -1262,6 +1266,8 @@ class ElevenLabsHttpTTSService(TTSService):
         }
         if self._settings.optimize_streaming_latency is not None:
             params["optimize_streaming_latency"] = self._settings.optimize_streaming_latency
+        if self._enable_logging is not None:
+            params["enable_logging"] = str(self._enable_logging).lower()
 
         try:
             async with self._session.post(
