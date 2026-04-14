@@ -231,6 +231,8 @@ class NvidiaSTTService(STTService):
             profanity_filter=False,
             automatic_punctuation=True,
             verbatim_transcripts=True,
+            boosted_lm_words=None,
+            boosted_lm_score=4.0,
             max_alternatives=1,
             interim_results=True,
             word_time_offsets=False,
