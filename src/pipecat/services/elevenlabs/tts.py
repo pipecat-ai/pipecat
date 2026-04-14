@@ -63,8 +63,6 @@ except ModuleNotFoundError as e:
     logger.error("In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`.")
     raise Exception(f"Missing module: {e}")
 
-ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
-
 # Models that support language codes
 # The following models are excluded as they don't support language codes:
 # - eleven_flash_v2
@@ -141,8 +139,12 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
             return "pcm_22050"
         case 24000:
             return "pcm_24000"
+        case 32000:
+            return "pcm_32000"
         case 44100:
             return "pcm_44100"
+        case 48000:
+            return "pcm_48000"
     logger.warning(
         f"ElevenLabsTTSService: No output format available for {sample_rate} sample rate"
     )
