@@ -398,6 +398,24 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
         self._cancel_pending_response: bool = False
         self._needs_drain: bool = False
 
+    async def _update_settings(self, delta):
+        """Apply a settings delta, invalidating previous_response_id state on system_instruction change.
+
+        Rationale: the OpenAI Responses API ignores the ``instructions`` field
+        when ``previous_response_id`` is set, so an in-place update to
+        ``system_instruction`` (e.g. on a multi-agent handoff) would otherwise
+        have no effect on the next turn. Clearing the optimization state forces
+        the next call to send the full context with fresh ``instructions``.
+        """
+        changed = await super()._update_settings(delta)
+        if "system_instruction" in changed:
+            logger.debug(
+                f"{self}: system_instruction changed — "
+                f"clearing previous_response_id state to force fresh instructions"
+            )
+            self._clear_previous_response_state()
+        return changed
+
     # -- WebsocketLLMService interface ----------------------------------------
 
     async def _connect_websocket(self):
