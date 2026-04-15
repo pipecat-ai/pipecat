@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN
 from pipecat.utils.tracing.service_attributes import (
+    add_function_call_span_attributes,
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
     add_openai_realtime_span_attributes,
@@ -1109,3 +1110,53 @@ def traced_openai_realtime(operation: str) -> Callable:
         return wrapper
 
     return decorator
+
+
+def traced_function_call(func: Callable) -> Callable:
+    """Trace LLM function call execution with tool-specific attributes.
+
+    Wraps ``_run_function_call`` to create a ``function_call`` span as a child
+    of the current turn span. The decorator sets start attributes
+    (``tool.function_name``, ``tool.call_id``, ``tool.arguments``) and handles
+    span lifecycle (error recording, span end). Result attributes
+    (``tool.result``, ``tool.result_status``) are set by the caller via the
+    span stored on ``self._current_function_call_span``.
+
+    Args:
+        func: The ``_run_function_call`` method to trace.
+
+    Returns:
+        Wrapped method with function-call-specific tracing.
+    """
+    if not is_tracing_available():
+        return func
+
+    @functools.wraps(func)
+    async def wrapper(self, runner_item, *args, **kwargs):
+        if not getattr(self, "_tracing_enabled", False):
+            return await func(self, runner_item, *args, **kwargs)
+
+        parent_context = _get_turn_context(self)
+        tracer = trace.get_tracer("pipecat")
+        span = tracer.start_span("function_call", context=parent_context)
+
+        args_str = json.dumps(dict(runner_item.arguments)) if runner_item.arguments else None
+        add_function_call_span_attributes(
+            span=span,
+            function_name=runner_item.function_name,
+            tool_call_id=runner_item.tool_call_id,
+            arguments=args_str,
+        )
+
+        self._current_function_call_span = span
+        try:
+            return await func(self, runner_item, *args, **kwargs)
+        except Exception as e:
+            span.set_attribute("tool.result_status", "error")
+            span.record_exception(e)
+            raise
+        finally:
+            span.end()
+            self._current_function_call_span = None
+
+    return wrapper

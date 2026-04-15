@@ -7,6 +7,7 @@
 """Testing utilities for Pipecat pipeline components."""
 
 import asyncio
+import threading
 from dataclasses import dataclass
 from typing import Awaitable, Callable, List, Optional, Sequence, Tuple
 
@@ -19,6 +20,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.utils.tracing.setup import is_tracing_available
+
+if is_tracing_available():
+    from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -244,3 +249,44 @@ async def run_test(
             assert isinstance(real, expected)
 
     return (received_down_frames, received_up_frames)
+
+
+if is_tracing_available():
+
+    class InMemorySpanExporter(SpanExporter):
+        """Simple in-memory span exporter for testing.
+
+        Collects exported spans in a thread-safe list for later inspection.
+        """
+
+        def __init__(self):
+            """Initialize the exporter."""
+            self._spans = []
+            self._lock = threading.Lock()
+
+        def export(self, spans):
+            """Export spans to memory.
+
+            Args:
+                spans: The spans to export.
+
+            Returns:
+                SpanExportResult.SUCCESS always.
+            """
+            with self._lock:
+                self._spans.extend(spans)
+            return SpanExportResult.SUCCESS
+
+        def get_finished_spans(self):
+            """Return collected spans.
+
+            Returns:
+                A copy of the collected spans list.
+            """
+            with self._lock:
+                return list(self._spans)
+
+        def clear(self):
+            """Clear collected spans."""
+            with self._lock:
+                self._spans.clear()

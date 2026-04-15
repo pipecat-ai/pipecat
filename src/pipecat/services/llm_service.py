@@ -70,6 +70,7 @@ from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
 )
+from pipecat.utils.tracing.service_decorators import traced_function_call
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -781,6 +782,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         for runner_item in runner_items:
             await self._sequential_runner_queue.put(runner_item)
 
+    @traced_function_call
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
         if runner_item.function_name in self._functions.keys():
             item = self._functions[runner_item.function_name]
@@ -828,6 +830,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             # Cancel timeout task if it exists
             if timeout_task and not timeout_task.done():
                 await self.cancel_task(timeout_task)
+
+            span = getattr(self, "_current_function_call_span", None)
+            if span and is_final:
+                span.set_attribute("tool.result", json.dumps(result) if result is not None else "")
+                span.set_attribute("tool.result_status", "success")
 
             await self.broadcast_frame(
                 FunctionCallResultFrame,
