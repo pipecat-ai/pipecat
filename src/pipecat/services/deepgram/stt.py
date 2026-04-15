@@ -443,6 +443,7 @@ class DeepgramSTTService(STTService):
 
         self._connection = None
         self._connection_task = None
+        self._connection_ready = asyncio.Event()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -451,6 +452,24 @@ class DeepgramSTTService(STTService):
             True, as Deepgram service supports metrics generation.
         """
         return True
+
+    async def _do_reconnect(self):
+        """Disconnect and reconnect to Deepgram, waiting until ready.
+
+        Called by ``STTService._reconnect()`` inside the reconnecting guard.
+        Unlike ``WebsocketSTTService``, Deepgram's ``_connect()`` only
+        launches a background task — the actual WebSocket handshake happens
+        asynchronously. This method waits for ``_connection_ready`` to be set
+        before returning so that buffered audio frames are replayed only after
+        the new connection can accept them.
+
+        Raises:
+            asyncio.TimeoutError: If the connection is not established within
+                05 seconds.
+        """
+        await self._disconnect()
+        await self._connect()
+        await asyncio.wait_for(self._connection_ready.wait(), timeout=5.0)
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed."""
@@ -463,9 +482,7 @@ class DeepgramSTTService(STTService):
         if isinstance(self._settings, self.Settings):
             self._settings._sync_extra_to_fields()
 
-        if self._connection:
-            await self._disconnect()
-            await self._connect()
+        await self._request_reconnect()
 
         return changed
 
@@ -581,8 +598,11 @@ class DeepgramSTTService(STTService):
             return
 
         logger.debug("Disconnecting from Deepgram")
-        # Clear self._connection first to prevent run_stt from sending audio
-        # during the close handshake, then close gracefully on the saved ref.
+        # Clear _connection and _connection_ready first to prevent run_stt
+        # from sending audio during the close handshake, and to ensure any
+        # concurrent _do_reconnect() waiter sees a clean state before the
+        # new connection is established.
+        self._connection_ready.clear()
         connection = self._connection
         self._connection = None
 
@@ -603,6 +623,7 @@ class DeepgramSTTService(STTService):
             try:
                 async with self._client.listen.v1.connect(**connect_kwargs) as connection:
                     self._connection = connection
+                    self._connection_ready.set()
                     connection.on(EventType.MESSAGE, self._on_message)
                     connection.on(EventType.ERROR, self._on_error)
 
@@ -611,16 +632,15 @@ class DeepgramSTTService(STTService):
                     keepalive_task = self.create_task(
                         self._keepalive_handler(), f"{self}::keepalive"
                     )
-                    try:
-                        await connection.start_listening()
-                    finally:
-                        await self.cancel_task(keepalive_task)
+                    await connection.start_listening()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 logger.warning(f"{self}: Connection lost, will retry: {e}")
             finally:
+                self._connection_ready.clear()
                 self._connection = None
+                await self.cancel_task(keepalive_task)
 
     async def _keepalive_handler(self):
         """Periodically send KeepAlive frames to prevent server-side timeout.
