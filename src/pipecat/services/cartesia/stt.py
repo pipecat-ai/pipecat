@@ -323,9 +323,7 @@ class CartesiaSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        if self._websocket:
-            await self._disconnect()
-            await self._connect()
+        await self._request_reconnect()
 
         return changed
 
