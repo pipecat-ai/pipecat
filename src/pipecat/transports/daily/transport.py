@@ -2400,6 +2400,22 @@ class DailyTransport(BaseTransport):
         """
         return self._client.participant_counts()
 
+    async def send_dtmf(self, settings) -> Optional[CallClientError]:
+        """Send DTMF tones during a call.
+
+        Args:
+            settings: DTMF settings including tones and target session.
+
+        Returns:
+            error: An error description or None.
+        """
+        logger.debug(f"Sending DTMF: settings={settings}")
+
+        error = await self._client.send_dtmf(settings)
+        if error:
+            logger.error(f"Unable to send DTMF: {error}")
+        return error
+
     async def start_dialout(self, settings=None) -> Tuple[str, Optional[CallClientError]]:
         """Start a dial-out call to a phone number.
 
