@@ -9,13 +9,17 @@ import unittest
 from typing import List
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     CancelFrame,
     EndFrame,
     InterruptionFrame,
     LLMContextFrame,
     MetricsFrame,
     TTSSpeakFrame,
+    VADUserStartedSpeakingFrame,
 )
+from pipecat.observers.base_observer import FramePushed
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.observers.latency_watchdog_observer import LatencyWatchdogObserver
 from pipecat.processors.filters.identity_filter import IdentityFilter
@@ -27,6 +31,18 @@ class MockLLM(IdentityFilter):
     @property
     def name(self):
         return "MockLLM"
+
+
+class MockSTT(IdentityFilter):
+    @property
+    def name(self):
+        return "MockSTT"
+
+
+class MockTTS(IdentityFilter):
+    @property
+    def name(self):
+        return "MockTTS"
 
 
 class TestLatencyWatchdogObserver(unittest.IsolatedAsyncioTestCase):
@@ -125,6 +141,123 @@ class TestLatencyWatchdogObserver(unittest.IsolatedAsyncioTestCase):
         await run_test(processor, frames_to_send=frames_to_send, observers=[watchdog])
 
         self.assertEqual(len(fired_events), 1)
+
+    async def test_spanning_latency(self):
+        """Test monitoring across different processors (spanning)."""
+        watchdog = LatencyWatchdogObserver(cooldown_secs=0)
+        stt = MockSTT()
+        tts = MockTTS()
+
+        fired_events = []
+
+        @watchdog.subscribe(
+            start_processor=MockSTT,
+            stop_processor=MockTTS,
+            threshold_secs=0.1,
+            start_frame=LLMContextFrame)
+        async def on_slow(name, elapsed):
+            fired_events.append(name)
+
+        # 1. Arm at STT
+        await watchdog.on_push_frame(
+            FramePushed(
+                source=None,
+                destination=stt,
+                frame=LLMContextFrame(
+                    context=None),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0))
+
+        # 2. Wait for trigger
+        await asyncio.sleep(0.2)
+        self.assertIn("MockSTT -> MockTTS", fired_events)
+
+        # 3. Test disarm at TTS
+        fired_events.clear()
+        await watchdog.on_push_frame(
+            FramePushed(
+                source=None,
+                destination=stt,
+                frame=LLMContextFrame(
+                    context=None),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0))
+        await asyncio.sleep(0.05)
+        # TTS Emits TTFB
+        await watchdog.on_push_frame(
+            FramePushed(
+                source=tts,
+                destination=None,
+                frame=MetricsFrame(
+                    data=[
+                        TTFBMetricsData(
+                            processor="MockTTS",
+                            value=0.01)]),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0))
+        await asyncio.sleep(0.1)
+        self.assertEqual(len(fired_events), 0)
+
+    async def test_global_latency(self):
+        """Test monitoring from a global frame (VAD start) to bot speaking."""
+        watchdog = LatencyWatchdogObserver(cooldown_secs=0)
+
+        fired_events = []
+
+        @watchdog.subscribe(
+            start_frame=VADUserStartedSpeakingFrame,
+            stop_frame=BotStartedSpeakingFrame,
+            threshold_secs=0.1)
+        async def on_slow(name, elapsed):
+            fired_events.append(name)
+
+        # Arm with global VAD frame
+        await watchdog.on_push_frame(
+            FramePushed(
+                source=None,
+                destination=MockSTT(),
+                frame=VADUserStartedSpeakingFrame(),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0))
+
+        await asyncio.sleep(0.2)
+        self.assertEqual(len(fired_events), 1)
+
+    async def test_no_reset(self):
+        """Test that subsequent start frames are ignored (no timer reset)."""
+        watchdog = LatencyWatchdogObserver(cooldown_secs=0)
+
+        fired_events = []
+
+        @watchdog.subscribe(start_frame=VADUserStartedSpeakingFrame, threshold_secs=0.2)
+        async def on_slow(name, elapsed):
+            fired_events.append(asyncio.get_event_loop().time())
+
+        # Start at T=0
+        start_time = asyncio.get_event_loop().time()
+        await watchdog.on_push_frame(
+            FramePushed(
+                source=None,
+                destination=MockSTT(),
+                frame=VADUserStartedSpeakingFrame(),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0))
+
+        await asyncio.sleep(0.1)
+        # Send again at T=0.1. Should be IGNORED.
+        await watchdog.on_push_frame(
+            FramePushed(
+                source=None,
+                destination=MockSTT(),
+                frame=VADUserStartedSpeakingFrame(),
+                direction=FrameDirection.DOWNSTREAM,
+                timestamp=0))
+
+        await asyncio.sleep(0.15)  # T=0.25 Total
+        # If it was ignored, it fired at T=0.2.
+        # If it was reset, it wouldn't fire until T=0.3.
+        self.assertEqual(len(fired_events), 1)
+        self.assertLess(fired_events[0] - start_time, 0.25)
 
     async def test_inheritance_matching(self):
         """Test inheritance matching with a real Pipecat base class."""
