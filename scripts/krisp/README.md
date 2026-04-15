@@ -42,12 +42,12 @@ Output goes to `./demo_output/` (override with `-o`).
 
 ### 3. Interrupt Prediction Demo
 
-Demonstrates Krisp IP by comparing two modes: IP enabled (assistant stops on genuine interruption) vs IP disabled (assistant ignores interruptions).
+Compares interruption strategies (Krisp IP vs VAD-only) on an audio file. Krisp IP only triggers on genuine interruptions, while VAD triggers on any speech including backchannels.
 
 ```bash
 python demo_interrupt_prediction.py input.wav
-python demo_interrupt_prediction.py input.wav --bot-audio assistant.wav
-python demo_interrupt_prediction.py input.wav --threshold 0.6
+python demo_interrupt_prediction.py input.wav --strategy krisp-ip --strategy vad
+python demo_interrupt_prediction.py input.wav --strategy krisp-ip --threshold 0.6 -v
 ```
 
 ## Output
