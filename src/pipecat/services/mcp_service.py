@@ -8,6 +8,7 @@
 
 import json
 from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypeAlias
 
 from loguru import logger
@@ -31,6 +32,49 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters
+
+
+@dataclass
+class MCPResource:
+    """A resource fetched from an MCP server.
+
+    Represents a readable resource exposed by an MCP server, including
+    its metadata and content. Text resources contain their content in
+    the ``text`` field; binary resources are base64-encoded in ``blob``.
+
+    Parameters:
+        uri: The URI identifying this resource.
+        name: Human-readable name for this resource.
+        description: Optional description of what this resource represents.
+        mime_type: The MIME type of this resource, if known.
+        text: The text content, populated for text resources.
+        blob: Base64-encoded binary content, populated for binary resources.
+    """
+
+    uri: str
+    name: str
+    description: Optional[str] = None
+    mime_type: Optional[str] = None
+    text: Optional[str] = None
+    blob: Optional[str] = None
+
+
+@dataclass
+class MCPResourceList:
+    """A collection of MCP resources with server capability metadata.
+
+    Returned by ``MCPClient.list_resources()`` to provide both the
+    resource list and information about what the server supports.
+
+    Parameters:
+        resources: The list of resource metadata (without content).
+        supports_subscribe: Whether the server supports resource subscriptions.
+        supports_list_changed: Whether the server emits list-changed notifications.
+    """
+
+    resources: List[MCPResource] = field(default_factory=list)
+    supports_subscribe: bool = False
+    supports_list_changed: bool = False
 
 
 class MCPClient(BaseObject):
@@ -193,6 +237,121 @@ class MCPClient(BaseObject):
         """
         for function_schema in tools_schema.standard_tools:
             llm.register_function(function_schema.name, self._tool_wrapper)
+
+    async def list_resources(self) -> MCPResourceList:
+        """List available resources from the MCP server.
+
+        Returns resource metadata (URI, name, description, MIME type)
+        without fetching the actual content. Use ``read_resource()`` or
+        ``read_all_resources()`` to retrieve content.
+
+        Requires the client to be started via ``start()`` or ``async with``.
+
+        Returns:
+            An MCPResourceList containing resource metadata and server
+            capability flags.
+
+        Raises:
+            RuntimeError: If the client is not connected.
+        """
+        session = self._ensure_connected()
+
+        caps = session.get_server_capabilities()
+        supports_subscribe = bool(caps and caps.resources and caps.resources.subscribe)
+        supports_list_changed = bool(caps and caps.resources and caps.resources.listChanged)
+
+        result = await session.list_resources()
+
+        resources = []
+        for r in result.resources:
+            resources.append(
+                MCPResource(
+                    uri=str(r.uri),
+                    name=r.name or str(r.uri),
+                    description=r.description,
+                    mime_type=r.mimeType,
+                )
+            )
+
+        logger.debug(f"Found {len(resources)} available resources")
+
+        return MCPResourceList(
+            resources=resources,
+            supports_subscribe=supports_subscribe,
+            supports_list_changed=supports_list_changed,
+        )
+
+    async def read_resource(self, uri: str) -> MCPResource:
+        """Read the content of a specific resource by URI.
+
+        Fetches the resource content from the MCP server. Text resources
+        will have their content in the ``text`` field; binary resources
+        in the ``blob`` field.
+
+        Args:
+            uri: The URI of the resource to read.
+
+        Returns:
+            An MCPResource with content populated.
+
+        Raises:
+            RuntimeError: If the client is not connected.
+        """
+        session = self._ensure_connected()
+
+        result = await session.read_resource(uri)
+
+        text = None
+        blob = None
+        mime_type = None
+        for content in result.contents:
+            mime_type = content.mimeType
+            if hasattr(content, "text"):
+                text = (text or "") + content.text
+            elif hasattr(content, "blob"):
+                blob = content.blob
+
+        logger.debug(f"Read resource '{uri}' (mime_type={mime_type})")
+
+        return MCPResource(
+            uri=str(uri),
+            name=str(uri),
+            description=None,
+            mime_type=mime_type,
+            text=text,
+            blob=blob,
+        )
+
+    async def read_all_resources(self) -> List[MCPResource]:
+        """List and read all resources from the MCP server.
+
+        Convenience method that combines ``list_resources()`` and
+        ``read_resource()`` to fetch all resources with their content
+        in a single call.
+
+        Returns:
+            A list of MCPResource objects with content populated.
+
+        Raises:
+            RuntimeError: If the client is not connected.
+        """
+        resource_list = await self.list_resources()
+        resources = []
+        for r in resource_list.resources:
+            try:
+                full = await self.read_resource(r.uri)
+                # Preserve the metadata from list_resources
+                full.name = r.name
+                full.description = r.description
+                full.mime_type = full.mime_type or r.mime_type
+                resources.append(full)
+            except Exception as e:
+                logger.warning(f"Failed to read resource '{r.uri}': {e}")
+                continue
+
+        logger.debug(f"Read {len(resources)} of {len(resource_list.resources)} resources")
+
+        return resources
 
     def _convert_mcp_schema_to_pipecat(
         self, tool_name: str, tool_schema: Dict[str, Any]
