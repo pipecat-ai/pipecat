@@ -747,11 +747,9 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
     Parameters:
         buttons: Sequence of one or more DTMF keypad buttons to send. Use
             :meth:`from_string` to build this from a string like ``"123#"``.
-        button: A single DTMF keypad entry to send.
-
-            .. deprecated:: 1.1.0
-                Use ``buttons`` instead. When only ``button`` is set, it is
-                used as a single-entry ``buttons`` list.
+        button: Convenience shortcut for sending a single DTMF keypad
+            entry. Equivalent to ``buttons=[button]``. If both ``buttons``
+            and ``button`` are provided, ``buttons`` takes precedence.
     """
 
     button: Optional[KeypadEntry] = None
@@ -1284,11 +1282,9 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
     Parameters:
         buttons: Sequence of one or more DTMF keypad buttons to send. Use
             :meth:`from_string` to build this from a string like ``"123#"``.
-        button: A single DTMF keypad entry to send.
-
-            .. deprecated:: 1.1.0
-                Use ``buttons`` instead. When only ``button`` is set, it is
-                used as a single-entry ``buttons`` list.
+        button: Convenience shortcut for sending a single DTMF keypad
+            entry. Equivalent to ``buttons=[button]``. If both ``buttons``
+            and ``button`` are provided, ``buttons`` takes precedence.
     """
 
     button: Optional[KeypadEntry] = None
