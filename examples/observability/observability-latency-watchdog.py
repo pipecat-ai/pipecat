@@ -10,7 +10,14 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMContextFrame, LLMRunFrame
+from pipecat.frames.frames import (
+    InputAudioRawFrame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMRunFrame,
+    TTSStartedFrame,
+    UserStartedSpeakingFrame,
+)
 from pipecat.observers.latency_watchdog_observer import LatencyWatchdogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -26,6 +33,9 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import LLMService
+from pipecat.services.stt_service import STTService
+from pipecat.services.tts_service import TTSService
+from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -48,6 +58,86 @@ transport_params = {
         audio_out_enabled=True,
     ),
 }
+
+
+def register_latency_observers(watchdog: LatencyWatchdogObserver) -> None:
+    """Centralize all usage examples.
+
+    Shows the three supported modes:
+
+    - per-processor: start_frame and stop_frame on the same processor class
+      (smart default: stop_processor is inferred from start_processor).
+    - spanning: start_frame on one processor, stop_frame on another — useful
+      to measure end-to-end latency across services.
+    - global: no processor filter, matches any processor in the pipeline.
+    """
+
+    # Per-processor: warn when LLM TTFB exceeds 0.5s 
+    @watchdog.subscribe(
+        start_processor=LLMService,
+        start_frame=LLMContextFrame,
+        threshold_secs=0.5,
+    )
+    async def on_slow_llm(processor_name, elapsed_secs):
+        logger.warning(f"SLOW LLM! {processor_name} exceeded threshold ({elapsed_secs}s)")
+
+    # Per-processor: critical LLM stall (3s), fallback candidate 
+    @watchdog.subscribe(
+        start_processor=LLMService,
+        start_frame=LLMContextFrame,
+        threshold_secs=3,
+    )
+    async def on_stalled_llm(processor_name, elapsed_secs):
+        logger.critical(
+            f"LLM might have crashed! {processor_name} exceeded {elapsed_secs}s. "
+            "Consider switching to fallback LLM."
+        )
+
+    # Per-processor: STT is slow to emit a first token 
+    @watchdog.subscribe(
+        start_processor=STTService,
+        start_frame=UserStartedSpeakingFrame,
+        threshold_secs=1.5,
+    )
+    async def on_slow_stt(processor_name, elapsed_secs):
+        logger.warning(f"Slow STT on {processor_name}: {elapsed_secs}s")
+
+    # Per-processor: TTS first audio is late
+    @watchdog.subscribe(
+        start_processor=TTSService,
+        start_frame=TTSStartedFrame,
+        threshold_secs=1.0,
+    )
+    async def on_slow_tts(processor_name, elapsed_secs):
+        logger.warning(f"Slow TTS on {processor_name}: {elapsed_secs}s")
+
+    # Spanning: end-to-end user-speech → LLM-done
+    @watchdog.subscribe(
+        start_processor=STTService,
+        start_frame=UserStartedSpeakingFrame,
+        stop_processor=LLMService,
+        stop_frame=LLMFullResponseEndFrame,
+        threshold_secs=4.0,
+    )
+    async def on_slow_turn(processor_name, elapsed_secs):
+        logger.warning(f"Slow end-to-end turn: {elapsed_secs}s (span ended at {processor_name})")
+
+    # Per-processor: transport input — detect slow incoming audio (network jitter)
+    @watchdog.subscribe(
+        start_processor=BaseInputTransport,
+        start_frame=InputAudioRawFrame,
+        threshold_secs=0.2,
+    )
+    async def on_slow_transport_input(processor_name, elapsed_secs):
+        logger.warning(f"Slow transport input on {processor_name}: {elapsed_secs}s")
+
+    # Global: any processor taking too long between start and TTFB
+    @watchdog.subscribe(
+        start_frame=LLMContextFrame,
+        threshold_secs=5.0,
+    )
+    async def on_global_latency(processor_name, elapsed_secs):
+        logger.error(f"Global latency breach on {processor_name}: {elapsed_secs}s")
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
@@ -76,14 +166,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     watchdog = LatencyWatchdogObserver()
-
-    @watchdog.subscribe(
-        start_processor=LLMService,
-        start_frame=LLMContextFrame,
-        threshold_secs=0.5,
-    )
-    async def on_slow_llm(processor_name, elapsed_secs):
-        logger.warning(f"SLOW LLM ! {processor_name} exceeded threshold ({elapsed_secs}s)")
+    register_latency_observers(watchdog)
 
     pipeline = Pipeline(
         [
