@@ -19,6 +19,7 @@ from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
 from loguru import logger
 from PIL import Image
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.dtmf.utils import load_dtmf_audio
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.utils import create_stream_resampler, is_silence
@@ -275,11 +276,19 @@ class BaseOutputTransport(FrameProcessor):
         Args:
             frame: The DTMF frame to write.
         """
-        dtmf_audio = await load_dtmf_audio(frame.button, sample_rate=self._sample_rate)
-        dtmf_audio_frame = OutputAudioRawFrame(
-            audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
-        )
-        await self.write_audio_frame(dtmf_audio_frame)
+        if not frame.tones:
+            return
+        for char in frame.tones:
+            try:
+                keypad_entry = KeypadEntry(char)
+            except ValueError:
+                logger.warning(f"Skipping invalid DTMF tone: {char!r}")
+                continue
+            dtmf_audio = await load_dtmf_audio(keypad_entry, sample_rate=self._sample_rate)
+            dtmf_audio_frame = OutputAudioRawFrame(
+                audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
+            )
+            await self.write_audio_frame(dtmf_audio_frame)
 
     async def send_audio(self, frame: OutputAudioRawFrame):
         """Send an audio frame downstream.

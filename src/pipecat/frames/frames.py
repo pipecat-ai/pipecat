@@ -730,13 +730,14 @@ class OutputTransportMessageFrame(DataFrame):
 
 @dataclass
 class DTMFFrame:
-    """Base class for DTMF (Dual-Tone Multi-Frequency) keypad frames.
+    """Marker base class for DTMF (Dual-Tone Multi-Frequency) keypad frames.
 
-    Parameters:
-        button: The DTMF keypad entry that was pressed.
+    Used only as a shared tag so that both input and output DTMF frames can
+    be identified via ``isinstance(frame, DTMFFrame)``. The concrete frames
+    define their own fields.
     """
 
-    button: KeypadEntry
+    pass
 
 
 @dataclass
@@ -744,12 +745,32 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
     """DTMF keypress output frame for transport queuing.
 
     A DTMF keypress output that will be queued. If your transport supports
-    multiple dial-out destinations, use the `transport_destination` field to
-    specify where the DTMF keypress should be sent.
+    multiple dial-out destinations, use the ``transport_destination`` field
+    to specify where the DTMF keypress should be sent.
+
+    Parameters:
+        tones: String of one or more DTMF tones to send (e.g. ``"1"`` or
+            ``"123#"``). Valid characters are the values of
+            :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
+        button: A single DTMF keypad entry to send.
+
+            .. deprecated:: 1.1.0
+                Use ``tones`` instead. When only ``button`` is set,
+                ``button.value`` is used as a single-tone ``tones`` string.
     """
 
+    button: Optional[KeypadEntry] = None
+    tones: Optional[str] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.tones is None and self.button is not None:
+            self.tones = self.button.value
+        if not self.tones:
+            raise ValueError(f"{self.__class__.__name__} requires `tones` or `button` to be set")
+
     def __str__(self):
-        return f"{self.name}(tone: {self.button})"
+        return f"{self.name}(tones: {self.tones})"
 
 
 #
@@ -1232,7 +1253,13 @@ class AssistantImageRawFrame(OutputImageRawFrame):
 
 @dataclass
 class InputDTMFFrame(DTMFFrame, SystemFrame):
-    """DTMF keypress input frame from transport."""
+    """DTMF keypress input frame from transport.
+
+    Parameters:
+        button: The DTMF keypad entry that was pressed.
+    """
+
+    button: KeypadEntry
 
     def __str__(self):
         return f"{self.name}(tone: {self.button.value})"
@@ -1243,11 +1270,32 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
     """DTMF keypress output frame for immediate sending.
 
     A DTMF keypress output that will be sent right away. If your transport
-    supports multiple dial-out destinations, use the `transport_destination`
+    supports multiple dial-out destinations, use the ``transport_destination``
     field to specify where the DTMF keypress should be sent.
+
+    Parameters:
+        tones: String of one or more DTMF tones to send (e.g. ``"1"`` or
+            ``"123#"``). Valid characters are the values of
+            :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
+        button: A single DTMF keypad entry to send.
+
+            .. deprecated:: 1.1.0
+                Use ``tones`` instead. When only ``button`` is set,
+                ``button.value`` is used as a single-tone ``tones`` string.
     """
 
-    pass
+    button: Optional[KeypadEntry] = None
+    tones: Optional[str] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.tones is None and self.button is not None:
+            self.tones = self.button.value
+        if not self.tones:
+            raise ValueError(f"{self.__class__.__name__} requires `tones` or `button` to be set")
+
+    def __str__(self):
+        return f"{self.name}(tones: {self.tones})"
 
 
 @dataclass
