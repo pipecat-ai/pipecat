@@ -626,6 +626,7 @@ class STTService(AIService):
         schedules a reconnect that fires as soon as ``UserStoppedSpeakingFrame``
         is received.
         """
+        logger.debug(f"{self} requesting to reconnect!")
         if self._can_reconnect:
             await self._reconnect()
         else:
