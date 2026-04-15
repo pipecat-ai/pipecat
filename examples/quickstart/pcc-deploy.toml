@@ -1,5 +1,5 @@
 agent_name = "quickstart-test"
-image = "markatdaily/quickstart-test:latest"
+image = "your_username/quickstart-test:latest"
 secret_set = "quickstart-test-secrets"
 agent_profile = "agent-1x"
 

@@ -10,6 +10,7 @@ This module provides integration with OpenAI's text-to-speech API for
 generating high-quality synthetic speech from text input.
 """
 
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Dict, Literal, Optional
 
 from loguru import logger
@@ -24,26 +25,54 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 ValidVoice = Literal[
-    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"
+    "alloy",
+    "ash",
+    "ballad",
+    "cedar",
+    "coral",
+    "echo",
+    "fable",
+    "marin",
+    "nova",
+    "onyx",
+    "sage",
+    "shimmer",
+    "verse",
 ]
 
 VALID_VOICES: Dict[str, ValidVoice] = {
     "alloy": "alloy",
     "ash": "ash",
     "ballad": "ballad",
+    "cedar": "cedar",
     "coral": "coral",
     "echo": "echo",
     "fable": "fable",
-    "onyx": "onyx",
+    "marin": "marin",
     "nova": "nova",
+    "onyx": "onyx",
     "sage": "sage",
     "shimmer": "shimmer",
     "verse": "verse",
 }
+
+
+@dataclass
+class OpenAITTSSettings(TTSSettings):
+    """Settings for OpenAI TTS service.
+
+    Parameters:
+        instructions: Instructions to guide voice synthesis behavior.
+        speed: Voice speed control (0.25 to 4.0, default 1.0).
+    """
+
+    instructions: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAITTSService(TTSService):
@@ -53,6 +82,8 @@ class OpenAITTSService(TTSService):
     Supports multiple voice models and configurable parameters for high-quality
     speech synthesis with streaming audio output.
     """
+
+    _settings: OpenAITTSSettings
 
     OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
 
@@ -101,12 +132,6 @@ class OpenAITTSService(TTSService):
                 f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
-        self.set_model_name(model)
-        self.set_voice(voice)
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-
         if instructions or speed:
             import warnings
 
@@ -118,10 +143,18 @@ class OpenAITTSService(TTSService):
                     stacklevel=2,
                 )
 
-        self._settings = {
-            "instructions": params.instructions if params else instructions,
-            "speed": params.speed if params else speed,
-        }
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=OpenAITTSSettings(
+                model=model,
+                voice=voice,
+                instructions=params.instructions if params else instructions,
+                speed=params.speed if params else speed,
+            ),
+            **kwargs,
+        )
+
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -130,15 +163,6 @@ class OpenAITTSService(TTSService):
             True, as OpenAI TTS service supports metrics generation.
         """
         return True
-
-    async def set_model(self, model: str):
-        """Set the TTS model to use.
-
-        Args:
-            model: The model name to use for text-to-speech synthesis.
-        """
-        logger.info(f"Switching TTS model to: [{model}]")
-        self.set_model_name(model)
 
     async def start(self, frame: StartFrame):
         """Start the OpenAI TTS service.
@@ -154,11 +178,12 @@ class OpenAITTSService(TTSService):
             )
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using OpenAI's TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech data.
@@ -170,16 +195,16 @@ class OpenAITTSService(TTSService):
             # Setup API parameters
             create_params = {
                 "input": text,
-                "model": self.model_name,
-                "voice": VALID_VOICES[self._voice_id],
+                "model": self._settings.model,
+                "voice": VALID_VOICES[self._settings.voice],
                 "response_format": "pcm",
             }
 
-            if self._settings["instructions"]:
-                create_params["instructions"] = self._settings["instructions"]
+            if self._settings.instructions:
+                create_params["instructions"] = self._settings.instructions
 
-            if self._settings["speed"]:
-                create_params["speed"] = self._settings["speed"]
+            if self._settings.speed:
+                create_params["speed"] = self._settings.speed
 
             async with self._client.audio.speech.with_streaming_response.create(
                 **create_params
@@ -198,12 +223,12 @@ class OpenAITTSService(TTSService):
 
                 CHUNK_SIZE = self.chunk_size
 
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
                 async for chunk in r.iter_bytes(CHUNK_SIZE):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                         yield frame
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
         except BadRequestError as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")

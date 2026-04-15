@@ -194,3 +194,7 @@ class TestSampleRateConversion:
         expected_rates = [8000, 16000, 24000, 32000, 44100, 48000]
         for rate in expected_rates:
             assert rate in KRISP_SAMPLE_RATES
+
+
+if __name__ == "__main__":
+    unittest.main()

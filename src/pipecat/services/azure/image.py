@@ -12,6 +12,7 @@ using REST endpoints for creating images from text prompts.
 
 import asyncio
 import io
+from dataclasses import dataclass
 from typing import AsyncGenerator
 
 import aiohttp
@@ -19,6 +20,16 @@ from PIL import Image
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
+from pipecat.services.settings import ImageGenSettings
+
+
+@dataclass
+class AzureImageGenSettings(ImageGenSettings):
+    """Settings for the Azure image generation service.
+
+    Parameters:
+        model: Azure image generation model identifier.
+    """
 
 
 class AzureImageGenServiceREST(ImageGenService):
@@ -49,12 +60,11 @@ class AzureImageGenServiceREST(ImageGenService):
             aiohttp_session: Shared aiohttp session for HTTP requests.
             api_version: Azure API version string. Defaults to "2023-06-01-preview".
         """
-        super().__init__()
+        super().__init__(settings=AzureImageGenSettings(model=model))
 
         self._api_key = api_key
         self._azure_endpoint = endpoint
         self._api_version = api_version
-        self.set_model_name(model)
         self._image_size = image_size
         self._aiohttp_session = aiohttp_session
 

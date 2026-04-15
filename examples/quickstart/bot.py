@@ -27,16 +27,11 @@ from loguru import logger
 print("🚀 Starting Pipecat bot...")
 print("⏳ Loading models and imports (20 seconds, first run only)\n")
 
-logger.info("Loading Local Smart Turn Analyzer V3...")
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-
-logger.info("✅ Local Smart Turn Analyzer V3 loaded")
 logger.info("Loading Silero VAD model...")
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 
 logger.info("✅ Silero VAD model loaded")
 
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 
 logger.info("Loading pipeline components...")
@@ -48,7 +43,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -56,10 +50,6 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
-    TurnAnalyzerUserTurnStopStrategy,
-)
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 logger.info("✅ All components loaded successfully!")
 
@@ -88,19 +78,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
-
-    rtvi = RTVIProcessor()
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            rtvi,  # RTVI processor
             stt,
             user_aggregator,  # User responses
             llm,  # LLM
@@ -116,7 +99,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        observers=[RTVIObserver(rtvi)],
     )
 
     @transport.event_handler("on_client_connected")
@@ -143,12 +125,10 @@ async def bot(runner_args: RunnerArguments):
         "daily": lambda: DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         ),
         "webrtc": lambda: TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         ),
     }
 

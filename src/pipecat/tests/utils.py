@@ -123,9 +123,10 @@ class QueuedFrameProcessor(FrameProcessor):
 async def run_test(
     processor: FrameProcessor,
     *,
-    frames_to_send: Sequence[Frame],
+    enable_rtvi: bool = False,
     expected_down_frames: Optional[Sequence[type]] = None,
     expected_up_frames: Optional[Sequence[type]] = None,
+    frames_to_send: Sequence[Frame],
     ignore_start: bool = True,
     observers: Optional[List[BaseObserver]] = None,
     pipeline_params: Optional[PipelineParams] = None,
@@ -139,9 +140,10 @@ async def run_test(
 
     Args:
         processor: The frame processor to test.
-        frames_to_send: Sequence of frames to send through the processor.
+        enable_rtvi: Whether RTVI should be enabled in this test.
         expected_down_frames: Expected frame types flowing downstream (optional).
         expected_up_frames: Expected frame types flowing upstream (optional).
+        frames_to_send: Sequence of frames to send through the processor.
         ignore_start: Whether to ignore StartFrames in frame validation.
         observers: Optional list of observers to attach to the pipeline.
         pipeline_params: Optional pipeline parameters.
@@ -173,9 +175,10 @@ async def run_test(
 
     task = PipelineTask(
         pipeline,
-        params=pipeline_params,
-        observers=observers,
         cancel_on_idle_timeout=False,
+        enable_rtvi=enable_rtvi,
+        observers=observers,
+        params=pipeline_params,
     )
 
     async def push_frames():

@@ -244,3 +244,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             "bold and italic",
             "Text filtering should be re-enabled",
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

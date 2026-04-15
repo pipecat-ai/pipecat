@@ -12,9 +12,7 @@ from dotenv import load_dotenv
 from google.genai.types import Content, Part
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -44,8 +42,6 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -100,7 +96,7 @@ class UserAudioCollector(FrameProcessor):
             self._user_speaking = True
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
-            self._context.add_audio_frames_message(audio_frames=self._audio_frames)
+            await self._context.add_audio_frames_message(audio_frames=self._audio_frames)
             await self._user_context_aggregator.push_frame(LLMRunFrame())
 
         elif isinstance(frame, InputAudioRawFrame):
@@ -197,24 +193,20 @@ class TranscriptionContextFixup(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -251,11 +243,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
     audio_collector = UserAudioCollector(context, user_aggregator)
     pull_transcript_out_of_llm_output = TranscriptExtractor(context)

@@ -4,7 +4,14 @@ __pycache__/
 *~
 venv
 .venv
-/.idea
+.idea
+.gradle
+.next
+next-env.d.ts
+local.properties
+*.log
+*.lock
+smart_turn_audio_log
 #*#
 
 # Distribution / Packaging
@@ -27,7 +34,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 .DS_Store
-.env
+.env*
 fly.toml
 
 # Examples

@@ -11,8 +11,6 @@ an OpenAI-compatible interface. It handles Perplexity's unique token usage
 reporting patterns while maintaining compatibility with the Pipecat framework.
 """
 
-from openai import NOT_GIVEN
-
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -66,22 +64,22 @@ class PerplexityLLMService(OpenAILLMService):
             Dictionary of parameters for the chat completion request.
         """
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "stream": True,
             "messages": params_from_context["messages"],
         }
 
         # Add OpenAI-compatible parameters if they're set
-        if self._settings["frequency_penalty"] is not NOT_GIVEN:
-            params["frequency_penalty"] = self._settings["frequency_penalty"]
-        if self._settings["presence_penalty"] is not NOT_GIVEN:
-            params["presence_penalty"] = self._settings["presence_penalty"]
-        if self._settings["temperature"] is not NOT_GIVEN:
-            params["temperature"] = self._settings["temperature"]
-        if self._settings["top_p"] is not NOT_GIVEN:
-            params["top_p"] = self._settings["top_p"]
-        if self._settings["max_tokens"] is not NOT_GIVEN:
-            params["max_tokens"] = self._settings["max_tokens"]
+        if self._settings.frequency_penalty is not None:
+            params["frequency_penalty"] = self._settings.frequency_penalty
+        if self._settings.presence_penalty is not None:
+            params["presence_penalty"] = self._settings.presence_penalty
+        if self._settings.temperature is not None:
+            params["temperature"] = self._settings.temperature
+        if self._settings.top_p is not None:
+            params["top_p"] = self._settings.top_p
+        if self._settings.max_tokens is not None:
+            params["max_tokens"] = self._settings.max_tokens
 
         return params
 

@@ -123,26 +123,29 @@ class WebsocketService(ABC):
 
     async def _maybe_try_reconnect(
         self,
-        error: Exception,
         error_message: str,
         report_error: Callable[[ErrorFrame], Awaitable[None]],
+        error: Optional[Exception] = None,
     ) -> bool:
         """Check if reconnection should be attempted and try if appropriate.
 
         Args:
-            error: The exception that occurred.
             error_message: Human-readable error message for logging.
             report_error: Callback function to report connection errors.
+            error: The exception that occurred (optional, may be None for graceful closes).
 
         Returns:
             True if should continue the receive loop, False if should break.
         """
         # Don't reconnect if we're intentionally disconnecting
         if self._disconnecting:
-            logger.warning(f"{self} error during disconnect: {error}")
+            if error:
+                logger.warning(f"{self} error during disconnect: {error}")
+            else:
+                logger.debug(f"{self} receive loop ended during disconnect")
             return False
 
-        # Log the error
+        # Log the message
         logger.warning(error_message)
 
         # Try to reconnect if enabled
@@ -167,6 +170,14 @@ class WebsocketService(ABC):
         while True:
             try:
                 await self._receive_messages()
+                # _receive_messages() returned normally. This happens when the websocket
+                # closes gracefully (server sent close frame). The async for loop over
+                # the websocket exits without raising an exception in this case.
+                # We must handle this to avoid an infinite loop.
+                message = f"{self} connection closed by server"
+                should_continue = await self._maybe_try_reconnect(message, report_error)
+                if not should_continue:
+                    break
             except ConnectionClosedOK as e:
                 # Normal closure, don't retry
                 logger.debug(f"{self} connection closed normally: {e}")
@@ -175,13 +186,13 @@ class WebsocketService(ABC):
                 # Connection closed with error (e.g., no close frame received/sent)
                 # This often indicates network issues, server problems, or abrupt disconnection
                 message = f"{self} connection closed, but with an error: {e}"
-                should_continue = await self._maybe_try_reconnect(e, message, report_error)
+                should_continue = await self._maybe_try_reconnect(message, report_error, e)
                 if not should_continue:
                     break
             except Exception as e:
                 # General error during message receiving
                 message = f"{self} error receiving messages: {e}"
-                should_continue = await self._maybe_try_reconnect(e, message, report_error)
+                should_continue = await self._maybe_try_reconnect(message, report_error, e)
                 if not should_continue:
                     break
 

@@ -62,10 +62,12 @@ class HeyGenCallbacks(BaseModel):
     """Callback handlers for HeyGen events.
 
     Parameters:
-        on_participant_connected: Called when a participant connects
-        on_participant_disconnected: Called when a participant disconnects
+        on_connected: Called when the bot connects to the LiveKit room.
+        on_participant_connected: Called when a participant connects.
+        on_participant_disconnected: Called when a participant disconnects.
     """
 
+    on_connected: Callable[[], Awaitable[None]]
     on_participant_connected: Callable[[str], Awaitable[None]]
     on_participant_disconnected: Callable[[str], Awaitable[None]]
 
@@ -251,6 +253,7 @@ class HeyGenClient:
         logger.debug(f"HeyGenClient send_interval: {self._send_interval}")
         await self._ws_connect()
         await self._livekit_connect()
+        self._call_event_callback(self._callbacks.on_connected)
 
     async def stop(self) -> None:
         """Stop the client and terminate all connections.

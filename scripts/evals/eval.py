@@ -42,7 +42,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
@@ -195,7 +198,7 @@ class EvalRunner:
 
 
 async def run_example_pipeline(script_path: Path, eval_config: EvalConfig):
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    room_url = os.getenv("DAILY_ROOM_URL")
 
     module = load_module_from_path(script_path)
 
@@ -207,7 +210,6 @@ async def run_example_pipeline(script_path: Path, eval_config: EvalConfig):
             audio_in_enabled=True,
             audio_out_enabled=True,
             video_in_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
         ),
     )
 
@@ -225,7 +227,7 @@ async def run_eval_pipeline(
 ):
     logger.info(f"Starting eval bot")
 
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    room_url = os.getenv("DAILY_ROOM_URL")
 
     transport = DailyTransport(
         room_url,
@@ -235,7 +237,6 @@ async def run_eval_pipeline(
             audio_in_enabled=True,
             audio_out_enabled=True,
             video_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=2.0)),
         ),
     )
 
@@ -309,7 +310,12 @@ async def run_eval_pipeline(
     ]
 
     context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=2.0)),
+        ),
+    )
 
     audio_buffer = AudioBufferProcessor()
 
@@ -332,6 +338,7 @@ async def run_eval_pipeline(
             audio_in_sample_rate=16000,
             audio_out_sample_rate=16000,
         ),
+        enable_rtvi=False,
         idle_timeout_secs=PIPELINE_IDLE_TIMEOUT_SECS,
     )
 

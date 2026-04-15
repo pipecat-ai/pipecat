@@ -89,6 +89,17 @@ SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
     }
 )
 
+# Latin punctuation that NLTK handles well — these need NLTK's disambiguation
+# because "." can appear in abbreviations, decimals, etc.
+_LATIN_SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset({".", "!", "?", ";", "…"})
+
+# Non-Latin sentence-ending punctuation that is always unambiguous and never needs
+# NLTK's disambiguation logic. Used as a fallback when NLTK doesn't support the
+# language (e.g., Japanese, Chinese, Korean, Hindi, Arabic).
+UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = (
+    SENTENCE_ENDING_PUNCTUATION - _LATIN_SENTENCE_ENDING_PUNCTUATION
+)
+
 StartEndTags = Tuple[str, str]
 
 
@@ -144,7 +155,17 @@ def match_endofsentence(text: str) -> int:
     # common for text to be single words, so we need to ensure
     # sentence-ending punctuation is present.
     if len(sentences) == 1 and first_sentence == text:
-        return len(text) if text and text[-1] in SENTENCE_ENDING_PUNCTUATION else 0
+        if text and text[-1] in SENTENCE_ENDING_PUNCTUATION:
+            return len(text)
+        # Fallback for languages not supported by NLTK (e.g., Japanese, Chinese,
+        # Korean, Hindi, Arabic). NLTK returned the entire text as a single
+        # sentence, and the last character is not sentence-ending punctuation
+        # (it's a lookahead character). Scan for unambiguous non-Latin sentence-
+        # ending punctuation that doesn't need NLTK's disambiguation.
+        for i, ch in enumerate(text):
+            if ch in UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION:
+                return i + 1
+        return 0
 
     # If there are multiple sentences, the first one is complete by definition
     # (NLTK found a boundary, so there must be proper punctuation)

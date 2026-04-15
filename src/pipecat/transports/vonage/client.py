@@ -18,12 +18,16 @@ from typing import Any, Awaitable, Callable, Optional, TypeVar
 import numpy as np
 from loguru import logger
 
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     StartFrame,
+    TranscriptionFrame,
+    UserAudioRawFrame,
     UserImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
@@ -36,11 +40,13 @@ from pipecat.transports.vonage.utils import (
     process_audio,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.time import time_now_iso8601
 
 try:
     import vonage_video_connector as vonage_video
     from vonage_video_connector.models import (
         AudioData,
+        CaptionsData,
         Connection,
         LoggingSettings,
         Publisher,
@@ -84,10 +90,12 @@ class VonageVideoConnectorTransportParams(TransportParams):
         session_enable_migration: Whether to enable session migration.
         audio_in_auto_subscribe: Whether to automatically subscribe to audio streams.
         video_in_auto_subscribe: Whether to automatically subscribe to video streams.
+        captions_in_auto_subscribe: Whether to automatically subscribe to captions streams.
         video_in_preferred_width: Preferred width for video input capture.
         video_in_preferred_height: Preferred height for video input capture.
         video_in_preferred_framerate: Preferred framerate for video input capture.
         clear_buffers_on_interruption: Whether to clear media buffers when an interruption frame is received.
+        captions_in_enabled: Whether to enable captions input.
     """
 
     publisher_name: str = "Bot"
@@ -99,6 +107,8 @@ class VonageVideoConnectorTransportParams(TransportParams):
     video_in_preferred_resolution: Optional[tuple[int, int]] = None
     video_in_preferred_framerate: Optional[int] = None
     clear_buffers_on_interruption: bool = True
+    captions_in_enabled: bool = False
+    captions_in_auto_subscribe: bool = False
 
 
 @dataclass
@@ -106,14 +116,16 @@ class SubscribeSettings:
     """Parameters for stream input subscription.
 
     Parameters:
-        capture_audio: Whether to subscribe to audio.
-        capture_video: Whether to subscribe to video.
+        subscribe_to_audio: Whether to subscribe to audio.
+        subscribe_to_video: Whether to subscribe to video.
+        subscribe_to_captions: Whether to subscribe to captions.
         preferred_resolution: Preferred resolution for video subscription.
         preferred_framerate: Preferred framerate for video subscription.
     """
 
     subscribe_to_audio: bool = True
     subscribe_to_video: bool = False
+    subscribe_to_captions: bool = False
     preferred_resolution: Optional[tuple[int, int]] = None
     preferred_framerate: Optional[int] = None
 
@@ -137,11 +149,14 @@ class VonageClientListener:
         on_connected: Async callback when session is connected.
         on_disconnected: Async callback when session is disconnected.
         on_error: Async callback for session errors.
-        on_audio_in: Async callback for incoming audio data.
+        on_audio_in: Async callback for incoming mixed audio data (session-level).
         on_stream_received: Async callback when a stream is received.
         on_stream_dropped: Async callback when a stream is dropped.
         on_subscriber_connected: Async callback when a subscriber connects.
         on_subscriber_disconnected: Async callback when a subscriber disconnects.
+        on_caption_text_in: Async callback when a subscriber receives caption text.
+        on_audio_in_per_subscriber: Async callback for processed per-subscriber audio frames.
+        on_video_in: Async callback for processed per-subscriber video frames.
     """
 
     on_connected: Callable[[Session], Awaitable[None]] = async_noop
@@ -152,8 +167,13 @@ class VonageClientListener:
     on_stream_dropped: Callable[[Session, Stream], Awaitable[None]] = async_noop
     on_subscriber_connected: Callable[[Subscriber], Awaitable[None]] = async_noop
     on_subscriber_disconnected: Callable[[Subscriber], Awaitable[None]] = async_noop
-    on_subscriber_video_in: Callable[[Subscriber, VideoFrame], Awaitable[None]] = async_noop
+    on_audio_in_per_subscriber: Callable[[Subscriber, UserAudioRawFrame], Awaitable[None]] = (
+        async_noop
+    )
     on_video_in: Callable[[Subscriber, UserImageRawFrame], Awaitable[None]] = async_noop
+    on_caption_text_in: Callable[
+        [Subscriber, TranscriptionFrame | InterimTranscriptionFrame], Awaitable[None]
+    ] = async_noop
 
 
 # the following StrEnum's don't use auto() to use the right capitalization
@@ -251,6 +271,8 @@ class VonageClient:
                 and params.audio_in_enabled,
                 "video_in_auto_subscribe": params.video_in_auto_subscribe
                 and params.video_in_enabled,
+                "captions_in_auto_subscribe": params.captions_in_auto_subscribe
+                and params.captions_in_enabled,
             }
         )
         # having these two settings separately to make them non-optional
@@ -268,7 +290,11 @@ class VonageClient:
         self._publisher: Optional[Publisher] = None
         self._session = Session(id=session_id)
 
+        # Session-level mixed audio gets its own resampler
         self._resampler = create_stream_resampler()
+        # Per-subscriber resamplers — stream resamplers are stateful so each
+        # audio source needs its own instance to avoid interleaved-state corruption.
+        self._subscriber_resamplers: dict[str, BaseAudioResampler] = {}
 
         self._task_manager: Optional[BaseTaskManager] = None
         self._loop_thread_id = threading.get_ident()
@@ -333,16 +359,25 @@ class VonageClient:
             await self.disconnect()
 
         if self._event_task and self._task_manager:
-            await self._task_manager.cancel_task(self._event_task)
-            await self._event_task
+            try:
+                await self._task_manager.cancel_task(self._event_task)
+                await self._event_task
+            except asyncio.CancelledError:
+                pass
             self._event_task = None
         if self._audio_task and self._task_manager:
-            await self._task_manager.cancel_task(self._audio_task)
-            await self._audio_task
+            try:
+                await self._task_manager.cancel_task(self._audio_task)
+                await self._audio_task
+            except asyncio.CancelledError:
+                pass
             self._audio_task = None
         if self._video_task and self._task_manager:
-            await self._task_manager.cancel_task(self._video_task)
-            await self._video_task
+            try:
+                await self._task_manager.cancel_task(self._video_task)
+                await self._video_task
+            except asyncio.CancelledError:
+                pass
             self._video_task = None
 
     def add_listener(self, listener: VonageClientListener) -> int:
@@ -769,13 +804,14 @@ class VonageClient:
         async def process() -> None:
             logger.info(
                 f"Subscribing to stream {stream.id} audio={params.subscribe_to_audio} "
-                f"video={params.subscribe_to_video}"
+                f"video={params.subscribe_to_video} captions={params.subscribe_to_captions} "
             )
             if not self._client.subscribe(
                 stream,
                 settings=SubscriberSettings(
                     subscribe_to_audio=params.subscribe_to_audio,
                     subscribe_to_video=params.subscribe_to_video,
+                    subscribe_to_captions=params.subscribe_to_captions,
                     video_settings=SubscriberVideoSettings(
                         preferred_resolution=(
                             VideoResolution(
@@ -792,6 +828,8 @@ class VonageClient:
                 on_connected_cb=on_connected_cb,
                 on_disconnected_cb=on_subscriber_disconnected_cb,
                 on_render_frame_cb=self._on_subscriber_video_data_cb,
+                on_audio_data_cb=self._on_subscriber_audio_data_cb,
+                on_caption_text_cb=self._on_subscriber_caption_text_cb,
             ):
                 subscribed_future.cancel()
                 raise VonageException(f"Could not subscribe to stream {stream.id}")
@@ -998,7 +1036,9 @@ class VonageClient:
 
             # if we have auto-subscribe enabled, subscribe to the stream if it hasn't been subscribed yet
             auto_subscribe = (
-                self._params.audio_in_auto_subscribe or self._params.video_in_auto_subscribe
+                self._params.audio_in_auto_subscribe
+                or self._params.video_in_auto_subscribe
+                or self._params.captions_in_auto_subscribe
             )
             if auto_subscribe and not stream.id in self._session_subscriptions:
                 await self._sdk_subscribe(
@@ -1006,6 +1046,7 @@ class VonageClient:
                     SubscribeSettings(
                         subscribe_to_audio=self._params.audio_in_auto_subscribe,
                         subscribe_to_video=self._params.video_in_auto_subscribe,
+                        subscribe_to_captions=self._params.captions_in_auto_subscribe,
                         preferred_resolution=(self._params.video_in_preferred_resolution),
                         preferred_framerate=self._params.video_in_preferred_framerate,
                     ),
@@ -1020,12 +1061,48 @@ class VonageClient:
                 self._client.unsubscribe(stream)
                 self._session_subscriptions.pop(stream.id, None)
             self._session_streams.pop(stream.id, None)
+            # Clean up per-subscriber resampler and frame counter
+            self._subscriber_resamplers.pop(stream.id, None)
 
             await self._notify_listeners(
                 lambda listener: listener.on_stream_dropped(session, stream)
             )
 
         self._sdk_event_cb_to_loop(async_cb())
+
+    def _on_subscriber_audio_data_cb(self, subscriber: Subscriber, audio_data: AudioData) -> None:
+        """Callback for incoming per-subscriber audio data."""
+        # we need to keep a copy of the audio data as it is a memory view and it will be lost when processed async later
+        stream_id = subscriber.stream.id
+        audio_frame = UserAudioRawFrame(
+            user_id=stream_id,
+            audio=audio_data.sample_buffer.tobytes(),
+            sample_rate=audio_data.sample_rate,
+            num_channels=audio_data.number_of_channels,
+        )
+
+        async def async_cb() -> None:
+            # Get or create a per-subscriber resampler — stream resamplers are
+            # stateful so each audio source needs its own instance.
+            # This must run on the main event loop thread to avoid race conditions
+            # with _on_stream_dropped_cb which also mutates _subscriber_resamplers.
+            if stream_id not in self._subscriber_resamplers:
+                self._subscriber_resamplers[stream_id] = create_stream_resampler()
+            sub_resampler = self._subscriber_resamplers[stream_id]
+
+            target_audio_props = AudioProps(
+                sample_rate=self._audio_in_sample_rate,
+                is_stereo=self._params.audio_in_channels == 2,
+            )
+            # _process_audio_if_needed preserves the concrete type via dataclasses.replace
+            proc_audio_frame: UserAudioRawFrame = await self._process_audio_if_needed(
+                audio_frame, target_audio_props, resampler=sub_resampler
+            )  # type: ignore[assignment]
+            await self._notify_listeners(
+                lambda listener: listener.on_audio_in_per_subscriber(subscriber, proc_audio_frame)
+            )
+
+        self._sdk_audio_cb_to_loop(async_cb())
 
     def _on_subscriber_video_data_cb(self, subscriber: Subscriber, frame: VideoFrame) -> None:
         """Callback for incoming per stream data for all the subscribers in the session."""
@@ -1065,7 +1142,35 @@ class VonageClient:
 
         self._sdk_video_cb_to_loop(async_cb())
 
-    async def _process_audio_if_needed(self, audio_frame: TA, target_props: AudioProps) -> TA:
+    def _on_subscriber_caption_text_cb(
+        self, subscriber: Subscriber, caption_data: CaptionsData
+    ) -> None:
+        async def async_cb() -> None:
+            pipecat_frame = (
+                TranscriptionFrame(
+                    text=caption_data.text,
+                    user_id=subscriber.stream.id,
+                    timestamp=time_now_iso8601(),
+                )
+                if caption_data.is_final
+                else InterimTranscriptionFrame(
+                    text=caption_data.text,
+                    user_id=subscriber.stream.id,
+                    timestamp=time_now_iso8601(),
+                )
+            )
+            await self._notify_listeners(
+                lambda listener: listener.on_caption_text_in(subscriber, pipecat_frame)
+            )
+
+        self._sdk_event_cb_to_loop(async_cb())
+
+    async def _process_audio_if_needed(
+        self,
+        audio_frame: TA,
+        target_props: AudioProps,
+        resampler: BaseAudioResampler | None = None,
+    ) -> TA:
         check_audio_data(audio_frame.audio, audio_frame.num_frames, audio_frame.num_channels)
 
         current_audio_props = AudioProps(
@@ -1075,7 +1180,7 @@ class VonageClient:
         if current_audio_props != target_props:
             audio_np = np.frombuffer(audio_frame.audio, dtype=np.int16)
             processed_audio_np = await process_audio(
-                self._resampler,
+                resampler or self._resampler,
                 audio_np,
                 current_audio_props,
                 target_props,

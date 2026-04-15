@@ -1,0 +1,27 @@
+{
+  "name": "pipecat-dev-skills",
+  "owner": {
+    "name": "Pipecat"
+  },
+  "metadata": {
+    "description": "Development workflow skills for contributing to the Pipecat project",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "pipecat-dev",
+      "description": "Development workflow skills for contributing to the Pipecat project",
+      "version": "1.0.0",
+      "source": "./",
+      "skills": [
+        "./.claude/skills/changelog",
+        "./.claude/skills/cleanup",
+        "./.claude/skills/code-review",
+        "./.claude/skills/docstring",
+        "./.claude/skills/pr-description",
+        "./.claude/skills/pr-submit",
+        "./.claude/skills/update-docs"
+      ]
+    }
+  ]
+}

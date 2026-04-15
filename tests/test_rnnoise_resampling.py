@@ -132,3 +132,7 @@ class TestRNNoiseResampling(unittest.IsolatedAsyncioTestCase):
             )
 
         print("Test Passed: Resampling logic verified (with mocked RNNoise).")
+
+
+if __name__ == "__main__":
+    unittest.main()

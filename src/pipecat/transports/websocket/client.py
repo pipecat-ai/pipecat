@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
@@ -298,6 +299,8 @@ class WebsocketClientInputTransport(BaseInputTransport):
             return
         if isinstance(frame, InputAudioRawFrame) and self._params.audio_in_enabled:
             await self.push_audio_frame(frame)
+        elif isinstance(frame, InputTransportMessageFrame):
+            await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
         else:
             await self.push_frame(frame)
 
@@ -468,6 +471,17 @@ class WebsocketClientTransport(BaseTransport):
 
     Provides a complete WebSocket client transport implementation with
     input and output capabilities, connection management, and event handling.
+
+    Event handlers available:
+
+    - on_connected(transport): Connected to WebSocket server
+    - on_disconnected(transport): Disconnected from WebSocket server
+
+    Example::
+
+        @transport.event_handler("on_connected")
+        async def on_connected(transport):
+            ...
     """
 
     def __init__(

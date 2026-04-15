@@ -13,7 +13,8 @@ text-to-speech API for real-time audio synthesis.
 import asyncio
 import base64
 import json
-from typing import Any, AsyncGenerator, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -34,7 +35,8 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import InterruptibleTTSService, TTSService
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -72,6 +74,21 @@ def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class NeuphonicTTSSettings(TTSSettings):
+    """Settings for Neuphonic TTS service.
+
+    Parameters:
+        speed: Speech speed multiplier. Defaults to 1.0.
+        encoding: Audio encoding format.
+        sampling_rate: Audio sample rate.
+    """
+
+    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    sampling_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class NeuphonicTTSService(InterruptibleTTSService):
     """Neuphonic real-time text-to-speech service using WebSocket streaming.
 
@@ -79,6 +96,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
     Supports interruption handling, keepalive connections, and configurable voice
     parameters for high-quality speech generation.
     """
+
+    _settings: NeuphonicTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Neuphonic TTS configuration.
@@ -100,7 +119,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
         params: Optional[InputParams] = None,
-        aggregate_sentences: Optional[bool] = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
     ):
         """Initialize the Neuphonic TTS service.
@@ -112,36 +132,41 @@ class NeuphonicTTSService(InterruptibleTTSService):
             sample_rate: Audio sample rate in Hz. Defaults to 22050.
             encoding: Audio encoding format. Defaults to "pcm_linear".
             params: Additional input parameters for TTS configuration.
-            aggregate_sentences: Whether to aggregate sentences within the TTSService.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
+        params = params or NeuphonicTTSService.InputParams()
+
         super().__init__(
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
             sample_rate=sample_rate,
+            settings=NeuphonicTTSSettings(
+                model=None,
+                language=self.language_to_service_language(params.language),
+                speed=params.speed,
+                encoding=encoding,
+                sampling_rate=sample_rate,
+                voice=voice_id,
+            ),
             **kwargs,
         )
 
-        params = params or NeuphonicTTSService.InputParams()
-
         self._api_key = api_key
         self._url = url
-        self._settings = {
-            "lang_code": self.language_to_service_language(params.language),
-            "speed": params.speed,
-            "encoding": encoding,
-            "sampling_rate": sample_rate,
-        }
-        self.set_voice(voice_id)
 
-        # Indicates if we have sent TTSStartedFrame. It will reset to False when
-        # there's an interruption or TTSStoppedFrame.
-        self._started = False
         self._cumulative_time = 0
 
         self._receive_task = None
         self._keepalive_task = None
+        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -162,15 +187,14 @@ class NeuphonicTTSService(InterruptibleTTSService):
         """
         return language_to_neuphonic_lang_code(language)
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect with new configuration."""
-        if "voice_id" in settings:
-            self.set_voice(settings["voice_id"])
-
-        await super()._update_settings(settings)
-        await self._disconnect()
-        await self._connect()
-        logger.info(f"Switching TTS to settings: [{self._settings}]")
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta and reconnect with new configuration."""
+        changed = await super()._update_settings(delta)
+        if changed:
+            await self._disconnect()
+            await self._connect()
+            logger.info(f"Switching TTS to settings: [{self._settings}]")
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the Neuphonic TTS service.
@@ -213,8 +237,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            self._started = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with special handling for speech control.
@@ -230,7 +252,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         # processing more frames until we receive a BotStoppedSpeakingFrame.
         if isinstance(frame, TTSSpeakFrame):
             await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame) and self._started:
+        elif isinstance(frame, LLMFullResponseEndFrame):
             await self.pause_processing_frames()
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.resume_processing_frames()
@@ -270,8 +292,11 @@ class NeuphonicTTSService(InterruptibleTTSService):
             logger.debug("Connecting to Neuphonic")
 
             tts_config = {
-                **self._settings,
-                "voice_id": self._voice_id,
+                "lang_code": self._settings.language,
+                "speed": self._settings.speed,
+                "encoding": self._settings.encoding,
+                "sampling_rate": self._settings.sampling_rate,
+                "voice_id": self._settings.voice,
             }
 
             query_params = []
@@ -279,7 +304,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 if value is not None:
                     query_params.append(f"{key}={value}")
 
-            url = f"{self._url}/speak/{self._settings['lang_code']}"
+            url = f"{self._url}/speak/{self._settings.language}"
             if query_params:
                 url += f"?{'&'.join(query_params)}"
 
@@ -304,7 +329,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._started = False
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -317,7 +342,9 @@ class NeuphonicTTSService(InterruptibleTTSService):
                     await self.stop_ttfb_metrics()
 
                     audio = base64.b64decode(msg["data"]["audio"])
-                    frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                    frame = TTSAudioRawFrame(
+                        audio, self.sample_rate, 1, context_id=self._context_id
+                    )
                     await self.push_frame(frame)
 
     async def _keepalive_task_handler(self):
@@ -342,11 +369,12 @@ class NeuphonicTTSService(InterruptibleTTSService):
             await self._websocket.send(json.dumps(msg))
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -358,17 +386,17 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                if not self._started:
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
-                    self._started = True
-                    self._cumulative_time = 0
+                await self.start_ttfb_metrics()
+                # Store context_id for use in _receive_messages
+                self._context_id = context_id
+                yield TTSStartedFrame(context_id=context_id)
+                self._cumulative_time = 0
 
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
@@ -384,6 +412,8 @@ class NeuphonicHttpTTSService(TTSService):
     events for streaming audio delivery. Suitable for applications that prefer
     HTTP-based communication over WebSocket connections.
     """
+
+    _settings: NeuphonicTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Neuphonic HTTP TTS configuration.
@@ -420,17 +450,24 @@ class NeuphonicHttpTTSService(TTSService):
             params: Additional input parameters for TTS configuration.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or NeuphonicHttpTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=NeuphonicTTSSettings(
+                model=None,
+                voice=voice_id,
+                language=self.language_to_service_language(params.language) or "en",
+                speed=params.speed,
+                encoding=encoding,
+                sampling_rate=sample_rate,
+            ),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._session = aiohttp_session
         self._base_url = url.rstrip("/")
-        self._lang_code = self.language_to_service_language(params.language) or "en"
-        self._speed = params.speed
-        self._encoding = encoding
-        self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -502,18 +539,19 @@ class NeuphonicHttpTTSService(TTSService):
             return None
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic streaming API.
 
         Args:
             text: The text to convert to speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech and status information.
         """
         logger.debug(f"Generating TTS: [{text}]")
 
-        url = f"{self._base_url}/sse/speak/{self._lang_code}"
+        url = f"{self._base_url}/sse/speak/{self._settings.language}"
 
         headers = {
             "X-API-KEY": self._api_key,
@@ -522,14 +560,14 @@ class NeuphonicHttpTTSService(TTSService):
 
         payload = {
             "text": text,
-            "lang_code": self._lang_code,
-            "encoding": self._encoding,
+            "lang_code": self._settings.language,
+            "encoding": self._settings.encoding,
             "sampling_rate": self.sample_rate,
-            "speed": self._speed,
+            "speed": self._settings.speed,
         }
 
-        if self._voice_id:
-            payload["voice_id"] = self._voice_id
+        if self._settings.voice:
+            payload["voice_id"] = self._settings.voice
 
         try:
             await self.start_ttfb_metrics()
@@ -542,7 +580,7 @@ class NeuphonicHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
 
                 # Process SSE stream line by line
                 async for line in response.content:
@@ -564,7 +602,9 @@ class NeuphonicHttpTTSService(TTSService):
                             audio_bytes = base64.b64decode(audio_b64)
 
                             await self.stop_ttfb_metrics()
-                            yield TTSAudioRawFrame(audio_bytes, self.sample_rate, 1)
+                            yield TTSAudioRawFrame(
+                                audio_bytes, self.sample_rate, 1, context_id=context_id
+                            )
 
                     except Exception as e:
                         yield ErrorFrame(error=f"Unknown error occurred: {e}")
@@ -578,4 +618,4 @@ class NeuphonicHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)

@@ -28,7 +28,7 @@ def check_env_variables() -> bool:
         "CARTESIA_API_KEY",
         "DEEPGRAM_API_KEY",
         "OPENAI_API_KEY",
-        "DAILY_SAMPLE_ROOM_URL",
+        "DAILY_ROOM_URL",
     ]
     for env in required_envs:
         if not os.getenv(env):

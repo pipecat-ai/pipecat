@@ -25,11 +25,15 @@ class SimpleTextAggregator(BaseTextAggregator):
     most straightforward implementation of text aggregation for TTS processing.
     """
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         """Initialize the simple text aggregator.
 
         Creates an empty text buffer ready to begin accumulating text tokens.
+
+        Args:
+            **kwargs: Additional arguments passed to BaseTextAggregator (e.g. aggregation_type).
         """
+        super().__init__(**kwargs)
         self._text = ""
         self._needs_lookahead: bool = False
 
@@ -43,19 +47,25 @@ class SimpleTextAggregator(BaseTextAggregator):
         return Aggregation(text=self._text.strip(" "), type=AggregationType.SENTENCE)
 
     async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
-        """Aggregate text and yield completed sentences.
+        """Aggregate text and yield completed aggregations.
 
-        Processes the input text character-by-character. When sentence-ending
-        punctuation is detected, it waits for non-whitespace lookahead before
-        calling NLTK. This prevents false positives like "$29." being detected
-        as a sentence when it's actually "$29.95".
+        In SENTENCE mode, processes the input text character-by-character. When
+        sentence-ending punctuation is detected, it waits for non-whitespace
+        lookahead before calling NLTK.
+
+        In TOKEN mode, yields the text immediately without buffering.
 
         Args:
             text: Text to aggregate.
 
         Yields:
-            Complete sentences as Aggregation objects.
+            Aggregation objects (sentences in SENTENCE mode, tokens in TOKEN mode).
         """
+        if self._aggregation_type == AggregationType.TOKEN:
+            if text:
+                yield Aggregation(text=text, type=AggregationType.TOKEN)
+            return
+
         # Process text character by character
         for char in text:
             self._text += char
@@ -114,11 +124,15 @@ class SimpleTextAggregator(BaseTextAggregator):
         """Flush any remaining text in the buffer.
 
         Returns any text remaining in the buffer. This is called at the end
-        of a stream to ensure all text is processed.
+        of a stream to ensure all text is processed. In TOKEN mode, returns
+        None since tokens are yielded immediately.
 
         Returns:
-            Any remaining text as a sentence, or None if buffer is empty.
+            Any remaining text as a sentence, or None if buffer is empty or in TOKEN mode.
         """
+        if self._aggregation_type == AggregationType.TOKEN:
+            return None
+
         if self._text:
             # Return whatever we have in the buffer
             result = self._text

@@ -100,3 +100,11 @@ class BaseObserver(BaseObject):
             data: The event data containing details about the frame transfer.
         """
         pass
+
+    async def on_pipeline_started(self):
+        """Called when the pipeline has fully started.
+
+        Fired after the ``StartFrame`` has been processed by all processors
+        in the pipeline, including nested ``ParallelPipeline`` branches.
+        """
+        pass

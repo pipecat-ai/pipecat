@@ -1,0 +1,236 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Example demonstrating advanced context summarization configuration.
+
+This example shows how to customize context summarization with:
+- A dedicated cheap/fast LLM for generating summaries (Gemini Flash)
+- A custom summary message template (XML tags)
+- A custom summarization prompt
+- A summarization timeout
+- The on_summary_applied event for observability
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+from loguru import logger
+
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMRunFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context_summarizer import SummaryAppliedEvent
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMAssistantAggregatorParams,
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.google import GoogleLLMService
+from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.utils.context.llm_context_summarization import (
+    LLMAutoContextSummarizationConfig,
+    LLMContextSummaryConfig,
+)
+
+load_dotenv(override=True)
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
+}
+
+# Custom summarization prompt tailored to the application
+CUSTOM_SUMMARIZATION_PROMPT = """Summarize this conversation, preserving:
+- Key decisions and agreements
+- Important facts and user preferences
+- Any pending action items or unresolved questions
+
+Be concise. Use clear, factual statements grouped by topic.
+Omit greetings, small talk, and resolved tangents."""
+
+
+# Tool functions for the LLM
+async def get_current_weather(params: FunctionCallParams):
+    """Get the current weather."""
+    logger.info("Tool called: get_current_weather")
+    await asyncio.sleep(1)  # Simulate some processing
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    logger.info("Starting bot")
+
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    )
+
+    # Primary LLM for conversation (could be any provider)
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # Dedicated cheap/fast LLM for summarization only
+    summarization_llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        model="gemini-2.5-flash",
+    )
+
+    # Register tool functions
+    llm.register_function("get_current_weather", get_current_weather)
+
+    weather_function = FunctionSchema(
+        name="get_current_weather",
+        description="Get the current weather",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+            "format": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the user's location.",
+            },
+        },
+        required=["location", "format"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function])
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate "
+                "your capabilities in a succinct way. Your output will be spoken aloud, "
+                "so avoid special characters that can't easily be spoken. Respond to what "
+                "the user said in a creative and helpful way. You have access to tools to "
+                "get the current weather - use them when relevant.\n\n"
+                "When you see a <context_summary> block, it contains a compressed summary "
+                "of earlier conversation. Use it as reference but don't mention it to the user."
+            ),
+        },
+    ]
+
+    context = LLMContext(messages, tools=tools)
+
+    # Create aggregators with custom summarization
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+        assistant_params=LLMAssistantAggregatorParams(
+            enable_auto_context_summarization=True,
+            auto_context_summarization_config=LLMAutoContextSummarizationConfig(
+                # Trigger thresholds (low values to demonstrate quickly)
+                max_context_tokens=1000,
+                max_unsummarized_messages=10,
+                summary_config=LLMContextSummaryConfig(
+                    # Summary generation
+                    target_context_tokens=800,
+                    min_messages_after_summary=2,
+                    summarization_prompt=CUSTOM_SUMMARIZATION_PROMPT,
+                    # Custom summary format - wrap in XML tags so the system
+                    # prompt can identify summaries vs. live conversation
+                    summary_message_template="<context_summary>\n{summary}\n</context_summary>",
+                    # Use a dedicated cheap LLM for summarization instead of
+                    # the primary conversation model
+                    llm=summarization_llm,
+                    # Cancel summarization if it takes longer than 60 seconds
+                    summarization_timeout=60.0,
+                ),
+            ),
+        ),
+    )
+
+    # Listen for summarization events
+    summarizer = assistant_aggregator._summarizer
+    if summarizer:
+
+        @summarizer.event_handler("on_summary_applied")
+        async def on_summary_applied(summarizer, event: SummaryAppliedEvent):
+            logger.info(
+                f"Context summarized: {event.original_message_count} messages -> "
+                f"{event.new_message_count} messages "
+                f"({event.summarized_message_count} summarized, "
+                f"{event.preserved_message_count} preserved)"
+            )
+
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,
+            user_aggregator,  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
+        ]
+    )
+
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info("Client connected")
+        # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMRunFrame()])
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info("Client disconnected")
+        await task.cancel()
+
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.run(task)
+
+
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

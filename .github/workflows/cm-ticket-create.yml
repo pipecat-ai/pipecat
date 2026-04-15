@@ -1,0 +1,49 @@
+name: APICM ticket creation
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Release Branch or Tag'
+        required: true
+        type: string
+      bundle:
+        description: 'Bundle/Version'
+        required: true
+        type: string
+      jira_project:
+        description: 'Jira Project'
+        required: true
+        type: choice
+        default: 'APICM'
+        options:
+          - APICM
+          - APICMDEV
+          - APICMQA
+      epic:
+        description: 'Epic Link (optional)'
+        required: false
+        type: string
+        default: ''
+  issue_comment: {}
+  pull_request:
+    types: [opened, edited]
+
+jobs:
+  apicm:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/apicm')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.body, '/apicm'))
+    uses: opentok/video-release-automation/.github/workflows/cm-ticket-wrapper.yml@main
+    secrets:
+      APICM_AUTOMATION_JIRA_TOKEN: ${{ secrets.APICM_AUTOMATION_JIRA_TOKEN }}
+    with:
+      event_name: ${{ github.event_name }}
+      workflow_dispatch_branch: ${{ inputs.branch }}
+      workflow_dispatch_bundle: ${{ inputs.bundle }}
+      workflow_dispatch_jira_project: ${{ inputs.jira_project }}
+      workflow_dispatch_epic: ${{ inputs.epic }}
+      pr_number: ${{ github.event.issue.number || github.event.pull_request.number }}
+      comment_body: ${{ github.event.comment.body }}
+      pr_body: ${{ github.event.pull_request.body }}

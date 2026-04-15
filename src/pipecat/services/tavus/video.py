@@ -94,6 +94,7 @@ class TavusVideoService(AIService):
         """
         await super().setup(setup)
         callbacks = TavusCallbacks(
+            on_joined=self._on_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
         )
@@ -118,6 +119,10 @@ class TavusVideoService(AIService):
         await super().cleanup()
         await self._client.cleanup()
         self._client = None
+
+    async def _on_joined(self, data):
+        """Handle bot joined the Daily room."""
+        logger.info("Tavus bot joined Daily room")
 
     async def _on_participant_left(self, participant, reason):
         """Handle participant leaving the session."""

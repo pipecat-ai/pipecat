@@ -137,3 +137,7 @@ class TestFunctionCallUserMuteStrategy(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertFalse(await strategy.process_frame(InterruptionFrame()))
+
+
+if __name__ == "__main__":
+    unittest.main()

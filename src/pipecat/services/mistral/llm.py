@@ -180,24 +180,24 @@ class MistralLLMService(OpenAILLMService):
         fixed_messages = self._apply_mistral_fixups(params_from_context["messages"])
 
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "stream": True,
             "messages": fixed_messages,
             "tools": params_from_context["tools"],
             "tool_choice": params_from_context["tool_choice"],
-            "frequency_penalty": self._settings["frequency_penalty"],
-            "presence_penalty": self._settings["presence_penalty"],
-            "temperature": self._settings["temperature"],
-            "top_p": self._settings["top_p"],
-            "max_tokens": self._settings["max_tokens"],
+            "frequency_penalty": self._settings.frequency_penalty,
+            "presence_penalty": self._settings.presence_penalty,
+            "temperature": self._settings.temperature,
+            "top_p": self._settings.top_p,
+            "max_tokens": self._settings.max_tokens,
         }
 
         # Handle Mistral-specific parameter mapping
         # Mistral uses "random_seed" instead of "seed"
-        if self._settings["seed"]:
-            params["random_seed"] = self._settings["seed"]
+        if self._settings.seed:
+            params["random_seed"] = self._settings.seed
 
         # Add any extra parameters
-        params.update(self._settings["extra"])
+        params.update(self._settings.extra)
 
         return params

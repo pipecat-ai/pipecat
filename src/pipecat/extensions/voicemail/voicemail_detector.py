@@ -368,7 +368,7 @@ class ClassificationProcessor(FrameProcessor):
             await self._voicemail_notifier.notify()  # Clear buffered TTS frames
 
             # Interrupt the current pipeline to stop any ongoing processing
-            await self.push_interruption_task_frame_and_wait()
+            await self.broadcast_interruption()
 
             # Set the voicemail event to trigger the voicemail handler
             self._voicemail_event.clear()

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,7 +10,6 @@ import numpy as np
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, InputImageRawFrame, LLMRunFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -22,14 +21,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -41,7 +37,6 @@ transport_params = {
         video_in_enabled=True,
         video_out_enabled=True,
         video_out_is_live=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -50,7 +45,6 @@ transport_params = {
         video_in_enabled=True,
         video_out_enabled=True,
         video_out_is_live=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -118,21 +112,13 @@ async def run_bot(pipecat_transport):
     context = LLMContext(messages)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
-
-    # RTVI events for Pipecat client UI
-    rtvi = RTVIProcessor()
 
     pipeline = Pipeline(
         [
             pipecat_transport.input(),
             user_aggregator,
-            rtvi,
             llm,  # LLM
             EdgeDetectionProcessor(
                 pipecat_transport._params.video_out_width,
@@ -149,13 +135,11 @@ async def run_bot(pipecat_transport):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        observers=[RTVIObserver(rtvi)],
     )
 
-    @rtvi.event_handler("on_client_ready")
+    @task.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         logger.info("Pipecat client ready.")
-        await rtvi.set_bot_ready()
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
 

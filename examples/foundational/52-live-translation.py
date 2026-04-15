@@ -10,9 +10,8 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -30,30 +29,25 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -88,8 +82,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
                 start=[TranscriptionUserTurnStartStrategy(enable_interruptions=False)],
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())],
             ),
+            vad_analyzer=SileroVADAnalyzer(),
         ),
     )
 
@@ -117,6 +111,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        await task.queue_frames(
+            [
+                TTSSpeakFrame(
+                    text="Hello, welcome to live translation. Everything you say will be automatically translated to Spanish. Let's begin!",
+                    append_to_context=True,
+                ),
+            ]
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

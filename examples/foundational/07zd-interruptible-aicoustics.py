@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.filters.aic_filter import AICFilter
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -32,17 +31,8 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
-
-
-# Create audio buffer processor so we can hear the audio fitler results.
-audiobuffer = AudioBufferProcessor(
-    num_channels=2,  # 1 for mono, 2 for stereo (user left, bot right)
-    enable_turn_audio=False,  # Enable per-turn audio recording
-)
 
 
 def _create_aic_filter() -> AICFilter:
@@ -50,38 +40,33 @@ def _create_aic_filter() -> AICFilter:
 
     return AICFilter(
         license_key=license_key,
-        enhancement_level=0.5,
+        model_id="quail-vf-2.0-l-16khz",
     )
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+aic_filter = _create_aic_filter()
+aic_vad_analyzer = aic_filter.create_vad_analyzer(
+    speech_hold_duration=0.05, minimum_speech_duration=0.0, sensitivity=6.0
+)
+
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
-    "daily": lambda: (
-        lambda aic: DailyParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=aic.create_vad_analyzer(lookback_buffer_size=6.0, sensitivity=6.0),
-            audio_in_filter=aic,
-        )
-    )(_create_aic_filter()),
-    "twilio": lambda: (
-        lambda aic: FastAPIWebsocketParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=aic.create_vad_analyzer(lookback_buffer_size=6.0, sensitivity=6.0),
-            audio_in_filter=aic,
-        )
-    )(_create_aic_filter()),
-    "webrtc": lambda: (
-        lambda aic: TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=aic.create_vad_analyzer(lookback_buffer_size=6.0, sensitivity=6.0),
-            audio_in_filter=aic,
-        )
-    )(_create_aic_filter()),
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
 }
 
 
@@ -107,11 +92,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=aic_vad_analyzer),
+    )
+
+    # Create audio buffer processor so we can hear the audio fitler results.
+    audiobuffer = AudioBufferProcessor(
+        num_channels=2,  # 1 for mono, 2 for stereo (user left, bot right)
+        enable_turn_audio=False,  # Enable per-turn audio recording
     )
 
     pipeline = Pipeline(

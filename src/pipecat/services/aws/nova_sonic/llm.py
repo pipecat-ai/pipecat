@@ -16,7 +16,7 @@ import json
 import time
 import uuid
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from importlib.resources import files
 from typing import Any, List, Optional
@@ -60,6 +60,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -185,12 +186,28 @@ class Params(BaseModel):
     endpointing_sensitivity: Optional[str] = Field(default=None)
 
 
+@dataclass
+class AWSNovaSonicLLMSettings(LLMSettings):
+    """Settings for AWS Nova Sonic LLM service.
+
+    Parameters:
+        voice_id: Voice for speech synthesis.
+        endpointing_sensitivity: Controls how quickly Nova Sonic decides the
+            user has stopped speaking. Can be "LOW", "MEDIUM", or "HIGH".
+    """
+
+    voice_id: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing_sensitivity: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class AWSNovaSonicLLMService(LLMService):
     """AWS Nova Sonic speech-to-speech LLM service.
 
     Provides bidirectional audio streaming, real-time transcription, text generation,
     and function calling capabilities using AWS Nova Sonic model.
     """
+
+    _settings: AWSNovaSonicLLMSettings
 
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
     adapter_class = AWSNovaSonicLLMAdapter
@@ -237,28 +254,51 @@ class AWSNovaSonicLLMService(LLMService):
 
             **kwargs: Additional arguments passed to the parent LLMService.
         """
-        super().__init__(**kwargs)
+        params = params or Params()
+
+        super().__init__(
+            settings=AWSNovaSonicLLMSettings(
+                model=model,
+                voice_id=voice_id,
+                temperature=params.temperature,
+                max_tokens=params.max_tokens,
+                top_p=params.top_p,
+                top_k=None,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                endpointing_sensitivity=params.endpointing_sensitivity,
+            ),
+            **kwargs,
+        )
         self._secret_access_key = secret_access_key
         self._access_key_id = access_key_id
         self._session_token = session_token
         self._region = region
-        self._model = model
         self._client: Optional[BedrockRuntimeClient] = None
-        self._voice_id = voice_id
-        self._params = params or Params()
+
+        # Audio I/O config (hardware settings, not runtime-tunable)
+        self._input_sample_rate = params.input_sample_rate
+        self._input_sample_size = params.input_sample_size
+        self._input_channel_count = params.input_channel_count
+        self._output_sample_rate = params.output_sample_rate
+        self._output_sample_size = params.output_sample_size
+        self._output_channel_count = params.output_channel_count
         self._system_instruction = system_instruction
         self._tools = tools
 
         # Validate endpointing_sensitivity parameter
         if (
-            self._params.endpointing_sensitivity
+            self._settings.endpointing_sensitivity
             and not self._is_endpointing_sensitivity_supported()
         ):
             logger.warning(
                 f"endpointing_sensitivity is not supported for model '{model}' and will be ignored. "
                 "This parameter is only supported starting with Nova 2 Sonic (amazon.nova-2-sonic-v1:0)."
             )
-            self._params.endpointing_sensitivity = None
+            self._settings.endpointing_sensitivity = None
 
         if not send_transcription_frames:
             import warnings
@@ -301,6 +341,29 @@ class AWSNovaSonicLLMService(LLMService):
         file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
             self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
+
+    #
+    # settings
+    #
+
+    async def _update_settings(self, delta: AWSNovaSonicLLMSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(delta)
+
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # await self._disconnect()
+        # await self._start_connecting()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     #
     # standard AIService frame handling
@@ -472,7 +535,7 @@ class AWSNovaSonicLLMService(LLMService):
 
             # Start the bidirectional stream
             self._stream = await self._client.invoke_model_with_bidirectional_stream(
-                InvokeModelWithBidirectionalStreamOperationInput(model_id=self._model)
+                InvokeModelWithBidirectionalStreamOperationInput(model_id=self._settings.model)
             )
 
             # Send session start event
@@ -639,7 +702,7 @@ class AWSNovaSonicLLMService(LLMService):
 
     def _is_first_generation_sonic_model(self) -> bool:
         # Nova Sonic (the older model) is identified by "amazon.nova-sonic-v1:0"
-        return self._model == "amazon.nova-sonic-v1:0"
+        return self._settings.model == "amazon.nova-sonic-v1:0"
 
     def _is_endpointing_sensitivity_supported(self) -> bool:
         # endpointing_sensitivity is only supported with Nova 2 Sonic (and,
@@ -658,9 +721,9 @@ class AWSNovaSonicLLMService(LLMService):
         turn_detection_config = (
             f""",
               "turnDetectionConfiguration": {{
-                "endpointingSensitivity": "{self._params.endpointing_sensitivity}"
+                "endpointingSensitivity": "{self._settings.endpointing_sensitivity}"
               }}"""
-            if self._params.endpointing_sensitivity
+            if self._settings.endpointing_sensitivity
             else ""
         )
 
@@ -669,9 +732,9 @@ class AWSNovaSonicLLMService(LLMService):
           "event": {{
             "sessionStart": {{
               "inferenceConfiguration": {{
-                "maxTokens": {self._params.max_tokens},
-                "topP": {self._params.top_p},
-                "temperature": {self._params.temperature}
+                "maxTokens": {self._settings.max_tokens},
+                "topP": {self._settings.top_p},
+                "temperature": {self._settings.temperature}
               }}{turn_detection_config}
             }}
           }}
@@ -706,10 +769,10 @@ class AWSNovaSonicLLMService(LLMService):
               }},
               "audioOutputConfiguration": {{
                 "mediaType": "audio/lpcm",
-                "sampleRateHertz": {self._params.output_sample_rate},
-                "sampleSizeBits": {self._params.output_sample_size},
-                "channelCount": {self._params.output_channel_count},
-                "voiceId": "{self._voice_id}",
+                "sampleRateHertz": {self._output_sample_rate},
+                "sampleSizeBits": {self._output_sample_size},
+                "channelCount": {self._output_channel_count},
+                "voiceId": "{self._settings.voice_id}",
                 "encoding": "base64",
                 "audioType": "SPEECH"
               }}{tools_config}
@@ -734,9 +797,9 @@ class AWSNovaSonicLLMService(LLMService):
                     "role": "USER",
                     "audioInputConfiguration": {{
                         "mediaType": "audio/lpcm",
-                        "sampleRateHertz": {self._params.input_sample_rate},
-                        "sampleSizeBits": {self._params.input_sample_size},
-                        "channelCount": {self._params.input_channel_count},
+                        "sampleRateHertz": {self._input_sample_rate},
+                        "sampleSizeBits": {self._input_sample_size},
+                        "channelCount": {self._input_channel_count},
                         "audioType": "SPEECH",
                         "encoding": "base64"
                     }}
@@ -1019,8 +1082,8 @@ class AWSNovaSonicLLMService(LLMService):
         audio = base64.b64decode(audio_content)
         frame = TTSAudioRawFrame(
             audio=audio,
-            sample_rate=self._params.output_sample_rate,
-            num_channels=self._params.output_channel_count,
+            sample_rate=self._output_sample_rate,
+            num_channels=self._output_channel_count,
         )
         await self.push_frame(frame)
 
@@ -1304,7 +1367,7 @@ class AWSNovaSonicLLMService(LLMService):
         """
         if not self._is_assistant_response_trigger_needed():
             logger.warning(
-                f"Assistant response trigger not needed for model '{self._model}'; skipping. "
+                f"Assistant response trigger not needed for model '{self._settings.model}'; skipping. "
                 "An LLMRunFrame() should be sufficient to prompt the assistant to respond, "
                 "assuming the context ends in a user message."
             )
@@ -1332,9 +1395,9 @@ class AWSNovaSonicLLMService(LLMService):
             chunk_duration = 0.02  # what we might get from InputAudioRawFrame
             chunk_size = int(
                 chunk_duration
-                * self._params.input_sample_rate
-                * self._params.input_channel_count
-                * (self._params.input_sample_size / 8)
+                * self._input_sample_rate
+                * self._input_channel_count
+                * (self._input_sample_size / 8)
             )  # e.g. 0.02 seconds of 16-bit (2-byte) PCM mono audio at 16kHz is 640 bytes
 
             # Lead with a bit of blank audio, if needed.

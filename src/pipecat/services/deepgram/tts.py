@@ -11,7 +11,8 @@ for generating speech from text using various voice models.
 """
 
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -29,6 +30,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -43,6 +45,17 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class DeepgramTTSSettings(TTSSettings):
+    """Settings for Deepgram TTS service.
+
+    Parameters:
+        encoding: Audio encoding format (linear16, mulaw, alaw).
+    """
+
+    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class DeepgramTTSService(WebsocketTTSService):
     """Deepgram WebSocket-based text-to-speech service.
 
@@ -50,6 +63,8 @@ class DeepgramTTSService(WebsocketTTSService):
     Supports streaming audio generation with interruption handling via the Clear
     message for conversational AI use cases.
     """
+
+    _settings: DeepgramTTSSettings
 
     SUPPORTED_ENCODINGS = ("linear16", "mulaw", "alaw")
 
@@ -86,17 +101,20 @@ class DeepgramTTSService(WebsocketTTSService):
             pause_frame_processing=True,
             push_stop_frames=True,
             append_trailing_space=True,
+            settings=DeepgramTTSSettings(
+                model=voice,
+                voice=voice,
+                language=None,
+                encoding=encoding,
+            ),
             **kwargs,
         )
 
         self._api_key = api_key
         self._base_url = base_url
-        self._settings = {
-            "encoding": encoding,
-        }
-        self.set_voice(voice)
 
         self._receive_task = None
+        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -165,6 +183,28 @@ class DeepgramTTSService(WebsocketTTSService):
 
         await self._disconnect_websocket()
 
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Args:
+            delta: A :class:`TTSSettings` (or ``DeepgramTTSSettings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+
+        # Deepgram uses voice as the model, so keep them in sync for metrics
+        if "voice" in changed:
+            self._settings.model = self._settings.voice
+            self._sync_model_name_to_metrics()
+
+        if changed:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
+
     async def _connect_websocket(self):
         """Connect to Deepgram WebSocket API with configured settings."""
         try:
@@ -175,8 +215,8 @@ class DeepgramTTSService(WebsocketTTSService):
 
             # Build WebSocket URL with query parameters
             params = []
-            params.append(f"model={self._voice_id}")
-            params.append(f"encoding={self._settings['encoding']}")
+            params.append(f"model={self._settings.voice}")
+            params.append(f"encoding={self._settings.encoding}")
             params.append(f"sample_rate={self.sample_rate}")
 
             url = f"{self._base_url}/v1/speak?{'&'.join(params)}"
@@ -211,6 +251,7 @@ class DeepgramTTSService(WebsocketTTSService):
             logger.error(f"{self} exception: {e}")
             await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -242,7 +283,7 @@ class DeepgramTTSService(WebsocketTTSService):
             if isinstance(message, bytes):
                 # Binary message contains audio data
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(message, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(message, self.sample_rate, 1, context_id=self._context_id)
                 await self.push_frame(frame)
             elif isinstance(message, str):
                 # Text message contains metadata or control messages
@@ -283,11 +324,12 @@ class DeepgramTTSService(WebsocketTTSService):
                 logger.error(f"{self} error sending Flush message: {e}")
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Deepgram's WebSocket TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
@@ -302,7 +344,9 @@ class DeepgramTTSService(WebsocketTTSService):
             await self.start_ttfb_metrics()
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
+            # Store context_id for use in _receive_messages
+            self._context_id = context_id
 
             # Send text message to Deepgram
             # Note: We don't send Flush here - that should only be sent when the
@@ -324,6 +368,8 @@ class DeepgramHttpTTSService(TTSService):
     Supports various voice models and audio encoding formats with
     configurable sample rates and quality settings.
     """
+
+    _settings: DeepgramTTSSettings
 
     def __init__(
         self,
@@ -347,15 +393,20 @@ class DeepgramHttpTTSService(TTSService):
             encoding: Audio encoding format. Defaults to "linear16".
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=DeepgramTTSSettings(
+                model=voice,
+                voice=voice,
+                language=None,
+                encoding=encoding,
+            ),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._session = aiohttp_session
         self._base_url = base_url
-        self._settings = {
-            "encoding": encoding,
-        }
-        self.set_voice(voice)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -366,11 +417,12 @@ class DeepgramHttpTTSService(TTSService):
         return True
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Deepgram's TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
@@ -383,8 +435,8 @@ class DeepgramHttpTTSService(TTSService):
         headers = {"Authorization": f"Token {self._api_key}", "Content-Type": "application/json"}
 
         params = {
-            "model": self._voice_id,
-            "encoding": self._settings["encoding"],
+            "model": self._settings.voice,
+            "encoding": self._settings.encoding,
             "sample_rate": self.sample_rate,
             "container": "none",
         }
@@ -404,7 +456,7 @@ class DeepgramHttpTTSService(TTSService):
                     raise Exception(f"HTTP {response.status}: {error_text}")
 
                 await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
@@ -419,9 +471,10 @@ class DeepgramHttpTTSService(TTSService):
                             audio=chunk,
                             sample_rate=self.sample_rate,
                             num_channels=1,
+                            context_id=context_id,
                         )
 
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
         except Exception as e:
             yield ErrorFrame(f"Error getting audio: {str(e)}")

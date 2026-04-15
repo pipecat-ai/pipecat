@@ -7,7 +7,8 @@
 """Speechmatics TTS service integration."""
 
 import asyncio
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 from urllib.parse import urlencode
 
 import aiohttp
@@ -21,6 +22,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -35,12 +37,25 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class SpeechmaticsTTSSettings(TTSSettings):
+    """Settings for Speechmatics TTS service.
+
+    Parameters:
+        max_retries: Maximum number of retries for HTTP requests.
+    """
+
+    max_retries: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class SpeechmaticsTTSService(TTSService):
     """Speechmatics TTS service implementation.
 
     This service provides text-to-speech synthesis using the Speechmatics HTTP API.
     It converts text to speech and returns raw PCM audio data for real-time playback.
     """
+
+    _settings: SpeechmaticsTTSSettings
 
     SPEECHMATICS_SAMPLE_RATE = 16000
 
@@ -80,7 +95,18 @@ class SpeechmaticsTTSService(TTSService):
                 f"Speechmatics TTS only supports {self.SPEECHMATICS_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        params = params or SpeechmaticsTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=SpeechmaticsTTSSettings(
+                model=None,
+                voice=voice_id,
+                language=None,
+                max_retries=params.max_retries,
+            ),
+            **kwargs,
+        )
 
         # Service parameters
         self._api_key: str = api_key
@@ -91,12 +117,6 @@ class SpeechmaticsTTSService(TTSService):
         if not self._api_key:
             raise ValueError("Missing Speechmatics API key")
 
-        # Default parameters
-        self._params = params or SpeechmaticsTTSService.InputParams()
-
-        # Set voice from constructor parameter
-        self.set_voice(voice_id)
-
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -106,11 +126,12 @@ class SpeechmaticsTTSService(TTSService):
         return True
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Speechmatics' HTTP API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -130,7 +151,7 @@ class SpeechmaticsTTSService(TTSService):
         }
 
         # Complete HTTP URL
-        url = _get_endpoint_url(self._base_url, self._voice_id, self.sample_rate)
+        url = _get_endpoint_url(self._base_url, self._settings.voice, self.sample_rate)
 
         try:
             # Start TTS TTFB metrics
@@ -158,7 +179,7 @@ class SpeechmaticsTTSService(TTSService):
                             attempt += 1
 
                             # Check if we've exceeded the maximum number of attempts
-                            if attempt >= self._params.max_retries:
+                            if attempt >= self._settings.max_retries:
                                 raise ValueError()
 
                             # Report error frame
@@ -187,7 +208,7 @@ class SpeechmaticsTTSService(TTSService):
                     await self.start_tts_usage_metrics(text)
 
                     # Emit the TTS started frame
-                    yield TTSStartedFrame()
+                    yield TTSStartedFrame(context_id=context_id)
 
                     # Process the response in streaming chunks
                     first_chunk = True
@@ -216,6 +237,7 @@ class SpeechmaticsTTSService(TTSService):
                                 audio=audio_data,
                                 sample_rate=self.sample_rate,
                                 num_channels=1,
+                                context_id=context_id,
                             )
 
                     # Successfully processed the response, break out of retry loop
@@ -225,7 +247,7 @@ class SpeechmaticsTTSService(TTSService):
             yield ErrorFrame(error=f"Error generating TTS: {e}")
         finally:
             # Emit the TTS stopped frame
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
 
 def _get_endpoint_url(base_url: str, voice: str, sample_rate: int) -> str:

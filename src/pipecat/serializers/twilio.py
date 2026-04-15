@@ -42,13 +42,14 @@ class TwilioFrameSerializer(FrameSerializer):
     credentials to be provided.
     """
 
-    class InputParams(BaseModel):
+    class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for TwilioFrameSerializer.
 
         Parameters:
             twilio_sample_rate: Sample rate used by Twilio, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             auto_hang_up: Whether to automatically terminate call on EndFrame.
+            ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
         twilio_sample_rate: int = 8000
@@ -76,7 +77,7 @@ class TwilioFrameSerializer(FrameSerializer):
             edge: Twilio edge location (e.g., "sydney", "dublin"). Must be specified with region.
             params: Configuration parameters.
         """
-        self._params = params or TwilioFrameSerializer.InputParams()
+        super().__init__(params or TwilioFrameSerializer.InputParams())
 
         # Validate hangup-related parameters if auto_hang_up is enabled
         if self._params.auto_hang_up:
@@ -167,6 +168,8 @@ class TwilioFrameSerializer(FrameSerializer):
 
             return json.dumps(answer)
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if self.should_ignore_frame(frame):
+                return None
             return json.dumps(frame.message)
 
         # Return None for unhandled frames

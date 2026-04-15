@@ -14,9 +14,7 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -39,8 +37,6 @@ from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -66,7 +62,8 @@ async def get_image(params: FunctionCallParams):
     logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
     # Request a user image frame and indicate that it should be added to the
-    # context. Also associate it to the function call.
+    # context. Also associate it to the function call. Pass the result_callback
+    # so it can be invoked when the image is actually retrieved.
     await params.llm.push_frame(
         UserImageRequestFrame(
             user_id=user_id,
@@ -74,15 +71,10 @@ async def get_image(params: FunctionCallParams):
             append_to_context=True,
             function_name=params.function_name,
             tool_call_id=params.tool_call_id,
+            result_callback=params.result_callback,
         ),
         FrameDirection.UPSTREAM,
     )
-
-    await params.result_callback(None)
-
-    # Instead of None, it's possible to also provide a tool call answer to
-    # tell the LLM that we are grabbing the image to analyze.
-    # await params.result_callback({"result": "Image is being captured."})
 
 
 async def get_saved_conversation_filenames(params: FunctionCallParams):
@@ -242,21 +234,18 @@ tools = ToolsSchema(
 )
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_in_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -284,11 +273,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages, tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
