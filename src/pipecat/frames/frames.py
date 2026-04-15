@@ -745,11 +745,11 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
     """DTMF keypress output frame for transport queuing.
 
     Parameters:
-        buttons: Sequence of one or more DTMF keypad buttons to send. Use
-            :meth:`from_string` to build this from a string like ``"123#"``.
         button: Convenience shortcut for sending a single DTMF keypad
             entry. Equivalent to ``buttons=[button]``. If both ``buttons``
             and ``button`` are provided, ``buttons`` takes precedence.
+        buttons: Sequence of one or more DTMF keypad buttons to send. Use
+            :meth:`from_string` to build this from a string like ``"123#"``.
     """
 
     button: Optional[KeypadEntry] = None
@@ -763,8 +763,7 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
             raise ValueError(f"{self.__class__.__name__} requires `buttons` or `button` to be set")
 
     def __str__(self):
-        buttons_str = "".join(b.value for b in self.buttons) if self.buttons else ""
-        return f"{self.name}(buttons: {buttons_str})"
+        return f"{self.name}(buttons: {self.to_string()})"
 
     @classmethod
     def from_string(cls, buttons: str, **kwargs) -> "OutputDTMFFrame":
@@ -781,6 +780,16 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
             :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
         """
         return cls(buttons=[KeypadEntry(c) for c in buttons], **kwargs)
+
+    def to_string(self) -> str:
+        """Return the frame's ``buttons`` as a dial string.
+
+        Returns:
+            A string such as ``"123#"`` formed by concatenating the values
+            of each :class:`~pipecat.audio.dtmf.types.KeypadEntry` in
+            ``buttons``, or an empty string if ``buttons`` is not set.
+        """
+        return "".join(b.value for b in self.buttons) if self.buttons else ""
 
 
 #
@@ -1280,11 +1289,11 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
     """DTMF keypress output frame for immediate sending.
 
     Parameters:
-        buttons: Sequence of one or more DTMF keypad buttons to send. Use
-            :meth:`from_string` to build this from a string like ``"123#"``.
         button: Convenience shortcut for sending a single DTMF keypad
             entry. Equivalent to ``buttons=[button]``. If both ``buttons``
             and ``button`` are provided, ``buttons`` takes precedence.
+        buttons: Sequence of one or more DTMF keypad buttons to send. Use
+            :meth:`from_string` to build this from a string like ``"123#"``.
     """
 
     button: Optional[KeypadEntry] = None
@@ -1298,8 +1307,7 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
             raise ValueError(f"{self.__class__.__name__} requires `buttons` or `button` to be set")
 
     def __str__(self):
-        buttons_str = "".join(b.value for b in self.buttons) if self.buttons else ""
-        return f"{self.name}(buttons: {buttons_str})"
+        return f"{self.name}(buttons: {self.to_string()})"
 
     @classmethod
     def from_string(cls, buttons: str, **kwargs) -> "OutputDTMFUrgentFrame":
@@ -1316,6 +1324,16 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
             :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
         """
         return cls(buttons=[KeypadEntry(c) for c in buttons], **kwargs)
+
+    def to_string(self) -> str:
+        """Return the frame's ``buttons`` as a dial string.
+
+        Returns:
+            A string such as ``"123#"`` formed by concatenating the values
+            of each :class:`~pipecat.audio.dtmf.types.KeypadEntry` in
+            ``buttons``, or an empty string if ``buttons`` is not set.
+        """
+        return "".join(b.value for b in self.buttons) if self.buttons else ""
 
 
 @dataclass

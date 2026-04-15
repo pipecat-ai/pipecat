@@ -2185,14 +2185,12 @@ class DailyOutputTransport(BaseOutputTransport):
         if not frame.buttons:
             return
 
-        settings: Dict[str, Any] = {"tones": "".join(b.value for b in frame.buttons)}
+        settings: Dict[str, Any] = {"tones": frame.to_string()}
         if isinstance(frame, (DailyOutputDTMFFrame, DailyOutputDTMFUrgentFrame)):
             if frame.session_id is not None:
                 settings["sessionId"] = frame.session_id
             if frame.digit_duration_ms is not None:
                 settings["digitDurationMs"] = frame.digit_duration_ms
-        elif frame.transport_destination is not None:
-            settings["sessionId"] = frame.transport_destination
 
         await self._client.send_dtmf(settings)
 
