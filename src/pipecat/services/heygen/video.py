@@ -212,9 +212,11 @@ class HeyGenVideoService(AIService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        # 40 ms of audio, match the default behavior from the output transport
-        self._audio_chunk_size = int((HEY_GEN_SAMPLE_RATE * 2) / 25)
-        await self._client.start(frame, self._audio_chunk_size)
+        # First chunk: 600ms for faster initial response
+        self._first_chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 0.6)  # 28800 bytes
+        # Subsequent chunks: 1000ms for efficient streaming
+        self._chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 1.0)  # 48000 bytes
+        await self._client.start(frame)
         await self._create_send_task()
 
     async def stop(self, frame: EndFrame):
@@ -340,12 +342,14 @@ class HeyGenVideoService(AIService):
         """Handle sending audio frames to the HeyGen client.
 
         Continuously processes audio frames from the queue and sends them to the
-        HeyGen client. Handles timeouts and silence detection for proper audio
-        streaming management.
+        HeyGen client. Uses 600ms for the first chunk of each utterance for faster
+        initial response, then 1000ms chunks for efficient streaming. Handles
+        timeouts and silence detection for proper audio streaming management.
         """
         sample_rate = self._client.out_sample_rate
         audio_buffer = bytearray()
         self._event_id = None
+        is_first_chunk = True
 
         while True:
             try:
@@ -356,20 +360,30 @@ class HeyGenVideoService(AIService):
                     # starting the new inference
                     if self._event_id is None:
                         self._event_id = str(frame.id)
+                        is_first_chunk = True
 
                     audio = await self._resampler.resample(
                         frame.audio, frame.sample_rate, sample_rate
                     )
                     audio_buffer.extend(audio)
-                    while len(audio_buffer) >= self._audio_chunk_size:
-                        chunk = audio_buffer[: self._audio_chunk_size]
-                        audio_buffer = audio_buffer[self._audio_chunk_size :]
 
+                    current_chunk_size = (
+                        self._first_chunk_size if is_first_chunk else self._chunk_size
+                    )
+                    while len(audio_buffer) >= current_chunk_size:
+                        chunk = audio_buffer[:current_chunk_size]
+                        audio_buffer = audio_buffer[current_chunk_size:]
                         await self._client.agent_speak(bytes(chunk), self._event_id)
+                        if is_first_chunk:
+                            is_first_chunk = False
+                            current_chunk_size = self._chunk_size
                 self._queue.task_done()
             except asyncio.TimeoutError:
                 # Bot has stopped speaking
                 if self._event_id is not None:
+                    # Flush any remaining buffered audio
+                    if len(audio_buffer) > 0:
+                        await self._client.agent_speak(bytes(audio_buffer), self._event_id)
+                        audio_buffer.clear()
                     await self._client.agent_speak_end(self._event_id)
                     self._event_id = None
-                    audio_buffer.clear()
