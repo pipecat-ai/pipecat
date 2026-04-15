@@ -633,8 +633,6 @@ class DeepgramSTTService(STTService):
                         self._keepalive_handler(), f"{self}::keepalive"
                     )
                     await connection.start_listening()
-            except asyncio.CancelledError:
-                raise
             except Exception as e:
                 logger.warning(f"{self}: Connection lost, will retry: {e}")
             finally:
