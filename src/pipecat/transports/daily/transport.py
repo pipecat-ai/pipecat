@@ -158,38 +158,45 @@ class DailyOutputDTMFFrame(OutputDTMFFrame):
     """DTMF output frame with Daily-specific options for transport queuing.
 
     A DTMF keypress output that will be queued after any preceding audio has
-    finished playing. Inherits ``tones`` from :class:`OutputDTMFFrame`; the
-    two extra fields are forwarded to Daily's ``send_dtmf`` as ``sessionId``
-    and ``digitDurationMs``.
+    finished playing. Inherits ``buttons`` from :class:`OutputDTMFFrame`; the
+    extra fields are forwarded to Daily's ``send_dtmf`` as ``sessionId``,
+    ``digitDurationMs`` and ``method``.
 
     Parameters:
         session_id: Target participant session id. When ``None``, Daily
             sends the tones to the default destination for the call.
         digit_duration_ms: Duration of each DTMF digit in milliseconds.
             When ``None``, Daily's default duration is used.
+        method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
+            or ``auto``).  When ``None``, Daily's default method is used.
     """
 
     session_id: Optional[str] = None
     digit_duration_ms: Optional[int] = None
+    method: Optional[str] = None
 
 
 @dataclass
 class DailyOutputDTMFUrgentFrame(OutputDTMFUrgentFrame):
     """DTMF output frame with Daily-specific options for immediate sending.
 
-    A DTMF keypress output that will be sent right away. Inherits ``tones``
-    from :class:`OutputDTMFUrgentFrame`; the two extra fields are forwarded
-    to Daily's ``send_dtmf`` as ``sessionId`` and ``digitDurationMs``.
+    A DTMF keypress output that will be sent right away. Inherits
+    ``buttons`` from :class:`OutputDTMFUrgentFrame`; the extra fields are
+    forwarded to Daily's ``send_dtmf`` as ``sessionId``, ``digitDurationMs``
+    and ``method``.
 
     Parameters:
         session_id: Target participant session id. When ``None``, Daily
             sends the tones to the default destination for the call.
         digit_duration_ms: Duration of each DTMF digit in milliseconds.
             When ``None``, Daily's default duration is used.
+        method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
+            or ``auto``).  When ``None``, Daily's default method is used.
     """
 
     session_id: Optional[str] = None
     digit_duration_ms: Optional[int] = None
+    method: Optional[str] = None
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -2178,9 +2185,9 @@ class DailyOutputTransport(BaseOutputTransport):
         Args:
             frame: The DTMF frame to write. When it is a
                 :class:`DailyOutputDTMFFrame` or
-                :class:`DailyOutputDTMFUrgentFrame`, the ``session_id`` and
-                ``digit_duration_ms`` fields are also forwarded to the Daily
-                call client.
+                :class:`DailyOutputDTMFUrgentFrame`, the ``session_id``,
+                ``digit_duration_ms`` and ``method`` fields are also
+                forwarded to the Daily call client.
         """
         if not frame.buttons:
             return
@@ -2191,6 +2198,8 @@ class DailyOutputTransport(BaseOutputTransport):
                 settings["sessionId"] = frame.session_id
             if frame.digit_duration_ms is not None:
                 settings["digitDurationMs"] = frame.digit_duration_ms
+            if frame.method is not None:
+                settings["method"] = frame.method
 
         await self._client.send_dtmf(settings)
 
