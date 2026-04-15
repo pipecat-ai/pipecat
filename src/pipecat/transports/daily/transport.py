@@ -36,6 +36,8 @@ from pipecat.frames.frames import (
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
+    OutputDTMFFrame,
+    OutputDTMFUrgentFrame,
     OutputImageRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
@@ -149,6 +151,78 @@ class DailyUpdateRemoteParticipantsFrame(DataFrame):
     """
 
     remote_participants: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DailyOutputDTMFFrame(OutputDTMFFrame):
+    """DTMF output frame with Daily-specific options for transport queuing.
+
+    A DTMF keypress output that will be queued after any preceding audio has
+    finished playing. When this frame is processed by the Daily transport,
+    the inherited ``button`` and ``transport_destination`` fields are ignored
+    in favor of the explicit ``tones``, ``session_id`` and
+    ``digit_duration_ms`` fields below.
+
+    Parameters:
+        tones: String of one or more DTMF tones to send (e.g. ``"1"`` or
+            ``"123#"``). Forwarded to Daily's ``send_dtmf`` as ``tones``.
+        session_id: Target participant session id. Forwarded to Daily's
+            ``send_dtmf`` as ``sessionId``. When ``None``, Daily sends the
+            tones to the default destination for the call.
+        digit_duration_ms: Duration of each DTMF digit in milliseconds.
+            Forwarded to Daily's ``send_dtmf`` as ``digitDurationMs``. When
+            ``None``, Daily's default duration is used.
+    """
+
+    # Override the inherited `button` to be optional: Daily's send_dtmf takes
+    # a multi-character `tones` string, so a single KeypadEntry is not
+    # required here.
+    button: Optional[KeypadEntry] = None  # pyright: ignore[reportIncompatibleVariableOverride]
+    tones: Optional[str] = None
+    session_id: Optional[str] = None
+    digit_duration_ms: Optional[int] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if not self.tones:
+            raise ValueError(f"{self.__class__.__name__} requires `tones` to be set")
+
+    def __str__(self):
+        return f"{self.name}(tones: {self.tones})"
+
+
+@dataclass
+class DailyOutputDTMFUrgentFrame(OutputDTMFUrgentFrame):
+    """DTMF output frame with Daily-specific options for immediate sending.
+
+    A DTMF keypress output that will be sent right away. When this frame is
+    processed by the Daily transport, the inherited ``button`` and
+    ``transport_destination`` fields are ignored in favor of the explicit
+    ``tones``, ``session_id`` and ``digit_duration_ms`` fields below.
+
+    Parameters:
+        tones: String of one or more DTMF tones to send (e.g. ``"1"`` or
+            ``"123#"``). Forwarded to Daily's ``send_dtmf`` as ``tones``.
+        session_id: Target participant session id. Forwarded to Daily's
+            ``send_dtmf`` as ``sessionId``. When ``None``, Daily sends the
+            tones to the default destination for the call.
+        digit_duration_ms: Duration of each DTMF digit in milliseconds.
+            Forwarded to Daily's ``send_dtmf`` as ``digitDurationMs``. When
+            ``None``, Daily's default duration is used.
+    """
+
+    button: Optional[KeypadEntry] = None  # pyright: ignore[reportIncompatibleVariableOverride]
+    tones: Optional[str] = None
+    session_id: Optional[str] = None
+    digit_duration_ms: Optional[int] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if not self.tones:
+            raise ValueError(f"{self.__class__.__name__} requires `tones` to be set")
+
+    def __str__(self):
+        return f"{self.name}(tones: {self.tones})"
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -2131,18 +2205,31 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         return True
 
-    async def _write_dtmf_native(self, frame):
+    async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         """Use Daily's native send_dtmf method for telephone events.
 
         Args:
-            frame: The DTMF frame to write.
+            frame: The DTMF frame to write. When it is a
+                :class:`DailyOutputDTMFFrame` or
+                :class:`DailyOutputDTMFUrgentFrame`, the explicit ``tones``,
+                ``session_id`` and ``digit_duration_ms`` fields are forwarded
+                to the Daily call client (and the inherited ``button`` /
+                ``transport_destination`` fields are ignored).
         """
-        await self._client.send_dtmf(
-            {
-                "sessionId": frame.transport_destination,
-                "tones": frame.button.value,
-            }
-        )
+        if isinstance(frame, (DailyOutputDTMFFrame, DailyOutputDTMFUrgentFrame)):
+            settings: Dict[str, Any] = {"tones": frame.tones}
+            if frame.session_id is not None:
+                settings["sessionId"] = frame.session_id
+            if frame.digit_duration_ms is not None:
+                settings["digitDurationMs"] = frame.digit_duration_ms
+            await self._client.send_dtmf(settings)
+        else:
+            await self._client.send_dtmf(
+                {
+                    "sessionId": frame.transport_destination,
+                    "tones": frame.button.value,
+                }
+            )
 
 
 class DailyTransport(BaseTransport):
