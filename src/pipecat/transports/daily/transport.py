@@ -2182,10 +2182,10 @@ class DailyOutputTransport(BaseOutputTransport):
                 ``digit_duration_ms`` fields are also forwarded to the Daily
                 call client.
         """
-        if not frame.tones:
+        if not frame.buttons:
             return
 
-        settings: Dict[str, Any] = {"tones": frame.tones}
+        settings: Dict[str, Any] = {"tones": "".join(b.value for b in frame.buttons)}
         if isinstance(frame, (DailyOutputDTMFFrame, DailyOutputDTMFUrgentFrame)):
             if frame.session_id is not None:
                 settings["sessionId"] = frame.session_id

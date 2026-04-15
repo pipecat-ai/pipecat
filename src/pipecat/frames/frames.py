@@ -744,33 +744,45 @@ class DTMFFrame:
 class OutputDTMFFrame(DTMFFrame, DataFrame):
     """DTMF keypress output frame for transport queuing.
 
-    A DTMF keypress output that will be queued. If your transport supports
-    multiple dial-out destinations, use the ``transport_destination`` field
-    to specify where the DTMF keypress should be sent.
-
     Parameters:
-        tones: String of one or more DTMF tones to send (e.g. ``"1"`` or
-            ``"123#"``). Valid characters are the values of
-            :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
+        buttons: Sequence of one or more DTMF keypad buttons to send. Use
+            :meth:`from_string` to build this from a string like ``"123#"``.
         button: A single DTMF keypad entry to send.
 
             .. deprecated:: 1.1.0
-                Use ``tones`` instead. When only ``button`` is set,
-                ``button.value`` is used as a single-tone ``tones`` string.
+                Use ``buttons`` instead. When only ``button`` is set, it is
+                used as a single-entry ``buttons`` list.
     """
 
     button: Optional[KeypadEntry] = None
-    tones: Optional[str] = None
+    buttons: Optional[List[KeypadEntry]] = None
 
     def __post_init__(self):
         super().__post_init__()
-        if self.tones is None and self.button is not None:
-            self.tones = self.button.value
-        if not self.tones:
-            raise ValueError(f"{self.__class__.__name__} requires `tones` or `button` to be set")
+        if self.buttons is None and self.button is not None:
+            self.buttons = [self.button]
+        if not self.buttons:
+            raise ValueError(f"{self.__class__.__name__} requires `buttons` or `button` to be set")
 
     def __str__(self):
-        return f"{self.name}(tones: {self.tones})"
+        buttons_str = "".join(b.value for b in self.buttons) if self.buttons else ""
+        return f"{self.name}(buttons: {buttons_str})"
+
+    @classmethod
+    def from_string(cls, buttons: str, **kwargs) -> "OutputDTMFFrame":
+        """Build an ``OutputDTMFFrame`` from a string of DTMF characters.
+
+        Args:
+            buttons: A string like ``"123#"``. Each character must be a
+                valid :class:`~pipecat.audio.dtmf.types.KeypadEntry` value.
+            **kwargs: Additional keyword arguments forwarded to the frame
+                constructor.
+
+        Returns:
+            A frame of type ``cls`` with ``buttons`` populated as a list of
+            :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
+        """
+        return cls(buttons=[KeypadEntry(c) for c in buttons], **kwargs)
 
 
 #
@@ -1269,33 +1281,45 @@ class InputDTMFFrame(DTMFFrame, SystemFrame):
 class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
     """DTMF keypress output frame for immediate sending.
 
-    A DTMF keypress output that will be sent right away. If your transport
-    supports multiple dial-out destinations, use the ``transport_destination``
-    field to specify where the DTMF keypress should be sent.
-
     Parameters:
-        tones: String of one or more DTMF tones to send (e.g. ``"1"`` or
-            ``"123#"``). Valid characters are the values of
-            :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
+        buttons: Sequence of one or more DTMF keypad buttons to send. Use
+            :meth:`from_string` to build this from a string like ``"123#"``.
         button: A single DTMF keypad entry to send.
 
             .. deprecated:: 1.1.0
-                Use ``tones`` instead. When only ``button`` is set,
-                ``button.value`` is used as a single-tone ``tones`` string.
+                Use ``buttons`` instead. When only ``button`` is set, it is
+                used as a single-entry ``buttons`` list.
     """
 
     button: Optional[KeypadEntry] = None
-    tones: Optional[str] = None
+    buttons: Optional[List[KeypadEntry]] = None
 
     def __post_init__(self):
         super().__post_init__()
-        if self.tones is None and self.button is not None:
-            self.tones = self.button.value
-        if not self.tones:
-            raise ValueError(f"{self.__class__.__name__} requires `tones` or `button` to be set")
+        if self.buttons is None and self.button is not None:
+            self.buttons = [self.button]
+        if not self.buttons:
+            raise ValueError(f"{self.__class__.__name__} requires `buttons` or `button` to be set")
 
     def __str__(self):
-        return f"{self.name}(tones: {self.tones})"
+        buttons_str = "".join(b.value for b in self.buttons) if self.buttons else ""
+        return f"{self.name}(buttons: {buttons_str})"
+
+    @classmethod
+    def from_string(cls, buttons: str, **kwargs) -> "OutputDTMFUrgentFrame":
+        """Build an ``OutputDTMFUrgentFrame`` from a string of DTMF characters.
+
+        Args:
+            buttons: A string like ``"123#"``. Each character must be a
+                valid :class:`~pipecat.audio.dtmf.types.KeypadEntry` value.
+            **kwargs: Additional keyword arguments forwarded to the frame
+                constructor.
+
+        Returns:
+            A frame of type ``cls`` with ``buttons`` populated as a list of
+            :class:`~pipecat.audio.dtmf.types.KeypadEntry`.
+        """
+        return cls(buttons=[KeypadEntry(c) for c in buttons], **kwargs)
 
 
 @dataclass

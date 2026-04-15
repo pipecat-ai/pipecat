@@ -898,15 +898,16 @@ class LiveKitOutputTransport(BaseOutputTransport):
     async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         """Use LiveKit's native publish_dtmf method for telephone events.
 
-        LiveKit's DTMF API sends a single tone per call, so when ``frame.tones``
-        contains multiple characters only the first one is sent.
+        LiveKit's DTMF API sends a single tone per call, so when
+        ``frame.buttons`` contains multiple entries only the first one is
+        sent.
 
         Args:
             frame: The DTMF frame to write.
         """
-        if not frame.tones:
+        if not frame.buttons:
             return
-        await self._client.send_dtmf(frame.tones[0])
+        await self._client.send_dtmf(frame.buttons[0].value)
 
     def _convert_pipecat_audio_to_livekit(self, pipecat_audio: bytes) -> rtc.AudioFrame:
         """Convert Pipecat audio data to LiveKit audio frame."""
