@@ -31,3 +31,4 @@ class AnalyzerResult:
     name: str
     turn_events: List[TurnEvent] = field(default_factory=list)
     init_time_ms: float = 0.0
+    timeout_secs: Optional[float] = None

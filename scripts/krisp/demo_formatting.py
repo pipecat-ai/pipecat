@@ -6,6 +6,7 @@ per-analyzer timeline report formatting.
 
 import math
 import os
+import statistics
 from typing import Dict, List, Optional, Tuple
 
 from demo_types import (
@@ -251,13 +252,19 @@ def format_summary(
 
         if delays:
             avg = sum(delays) / len(delays)
+            med = statistics.median(delays)
             std = math.sqrt(sum((d - avg) ** 2 for d in delays) / len(delays))
             lines.append(
-                f"    Detection delay: avg={avg:.3f}s  min={min(delays):.3f}s"
-                f"  max={max(delays):.3f}s  stddev={std:.3f}s"
+                f"    Response time: median={med:.3f}s  avg={avg:.3f}s"
+                f"  min={min(delays):.3f}s  max={max(delays):.3f}s  stddev={std:.3f}s"
             )
+            if len(delays) >= 3 and max(delays) > med * 2.5 and med > 0.01:
+                lines.append(
+                    f"    Note: max ({max(delays):.3f}s) >> median ({med:.3f}s)"
+                    " -- likely VAD truncated speech, not analyzer latency"
+                )
         else:
-            lines.append("    Detection delay: N/A")
+            lines.append("    Response time: N/A")
 
         method_parts = []
         for m in [METHOD_STREAMING, METHOD_ON_DEMAND, METHOD_TIMEOUT]:
@@ -338,10 +345,15 @@ def format_timeline(
     delays = [e.detection_delay for e in result.turn_events if e.detection_delay is not None]
     if delays:
         avg = sum(delays) / len(delays)
+        med = statistics.median(delays)
         std = math.sqrt(sum((d - avg) ** 2 for d in delays) / len(delays))
-        lines.append(f"  Avg detection delay: {avg:.3f}s (stddev: {std:.3f}s)")
-        lines.append(f"  Min detection delay: {min(delays):.3f}s")
-        lines.append(f"  Max detection delay: {max(delays):.3f}s")
+        lines.append(f"  Response time: median={med:.3f}s  avg={avg:.3f}s (stddev: {std:.3f}s)")
+        lines.append(f"  Min: {min(delays):.3f}s  Max: {max(delays):.3f}s")
+        if len(delays) >= 3 and max(delays) > med * 2.5 and med > 0.01:
+            lines.append(
+                f"  Note: max ({max(delays):.3f}s) >> median ({med:.3f}s)"
+                " -- outlier likely due to VAD truncating speech"
+            )
 
     methods: Dict[str, int] = {}
     for e in result.turn_events:

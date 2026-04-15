@@ -9,9 +9,11 @@ producing:
   - Self-contained HTML report with interactive timeline
   - Text timeline reports
 
-Uses Silero VAD (same as the real Pipecat pipeline) for voice activity
-detection, and optionally applies the Krisp VIVA noise filter before
-processing.
+Replicates the real Pipecat production pipeline: uses the same VAD engine
+(Silero or Krisp VIVA) with the same default parameters (confidence=0.7,
+start_secs=0.2, stop_secs=0.2, min_volume=0.6), and optionally applies
+the Krisp VIVA noise filter before processing -- exactly as the transport
+does in BaseInputTransport._audio_task_handler.
 
 Usage:
     python demo_turn_taking.py input.wav
@@ -61,8 +63,7 @@ if src_dir.exists() and str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams, VADState
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 
 from demo_formatting import (
     format_ascii_timeline,
@@ -82,6 +83,42 @@ from demo_types import (
 
 
 AVAILABLE_ANALYZERS = ["krisp", "smart-turn-v3"]
+AVAILABLE_VADS = ["silero", "krisp"]
+
+
+def create_vad(
+    vad_type: str,
+    params: VADParams,
+    sample_rate: int,
+    frame_duration_ms: int = 10,
+) -> Tuple[VADAnalyzer, str]:
+    """Create and configure a VAD analyzer by name.
+
+    Args:
+        vad_type: VAD engine ("silero" or "krisp").
+        params: VAD detection parameters.
+        sample_rate: Audio sample rate in Hz.
+        frame_duration_ms: Frame duration for Krisp VAD (default: 10).
+
+    Returns:
+        Tuple of (VADAnalyzer instance, actual vad_type used).
+    """
+    if vad_type == "silero":
+        from pipecat.audio.vad.silero import SileroVADAnalyzer
+
+        vad = SileroVADAnalyzer(params=params)
+        vad.set_sample_rate(sample_rate)
+        return vad, "silero"
+
+    elif vad_type == "krisp":
+        from pipecat.audio.vad.krisp_viva_vad import KrispVivaVadAnalyzer
+
+        vad = KrispVivaVadAnalyzer(frame_duration=frame_duration_ms, params=params)
+        vad.set_sample_rate(sample_rate)
+        return vad, "krisp"
+
+    else:
+        raise ValueError(f"Unknown VAD type '{vad_type}'. Available: {AVAILABLE_VADS}")
 
 
 def create_analyzer(
@@ -234,11 +271,12 @@ async def process_audio(
     output_dir: str = "./demo_output",
     verbose: bool = False,
     use_viva_filter: bool = False,
+    vad_type: str = "silero",
 ) -> None:
     """Process an audio file through turn analyzers and produce outputs.
 
-    Uses Silero VAD for voice activity detection (matching the real Pipecat
-    pipeline) and optionally applies the Krisp VIVA noise filter.
+    Uses the same VAD parameters as the production Pipecat pipeline
+    to replicate real-life behavior.
     """
     audio_data, sample_rate = read_audio_file(input_path, verbose=True)
     duration_secs = len(audio_data) / sample_rate
@@ -258,11 +296,19 @@ async def process_audio(
             print("  Continuing without noise filtering")
             use_viva_filter = False
 
-    # Initialize Silero VAD (same as real pipeline)
-    print("\nInitializing Silero VAD...")
-    vad = SileroVADAnalyzer(params=VADParams(stop_secs=0.2))
-    vad.set_sample_rate(sample_rate)
-    print(f"  Silero VAD ready (stop_secs=0.2, confidence={vad.params.confidence})")
+    # Production VAD defaults (same as Pipecat pipeline)
+    print(f"\nInitializing {vad_type} VAD...")
+    vad_params = VADParams(
+        confidence=0.7,
+        start_secs=0.2,
+        stop_secs=0.2,
+        min_volume=0.6,
+    )
+    vad, vad_type = create_vad(vad_type, vad_params, sample_rate, frame_duration_ms=10)
+    print(
+        f"  {vad_type} VAD ready (confidence={vad_params.confidence}, "
+        f"start={vad_params.start_secs}s, stop={vad_params.stop_secs}s)"
+    )
 
     # Create turn analyzers
     analyzers: Dict[str, BaseTurnAnalyzer] = {}
@@ -272,9 +318,13 @@ async def process_audio(
         print(f"\nInitializing analyzer: {name}...")
         t0 = time.time()
         try:
-            analyzers[name] = create_analyzer(name, threshold, frame_duration_ms, sample_rate)
+            analyzer = create_analyzer(name, threshold, frame_duration_ms, sample_rate)
+            analyzers[name] = analyzer
             init_ms = (time.time() - t0) * 1000
-            results[name] = AnalyzerResult(name=name, init_time_ms=init_ms)
+            timeout_s = analyzer.params.stop_secs if is_smart_turn(analyzer) else None
+            results[name] = AnalyzerResult(
+                name=name, init_time_ms=init_ms, timeout_secs=timeout_s
+            )
             print(f"  {name} initialized in {init_ms:.1f}ms")
         except Exception as e:
             print(f"  Error initializing {name}: {e}")
@@ -318,7 +368,7 @@ async def process_audio(
 
             frame_bytes = frame_samples.tobytes()
 
-            # Run Silero VAD
+            # Run VAD
             vad_state = vad._run_analyzer(frame_bytes)
 
             # Detect VAD state transitions (same as pipeline frame events)
@@ -414,6 +464,8 @@ async def process_audio(
 
     print(f"Generating outputs in: {output_dir}/")
 
+    annotated_audio_map: Dict[str, np.ndarray] = {}
+
     for name, result in results.items():
         timeline = format_timeline(
             analyzer_name=name,
@@ -430,14 +482,15 @@ async def process_audio(
         print(f"\n{timeline}")
 
         timeline_path = os.path.join(output_dir, f"{input_stem}_{name}_timeline.txt")
-        with open(timeline_path, "w") as f:
+        with open(timeline_path, "w", encoding="utf-8") as f:
             f.write(timeline)
         print(f"  Timeline saved: {timeline_path}")
 
         turn_timestamps = [e.timestamp for e in result.turn_events]
-        annotated_audio = mix_beeps(audio_data, sample_rate, turn_timestamps, beep)
+        annotated = mix_beeps(audio_data, sample_rate, turn_timestamps, beep)
+        annotated_audio_map[name] = annotated
         wav_path = os.path.join(output_dir, f"{input_stem}_{name}_annotated.wav")
-        write_audio_file(wav_path, annotated_audio, sample_rate, verbose=True)
+        write_audio_file(wav_path, annotated, sample_rate, verbose=True)
         print(f"  Annotated WAV: {wav_path}")
 
     # Comparison outputs (multiple analyzers)
@@ -448,7 +501,12 @@ async def process_audio(
         summary = format_summary(results)
         print(summary)
 
-    # HTML report
+    # HTML report (with embedded audio players)
+    vad_label = "Krisp VIVA" if vad_type == "krisp" else "Silero"
+    vad_info = (
+        f"{vad_label} (confidence={vad_params.confidence}, "
+        f"start={vad_params.start_secs}s, stop={vad_params.stop_secs}s)"
+    )
     html_path = os.path.join(output_dir, f"{input_stem}_report.html")
     generate_html_report(
         input_path=input_path,
@@ -458,6 +516,8 @@ async def process_audio(
         results=results,
         viva_filter_used=use_viva_filter,
         output_path=html_path,
+        annotated_audio=annotated_audio_map,
+        vad_info=vad_info,
     )
     print(f"\n  HTML report: {html_path}")
 
@@ -465,6 +525,8 @@ async def process_audio(
     for name, analyzer in analyzers.items():
         analyzer.clear()
         await analyzer.cleanup()
+    if hasattr(vad, "cleanup"):
+        await vad.cleanup()
 
     print("\nDone.")
 
@@ -478,11 +540,13 @@ Examples:
   python demo_turn_taking.py conversation.wav
   python demo_turn_taking.py input.wav --analyzer krisp
   python demo_turn_taking.py input.wav --analyzer krisp --analyzer smart-turn-v3
+  python demo_turn_taking.py input.wav --vad krisp --viva-filter
   python demo_turn_taking.py input.wav --viva-filter --threshold 0.7 -v
 
 Environment variables:
   KRISP_VIVA_TURN_MODEL_PATH    Path to Krisp turn detection model (.kef)
   KRISP_VIVA_FILTER_MODEL_PATH  Path to Krisp noise filter model (.kef)
+  KRISP_VIVA_VAD_MODEL_PATH     Path to Krisp VAD model (.kef, for --vad krisp)
         """,
     )
 
@@ -539,6 +603,16 @@ Environment variables:
         help="Show per-frame turn detection events",
     )
 
+    parser.add_argument(
+        "--vad",
+        type=str,
+        default="silero",
+        choices=AVAILABLE_VADS,
+        dest="vad_type",
+        help="VAD engine: silero (default) or krisp (requires KRISP_VIVA_VAD_MODEL_PATH). "
+        "Uses production Pipecat VAD parameters.",
+    )
+
     args = parser.parse_args()
 
     if not os.path.exists(args.input):
@@ -562,6 +636,7 @@ Environment variables:
             output_dir=args.output_dir,
             verbose=args.verbose,
             use_viva_filter=args.viva_filter,
+            vad_type=args.vad_type,
         )
     )
 
