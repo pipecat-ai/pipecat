@@ -128,7 +128,7 @@ class DailyRoomProperties(BaseModel):
         if not self.sip_uri:
             return ""
         else:
-            return "sip:%s" % self.sip_uri["endpoint"]
+            return f"sip:{self.sip_uri['endpoint']}"
 
 
 class DailyRoomParams(BaseModel):
