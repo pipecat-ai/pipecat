@@ -475,9 +475,7 @@ class AWSBedrockLLMService(LLMService):
             # Log request params with messages redacted for logging
             adapter = self.get_llm_adapter()
             messages_for_logging = adapter.get_messages_for_logging(context)
-            logger.debug(
-                f"{self}: Generating chat from context [{system}] | {messages_for_logging}"
-            )
+            logger.debug(f"{self}: Generating chat from context {messages_for_logging}")
 
             async with self._aws_session.client(
                 service_name="bedrock-runtime", **self._aws_params
