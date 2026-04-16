@@ -211,9 +211,9 @@ class BaseDirectFunctionWrapper:
             return {"type": "number"}
         elif type_hint is bool:
             return {"type": "boolean"}
-        elif type_hint is dict or type_hint is dict:
+        elif type_hint is dict:
             return {"type": "object"}
-        elif type_hint is list or type_hint is list:
+        elif type_hint is list:
             return {"type": "array"}
 
         # Get origin and arguments for complex types
@@ -225,11 +225,11 @@ class BaseDirectFunctionWrapper:
             return {"anyOf": [self._typehint_to_jsonschema(arg) for arg in args]}
 
         # Handle List, Tuple, Set with specific item types
-        if origin in (list, list, tuple, tuple, set, set) and args:
+        if origin in (list, tuple, set) and args:
             return {"type": "array", "items": self._typehint_to_jsonschema(args[0])}
 
         # Handle Dict with specific key/value types
-        if origin in (dict, dict) and len(args) == 2:
+        if origin is dict and len(args) == 2:
             # For JSON Schema, keys must be strings
             return {"type": "object", "additionalProperties": self._typehint_to_jsonschema(args[1])}
 
