@@ -392,7 +392,7 @@ class GoogleLLMService(LLMService):
         )
 
         logger.debug(
-            f"{self}: Generating chat from context [{params['system_instruction']}] | {adapter.get_messages_for_logging(context)}"
+            f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
         )
 
         messages = params["messages"]

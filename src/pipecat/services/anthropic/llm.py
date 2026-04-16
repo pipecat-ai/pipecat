@@ -345,9 +345,7 @@ class AnthropicLLMService(LLMService):
 
             adapter = self.get_llm_adapter()
             messages_for_logging = adapter.get_messages_for_logging(context)
-            logger.debug(
-                f"{self}: Generating chat from context [{params_from_context['system']}] | {messages_for_logging}"
-            )
+            logger.debug(f"{self}: Generating chat from context {messages_for_logging}")
 
             await self.start_ttfb_metrics()
 
