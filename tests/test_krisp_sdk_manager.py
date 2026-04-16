@@ -62,7 +62,14 @@ class TestKrispVivaSDKManager:
     def setup_method(self):
         """Reset mocks and SDK state before each test."""
         mock_krisp_audio.reset_mock()
+        mock_krisp_audio.globalInit.side_effect = None
         mock_krisp_audio.getVersion.return_value = mock_version
+
+        # Ensure krisp_instance module uses THIS test's mock, not a stale
+        # reference cached from a different test file's sys.modules entry.
+        import pipecat.audio.krisp_instance as _ki
+
+        _ki.krisp_audio = mock_krisp_audio
 
         # Reset the SDK manager state for clean tests
         # We access internal state to ensure tests are isolated
