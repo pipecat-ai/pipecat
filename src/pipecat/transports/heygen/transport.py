@@ -21,6 +21,7 @@ from typing import Any
 import aiohttp
 from loguru import logger
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
     BotConnectedFrame,
@@ -40,7 +41,12 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.heygen.api_interactive_avatar import NewSessionRequest
 from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
-from pipecat.services.heygen.client import HeyGenCallbacks, HeyGenClient, ServiceType
+from pipecat.services.heygen.client import (
+    HEY_GEN_SAMPLE_RATE,
+    HeyGenCallbacks,
+    HeyGenClient,
+    ServiceType,
+)
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -164,6 +170,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
+        self._resampler = create_stream_resampler()
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
@@ -195,7 +202,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
             return
 
         self._initialized = True
-        await self._client.start(frame, self.audio_chunk_size)
+        await self._client.start(frame)
         await self.set_transport_ready(frame)
         self._client.transport_ready()
 
@@ -266,10 +273,15 @@ class HeyGenOutputTransport(BaseOutputTransport):
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the HeyGen transport.
 
+        Resamples audio to 24kHz if needed before sending.
+
         Args:
             frame: The audio frame to write.
         """
-        await self._client.agent_speak(bytes(frame.audio), self._event_id)
+        audio = frame.audio
+        if frame.sample_rate != HEY_GEN_SAMPLE_RATE:
+            audio = await self._resampler.resample(audio, frame.sample_rate, HEY_GEN_SAMPLE_RATE)
+        await self._client.agent_speak(bytes(audio), self._event_id)
         return True
 
 

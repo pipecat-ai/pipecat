@@ -156,6 +156,7 @@ class HeyGenClient:
         self._in_sample_rate = 0
         self._out_sample_rate = 0
         self._connected = False
+        self._keep_alive_task = None
         self._session_request = session_request
         self._callbacks = callbacks
         self._event_queue: asyncio.Queue | None = None
@@ -170,7 +171,6 @@ class HeyGenClient:
         # would be sending it to quickly. Instead, we want to block to emulate
         # an audio device, this is what the send interval is. It will be
         # computed on StartFrame.
-        self._send_interval = 0
         self._next_send_time = 0
         self._audio_seconds_sent = 0.0
         self._transport_ready = False
@@ -232,7 +232,7 @@ class HeyGenClient:
         except Exception as e:
             logger.error(f"Exception during cleanup: {e}")
 
-    async def start(self, frame: StartFrame, audio_chunk_size: int) -> None:
+    async def start(self, frame: StartFrame) -> None:
         """Start the client and establish all necessary connections.
 
         Initializes WebSocket and LiveKit connections using the provided configuration.
@@ -240,7 +240,6 @@ class HeyGenClient:
 
         Args:
             frame: Initial configuration frame containing audio parameters
-            audio_chunk_size: Audio chunk size for output processing
         """
         if self._websocket:
             logger.debug("heygen client already started")
@@ -249,10 +248,11 @@ class HeyGenClient:
         logger.debug(f"HeyGenClient starting")
         self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
-        self._send_interval = (audio_chunk_size / self._out_sample_rate) / 2
-        logger.debug(f"HeyGenClient send_interval: {self._send_interval}")
         await self._ws_connect()
         await self._livekit_connect()
+        self._keep_alive_task = self._task_manager.create_task(
+            self._keep_alive_handler(), name="HeyGenClient_KeepAlive"
+        )
         self._call_event_callback(self._callbacks.on_connected)
 
     async def stop(self) -> None:
@@ -261,6 +261,9 @@ class HeyGenClient:
         Disconnects from WebSocket and LiveKit endpoints, and performs cleanup.
         """
         logger.debug(f"HeyGenVideoService stopping")
+        if self._keep_alive_task:
+            await self._task_manager.cancel_task(self._keep_alive_task)
+            self._keep_alive_task = None
         await self._ws_disconnect()
         await self._livekit_disconnect()
         await self.cleanup()
@@ -286,21 +289,29 @@ class HeyGenClient:
 
     async def _ws_receive_task_handler(self):
         """Handle incoming WebSocket messages."""
-        while self._connected:
-            try:
-                message = await self._websocket.recv()
-                parsed_message = json.loads(message)
-                await self._handle_ws_server_event(parsed_message)
-            except ConnectionClosedOK:
-                break
-            except Exception as e:
-                logger.error(f"Error processing WebSocket message: {e}")
-                break
+        try:
+            while self._connected:
+                try:
+                    message = await self._websocket.recv()
+                    parsed_message = json.loads(message)
+                    await self._handle_ws_server_event(parsed_message)
+                except ConnectionClosedOK:
+                    logger.debug("HeyGenClient: WebSocket closed normally")
+                    break
+                except Exception as e:
+                    logger.error(f"Error processing WebSocket message: {e}")
+                    break
+        finally:
+            self._connected = False
+            logger.debug("HeyGenClient: WS receive handler exited, state cleaned up")
 
     async def _handle_ws_server_event(self, event: dict) -> None:
         """Handle an event from HeyGen websocket."""
         event_type = event.get("type")
-        if event_type == "agent.state":
+        if event_type == "session.state_updated":
+            state = event.get("state")
+            logger.debug(f"HeyGenClient ws session state updated: {state}")
+        elif event_type == "agent.state":
             logger.debug(f"HeyGenClient ws received agent status: {event}")
         else:
             logger.trace(f"HeyGenClient ws received unknown event: {event_type}")
@@ -327,6 +338,22 @@ class HeyGenClient:
         except Exception as e:
             logger.error(f"Error sending message to HeyGen websocket: {e}")
             raise e
+
+    async def _keep_alive_handler(self):
+        """Periodically send keep-alive to prevent session timeout (5 min inactivity limit)."""
+        while self._connected:
+            await asyncio.sleep(150)  # 2.5 minutes
+            if self._connected:
+                try:
+                    await self._ws_send(
+                        {
+                            "type": "session.keep_alive",
+                            "event_id": str(uuid.uuid4()),
+                        }
+                    )
+                    logger.debug("HeyGenClient: Sent keep-alive")
+                except Exception as e:
+                    logger.warning(f"HeyGenClient: Keep-alive failed: {e}")
 
     async def interrupt(self, event_id: str) -> None:
         """Interrupt the avatar's current action.
@@ -394,7 +421,7 @@ class HeyGenClient:
         """Send audio data to the agent speak.
 
         Args:
-            audio: Audio data in base64 encoded format
+            audio: Audio data as raw bytes (will be base64 encoded)
             event_id: Unique identifier for the event
         """
         audio_base64 = base64.b64encode(audio).decode("utf-8")
@@ -406,30 +433,36 @@ class HeyGenClient:
             }
         )
         # Simulate audio playback with a sleep.
-        await self._write_audio_sleep()
+        await self._write_audio_sleep(len(audio))
 
     def _reset_audio_timing(self):
         """Reset audio timing control variables."""
         self._audio_seconds_sent = 0.0
         self._next_send_time = 0
 
-    async def _write_audio_sleep(self):
-        """Simulate audio playback timing with appropriate delays."""
-        # Only sleep after we've sent the first second of audio
-        # This appears to reduce the latency to receive the answer from HeyGen
+    async def _write_audio_sleep(self, audio_bytes: int):
+        """Simulate audio playback timing with appropriate delays.
+
+        Args:
+            audio_bytes: Number of raw audio bytes sent (24kHz, 16-bit mono).
+        """
+        # Compute actual audio duration from bytes (24kHz, 16-bit mono = 2 bytes/sample)
+        chunk_duration = audio_bytes / (HEY_GEN_SAMPLE_RATE * 2)
+
+        # Skip sleeping for the first 3 seconds of audio to reduce initial latency
         if self._audio_seconds_sent < 3.0:
-            self._audio_seconds_sent += self._send_interval
-            self._next_send_time = time.monotonic() + self._send_interval
+            self._audio_seconds_sent += chunk_duration
+            self._next_send_time = time.monotonic() + chunk_duration
             return
 
-        # After first second, use normal timing
+        # After first 3 seconds, pace sends to match real-time playback
         current_time = time.monotonic()
         sleep_duration = max(0, self._next_send_time - current_time)
         if sleep_duration > 0:
             await asyncio.sleep(sleep_duration)
-            self._next_send_time += self._send_interval
+            self._next_send_time += chunk_duration
         else:
-            self._next_send_time = time.monotonic() + self._send_interval
+            self._next_send_time = time.monotonic() + chunk_duration
 
     async def agent_speak_end(self, event_id: str) -> None:
         """Send signaling that the agent has finished speaking.

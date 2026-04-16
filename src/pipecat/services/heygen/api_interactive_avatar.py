@@ -225,7 +225,7 @@ class HeyGenApi(BaseAvatarApi):
             "activity_idle_timeout": request_data.activity_idle_timeout,
         }
         session_info = await self._request("/streaming.new", params)
-        print("heygen session info", session_info)
+        logger.debug(f"HeyGen session info: {session_info}")
 
         heygen_session = HeyGenSession.model_validate(session_info)
 

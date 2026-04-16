@@ -276,6 +276,13 @@ class LiveAvatarApi(BaseAvatarApi):
             # Fall back to VP8 encoding if video_settings is not provided
             params["video_settings"] = {"encoding": VideoEncoding.VP8.value}
 
+        if request_data.livekit_config is not None:
+            params["livekit_config"] = {
+                "livekit_url": request_data.livekit_config.livekit_url,
+                "livekit_room": request_data.livekit_config.livekit_room,
+                "livekit_client_token": request_data.livekit_config.livekit_client_token,
+            }
+
         logger.debug(f"Creating LiveAvatar session token with params: {params}")
         response = await self._request("POST", "/sessions/token", params)
         logger.debug(f"LiveAvatar session token created")
