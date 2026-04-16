@@ -28,6 +28,10 @@
 
 ## 🌐 Pipecat Ecosystem
 
+### 🧩 Multi-agent systems
+
+Need multiple AI agents working together? [Pipecat Subagents](https://github.com/pipecat-ai/pipecat-subagents) lets you build distributed multi-agent systems where each agent runs its own pipeline and communicates through a shared message bus. Hand off conversations between specialists, dispatch background tasks, and scale agents across processes or machines.
+
 ### 📱 Client SDKs
 
 Building client applications? You can connect to Pipecat from any platform using our official SDKs:
