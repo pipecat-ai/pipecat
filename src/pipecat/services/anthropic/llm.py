@@ -14,7 +14,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 import httpx
 from loguru import logger
@@ -66,7 +66,7 @@ class AnthropicThinkingConfig(BaseModel):
 
     # No client-side validation on budget_tokens — we let the server
     # enforce the rules so we stay forward-compatible if they change.
-    budget_tokens: Optional[int] = None
+    budget_tokens: int | None = None
 
 
 @dataclass
@@ -133,26 +133,26 @@ class AnthropicLLMService(LLMService):
             extra: Additional parameters to pass to the API.
         """
 
-        enable_prompt_caching: Optional[bool] = None
-        max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
-        temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
-        top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        enable_prompt_caching: bool | None = None
+        max_tokens: int | None = Field(default_factory=lambda: 4096, ge=1)
+        temperature: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        top_k: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=0)
+        top_p: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(
             default_factory=lambda: NOT_GIVEN
         )
-        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
+        extra: dict[str, Any] | None = Field(default_factory=dict)
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         client=None,
-        retry_timeout_secs: Optional[float] = 5.0,
-        retry_on_timeout: Optional[bool] = False,
+        retry_timeout_secs: float | None = 5.0,
+        retry_on_timeout: bool | None = False,
         **kwargs,
     ):
         """Initialize the Anthropic LLM service.
@@ -251,7 +251,7 @@ class AnthropicLLMService(LLMService):
                     api_call(**params), timeout=self._retry_timeout_secs
                 )
                 return response
-            except (APITimeoutError, asyncio.TimeoutError):
+            except (TimeoutError, APITimeoutError):
                 # Retry, this time without a timeout so we get a response
                 logger.debug(f"{self}: Retrying message creation due to timeout")
                 response = await api_call(**params)
@@ -263,9 +263,9 @@ class AnthropicLLMService(LLMService):
     async def run_inference(
         self,
         context: LLMContext,
-        max_tokens: Optional[int] = None,
-        system_instruction: Optional[str] = None,
-    ) -> Optional[str]:
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:

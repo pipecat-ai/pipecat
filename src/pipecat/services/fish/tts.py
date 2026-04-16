@@ -10,8 +10,9 @@ This module provides integration with Fish Audio's real-time TTS WebSocket API
 for streaming text-to-speech synthesis with customizable voice parameters.
 """
 
+from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Literal, Mapping, Optional, Self
+from typing import Any, Literal, Self
 
 from loguru import logger
 from pydantic import BaseModel
@@ -99,22 +100,22 @@ class FishAudioTTSService(InterruptibleTTSService):
             prosody_volume: Volume adjustment in dB. Defaults to 0.
         """
 
-        language: Optional[Language] = Language.EN
-        latency: Optional[str] = "normal"  # "normal" or "balanced"
-        normalize: Optional[bool] = True
-        prosody_speed: Optional[float] = 1.0  # Speech speed (0.5-2.0)
-        prosody_volume: Optional[int] = 0  # Volume adjustment in dB
+        language: Language | None = Language.EN
+        latency: str | None = "normal"  # "normal" or "balanced"
+        normalize: bool | None = True
+        prosody_speed: float | None = 1.0  # Speech speed (0.5-2.0)
+        prosody_volume: int | None = 0  # Volume adjustment in dB
 
     def __init__(
         self,
         *,
         api_key: str,
-        reference_id: Optional[str] = None,  # This is the voice ID
-        model_id: Optional[str] = None,
+        reference_id: str | None = None,  # This is the voice ID
+        model_id: str | None = None,
         output_format: FishAudioOutputFormat = "pcm",
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Fish Audio TTS service.
@@ -321,7 +322,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any buffered audio by sending a flush event to Fish Audio."""
         logger.trace(f"{self}: Flushing audio buffers")
         if not self._websocket or self._websocket.state is State.CLOSED:

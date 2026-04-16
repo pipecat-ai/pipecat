@@ -10,8 +10,6 @@ This module provides a VADProcessor that wraps a VADController to process
 audio frames and push VAD-related frames into the pipeline.
 """
 
-from typing import Type
-
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
@@ -94,7 +92,7 @@ class VADProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
         @self._vad_controller.event_handler("on_broadcast_frame")
-        async def on_broadcast_frame(_controller, frame_cls: Type[Frame], **kwargs):
+        async def on_broadcast_frame(_controller, frame_cls: type[Frame], **kwargs):
             await self.broadcast_frame(frame_cls, **kwargs)
 
     async def cleanup(self):

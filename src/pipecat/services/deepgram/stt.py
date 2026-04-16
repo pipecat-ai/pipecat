@@ -7,8 +7,9 @@
 """Deepgram speech-to-text service implementation."""
 
 import asyncio
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -64,33 +65,33 @@ class LiveOptions:
     def __init__(
         self,
         *,
-        callback: Optional[str] = None,
-        callback_method: Optional[str] = None,
-        channels: Optional[int] = None,
-        detect_entities: Optional[bool] = None,
-        diarize: Optional[bool] = None,
-        dictation: Optional[bool] = None,
-        encoding: Optional[str] = None,
-        endpointing: Optional[Any] = None,
-        extra: Optional[Any] = None,
-        interim_results: Optional[bool] = None,
-        keyterm: Optional[Any] = None,
-        keywords: Optional[Any] = None,
-        language: Optional[str] = None,
-        mip_opt_out: Optional[bool] = None,
-        model: Optional[str] = None,
-        multichannel: Optional[bool] = None,
-        numerals: Optional[bool] = None,
-        profanity_filter: Optional[bool] = None,
-        punctuate: Optional[bool] = None,
-        redact: Optional[Any] = None,
-        replace: Optional[Any] = None,
-        sample_rate: Optional[int] = None,
-        search: Optional[Any] = None,
-        smart_format: Optional[bool] = None,
-        tag: Optional[Any] = None,
-        utterance_end_ms: Optional[int] = None,
-        version: Optional[str] = None,
+        callback: str | None = None,
+        callback_method: str | None = None,
+        channels: int | None = None,
+        detect_entities: bool | None = None,
+        diarize: bool | None = None,
+        dictation: bool | None = None,
+        encoding: str | None = None,
+        endpointing: Any | None = None,
+        extra: Any | None = None,
+        interim_results: bool | None = None,
+        keyterm: Any | None = None,
+        keywords: Any | None = None,
+        language: str | None = None,
+        mip_opt_out: bool | None = None,
+        model: str | None = None,
+        multichannel: bool | None = None,
+        numerals: bool | None = None,
+        profanity_filter: bool | None = None,
+        punctuate: bool | None = None,
+        redact: Any | None = None,
+        replace: Any | None = None,
+        sample_rate: int | None = None,
+        search: Any | None = None,
+        smart_format: bool | None = None,
+        tag: Any | None = None,
+        utterance_end_ms: int | None = None,
+        version: str | None = None,
         **kwargs,
     ):
         """Initialize live transcription options.
@@ -298,15 +299,15 @@ class DeepgramSTTService(STTService):
         encoding: str = "linear16",
         channels: int = 1,
         multichannel: bool = False,
-        sample_rate: Optional[int] = None,
-        callback: Optional[str] = None,
-        callback_method: Optional[str] = None,
-        tag: Optional[Any] = None,
-        mip_opt_out: Optional[bool] = None,
-        live_options: Optional[LiveOptions] = None,
-        addons: Optional[dict] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = DEEPGRAM_TTFS_P99,
+        sample_rate: int | None = None,
+        callback: str | None = None,
+        callback_method: str | None = None,
+        tag: Any | None = None,
+        mip_opt_out: bool | None = None,
+        live_options: LiveOptions | None = None,
+        addons: dict | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = DEEPGRAM_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Deepgram STT service.
@@ -668,7 +669,7 @@ class DeepgramSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass

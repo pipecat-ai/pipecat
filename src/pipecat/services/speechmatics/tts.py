@@ -7,8 +7,8 @@
 """Speechmatics TTS service integration."""
 
 import asyncio
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
 from urllib.parse import urlencode
 
 import aiohttp
@@ -75,11 +75,11 @@ class SpeechmaticsTTSService(TTSService):
         *,
         api_key: str,
         base_url: str = "https://preview.tts.speechmatics.com",
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
-        sample_rate: Optional[int] = SPEECHMATICS_SAMPLE_RATE,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        sample_rate: int | None = SPEECHMATICS_SAMPLE_RATE,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Speechmatics TTS service.

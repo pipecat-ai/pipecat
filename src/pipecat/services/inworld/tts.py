@@ -17,19 +17,13 @@ import asyncio
 import base64
 import json
 import uuid
+from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from typing import (
     Any,
-    AsyncGenerator,
     ClassVar,
-    Dict,
-    List,
     Literal,
-    Mapping,
-    Optional,
     Self,
-    Set,
-    Tuple,
 )
 
 import aiohttp
@@ -81,7 +75,7 @@ class InworldTTSSettings(TTSSettings):
     speaking_rate: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
-    _aliases: ClassVar[Dict[str, str]] = {
+    _aliases: ClassVar[dict[str, str]] = {
         "voiceId": "voice",
         "modelId": "model",
     }
@@ -118,23 +112,23 @@ class InworldHttpTTSService(TTSService):
             timestamp_transport_strategy: The strategy to use for timestamp transport.
         """
 
-        temperature: Optional[float] = None
-        speaking_rate: Optional[float] = None
-        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC"
+        temperature: float | None = None
+        speaking_rate: float | None = None
+        timestamp_transport_strategy: Literal["ASYNC", "SYNC"] | None = "ASYNC"
 
     def __init__(
         self,
         *,
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
-        voice_id: Optional[str] = None,
-        model: Optional[str] = None,
+        voice_id: str | None = None,
+        model: str | None = None,
         streaming: bool = True,
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         encoding: str = "LINEAR16",
-        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC",
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        timestamp_transport_strategy: Literal["ASYNC", "SYNC"] | None = "ASYNC",
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Inworld TTS service.
@@ -255,8 +249,8 @@ class InworldHttpTTSService(TTSService):
 
     def _calculate_word_times(
         self,
-        timestamp_info: Dict[str, Any],
-    ) -> Tuple[List[Tuple[str, float]], float]:
+        timestamp_info: dict[str, Any],
+    ) -> tuple[list[tuple[str, float]], float]:
         """Calculate word timestamps from Inworld HTTP API word-level response.
 
         Note: Inworld HTTP provides timestamps that reset for each request.
@@ -269,7 +263,7 @@ class InworldHttpTTSService(TTSService):
             Tuple of (word_times, chunk_end_time) where chunk_end_time is the
             end time of the last word in this chunk (not cumulative).
         """
-        word_times: List[Tuple[str, float]] = []
+        word_times: list[tuple[str, float]] = []
         chunk_end_time = 0.0
 
         alignment = timestamp_info.get("wordAlignment", {})
@@ -534,30 +528,30 @@ class InworldTTSService(WebsocketTTSService):
             timestamp_transport_strategy: The strategy to use for timestamp transport.
         """
 
-        temperature: Optional[float] = None
-        speaking_rate: Optional[float] = None
-        apply_text_normalization: Optional[str] = None
-        max_buffer_delay_ms: Optional[int] = None
-        buffer_char_threshold: Optional[int] = None
-        auto_mode: Optional[bool] = True
-        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC"
+        temperature: float | None = None
+        speaking_rate: float | None = None
+        apply_text_normalization: str | None = None
+        max_buffer_delay_ms: int | None = None
+        buffer_char_threshold: int | None = None
+        auto_mode: bool | None = True
+        timestamp_transport_strategy: Literal["ASYNC", "SYNC"] | None = "ASYNC"
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
-        model: Optional[str] = None,
+        voice_id: str | None = None,
+        model: str | None = None,
         url: str = "wss://api.inworld.ai/tts/v1/voice:streamBidirectional",
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         encoding: str = "LINEAR16",
-        auto_mode: Optional[bool] = None,
-        apply_text_normalization: Optional[str] = None,
-        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC",
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        aggregate_sentences: Optional[bool] = None,
-        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        auto_mode: bool | None = None,
+        apply_text_normalization: str | None = None,
+        timestamp_transport_strategy: Literal["ASYNC", "SYNC"] | None = "ASYNC",
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        aggregate_sentences: bool | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
         append_trailing_space: bool = True,
         **kwargs: Any,
     ):
@@ -684,8 +678,8 @@ class InworldTTSService(WebsocketTTSService):
         # Fallback tracking for when timestamps are not received. Without
         # timestamps, interruptions commit the full text rather than only the
         # portion that was spoken.
-        self._context_texts: Dict[str, str] = {}
-        self._contexts_with_timestamps: Set[str] = set()
+        self._context_texts: dict[str, str] = {}
+        self._contexts_with_timestamps: set[str] = set()
 
         # Init-only config (not runtime-updatable).
         self._audio_encoding = encoding
@@ -730,7 +724,7 @@ class InworldTTSService(WebsocketTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio without closing the context.
 
         This triggers synthesis of all accumulated text in the buffer while
@@ -758,7 +752,7 @@ class InworldTTSService(WebsocketTTSService):
         except Exception as e:
             logger.warning(f"{self}: Failed to pre-open context: {e}")
 
-    def _calculate_word_times(self, timestamp_info: Dict[str, Any]) -> List[Tuple[str, float]]:
+    def _calculate_word_times(self, timestamp_info: dict[str, Any]) -> list[tuple[str, float]]:
         """Calculate word timestamps from Inworld WebSocket API response.
 
         Adds cumulative time offset to maintain monotonically increasing timestamps
@@ -771,7 +765,7 @@ class InworldTTSService(WebsocketTTSService):
         Returns:
             List of (word, timestamp) tuples with cumulative offset applied.
         """
-        word_times: List[Tuple[str, float]] = []
+        word_times: list[tuple[str, float]] = []
 
         alignment = timestamp_info.get("wordAlignment", {})
         words = alignment.get("words", [])
@@ -1079,7 +1073,7 @@ class InworldTTSService(WebsocketTTSService):
         if self._settings.speaking_rate is not None:
             audio_config["speakingRate"] = self._settings.speaking_rate
 
-        create_config: Dict[str, Any] = {
+        create_config: dict[str, Any] = {
             "voiceId": self._settings.voice,
             "modelId": self._settings.model,
             "audioConfig": audio_config,

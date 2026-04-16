@@ -15,7 +15,7 @@ import asyncio
 import time
 from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -57,9 +57,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
     implement the specific model prediction logic.
     """
 
-    def __init__(
-        self, *, sample_rate: Optional[int] = None, params: Optional[SmartTurnParams] = None
-    ):
+    def __init__(self, *, sample_rate: int | None = None, params: SmartTurnParams | None = None):
         """Initialize the smart turn analyzer.
 
         Args:
@@ -146,7 +144,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
 
         return state
 
-    async def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    async def analyze_end_of_turn(self) -> tuple[EndOfTurnState, MetricsData | None]:
         """Analyze the current audio state to determine if turn has ended.
 
         Returns:
@@ -178,7 +176,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._speech_start_time = 0
         self._silence_ms = 0
 
-    def _process_speech_segment(self, audio_buffer) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    def _process_speech_segment(self, audio_buffer) -> tuple[EndOfTurnState, MetricsData | None]:
         """Process accumulated audio segment using ML model."""
         state = EndOfTurnState.INCOMPLETE
 
@@ -248,6 +246,6 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         return state, result_data
 
     @abstractmethod
-    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using ML model from audio data."""
         pass

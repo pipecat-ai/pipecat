@@ -23,7 +23,8 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
-from typing import Any, AsyncGenerator, List, Optional, Union
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
@@ -59,7 +60,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_google_stt_language(language: Language) -> Optional[str]:
+def language_to_google_stt_language(language: Language) -> str | None:
     """Maps Language enum to Google Speech-to-Text V2 language codes.
 
     Args:
@@ -383,8 +384,8 @@ class GoogleSTTSettings(STTSettings):
         enable_voice_activity_events: Detect voice activity in audio.
     """
 
-    languages: List[Language] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_codes: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    languages: list[Language] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_codes: list[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     use_separate_recognition_per_channel: bool | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -443,21 +444,21 @@ class GoogleSTTService(STTService):
             enable_voice_activity_events: Detect voice activity in audio.
         """
 
-        languages: Union[Language, List[Language]] = Field(default_factory=lambda: [Language.EN_US])
-        model: Optional[str] = "latest_long"
-        use_separate_recognition_per_channel: Optional[bool] = False
-        enable_automatic_punctuation: Optional[bool] = True
-        enable_spoken_punctuation: Optional[bool] = False
-        enable_spoken_emojis: Optional[bool] = False
-        profanity_filter: Optional[bool] = False
-        enable_word_time_offsets: Optional[bool] = False
-        enable_word_confidence: Optional[bool] = False
-        enable_interim_results: Optional[bool] = True
-        enable_voice_activity_events: Optional[bool] = False
+        languages: Language | list[Language] = Field(default_factory=lambda: [Language.EN_US])
+        model: str | None = "latest_long"
+        use_separate_recognition_per_channel: bool | None = False
+        enable_automatic_punctuation: bool | None = True
+        enable_spoken_punctuation: bool | None = False
+        enable_spoken_emojis: bool | None = False
+        profanity_filter: bool | None = False
+        enable_word_time_offsets: bool | None = False
+        enable_word_confidence: bool | None = False
+        enable_interim_results: bool | None = True
+        enable_voice_activity_events: bool | None = False
 
         @field_validator("languages", mode="before")
         @classmethod
-        def validate_languages(cls, v) -> List[Language]:
+        def validate_languages(cls, v) -> list[Language]:
             """Ensure languages is always a list.
 
             Args:
@@ -471,7 +472,7 @@ class GoogleSTTService(STTService):
             return v
 
         @property
-        def language_list(self) -> List[Language]:
+        def language_list(self) -> list[Language]:
             """Get languages as a guaranteed list.
 
             Returns:
@@ -483,13 +484,13 @@ class GoogleSTTService(STTService):
     def __init__(
         self,
         *,
-        credentials: Optional[str] = None,
-        credentials_path: Optional[str] = None,
+        credentials: str | None = None,
+        credentials_path: str | None = None,
         location: str = "global",
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = GOOGLE_TTFS_P99,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = GOOGLE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Google STT service.
@@ -581,7 +582,7 @@ class GoogleSTTService(STTService):
             client_options = ClientOptions(api_endpoint=f"{self._location}-speech.googleapis.com")
 
         # Extract project ID and create client
-        creds: Optional[service_account.Credentials] = None
+        creds: service_account.Credentials | None = None
         if credentials:
             json_account_info = json.loads(credentials)
             self._project_id = json_account_info.get("project_id")
@@ -616,7 +617,7 @@ class GoogleSTTService(STTService):
         """
         return True
 
-    def language_to_service_language(self, language: Language | List[Language]) -> str | List[str]:
+    def language_to_service_language(self, language: Language | list[Language]) -> str | list[str]:
         """Convert Language enum(s) to Google STT language code(s).
 
         Args:
@@ -629,7 +630,7 @@ class GoogleSTTService(STTService):
             return [language_to_google_stt_language(lang) or "en-US" for lang in language]
         return language_to_google_stt_language(language) or "en-US"
 
-    def _get_language_codes(self) -> List[str]:
+    def _get_language_codes(self) -> list[str]:
         """Resolve the current language settings to Google STT language code strings.
 
         Prefers ``languages`` (``Language`` enums) over the deprecated
@@ -651,7 +652,7 @@ class GoogleSTTService(STTService):
             await self._disconnect()
             await self._connect()
 
-    async def set_languages(self, languages: List[Language]):
+    async def set_languages(self, languages: list[Language]):
         """Update the service's recognition languages.
 
         .. deprecated:: 0.0.104
@@ -741,17 +742,17 @@ class GoogleSTTService(STTService):
     async def update_options(
         self,
         *,
-        languages: Optional[List[Language]] = None,
-        model: Optional[str] = None,
-        enable_automatic_punctuation: Optional[bool] = None,
-        enable_spoken_punctuation: Optional[bool] = None,
-        enable_spoken_emojis: Optional[bool] = None,
-        profanity_filter: Optional[bool] = None,
-        enable_word_time_offsets: Optional[bool] = None,
-        enable_word_confidence: Optional[bool] = None,
-        enable_interim_results: Optional[bool] = None,
-        enable_voice_activity_events: Optional[bool] = None,
-        location: Optional[str] = None,
+        languages: list[Language] | None = None,
+        model: str | None = None,
+        enable_automatic_punctuation: bool | None = None,
+        enable_spoken_punctuation: bool | None = None,
+        enable_spoken_emojis: bool | None = None,
+        profanity_filter: bool | None = None,
+        enable_word_time_offsets: bool | None = None,
+        enable_word_confidence: bool | None = None,
+        enable_interim_results: bool | None = None,
+        enable_voice_activity_events: bool | None = None,
+        location: str | None = None,
     ) -> None:
         """Update service options dynamically.
 
@@ -947,7 +948,7 @@ class GoogleSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
+        self, transcript: str, is_final: bool, language: str | None = None
     ):
         pass
 

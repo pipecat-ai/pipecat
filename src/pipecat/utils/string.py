@@ -18,8 +18,8 @@ Dependencies:
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import FrozenSet, List, Optional, Sequence, Tuple
 
 import nltk
 from loguru import logger
@@ -41,7 +41,7 @@ except LookupError:
             "See https://www.nltk.org/data.html for more information."
         )
 
-SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
+SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
     {
         # Latin script punctuation (most European languages, Filipino, etc.)
         ".",
@@ -91,16 +91,16 @@ SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
 
 # Latin punctuation that NLTK handles well — these need NLTK's disambiguation
 # because "." can appear in abbreviations, decimals, etc.
-_LATIN_SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset({".", "!", "?", ";", "…"})
+_LATIN_SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset({".", "!", "?", ";", "…"})
 
 # Non-Latin sentence-ending punctuation that is always unambiguous and never needs
 # NLTK's disambiguation logic. Used as a fallback when NLTK doesn't support the
 # language (e.g., Japanese, Chinese, Korean, Hindi, Arabic).
-UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = (
+UNAMBIGUOUS_SENTENCE_ENDING_PUNCTUATION: frozenset[str] = (
     SENTENCE_ENDING_PUNCTUATION - _LATIN_SENTENCE_ENDING_PUNCTUATION
 )
 
-StartEndTags = Tuple[str, str]
+StartEndTags = tuple[str, str]
 
 
 def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
@@ -179,9 +179,9 @@ def match_endofsentence(text: str) -> int:
 def parse_start_end_tags(
     text: str,
     tags: Sequence[StartEndTags],
-    current_tag: Optional[StartEndTags],
+    current_tag: StartEndTags | None,
     current_tag_index: int,
-) -> Tuple[Optional[StartEndTags], int]:
+) -> tuple[StartEndTags | None, int]:
     """Parse text to identify start and end tag pairs.
 
     If a start tag was previously found (i.e., current_tag is valid), wait for
@@ -237,7 +237,7 @@ class TextPartForConcatenation:
         return f"{self.name}(text: [{self.text}], includes_inter_part_spaces: {self.includes_inter_part_spaces})"
 
 
-def concatenate_aggregated_text(text_parts: List[TextPartForConcatenation]) -> str:
+def concatenate_aggregated_text(text_parts: list[TextPartForConcatenation]) -> str:
     """Concatenate a list of text parts into a single string.
 
     This function joins the provided list of text parts into a single string,

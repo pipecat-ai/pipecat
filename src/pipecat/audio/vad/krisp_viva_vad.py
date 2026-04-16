@@ -12,7 +12,6 @@ Supports 8kHz, 16kHz, 32kHz, 44.1kHz and 48kHz sample rates.
 """
 
 import os
-from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -38,10 +37,10 @@ class KrispVivaVadAnalyzer(VADAnalyzer):
     def __init__(
         self,
         *,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         frame_duration: int = 10,
-        sample_rate: Optional[int] = None,
-        params: Optional[VADParams] = None,
+        sample_rate: int | None = None,
+        params: VADParams | None = None,
     ):
         """Initialize the Krisp VIVA VAD analyzer.
 

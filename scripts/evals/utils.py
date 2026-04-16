@@ -6,9 +6,9 @@
 
 import importlib.util
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 GREEN = "\033[92m"
 RED = "\033[91m"

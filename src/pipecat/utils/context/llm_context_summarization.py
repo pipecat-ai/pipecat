@@ -13,7 +13,7 @@ context when token limits are reached, enabling efficient long-running conversat
 import json
 import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from pipecat.services.llm_service import LLMService
@@ -90,7 +90,7 @@ class LLMContextSummaryConfig:
 
     target_context_tokens: int = 6000
     min_messages_after_summary: int = 4
-    summarization_prompt: Optional[str] = None
+    summarization_prompt: str | None = None
     summary_message_template: str = "Conversation summary: {summary}"
     llm: Optional["LLMService"] = None
     summarization_timeout: float = DEFAULT_SUMMARIZATION_TIMEOUT
@@ -139,8 +139,8 @@ class LLMAutoContextSummarizationConfig:
             default ``LLMContextSummaryConfig`` values.
     """
 
-    max_context_tokens: Optional[int] = 8000
-    max_unsummarized_messages: Optional[int] = 20
+    max_context_tokens: int | None = 8000
+    max_unsummarized_messages: int | None = 20
     summary_config: LLMContextSummaryConfig = field(default_factory=LLMContextSummaryConfig)
 
     def __post_init__(self):
@@ -192,11 +192,11 @@ class LLMContextSummarizationConfig:
         summarization_prompt: Custom prompt for summary generation.
     """
 
-    max_context_tokens: Optional[int] = 8000
+    max_context_tokens: int | None = 8000
     target_context_tokens: int = 6000
-    max_unsummarized_messages: Optional[int] = 20
+    max_unsummarized_messages: int | None = 20
     min_messages_after_summary: int = 4
-    summarization_prompt: Optional[str] = None
+    summarization_prompt: str | None = None
     summary_message_template: str = "Conversation summary: {summary}"
     llm: Optional["LLMService"] = None
     summarization_timeout: float = DEFAULT_SUMMARIZATION_TIMEOUT
@@ -269,7 +269,7 @@ class LLMMessagesToSummarize:
         last_summarized_index: Index of the last message being summarized
     """
 
-    messages: List[dict]
+    messages: list[dict]
     last_summarized_index: int
 
 
@@ -415,7 +415,7 @@ class LLMContextSummarizationUtil:
 
     @staticmethod
     def _get_earliest_function_call_not_resolved_in_range(
-        messages: List[dict], start_idx: int, summary_end: int
+        messages: list[dict], start_idx: int, summary_end: int
     ) -> int:
         """Find the earliest message index with incomplete function calls.
 
@@ -574,7 +574,7 @@ class LLMContextSummarizationUtil:
         )
 
     @staticmethod
-    def format_messages_for_summary(messages: List[dict]) -> str:
+    def format_messages_for_summary(messages: list[dict]) -> str:
         """Format messages as a transcript for summarization.
 
         Args:

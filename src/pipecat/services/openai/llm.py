@@ -6,8 +6,6 @@
 
 """OpenAI LLM service implementation with context aggregators."""
 
-from typing import Optional
-
 from openai import NOT_GIVEN
 
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
@@ -26,10 +24,10 @@ class OpenAILLMService(BaseOpenAILLMService):
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
-        service_tier: Optional[str] = None,
-        params: Optional[BaseOpenAILLMService.InputParams] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        service_tier: str | None = None,
+        params: BaseOpenAILLMService.InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize OpenAI LLM service.

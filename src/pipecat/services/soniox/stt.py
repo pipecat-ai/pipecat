@@ -8,8 +8,9 @@
 
 import json
 import time
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, List, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
@@ -70,10 +71,10 @@ class SonioxContextObject(BaseModel):
     https://soniox.com/docs/stt/concepts/context
     """
 
-    general: Optional[List[SonioxContextGeneralItem]] = None
-    text: Optional[str] = None
-    terms: Optional[List[str]] = None
-    translation_terms: Optional[List[SonioxContextTranslationTerm]] = None
+    general: list[SonioxContextGeneralItem] | None = None
+    text: str | None = None
+    terms: list[str] | None = None
+    translation_terms: list[SonioxContextTranslationTerm] | None = None
 
 
 class SonioxInputParams(BaseModel):
@@ -99,17 +100,17 @@ class SonioxInputParams(BaseModel):
 
     model: str = "stt-rt-v4"
 
-    audio_format: Optional[str] = "pcm_s16le"
-    num_channels: Optional[int] = 1
+    audio_format: str | None = "pcm_s16le"
+    num_channels: int | None = 1
 
-    language_hints: Optional[List[Language]] = None
-    language_hints_strict: Optional[bool] = None
-    context: Optional[SonioxContextObject | str] = None
+    language_hints: list[Language] | None = None
+    language_hints_strict: bool | None = None
+    context: SonioxContextObject | str | None = None
 
-    enable_speaker_diarization: Optional[bool] = False
-    enable_language_identification: Optional[bool] = False
+    enable_speaker_diarization: bool | None = False
+    enable_language_identification: bool | None = False
 
-    client_reference_id: Optional[str] = None
+    client_reference_id: str | None = None
 
 
 def is_end_token(token: dict) -> bool:
@@ -190,8 +191,8 @@ def language_to_soniox_language(language: Language) -> str:
 
 
 def _prepare_language_hints(
-    language_hints: Optional[List[Language]],
-) -> Optional[List[str]]:
+    language_hints: list[Language] | None,
+) -> list[str] | None:
     if language_hints is None:
         return None
 
@@ -215,7 +216,7 @@ class SonioxSTTSettings(STTSettings):
         client_reference_id: Client reference ID to use for transcription.
     """
 
-    language_hints: List[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_hints: list[Language] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language_hints_strict: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     context: SonioxContextObject | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_speaker_diarization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -243,14 +244,14 @@ class SonioxSTTService(WebsocketSTTService):
         *,
         api_key: str,
         url: str = "wss://stt-rt.soniox.com/transcribe-websocket",
-        sample_rate: Optional[int] = None,
-        model: Optional[str] = None,
+        sample_rate: int | None = None,
+        model: str | None = None,
         audio_format: str = "pcm_s16le",
         num_channels: int = 1,
-        params: Optional[SonioxInputParams] = None,
+        params: SonioxInputParams | None = None,
         vad_force_turn_endpoint: bool = True,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = SONIOX_TTFS_P99,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = SONIOX_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Soniox STT service.
@@ -337,7 +338,7 @@ class SonioxSTTService(WebsocketSTTService):
         self._num_channels = num_channels
 
         self._final_transcription_buffer = []
-        self._last_tokens_received: Optional[float] = None
+        self._last_tokens_received: float | None = None
 
         self._receive_task = None
 
@@ -417,7 +418,7 @@ class SonioxSTTService(WebsocketSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass

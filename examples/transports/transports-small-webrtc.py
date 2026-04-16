@@ -8,7 +8,6 @@ import argparse
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from typing import Dict
 
 import uvicorn
 from dotenv import load_dotenv
@@ -39,7 +38,7 @@ load_dotenv(override=True)
 app = FastAPI()
 
 # Store connections by pc_id
-pcs_map: Dict[str, SmallWebRTCConnection] = {}
+pcs_map: dict[str, SmallWebRTCConnection] = {}
 
 ice_servers = [
     IceServer(

@@ -8,7 +8,6 @@
 
 import base64
 import json
-from typing import Optional
 
 import aiohttp
 from loguru import logger
@@ -59,7 +58,7 @@ class TelnyxFrameSerializer(FrameSerializer):
         """
 
         telnyx_sample_rate: int = 8000
-        sample_rate: Optional[int] = None
+        sample_rate: int | None = None
         inbound_encoding: str = "PCMU"
         outbound_encoding: str = "PCMU"
         auto_hang_up: bool = True
@@ -69,9 +68,9 @@ class TelnyxFrameSerializer(FrameSerializer):
         stream_id: str,
         outbound_encoding: str,
         inbound_encoding: str,
-        call_control_id: Optional[str] = None,
-        api_key: Optional[str] = None,
-        params: Optional[InputParams] = None,
+        call_control_id: str | None = None,
+        api_key: str | None = None,
+        params: InputParams | None = None,
     ):
         """Initialize the TelnyxFrameSerializer.
 

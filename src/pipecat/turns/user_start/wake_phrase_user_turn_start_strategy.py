@@ -9,7 +9,6 @@
 import asyncio
 import enum
 import re
-from typing import List, Optional
 
 from loguru import logger
 
@@ -85,7 +84,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
     def __init__(
         self,
         *,
-        phrases: List[str],
+        phrases: list[str],
         timeout: float = 10.0,
         single_activation: bool = False,
         **kwargs,
@@ -106,7 +105,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         self._timeout = timeout
         self._single_activation = single_activation
 
-        self._patterns: List[re.Pattern] = []
+        self._patterns: list[re.Pattern] = []
         for phrase in phrases:
             pattern = re.compile(
                 r"\b" + r"\s*".join(re.escape(word) for word in phrase.split()) + r"\b",
@@ -118,7 +117,7 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
         self._accumulated_text = ""
 
         self._timeout_event = asyncio.Event()
-        self._timeout_task: Optional[asyncio.Task] = None
+        self._timeout_task: asyncio.Task | None = None
 
         self._register_event_handler("on_wake_phrase_detected")
         self._register_event_handler("on_wake_phrase_timeout")
@@ -276,6 +275,6 @@ class WakePhraseUserTurnStartStrategy(BaseUserTurnStartStrategy):
                     timeout=self._timeout,
                 )
                 self._timeout_event.clear()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if self._state == _WakeState.AWAKE:
                     self._transition_to_idle()

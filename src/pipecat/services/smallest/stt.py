@@ -14,9 +14,10 @@ This module provides a STT service using Smallest AI's Waves API:
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, AsyncGenerator, Optional
+from enum import StrEnum
+from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -97,7 +98,7 @@ def language_to_smallest_stt_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP)
 
 
-class SmallestSTTModel(str, Enum):
+class SmallestSTTModel(StrEnum):
     """Available Smallest AI STT models."""
 
     PULSE = "pulse"
@@ -156,9 +157,9 @@ class SmallestSTTService(WebsocketSTTService):
         api_key: str,
         base_url: str = "wss://api.smallest.ai",
         encoding: str = "linear16",
-        sample_rate: Optional[int] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = SMALLEST_TTFS_P99,
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = SMALLEST_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Smallest AI STT service.
@@ -207,7 +208,7 @@ class SmallestSTTService(WebsocketSTTService):
         """Check if this service can generate processing metrics."""
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Smallest service language format.
 
         Args:
@@ -406,7 +407,7 @@ class SmallestSTTService(WebsocketSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
+        self, transcript: str, is_final: bool, language: str | None = None
     ):
         """Handle a transcription result with tracing."""
         pass

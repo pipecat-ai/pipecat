@@ -11,7 +11,6 @@ Microservice) API while maintaining compatibility with the OpenAI-style interfac
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -42,8 +41,8 @@ class NvidiaLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://integrate.api.nvidia.com/v1",
-        model: Optional[str] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the NvidiaLLMService.

@@ -16,7 +16,8 @@ import functools
 import inspect
 import json
 import logging
-from typing import TYPE_CHECKING, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypeVar
 
 # Type imports for type checking only
 if TYPE_CHECKING:
@@ -164,7 +165,7 @@ def _add_token_usage_to_span(span, token_usage):
             span.set_attribute("gen_ai.usage.reasoning_tokens", reasoning_tokens)
 
 
-def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
+def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Callable:
     """Trace TTS service methods with TTS-specific attributes.
 
     Automatically captures and records:
@@ -236,7 +237,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     raise
                 finally:
                     # Update TTFB metric at the end
-                    ttfb: Optional[float] = getattr(getattr(self, "_metrics", None), "ttfb", None)
+                    ttfb: float | None = getattr(getattr(self, "_metrics", None), "ttfb", None)
                     if ttfb is not None:
                         span.set_attribute("metrics.ttfb", ttfb)
 
@@ -288,7 +289,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     return decorator
 
 
-def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
+def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Callable:
     """Trace STT service methods with transcription attributes.
 
     Automatically captures and records:
@@ -329,9 +330,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 ) as current_span:
                     try:
                         # Get TTFB metric if available
-                        ttfb: Optional[float] = getattr(
-                            getattr(self, "_metrics", None), "ttfb", None
-                        )
+                        ttfb: float | None = getattr(getattr(self, "_metrics", None), "ttfb", None)
 
                         # Use settings from the service if available
                         settings = getattr(self, "_settings", None)
@@ -369,7 +368,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     return decorator
 
 
-def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
+def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Callable:
     """Trace LLM service methods with LLM-specific attributes.
 
     Automatically captures and records:
@@ -567,9 +566,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             self.start_llm_usage_metrics = original_start_llm_usage_metrics
 
                         # Update TTFB metric
-                        ttfb: Optional[float] = getattr(
-                            getattr(self, "_metrics", None), "ttfb", None
-                        )
+                        ttfb: float | None = getattr(getattr(self, "_metrics", None), "ttfb", None)
                         if ttfb is not None:
                             current_span.set_attribute("metrics.ttfb", ttfb)
             except Exception as e:

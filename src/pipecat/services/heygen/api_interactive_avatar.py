@@ -9,8 +9,8 @@
 API to communicate with HeyGen Streaming API.
 """
 
-from enum import Enum
-from typing import Any, Dict, Literal, Optional
+from enum import StrEnum
+from typing import Any, Literal
 
 import aiohttp
 from loguru import logger
@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from pipecat.services.heygen.base_api import BaseAvatarApi, StandardSessionResponse
 
 
-class AvatarQuality(str, Enum):
+class AvatarQuality(StrEnum):
     """Enum representing different avatar quality levels."""
 
     low = "low"
@@ -27,14 +27,14 @@ class AvatarQuality(str, Enum):
     high = "high"
 
 
-class VideoEncoding(str, Enum):
+class VideoEncoding(StrEnum):
     """Enum representing the video encoding."""
 
     H264 = "H264"
     VP8 = "VP8"
 
 
-class VoiceEmotion(str, Enum):
+class VoiceEmotion(StrEnum):
     """Enum representing different voice emotion types."""
 
     EXCITED = "excited"
@@ -55,11 +55,11 @@ class ElevenLabsSettings(BaseModel):
         use_speaker_boost (Optional[bool]): Flag to enable speaker boost.
     """
 
-    stability: Optional[float] = None
-    similarity_boost: Optional[float] = None
-    model_id: Optional[str] = None
-    style: Optional[int] = None
-    use_speaker_boost: Optional[bool] = None
+    stability: float | None = None
+    similarity_boost: float | None = None
+    model_id: str | None = None
+    style: int | None = None
+    use_speaker_boost: bool | None = None
 
 
 class VoiceSettings(BaseModel):
@@ -72,10 +72,10 @@ class VoiceSettings(BaseModel):
         elevenlabs_settings (Optional[ElevenLabsSettings]): Details for ElevenLabs configuration.
     """
 
-    voice_id: Optional[str] = Field(None, alias="voiceId")
-    rate: Optional[float] = None
-    emotion: Optional[VoiceEmotion] = None
-    elevenlabs_settings: Optional[ElevenLabsSettings] = Field(None, alias="elevenlabsSettings")
+    voice_id: str | None = Field(None, alias="voiceId")
+    rate: float | None = None
+    emotion: VoiceEmotion | None = None
+    elevenlabs_settings: ElevenLabsSettings | None = Field(None, alias="elevenlabsSettings")
 
 
 class NewSessionRequest(BaseModel):
@@ -93,15 +93,15 @@ class NewSessionRequest(BaseModel):
         activity_idle_timeout (Optional[int]): Timeout in seconds for activity-based idle detection.
     """
 
-    quality: Optional[AvatarQuality] = None
-    avatar_id: Optional[str] = None
-    voice: Optional[VoiceSettings] = None
-    video_encoding: Optional[VideoEncoding] = None
-    knowledge_id: Optional[str] = None
-    knowledge_base: Optional[str] = None
+    quality: AvatarQuality | None = None
+    avatar_id: str | None = None
+    voice: VoiceSettings | None = None
+    video_encoding: VideoEncoding | None = None
+    knowledge_id: str | None = None
+    knowledge_base: str | None = None
     version: Literal["v2"] = "v2"
-    disable_idle_timeout: Optional[bool] = None
-    activity_idle_timeout: Optional[int] = None
+    disable_idle_timeout: bool | None = None
+    activity_idle_timeout: int | None = None
 
 
 class HeyGenSession(BaseModel):
@@ -153,7 +153,7 @@ class HeyGenApi(BaseAvatarApi):
         self.api_key = api_key
         self.session = session
 
-    async def _request(self, path: str, params: Dict[str, Any], expect_data: bool = True) -> Any:
+    async def _request(self, path: str, params: dict[str, Any], expect_data: bool = True) -> Any:
         """Make a POST request to the HeyGen API.
 
         Args:

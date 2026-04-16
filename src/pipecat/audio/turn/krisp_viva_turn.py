@@ -16,7 +16,6 @@ passed directly to the constructor.
 
 import os
 import time
-from typing import Optional, Tuple
 
 import numpy as np
 from loguru import logger
@@ -61,9 +60,9 @@ class KrispVivaTurn(BaseTurnAnalyzer):
     def __init__(
         self,
         *,
-        model_path: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        params: Optional[KrispTurnParams] = None,
+        model_path: str | None = None,
+        sample_rate: int | None = None,
+        params: KrispTurnParams | None = None,
         api_key: str = "",
     ) -> None:
         """Initialize the Krisp turn analyzer.
@@ -119,9 +118,9 @@ class KrispVivaTurn(BaseTurnAnalyzer):
             self._last_probability = None
             self._frame_probabilities = []
             self._last_state = EndOfTurnState.INCOMPLETE
-            self._speech_stopped_time: Optional[float] = None
-            self._e2e_processing_time_ms: Optional[float] = None
-            self._last_metrics: Optional[TurnMetricsData] = None
+            self._speech_stopped_time: float | None = None
+            self._e2e_processing_time_ms: float | None = None
+            self._last_metrics: TurnMetricsData | None = None
 
             # Create session with provided sample rate or default to 16000 Hz
             # This preloads the model to improve latency when set_sample_rate is called later
@@ -214,7 +213,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
         return self._frame_probabilities
 
     @property
-    def last_probability(self) -> Optional[float]:
+    def last_probability(self) -> float | None:
         """Get the last turn probability value computed.
 
         Returns:
@@ -348,7 +347,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
             self._last_state = error_state
             return error_state
 
-    async def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    async def analyze_end_of_turn(self) -> tuple[EndOfTurnState, MetricsData | None]:
         """Analyze the current audio state to determine if turn has ended.
 
         Returns:

@@ -13,9 +13,10 @@ Waves API for real-time text-to-speech synthesis.
 import asyncio
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, AsyncGenerator, Optional
+from enum import StrEnum
+from typing import Any
 
 from loguru import logger
 
@@ -43,14 +44,14 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class SmallestTTSModel(str, Enum):
+class SmallestTTSModel(StrEnum):
     """Available Smallest AI TTS models."""
 
     LIGHTNING_V2 = "lightning-v2"
     LIGHTNING_V3_1 = "lightning-v3.1"
 
 
-def language_to_smallest_tts_language(language: Language) -> Optional[str]:
+def language_to_smallest_tts_language(language: Language) -> str | None:
     """Convert a Language enum to a Smallest TTS language string.
 
     Args:
@@ -125,8 +126,8 @@ class SmallestTTSService(InterruptibleTTSService):
         *,
         api_key: str,
         base_url: str = "wss://waves-api.smallest.ai",
-        sample_rate: Optional[int] = None,
-        settings: Optional[Settings] = None,
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Smallest AI WebSocket TTS service.
@@ -173,7 +174,7 @@ class SmallestTTSService(InterruptibleTTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Smallest service language format.
 
         Args:
@@ -354,7 +355,7 @@ class SmallestTTSService(InterruptibleTTSService):
             msg = {"flush": True}
             await self._websocket.send(json.dumps(msg))
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis."""
         if not self._websocket or self._websocket.state is State.CLOSED:
             return

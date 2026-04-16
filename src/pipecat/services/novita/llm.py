@@ -7,7 +7,6 @@
 """Novita AI LLM service implementation using OpenAI-compatible interface."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from loguru import logger
 
@@ -37,7 +36,7 @@ class NovitaLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.novita.ai/openai",
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize Novita AI LLM service.

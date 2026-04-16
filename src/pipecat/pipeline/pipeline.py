@@ -11,7 +11,7 @@ in sequence and manages frame flow between them, along with helper classes
 for pipeline source and sink operations.
 """
 
-from typing import Callable, Coroutine, List, Optional
+from collections.abc import Callable, Coroutine
 
 from pipecat.frames.frames import Frame
 from pipecat.pipeline.base_pipeline import BasePipeline
@@ -98,10 +98,10 @@ class Pipeline(BasePipeline):
 
     def __init__(
         self,
-        processors: List[FrameProcessor],
+        processors: list[FrameProcessor],
         *,
-        source: Optional[FrameProcessor] = None,
-        sink: Optional[FrameProcessor] = None,
+        source: FrameProcessor | None = None,
+        sink: FrameProcessor | None = None,
     ):
         """Initialize the pipeline with a list of processors.
 
@@ -116,7 +116,7 @@ class Pipeline(BasePipeline):
         # downstream outside of the pipeline.
         self._source = source or PipelineSource(self.push_frame, name=f"{self}::Source")
         self._sink = sink or PipelineSink(self.push_frame, name=f"{self}::Sink")
-        self._processors: List[FrameProcessor] = [self._source] + processors + [self._sink]
+        self._processors: list[FrameProcessor] = [self._source] + processors + [self._sink]
 
         self._link_processors()
 
@@ -137,7 +137,7 @@ class Pipeline(BasePipeline):
         return self._processors
 
     @property
-    def entry_processors(self) -> List["FrameProcessor"]:
+    def entry_processors(self) -> list["FrameProcessor"]:
         """Return the list of entry processors for this processor.
 
         Entry processors are the first processors in a compound processor

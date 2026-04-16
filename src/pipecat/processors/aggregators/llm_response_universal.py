@@ -15,8 +15,9 @@ import asyncio
 import json
 import warnings
 from abc import abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Literal, Optional, Set, Type
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -119,14 +120,14 @@ class LLMUserAggregatorParams:
             filter_incomplete_user_turns is True.
     """
 
-    user_turn_strategies: Optional[UserTurnStrategies] = None
-    user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
+    user_turn_strategies: UserTurnStrategies | None = None
+    user_mute_strategies: list[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
-    vad_analyzer: Optional[VADAnalyzer] = None
+    vad_analyzer: VADAnalyzer | None = None
     audio_idle_timeout: float = 1.0
     filter_incomplete_user_turns: bool = False
-    user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
+    user_turn_completion_config: UserTurnCompletionConfig | None = None
 
 
 @dataclass
@@ -145,14 +146,14 @@ class LLMAssistantAggregatorParams:
     """
 
     enable_auto_context_summarization: bool = False
-    auto_context_summarization_config: Optional[LLMAutoContextSummarizationConfig] = None
+    auto_context_summarization_config: LLMAutoContextSummarizationConfig | None = None
 
     # ---------------------------------------------------------------------------
     # Deprecated field names — kept for backward compatibility.
     # Use enable_auto_context_summarization and auto_context_summarization_config instead.
     # ---------------------------------------------------------------------------
-    enable_context_summarization: Optional[bool] = None
-    context_summarization_config: Optional[LLMContextSummarizationConfig] = None
+    enable_context_summarization: bool | None = None
+    context_summarization_config: LLMContextSummarizationConfig | None = None
 
     def __post_init__(self):
         if self.enable_context_summarization is not None:
@@ -198,7 +199,7 @@ class UserTurnStoppedMessage:
 
     content: str
     timestamp: str
-    user_id: Optional[str] = None
+    user_id: str | None = None
 
 
 @dataclass
@@ -259,10 +260,10 @@ class LLMContextAggregator(FrameProcessor):
         self._context = context
         self._role = role
 
-        self._aggregation: List[TextPartForConcatenation] = []
+        self._aggregation: list[TextPartForConcatenation] = []
 
     @property
-    def messages(self) -> List[LLMContextMessage]:
+    def messages(self) -> list[LLMContextMessage]:
         """Get messages from the LLM context.
 
         Returns:
@@ -322,7 +323,7 @@ class LLMContextAggregator(FrameProcessor):
         self._context.set_messages(messages)
 
     def transform_messages(
-        self, transform: Callable[[List[LLMContextMessage]], List[LLMContextMessage]]
+        self, transform: Callable[[list[LLMContextMessage]], list[LLMContextMessage]]
     ):
         """Transform the context messages using a provided function.
 
@@ -423,7 +424,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self,
         context: LLMContext,
         *,
-        params: Optional[LLMUserAggregatorParams] = None,
+        params: LLMUserAggregatorParams | None = None,
         **kwargs,
     ):
         """Initialize the user context aggregator.
@@ -473,7 +474,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
 
         # VAD controller
-        self._vad_controller: Optional[VADController] = None
+        self._vad_controller: VADController | None = None
         if self._params.vad_analyzer:
             self._vad_controller = VADController(
                 self._params.vad_analyzer,
@@ -681,7 +682,7 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
-    async def _queued_broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
+    async def _queued_broadcast_frame(self, frame_cls: type[Frame], **kwargs):
         """Broadcasts a frame upstream and queues it for internal processing.
 
         Queues the frame so it flows through `process_frame` and is handled
@@ -701,7 +702,7 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         await self.queue_frame(frame, direction)
 
-    async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
+    async def _on_broadcast_frame(self, controller, frame_cls: type[Frame], **kwargs):
         await self._queued_broadcast_frame(frame_cls, **kwargs)
 
     async def _on_vad_speech_started(self, controller):
@@ -768,7 +769,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _maybe_emit_user_turn_stopped(
         self,
-        strategy: Optional[BaseUserTurnStopStrategy] = None,
+        strategy: BaseUserTurnStopStrategy | None = None,
         on_session_end: bool = False,
     ):
         """Maybe emit user turn stopped event.
@@ -832,7 +833,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self,
         context: LLMContext,
         *,
-        params: Optional[LLMAssistantAggregatorParams] = None,
+        params: LLMAssistantAggregatorParams | None = None,
         **kwargs,
     ):
         """Initialize the assistant context aggregator.
@@ -845,9 +846,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         super().__init__(context=context, role="assistant", **kwargs)
         self._params = params or LLMAssistantAggregatorParams()
 
-        self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
-        self._function_calls_image_results: Dict[str, UserImageRawFrame] = {}
-        self._context_updated_tasks: Set[asyncio.Task] = set()
+        self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
+        self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
+        self._context_updated_tasks: set[asyncio.Task] = set()
 
         self._user_speaking: bool = False
         self._bot_speaking: bool = False
@@ -862,14 +863,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._thought_append_to_context = False
         self._thought_llm: str = ""
-        self._thought_aggregation: List[TextPartForConcatenation] = []
+        self._thought_aggregation: list[TextPartForConcatenation] = []
         self._thought_start_time: str = ""
 
         # Context summarization — always create the summarizer so that manually
         # pushed LLMSummarizeContextFrame frames are always handled.
         # Auto-triggering based on thresholds is only enabled when
         # enable_auto_context_summarization is True.
-        self._summarizer: Optional[LLMContextSummarizer] = LLMContextSummarizer(
+        self._summarizer: LLMContextSummarizer | None = LLMContextSummarizer(
             context=self._context,
             config=self._params.auto_context_summarization_config,
             auto_trigger=self._params.enable_auto_context_summarization,
@@ -1475,8 +1476,8 @@ class LLMContextAggregatorPair:
         self,
         context: LLMContext,
         *,
-        user_params: Optional[LLMUserAggregatorParams] = None,
-        assistant_params: Optional[LLMAssistantAggregatorParams] = None,
+        user_params: LLMUserAggregatorParams | None = None,
+        assistant_params: LLMAssistantAggregatorParams | None = None,
     ):
         """Initialize the LLM context aggregator pair.
 

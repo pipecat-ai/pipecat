@@ -6,12 +6,10 @@
 
 """Language conversion utilities for Azure services."""
 
-from typing import Optional
-
 from pipecat.transcriptions.language import Language, resolve_language
 
 
-def language_to_azure_language(language: Language) -> Optional[str]:
+def language_to_azure_language(language: Language) -> str | None:
     """Convert a Language enum to Azure language code.
 
     Args:

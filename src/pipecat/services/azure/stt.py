@@ -11,8 +11,9 @@ Speech SDK for real-time audio transcription.
 """
 
 import asyncio
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -73,13 +74,13 @@ class AzureSTTService(STTService):
         self,
         *,
         api_key: str,
-        region: Optional[str] = None,
-        language: Optional[Language] = Language.EN_US,
-        sample_rate: Optional[int] = None,
-        private_endpoint: Optional[str] = None,
-        endpoint_id: Optional[str] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = AZURE_TTFS_P99,
+        region: str | None = None,
+        language: Language | None = Language.EN_US,
+        sample_rate: int | None = None,
+        private_endpoint: str | None = None,
+        endpoint_id: str | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = AZURE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Azure STT service.
@@ -165,7 +166,7 @@ class AzureSTTService(STTService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Azure service-specific language code.
 
         Args:
@@ -272,7 +273,7 @@ class AzureSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         await self.stop_processing_metrics()

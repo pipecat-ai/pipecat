@@ -5,13 +5,12 @@ handling format detection and conversion to int16 PCM format.
 """
 
 import sys
-from typing import Tuple
 
 import numpy as np
 import soundfile as sf
 
 
-def read_audio_file(input_path: str, verbose: bool = False) -> Tuple[np.ndarray, int]:
+def read_audio_file(input_path: str, verbose: bool = False) -> tuple[np.ndarray, int]:
     """Read an audio file and convert to int16 mono format.
 
     This function:

@@ -7,7 +7,6 @@
 """Vonage Audio Connector WebSocket serializer for Pipecat."""
 
 import json
-from typing import Optional
 
 from loguru import logger
 
@@ -47,9 +46,9 @@ class VonageFrameSerializer(FrameSerializer):
         """
 
         vonage_sample_rate: int = 16000
-        sample_rate: Optional[int] = None
+        sample_rate: int | None = None
 
-    def __init__(self, params: Optional[InputParams] = None):
+    def __init__(self, params: InputParams | None = None):
         """Initialize the VonageFrameSerializer.
 
         Args:

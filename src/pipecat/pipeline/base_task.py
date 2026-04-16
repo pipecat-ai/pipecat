@@ -12,8 +12,8 @@ tasks that manage the lifecycle and execution of frame processing pipelines.
 
 import asyncio
 from abc import abstractmethod
+from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass
-from typing import AsyncIterable, Iterable
 
 from pipecat.frames.frames import Frame
 from pipecat.utils.base_object import BaseObject

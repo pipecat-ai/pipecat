@@ -105,7 +105,7 @@ async def load_conversation(params: FunctionCallParams):
         filename = params.arguments["filename"]
         logger.debug(f"loading conversation from {filename}")
         try:
-            with open(filename, "r") as file:
+            with open(filename) as file:
                 messages = json.load(file)
                 # HACK: if using the older Nova Sonic (pre-2) model, you need a special way of
                 # triggering the first assistant response. The call to trigger_assistant_response(),

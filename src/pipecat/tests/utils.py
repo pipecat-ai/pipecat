@@ -7,8 +7,8 @@
 """Testing utilities for Pipecat pipeline components."""
 
 import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Awaitable, Callable, List, Optional, Sequence, Tuple
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -124,15 +124,15 @@ async def run_test(
     processor: FrameProcessor,
     *,
     enable_rtvi: bool = False,
-    expected_down_frames: Optional[Sequence[type]] = None,
-    expected_up_frames: Optional[Sequence[type]] = None,
+    expected_down_frames: Sequence[type] | None = None,
+    expected_up_frames: Sequence[type] | None = None,
     frames_to_send: Sequence[Frame],
     frames_to_send_direction: FrameDirection = FrameDirection.DOWNSTREAM,
     ignore_start: bool = True,
-    observers: Optional[List[BaseObserver]] = None,
-    pipeline_params: Optional[PipelineParams] = None,
+    observers: list[BaseObserver] | None = None,
+    pipeline_params: PipelineParams | None = None,
     send_end_frame: bool = True,
-) -> Tuple[Sequence[Frame], Sequence[Frame]]:
+) -> tuple[Sequence[Frame], Sequence[Frame]]:
     """Run a test pipeline with the specified processor and validate frame flow.
 
     This function creates a test pipeline with the given processor, sends the

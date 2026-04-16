@@ -18,7 +18,6 @@ Classes:
 import asyncio
 from pathlib import Path
 from threading import Lock
-from typing import List, Optional, Tuple
 
 import numpy as np
 from aic_sdk import (
@@ -44,14 +43,14 @@ class AICModelManager:
     acquires on first use and releases when the last reference is dropped.
     """
 
-    _cache: dict[str, Tuple[Model, int]] = {}  # key -> (model, ref_count)
+    _cache: dict[str, tuple[Model, int]] = {}  # key -> (model, ref_count)
     _lock = Lock()
     _loading: dict[
         str, asyncio.Task[Model]
     ] = {}  # key -> load task (deduplicates concurrent loads)
 
     @classmethod
-    def _increment_reference(cls, cache_key: str, entry: Tuple[Model, int]) -> Tuple[Model, str]:
+    def _increment_reference(cls, cache_key: str, entry: tuple[Model, int]) -> tuple[Model, str]:
         """Increment reference count for cached entry. Caller must hold _lock."""
         cached_model, ref_count = entry
         cls._cache[cache_key] = (cached_model, ref_count + 1)
@@ -59,7 +58,7 @@ class AICModelManager:
         return cached_model, cache_key
 
     @classmethod
-    def _store_new_reference(cls, cache_key: str, model: Model) -> Tuple[Model, str]:
+    def _store_new_reference(cls, cache_key: str, model: Model) -> tuple[Model, str]:
         """Store new model in cache with ref count 1. Caller must hold _lock."""
         cls._cache[cache_key] = (model, 1)
         logger.debug(f"AIC model cached key={cache_key!r} ref_count=1")
@@ -70,9 +69,9 @@ class AICModelManager:
         cls,
         cache_key: str,
         *,
-        model_path: Optional[Path] = None,
-        model_id: Optional[str] = None,
-        model_download_dir: Optional[Path] = None,
+        model_path: Path | None = None,
+        model_id: str | None = None,
+        model_download_dir: Path | None = None,
     ) -> Model:
         """Run the actual load (file or download). Separate to allow create_task and deduplication."""
         if model_path is not None:
@@ -94,9 +93,9 @@ class AICModelManager:
     @staticmethod
     def _get_cache_key(
         *,
-        model_path: Optional[Path] = None,
-        model_id: Optional[str] = None,
-        model_download_dir: Optional[Path] = None,
+        model_path: Path | None = None,
+        model_id: str | None = None,
+        model_download_dir: Path | None = None,
     ) -> str:
         """Build a stable cache key for the model.
 
@@ -120,10 +119,10 @@ class AICModelManager:
     async def acquire(
         cls,
         *,
-        model_path: Optional[Path] = None,
-        model_id: Optional[str] = None,
-        model_download_dir: Optional[Path] = None,
-    ) -> Tuple[Model, str]:
+        model_path: Path | None = None,
+        model_id: str | None = None,
+        model_download_dir: Path | None = None,
+    ) -> tuple[Model, str]:
         """Get or load a Model and increment its reference count.
 
         Call this when starting a filter. Store the returned key and pass it
@@ -218,10 +217,10 @@ class AICFilter(BaseAudioFilter):
         self,
         *,
         license_key: str,
-        model_id: Optional[str] = None,
-        model_path: Optional[Path] = None,
-        model_download_dir: Optional[Path] = None,
-        enhancement_level: Optional[float] = None,
+        model_id: str | None = None,
+        model_path: Path | None = None,
+        model_download_dir: Path | None = None,
+        enhancement_level: float | None = None,
     ) -> None:
         """Initialize the AIC filter.
 
@@ -274,7 +273,7 @@ class AICFilter(BaseAudioFilter):
         )
 
         # AIC SDK objects; model is shared via AICModelManager
-        self._model_cache_key: Optional[str] = None
+        self._model_cache_key: str | None = None
         self._model = None
         self._processor = None
         self._processor_ctx = None
@@ -298,9 +297,9 @@ class AICFilter(BaseAudioFilter):
     def create_vad_analyzer(
         self,
         *,
-        speech_hold_duration: Optional[float] = None,
-        minimum_speech_duration: Optional[float] = None,
-        sensitivity: Optional[float] = None,
+        speech_hold_duration: float | None = None,
+        minimum_speech_duration: float | None = None,
+        sensitivity: float | None = None,
     ):
         """Return an analyzer that will lazily instantiate the AIC VAD when ready.
 
@@ -491,7 +490,7 @@ class AICFilter(BaseAudioFilter):
         blocks_data = bytes(self._audio_buffer[:total_size])
         self._audio_buffer = self._audio_buffer[total_size:]
 
-        filtered_chunks: List[bytes] = []
+        filtered_chunks: list[bytes] = []
 
         for i in range(num_blocks):
             start = i * block_size

@@ -15,7 +15,7 @@ import asyncio
 import io
 import time
 import wave
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 from loguru import logger
 from pydantic import BaseModel
@@ -59,8 +59,8 @@ class WebsocketServerParams(TransportParams):
     """
 
     add_wav_header: bool = False
-    serializer: Optional[FrameSerializer] = None
-    session_timeout: Optional[int] = None
+    serializer: FrameSerializer | None = None
+    session_timeout: int | None = None
 
 
 class WebsocketServerCallbacks(BaseModel):
@@ -113,7 +113,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self._params = params
         self._callbacks = callbacks
 
-        self._websocket: Optional[websockets.WebSocketServerProtocol] = None
+        self._websocket: websockets.WebSocketServerProtocol | None = None
 
         self._server_task = None
 
@@ -264,7 +264,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         self._transport = transport
         self._params = params
 
-        self._websocket: Optional[websockets.WebSocketServerProtocol] = None
+        self._websocket: websockets.WebSocketServerProtocol | None = None
 
         # write_audio_frame() is called quickly, as soon as we get audio
         # (e.g. from the TTS), and since this is just a network connection we
@@ -277,7 +277,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
-    async def set_client_connection(self, websocket: Optional[websockets.WebSocketServerProtocol]):
+    async def set_client_connection(self, websocket: websockets.WebSocketServerProtocol | None):
         """Set the active client WebSocket connection.
 
         Args:
@@ -441,8 +441,8 @@ class WebsocketServerTransport(BaseTransport):
         params: WebsocketServerParams,
         host: str = "localhost",
         port: int = 8765,
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the WebSocket server transport.
 
@@ -464,9 +464,9 @@ class WebsocketServerTransport(BaseTransport):
             on_session_timeout=self._on_session_timeout,
             on_websocket_ready=self._on_websocket_ready,
         )
-        self._input: Optional[WebsocketServerInputTransport] = None
-        self._output: Optional[WebsocketServerOutputTransport] = None
-        self._websocket: Optional[websockets.WebSocketServerProtocol] = None
+        self._input: WebsocketServerInputTransport | None = None
+        self._output: WebsocketServerOutputTransport | None = None
+        self._websocket: websockets.WebSocketServerProtocol | None = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.

@@ -7,7 +7,6 @@
 """User turn stop strategy triggered by externally emitted frames."""
 
 import asyncio
-from typing import Optional
 
 from pipecat.frames.frames import (
     Frame,
@@ -44,7 +43,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._user_speaking = False
         self._seen_interim_results = False
         self._event = asyncio.Event()
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -125,7 +124,7 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             try:
                 await asyncio.wait_for(self._event.wait(), timeout=self._timeout)
                 self._event.clear()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await self._maybe_trigger_user_turn_stopped()
 
     async def _maybe_trigger_user_turn_stopped(self):

@@ -8,8 +8,8 @@
 
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -58,12 +58,12 @@ class ResembleAITTSService(WebsocketTTSService):
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         url: str = "wss://websocket.cluster.resemble.ai/stream",
-        precision: Optional[str] = "PCM_16",
-        output_format: Optional[str] = "wav",
-        sample_rate: Optional[int] = 22050,
-        settings: Optional[Settings] = None,
+        precision: str | None = "PCM_16",
+        output_format: str | None = "wav",
+        sample_rate: int | None = 22050,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Resemble AI TTS service.
@@ -269,7 +269,7 @@ class ResembleAITTSService(WebsocketTTSService):
         """
         await super().on_audio_context_completed(context_id)
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio and finalize the current context."""
         logger.trace(f"{self}: flushing audio")
         # For Resemble AI, we just wait for the audio_end message
