@@ -92,11 +92,14 @@ def format_ascii_timeline(
             speech_bar[c] = "█"
     lines.append(f"  {'Speech':>{label_width - 2}}  {''.join(speech_bar)}")
 
-    # Per-analyzer rows
+    # Per-analyzer rows — position markers at effective time
+    # (timestamp + vad_stop_secs) so the visual gap from speech end
+    # reflects total latency, not just model processing time.
     for name, result in results.items():
         row = list("·" * bar_width)
         for event in result.turn_events:
-            col = time_to_col(event.timestamp)
+            effective_time = event.timestamp + (event.vad_stop_secs or 0)
+            col = time_to_col(effective_time)
             sym = method_symbol(event.method)
             if 0 <= col < bar_width:
                 row[col] = sym
@@ -180,14 +183,14 @@ def format_comparison_table(
             if event is None:
                 row += f"  {'(missed)':>{col_w}}"
             else:
-                d = event.detection_delay
+                td = event.total_delay
                 m = method_symbol(event.method)
-                if d is not None:
-                    cell = f"{event.timestamp:.2f}s +{d:.2f}s [{m}]"
+                if td is not None:
+                    cell = f"{event.timestamp:.2f}s +{td:.2f}s [{m}]"
                 else:
                     cell = f"{event.timestamp:.2f}s [?]"
                 row += f"  {cell:>{col_w}}"
-                delays[name] = d if d is not None else float("inf")
+                delays[name] = td if td is not None else float("inf")
 
         if len(delays) >= 2:
             sorted_d = sorted(delays.items(), key=lambda x: x[1])
@@ -208,13 +211,13 @@ def format_comparison_table(
 
     lines.append("")
     lines.append(
-        "  [S]=streaming (real-time analysis)  "
-        "[D]=on-demand (confirmed at VAD stop)  "
+        "  [S]=streaming (real-time)  "
+        "[D]=on-demand (at VAD stop)  "
         "[T]=timeout (silence fallback)"
     )
     lines.append(
-        "  * 'on-demand +0.00s' means the analyzer confirmed instantly when asked"
-        " -- equivalent to raw VAD, no independent analysis."
+        "  * Delays are total latency from estimated speech end."
+        " [D]/[T] include VAD stop_secs wait before the analyzer is invoked."
     )
     lines.append(sep)
 
@@ -238,50 +241,47 @@ def format_summary(
 
     for name, result in results.items():
         n_turns = len(result.turn_events)
-        delays = [
-            e.detection_delay for e in result.turn_events if e.detection_delay is not None
+        total_delays = [
+            e.total_delay for e in result.turn_events if e.total_delay is not None
         ]
 
         methods: Dict[str, int] = {}
         for e in result.turn_events:
             methods[e.method] = methods.get(e.method, 0) + 1
 
+        has_vad_wait = any(e.vad_stop_secs for e in result.turn_events)
+
         lines.append(f"  {name}:")
         lines.append(f"    Turns detected:  {n_turns}")
         lines.append(f"    Init time:       {result.init_time_ms:.0f}ms")
 
-        if delays:
-            avg = sum(delays) / len(delays)
-            med = statistics.median(delays)
-            std = math.sqrt(sum((d - avg) ** 2 for d in delays) / len(delays))
+        if total_delays:
+            avg = sum(total_delays) / len(total_delays)
+            med = statistics.median(total_delays)
+            std = math.sqrt(sum((d - avg) ** 2 for d in total_delays) / len(total_delays))
             lines.append(
-                f"    Response time: median={med:.3f}s  avg={avg:.3f}s"
-                f"  min={min(delays):.3f}s  max={max(delays):.3f}s  stddev={std:.3f}s"
+                f"    Total latency: median={med:.3f}s  avg={avg:.3f}s"
+                f"  min={min(total_delays):.3f}s  max={max(total_delays):.3f}s"
+                f"  stddev={std:.3f}s"
             )
-            if len(delays) >= 3 and max(delays) > med * 2.5 and med > 0.01:
+            if has_vad_wait:
+                vad_secs = result.turn_events[0].vad_stop_secs
                 lines.append(
-                    f"    Note: max ({max(delays):.3f}s) >> median ({med:.3f}s)"
+                    f"    (includes {vad_secs:.1f}s VAD wait before analyzer is invoked)"
+                )
+            if len(total_delays) >= 3 and max(total_delays) > med * 2.5 and med > 0.01:
+                lines.append(
+                    f"    Note: max ({max(total_delays):.3f}s) >> median ({med:.3f}s)"
                     " -- likely VAD truncated speech, not analyzer latency"
                 )
         else:
-            lines.append("    Response time: N/A")
+            lines.append("    Total latency: N/A")
 
         method_parts = []
         for m in [METHOD_STREAMING, METHOD_ON_DEMAND, METHOD_TIMEOUT]:
             if m in methods:
                 method_parts.append(f"{methods[m]} {m}")
         lines.append(f"    Detection methods: {', '.join(method_parts)}")
-
-        instant_count = sum(
-            1
-            for e in result.turn_events
-            if e.detection_delay is not None and e.detection_delay < 0.001
-        )
-        if instant_count > n_turns * 0.5 and n_turns > 1:
-            lines.append(
-                f"    ⚠ {instant_count}/{n_turns} turns detected with 0ms delay"
-                " -- analyzer is confirming VAD decisions, not adding independent analysis"
-            )
 
         lines.append("")
 
@@ -329,12 +329,19 @@ def format_timeline(
     lines.append("Turn Boundaries Detected:")
     if result.turn_events:
         for i, event in enumerate(result.turn_events, 1):
-            d = event.detection_delay
+            td = event.total_delay
             m = method_symbol(event.method)
             delay_str = ""
-            if d is not None:
-                label = _delay_label(d)
-                delay_str = f"  delay: {d:.3f}s [{m}] {label}"
+            if td is not None:
+                label = _delay_label(td)
+                if event.vad_stop_secs is not None:
+                    d = event.detection_delay or 0.0
+                    delay_str = (
+                        f"  total: {td:.3f}s [{m}]"
+                        f" ({event.vad_stop_secs:.1f}s VAD + {d:.3f}s model) {label}"
+                    )
+                else:
+                    delay_str = f"  delay: {td:.3f}s [{m}] {label}"
             lines.append(f"  Turn {i}: {event.timestamp:7.2f}s{delay_str}")
     else:
         lines.append("  (none detected)")
@@ -342,16 +349,20 @@ def format_timeline(
 
     lines.append("Summary:")
     lines.append(f"  Turns detected: {len(result.turn_events)}")
-    delays = [e.detection_delay for e in result.turn_events if e.detection_delay is not None]
-    if delays:
-        avg = sum(delays) / len(delays)
-        med = statistics.median(delays)
-        std = math.sqrt(sum((d - avg) ** 2 for d in delays) / len(delays))
-        lines.append(f"  Response time: median={med:.3f}s  avg={avg:.3f}s (stddev: {std:.3f}s)")
-        lines.append(f"  Min: {min(delays):.3f}s  Max: {max(delays):.3f}s")
-        if len(delays) >= 3 and max(delays) > med * 2.5 and med > 0.01:
+    total_delays = [
+        e.total_delay for e in result.turn_events if e.total_delay is not None
+    ]
+    if total_delays:
+        avg = sum(total_delays) / len(total_delays)
+        med = statistics.median(total_delays)
+        std = math.sqrt(sum((d - avg) ** 2 for d in total_delays) / len(total_delays))
+        lines.append(
+            f"  Total latency: median={med:.3f}s  avg={avg:.3f}s (stddev: {std:.3f}s)"
+        )
+        lines.append(f"  Min: {min(total_delays):.3f}s  Max: {max(total_delays):.3f}s")
+        if len(total_delays) >= 3 and max(total_delays) > med * 2.5 and med > 0.01:
             lines.append(
-                f"  Note: max ({max(delays):.3f}s) >> median ({med:.3f}s)"
+                f"  Note: max ({max(total_delays):.3f}s) >> median ({med:.3f}s)"
                 " -- outlier likely due to VAD truncating speech"
             )
 
@@ -365,8 +376,8 @@ def format_timeline(
     lines.append("")
     lines.append("  [S]=streaming  [D]=on-demand  [T]=timeout")
     lines.append(
-        "  * instant (0.000s) means analyzer confirmed at VAD stop"
-        " with no additional analysis"
+        "  * Total latency = time from estimated speech end to turn detection."
+        " [D]/[T] include VAD stop_secs wait."
     )
     lines.append(sep)
 

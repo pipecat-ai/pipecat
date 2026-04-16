@@ -388,7 +388,14 @@ async def process_audio(
             if vad_just_stopped:
                 vad_speaking = False
                 if current_speech_start is not None:
-                    speech_segments.append((current_speech_start, timestamp))
+                    # VAD confirmed silence after stop_secs; actual speech
+                    # likely ended stop_secs earlier.  Adjust the segment
+                    # end so the visual gap between speech and turn markers
+                    # reflects real latency for all analyzers.
+                    estimated_speech_end = max(
+                        current_speech_start, timestamp - vad_params.stop_secs
+                    )
+                    speech_segments.append((current_speech_start, estimated_speech_end))
                     current_speech_start = None
 
             is_speech = vad_speaking
@@ -406,8 +413,12 @@ async def process_audio(
 
                 if state == EndOfTurnState.COMPLETE:
                     method = METHOD_TIMEOUT if is_smart_turn(analyzer) else METHOD_STREAMING
+                    vad_wait = vad_params.stop_secs if is_smart_turn(analyzer) else None
                     event = TurnEvent(
-                        timestamp=timestamp, silence_start=silence_start[name], method=method
+                        timestamp=timestamp,
+                        silence_start=silence_start[name],
+                        method=method,
+                        vad_stop_secs=vad_wait,
                     )
                     results[name].turn_events.append(event)
                     silence_start[name] = None
@@ -432,6 +443,7 @@ async def process_audio(
                             timestamp=timestamp,
                             silence_start=silence_start[name],
                             method=METHOD_ON_DEMAND,
+                            vad_stop_secs=vad_params.stop_secs,
                         )
                         results[name].turn_events.append(event)
                         silence_start[name] = None

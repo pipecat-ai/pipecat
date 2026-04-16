@@ -15,6 +15,7 @@ class TurnEvent:
     timestamp: float
     silence_start: Optional[float] = None
     method: str = METHOD_STREAMING
+    vad_stop_secs: Optional[float] = None
 
     @property
     def detection_delay(self) -> Optional[float]:
@@ -22,6 +23,21 @@ class TurnEvent:
         if self.silence_start is not None:
             return self.timestamp - self.silence_start
         return None
+
+    @property
+    def total_delay(self) -> Optional[float]:
+        """Total latency from estimated actual speech end to turn detection.
+
+        For SmartTurn (on-demand/timeout), includes the VAD stop delay
+        that elapsed before the analyzer was invoked. For streaming
+        analyzers, same as detection_delay.
+        """
+        d = self.detection_delay
+        if d is None:
+            return None
+        if self.vad_stop_secs is not None:
+            return d + self.vad_stop_secs
+        return d
 
 
 @dataclass

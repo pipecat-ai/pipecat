@@ -64,21 +64,24 @@ def generate_html_report(
         color = colors[idx % len(colors)]
         events_json = ", ".join(
             f'{{"t":{e.timestamp:.3f},'
-            f'"d":{e.detection_delay if e.detection_delay is not None else 0:.3f},'
+            f'"d":{e.total_delay if e.total_delay is not None else 0:.3f},'
+            f'"vad":{e.vad_stop_secs if e.vad_stop_secs is not None else 0:.3f},'
             f'"ss":{e.silence_start if e.silence_start is not None else e.timestamp:.3f},'
             f'"m":"{e.method}"}}'
             for e in result.turn_events
         )
         timeout_count = sum(1 for e in result.turn_events if e.method == METHOD_TIMEOUT)
-        delays = [
-            e.detection_delay for e in result.turn_events if e.detection_delay is not None
+        total_delays = [
+            e.total_delay for e in result.turn_events if e.total_delay is not None
         ]
-        avg_d = sum(delays) / len(delays) if delays else 0
-        med_d = statistics.median(delays) if delays else 0
+        avg_d = sum(total_delays) / len(total_delays) if total_delays else 0
+        med_d = statistics.median(total_delays) if total_delays else 0
         std_d = (
-            math.sqrt(sum((d - avg_d) ** 2 for d in delays) / len(delays)) if delays else 0
+            math.sqrt(sum((d - avg_d) ** 2 for d in total_delays) / len(total_delays))
+            if total_delays
+            else 0
         )
-        max_d = max(delays) if delays else 0
+        max_d = max(total_delays) if total_delays else 0
         timeout_secs_val = result.timeout_secs if result.timeout_secs is not None else 0
         audio_uri = audio_uris.get(name, "")
         analyzer_blocks.append(
@@ -366,14 +369,17 @@ ANALYZERS.forEach(a => {{
   let row = '<div class="timeline-row"><div class="timeline-label" style="color:' +
     a.color + '">' + a.name + '</div><div class="timeline-track">';
   a.events.forEach(e => {{
+    // Effective position: offset by VAD wait so markers reflect total latency
+    var ePos = e.t + e.vad;
     if (e.d > 0.05) {{
       row += '<div class="wait-gap" style="left:' + pct(e.ss) + ';right:' +
-        pctR(e.t) + ';background:' + a.color + '" title="waiting ' +
+        pctR(ePos) + ';background:' + a.color + '" title="total ' +
         e.d.toFixed(3) + 's"></div>';
     }}
-    row += '<div class="turn-marker" style="left:' + pct(e.t) + ';background:' +
-      a.color + '"><div class="tooltip">' + e.t.toFixed(2) + 's &mdash; response: ' +
-      e.d.toFixed(3) + 's [' + msym(e.m) + ']</div></div>';
+    var tip = ePos.toFixed(2) + 's &mdash; total: ' + e.d.toFixed(3) + 's [' + msym(e.m) + ']';
+    if (e.vad > 0) tip += ' (' + e.vad.toFixed(1) + 's VAD + ' + (e.d - e.vad).toFixed(3) + 's model)';
+    row += '<div class="turn-marker" style="left:' + pct(ePos) + ';background:' +
+      a.color + '"><div class="tooltip">' + tip + '</div></div>';
   }});
   row += '</div></div>';
   tl.innerHTML += row;
