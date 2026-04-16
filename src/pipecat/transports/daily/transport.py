@@ -36,6 +36,8 @@ from pipecat.frames.frames import (
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
+    OutputDTMFFrame,
+    OutputDTMFUrgentFrame,
     OutputImageRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
@@ -149,6 +151,52 @@ class DailyUpdateRemoteParticipantsFrame(DataFrame):
     """
 
     remote_participants: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DailyOutputDTMFFrame(OutputDTMFFrame):
+    """DTMF output frame with Daily-specific options for transport queuing.
+
+    A DTMF keypress output that will be queued after any preceding audio has
+    finished playing. Inherits ``buttons`` from :class:`OutputDTMFFrame`; the
+    extra fields are forwarded to Daily's ``send_dtmf`` as ``sessionId``,
+    ``digitDurationMs`` and ``method``.
+
+    Parameters:
+        session_id: Target participant session id. When ``None``, Daily
+            sends the tones to the default destination for the call.
+        digit_duration_ms: Duration of each DTMF digit in milliseconds.
+            When ``None``, Daily's default duration is used.
+        method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
+            or ``auto``).  When ``None``, Daily's default method is used.
+    """
+
+    session_id: Optional[str] = None
+    digit_duration_ms: Optional[int] = None
+    method: Optional[str] = None
+
+
+@dataclass
+class DailyOutputDTMFUrgentFrame(OutputDTMFUrgentFrame):
+    """DTMF output frame with Daily-specific options for immediate sending.
+
+    A DTMF keypress output that will be sent right away. Inherits
+    ``buttons`` from :class:`OutputDTMFUrgentFrame`; the extra fields are
+    forwarded to Daily's ``send_dtmf`` as ``sessionId``, ``digitDurationMs``
+    and ``method``.
+
+    Parameters:
+        session_id: Target participant session id. When ``None``, Daily
+            sends the tones to the default destination for the call.
+        digit_duration_ms: Duration of each DTMF digit in milliseconds.
+            When ``None``, Daily's default duration is used.
+        method: DTMF delivery method (e.g. ``"telephone-event"``, ``"sip-info"``
+            or ``auto``).  When ``None``, Daily's default method is used.
+    """
+
+    session_id: Optional[str] = None
+    digit_duration_ms: Optional[int] = None
+    method: Optional[str] = None
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -2131,18 +2179,29 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         return True
 
-    async def _write_dtmf_native(self, frame):
+    async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         """Use Daily's native send_dtmf method for telephone events.
 
         Args:
-            frame: The DTMF frame to write.
+            frame: The DTMF frame to write. When it is a
+                :class:`DailyOutputDTMFFrame` or
+                :class:`DailyOutputDTMFUrgentFrame`, the ``session_id``,
+                ``digit_duration_ms`` and ``method`` fields are also
+                forwarded to the Daily call client.
         """
-        await self._client.send_dtmf(
-            {
-                "sessionId": frame.transport_destination,
-                "tones": frame.button.value,
-            }
-        )
+        if not frame.buttons:
+            return
+
+        settings: Dict[str, Any] = {"tones": frame.to_string()}
+        if isinstance(frame, (DailyOutputDTMFFrame, DailyOutputDTMFUrgentFrame)):
+            if frame.session_id is not None:
+                settings["sessionId"] = frame.session_id
+            if frame.digit_duration_ms is not None:
+                settings["digitDurationMs"] = frame.digit_duration_ms
+            if frame.method is not None:
+                settings["method"] = frame.method
+
+        await self._client.send_dtmf(settings)
 
 
 class DailyTransport(BaseTransport):
@@ -2399,6 +2458,22 @@ class DailyTransport(BaseTransport):
             Dictionary with participant count details.
         """
         return self._client.participant_counts()
+
+    async def send_dtmf(self, settings) -> Optional[CallClientError]:
+        """Send DTMF tones during a call.
+
+        Args:
+            settings: DTMF settings including tones and target session.
+
+        Returns:
+            error: An error description or None.
+        """
+        logger.debug(f"Sending DTMF: settings={settings}")
+
+        error = await self._client.send_dtmf(settings)
+        if error:
+            logger.error(f"Unable to send DTMF: {error}")
+        return error
 
     async def start_dialout(self, settings=None) -> Tuple[str, Optional[CallClientError]]:
         """Start a dial-out call to a phone number.

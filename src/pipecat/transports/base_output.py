@@ -275,11 +275,14 @@ class BaseOutputTransport(FrameProcessor):
         Args:
             frame: The DTMF frame to write.
         """
-        dtmf_audio = await load_dtmf_audio(frame.button, sample_rate=self._sample_rate)
-        dtmf_audio_frame = OutputAudioRawFrame(
-            audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
-        )
-        await self.write_audio_frame(dtmf_audio_frame)
+        if not frame.buttons:
+            return
+        for button in frame.buttons:
+            dtmf_audio = await load_dtmf_audio(button, sample_rate=self._sample_rate)
+            dtmf_audio_frame = OutputAudioRawFrame(
+                audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
+            )
+            await self.write_audio_frame(dtmf_audio_frame)
 
     async def send_audio(self, frame: OutputAudioRawFrame):
         """Send an audio frame downstream.
