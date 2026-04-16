@@ -257,7 +257,7 @@ class HeyGenClient:
             logger.error(
                 "HeyGenClient: Timed out waiting for WebSocket session.state_updated connected"
             )
-            return
+            raise Exception("HeyGenClient failed to start: WebSocket did not reach connected state")
         self._keep_alive_task = self._task_manager.create_task(
             self._keep_alive_handler(), name="HeyGenClient_KeepAlive"
         )
