@@ -91,6 +91,14 @@ async def main():
             ),
         )
 
+        @transport.event_handler("on_connected")
+        async def on_connected(transport, data):
+            # Extract the room name to build the conversation URL. Share this
+            # URL with a frontend client so it can join the same Daily room.
+            room_name = data.get("callConfig", {}).get("roomName")
+            conversation_url = f"https://tavus.daily.co/{room_name}"
+            logger.info(f"Conversation URL: {conversation_url}")
+
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, participant):
             logger.info(f"Client connected")
