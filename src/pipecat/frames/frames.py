@@ -752,8 +752,8 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
             :meth:`from_string` to build this from a string like ``"123#"``.
     """
 
-    button: Optional[KeypadEntry] = None
-    buttons: Optional[List[KeypadEntry]] = None
+    button: KeypadEntry | None = None
+    buttons: list[KeypadEntry] | None = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -1296,8 +1296,8 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
             :meth:`from_string` to build this from a string like ``"123#"``.
     """
 
-    button: Optional[KeypadEntry] = None
-    buttons: Optional[List[KeypadEntry]] = None
+    button: KeypadEntry | None = None
+    buttons: list[KeypadEntry] | None = None
 
     def __post_init__(self):
         super().__post_init__()

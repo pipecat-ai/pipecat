@@ -171,9 +171,9 @@ class DailyOutputDTMFFrame(OutputDTMFFrame):
             or ``auto``).  When ``None``, Daily's default method is used.
     """
 
-    session_id: Optional[str] = None
-    digit_duration_ms: Optional[int] = None
-    method: Optional[str] = None
+    session_id: str | None = None
+    digit_duration_ms: int | None = None
+    method: str | None = None
 
 
 @dataclass
@@ -194,9 +194,9 @@ class DailyOutputDTMFUrgentFrame(OutputDTMFUrgentFrame):
             or ``auto``).  When ``None``, Daily's default method is used.
     """
 
-    session_id: Optional[str] = None
-    digit_duration_ms: Optional[int] = None
-    method: Optional[str] = None
+    session_id: str | None = None
+    digit_duration_ms: int | None = None
+    method: str | None = None
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -2192,7 +2192,7 @@ class DailyOutputTransport(BaseOutputTransport):
         if not frame.buttons:
             return
 
-        settings: Dict[str, Any] = {"tones": frame.to_string()}
+        settings: dict[str, Any] = {"tones": frame.to_string()}
         if isinstance(frame, (DailyOutputDTMFFrame, DailyOutputDTMFUrgentFrame)):
             if frame.session_id is not None:
                 settings["sessionId"] = frame.session_id
