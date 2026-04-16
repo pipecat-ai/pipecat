@@ -201,9 +201,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         return ProcessFrameResult.CONTINUE
 
-    async def _handle_vad_started(
-        self, frame: VADUserStartedSpeakingFrame
-    ) -> ProcessFrameResult:
+    async def _handle_vad_started(self, frame: VADUserStartedSpeakingFrame) -> ProcessFrameResult:
         """Begin collecting audio for interruption classification.
 
         Args:
