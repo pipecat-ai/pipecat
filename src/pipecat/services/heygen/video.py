@@ -212,8 +212,8 @@ class HeyGenVideoService(AIService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        # First chunk: 600ms for faster initial response
-        self._first_chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 0.6)  # 28800 bytes
+        # First chunk: 400ms for faster initial response
+        self._first_chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 0.4)  # 19200 bytes
         # Subsequent chunks: 1000ms for efficient streaming
         self._chunk_size = int(HEY_GEN_SAMPLE_RATE * 2 * 1.0)  # 48000 bytes
         await self._client.start(frame)

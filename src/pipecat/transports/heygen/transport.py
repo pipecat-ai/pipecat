@@ -195,7 +195,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
             return
 
         self._initialized = True
-        await self._client.start(frame, self.audio_chunk_size)
+        await self._client.start(frame)
         await self.set_transport_ready(frame)
         self._client.transport_ready()
 
