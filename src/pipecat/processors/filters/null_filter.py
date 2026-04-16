@@ -29,7 +29,7 @@ class NullFilter(FrameProcessor):
         Args:
             **kwargs: Additional arguments passed to parent FrameProcessor.
         """
-        super().__init__(**kwargs)
+        super().__init__(enable_direct_mode=True, **kwargs)
 
     #
     # Frame processor
