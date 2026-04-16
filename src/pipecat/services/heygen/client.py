@@ -157,7 +157,6 @@ class HeyGenClient:
         self._out_sample_rate = 0
         self._connected = False
         self._ws_ready = asyncio.Event()
-        self._session_ready = asyncio.Event()
         self._keep_alive_task = None
         self._session_request = session_request
         self._callbacks = callbacks
@@ -228,7 +227,6 @@ class HeyGenClient:
                 self._heyGen_session = None
                 self._connected = False
                 self._ws_ready.clear()
-                self._session_ready.clear()
 
             if self._event_task and self._task_manager:
                 await self._task_manager.cancel_task(self._event_task)
@@ -255,10 +253,10 @@ class HeyGenClient:
         await self._ws_connect()
         await self._livekit_connect()
         try:
-            await asyncio.wait_for(self._session_ready.wait(), timeout=10.0)
+            await asyncio.wait_for(self._ws_ready.wait(), timeout=30.0)
         except asyncio.TimeoutError:
-            logger.error("HeyGenClient: Timed out waiting for session to become ready")
-            raise Exception("HeyGenClient failed to start: session did not become ready")
+            logger.error("HeyGenClient: Timed out waiting for WebSocket connected state")
+            raise Exception("HeyGenClient failed to start: WebSocket did not reach connected state")
         self._keep_alive_task = self._task_manager.create_task(
             self._keep_alive_handler(), name="HeyGenClient_KeepAlive"
         )
@@ -313,7 +311,6 @@ class HeyGenClient:
         finally:
             self._connected = False
             self._ws_ready.clear()
-            self._session_ready.clear()
             logger.debug("HeyGenClient: WS receive handler exited, state cleaned up")
 
     async def _handle_ws_server_event(self, event: dict) -> None:
@@ -324,7 +321,6 @@ class HeyGenClient:
             logger.debug(f"HeyGenClient ws session state updated: {state}")
             if state == "connected":
                 self._ws_ready.set()
-                self._session_ready.set()
         elif event_type == "agent.state":
             logger.debug(f"HeyGenClient ws received agent status: {event}")
         else:
@@ -335,7 +331,6 @@ class HeyGenClient:
         try:
             self._connected = False
             self._ws_ready.clear()
-            self._session_ready.clear()
             if self._websocket:
                 await self._websocket.close()
         except Exception as e:
@@ -620,7 +615,6 @@ class HeyGenClient:
                 logger.debug(
                     f"Participant connected - SID: {participant.sid}, Identity: {participant.identity}"
                 )
-                self._session_ready.set()
                 for track_pub in participant.track_publications.values():
                     logger.debug(
                         f"Available track - SID: {track_pub.sid}, Kind: {track_pub.kind}, Name: {track_pub.name}"
@@ -691,7 +685,6 @@ class HeyGenClient:
                 logger.debug(
                     f"Existing participant - SID: {participant.sid}, Identity: {participant.identity}"
                 )
-                self._session_ready.set()
                 self._call_event_callback(
                     self._callbacks.on_participant_connected, participant.identity
                 )
