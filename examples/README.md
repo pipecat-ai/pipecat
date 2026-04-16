@@ -111,7 +111,11 @@ Transport layer examples (WebRTC, Daily, LiveKit).
 
 ### [`video-avatar/`](./video-avatar/)
 
-Video avatar integrations (Tavus, HeyGen, Simli, LemonSlice).
+Video avatar integrations (Tavus, HeyGen, Simli, LemonSlice, Ojin).
+
+```bash
+uv run python video-avatar/video-avatar-ojin-video-service.py
+```
 
 ### [`video-processing/`](./video-processing/)
 
