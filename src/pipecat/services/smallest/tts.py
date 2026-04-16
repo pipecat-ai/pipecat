@@ -10,7 +10,6 @@ This module provides a WebSocket-based integration with Smallest AI's
 Waves API for real-time text-to-speech synthesis.
 """
 
-import asyncio
 import base64
 import json
 from dataclasses import dataclass, field
@@ -163,7 +162,6 @@ class SmallestTTSService(InterruptibleTTSService):
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._receive_task = None
-        self._keepalive_task = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -272,9 +270,6 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
-
     async def _disconnect(self):
         """Disconnect from Smallest WebSocket and clean up tasks."""
         await super()._disconnect()
@@ -282,10 +277,6 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
-
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
 
         await self._disconnect_websocket()
 
@@ -340,25 +331,6 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._websocket:
             return self._websocket
         raise Exception("Websocket not connected")
-
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to prevent idle timeout."""
-        KEEPALIVE_INTERVAL = 30
-        while True:
-            await asyncio.sleep(KEEPALIVE_INTERVAL)
-            await self._send_keepalive()
-
-    async def _send_keepalive(self):
-        """Send a flush message to keep the connection alive."""
-        if self._websocket and self._websocket.state is State.OPEN:
-            msg = {"flush": True}
-            await self._websocket.send(json.dumps(msg))
-
-    async def flush_audio(self, context_id: Optional[str] = None):
-        """Flush any pending audio synthesis."""
-        if not self._websocket or self._websocket.state is State.CLOSED:
-            return
-        await self._get_websocket().send(json.dumps({"flush": True}))
 
     async def _receive_messages(self):
         """Receive and process messages from the Smallest WebSocket API."""
