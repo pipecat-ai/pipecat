@@ -277,6 +277,7 @@ class DeepgramTTSService(WebsocketTTSService):
                 await self._websocket.send(json.dumps({"type": "Clear"}))
             except Exception as e:
                 logger.error(f"{self} error sending Clear message: {e}")
+        await super().on_audio_context_interrupted(context_id)
 
     async def _receive_messages(self):
         """Receive and process messages from Deepgram WebSocket."""

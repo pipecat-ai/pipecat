@@ -309,6 +309,7 @@ class DeepgramSageMakerTTSService(TTSService):
                 await self._client.send_json({"type": "Clear"})
             except Exception as e:
                 logger.error(f"{self} error sending Clear message: {e}")
+        await super().on_audio_context_interrupted(context_id)
 
     async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending Flush command.

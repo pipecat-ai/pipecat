@@ -21,13 +21,12 @@ class AdapterType(Enum):
     """Supported adapter types for custom tools.
 
     Parameters:
-        GEMINI: Google Gemini adapter - currently the only service supporting custom tools.
-        SHIM: Backward compatibility shim for creating ToolsSchemas from lists of tools in
-              any format, used by LLMContext.from_openai_context.
+        GEMINI: Google Gemini adapter.
+        OPENAI: OpenAI adapter (Chat Completions, Responses, and Realtime API).
     """
 
-    GEMINI = "gemini"  # that is the only service where we are able to add custom tools for now
-    SHIM = "shim"  # for use as backward compatibility shim for creating ToolsSchemas from list of tools in any format
+    GEMINI = "gemini"
+    OPENAI = "openai"
 
 
 class ToolsSchema:

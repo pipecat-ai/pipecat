@@ -23,14 +23,13 @@ from typing import (
     Coroutine,
     List,
     Optional,
-    Sequence,
     Tuple,
     Type,
+    Union,
 )
 
 from loguru import logger
 
-from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     CancelFrame,
@@ -50,6 +49,7 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.frame_queue import FrameQueue
 
 
 class FrameDirection(Enum):
@@ -193,10 +193,6 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
-        # Other properties (deprecated)
-        self._allow_interruptions = False
-        self._interruption_strategies: List[BaseInterruptionStrategy] = []
-        self._deprecated_openaillmcontext = False
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -234,7 +230,7 @@ class FrameProcessor(BaseObject):
         # called. To resume processing frames we need to call
         # `resume_processing_frames()` which will wake up the event.
         self.__should_block_frames = False
-        self.__process_queue = asyncio.Queue()
+        self.__process_queue = FrameQueue(frame_getter=lambda item: item[0])
         self.__process_event: Optional[asyncio.Event] = None
         self.__process_frame_task: Optional[asyncio.Task] = None
         self.__process_current_frame: Optional[Frame] = None
@@ -309,29 +305,6 @@ class FrameProcessor(BaseObject):
         return self._prev
 
     @property
-    def interruptions_allowed(self):
-        """Check if interruptions are allowed for this processor.
-
-        .. deprecated:: 0.0.99
-            Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.
-
-        Returns:
-            True if interruptions are allowed.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`FrameProcessor.interruptions_allowed` is deprecated. "
-                "Use `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        return self._allow_interruptions
-
-    @property
     def metrics_enabled(self):
         """Check if metrics collection is enabled.
 
@@ -357,19 +330,6 @@ class FrameProcessor(BaseObject):
             True if only initial time-to-first-byte should be reported.
         """
         return self._report_only_initial_ttfb
-
-    @property
-    def interruption_strategies(self) -> Sequence[BaseInterruptionStrategy]:
-        """Get the interruption strategies for this processor.
-
-        .. deprecated:: 0.0.99
-            This function is deprecated, use the new user and bot turn start
-            strategies insted.
-
-        Returns:
-            Sequence of interruption strategies.
-        """
-        return self._interruption_strategies
 
     @property
     def task_manager(self) -> BaseTaskManager:
@@ -526,33 +486,6 @@ class FrameProcessor(BaseObject):
             timeout: Optional timeout for task cancellation.
         """
         await self.task_manager.cancel_task(task, timeout)
-
-    async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
-        """Wait for a task to complete.
-
-        .. deprecated:: 0.0.81
-            This function is deprecated, use `await task` or
-            `await asyncio.wait_for(task, timeout)` instead.
-
-        Args:
-            task: The task to wait for.
-            timeout: Optional timeout for waiting.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`FrameProcessor.wait_for_task()` is deprecated. "
-                "Use `await task` or `await asyncio.wait_for(task, timeout)` instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        if timeout:
-            await asyncio.wait_for(task, timeout)
-        else:
-            await task
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with required components.
@@ -847,14 +780,9 @@ class FrameProcessor(BaseObject):
             frame: The start frame containing initialization parameters.
         """
         self.__started = True
-        self._allow_interruptions = frame.allow_interruptions
         self._enable_metrics = frame.enable_metrics
         self._enable_usage_metrics = frame.enable_usage_metrics
-        self._interruption_strategies = frame.interruption_strategies
         self._report_only_initial_ttfb = frame.report_only_initial_ttfb
-
-        # NOTE(aleix): Remove when OpenAILLMContext/LLMUserContextAggregator is removed.
-        self._deprecated_openaillmcontext = "deprecated_openaillmcontext" in frame.metadata
 
         self.__create_process_task()
 
@@ -892,9 +820,14 @@ class FrameProcessor(BaseObject):
     async def _start_interruption(self):
         """Start handling an interruption by cancelling current tasks."""
         try:
-            if isinstance(self.__process_current_frame, UninterruptibleFrame):
-                # We don't want to cancel UninterruptibleFrame, so we simply
-                # cleanup the queue.
+            current_is_uninterruptible = isinstance(
+                self.__process_current_frame, UninterruptibleFrame
+            )
+            if current_is_uninterruptible or self.__process_queue.has_uninterruptible:
+                # We don't want to cancel an UninterruptibleFrame (either the
+                # one currently being processed or one waiting in the queue),
+                # so we simply cleanup the queue keeping only
+                # UninterruptibleFrames.
                 self.__reset_process_queue()
             else:
                 # Cancel and re-create the process task.
@@ -994,22 +927,22 @@ class FrameProcessor(BaseObject):
 
     def __reset_process_queue(self):
         """Reset non-system frame processing queue."""
-        # Create a new queue to insert UninterruptibleFrame frames.
-        new_queue = asyncio.Queue()
+        self.__process_queue.reset()
 
-        # Process current queue and keep UninterruptibleFrame frames.
-        while not self.__process_queue.empty():
-            item = self.__process_queue.get_nowait()
-            frame = item[0]
-            if isinstance(frame, UninterruptibleFrame):
-                new_queue.put_nowait(item)
-            self.__process_queue.task_done()
+    def has_queued_frame(self, frame_type: Union[Type[Frame], Type[UninterruptibleFrame]]) -> bool:
+        """Return True if a frame of the given type is waiting in the processing queue.
 
-        # Put back UninterruptibleFrame frames into our process queue.
-        while not new_queue.empty():
-            item = new_queue.get_nowait()
-            self.__process_queue.put_nowait(item)
-            new_queue.task_done()
+        Delegates to :meth:`FrameQueue.has_frame` so the check is O(distinct
+        enqueued types) with no queue scanning.  ``frame_type`` may be any
+        ``Frame`` subclass or ``UninterruptibleFrame`` (a mixin).
+
+        Args:
+            frame_type: The frame class (or mixin) to look for.
+
+        Returns:
+            True if at least one matching frame is queued.
+        """
+        return self.__process_queue.has_frame(frame_type)
 
     async def __cancel_process_task(self):
         """Cancel the non-system frame processing task."""

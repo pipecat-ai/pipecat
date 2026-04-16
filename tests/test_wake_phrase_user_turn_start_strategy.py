@@ -33,6 +33,8 @@ class TestWakePhraseUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         loop = asyncio.get_running_loop()
         task_manager.setup(TaskManagerParams(loop=loop))
         await strategy.setup(task_manager)
+        # The tests are quick, so make sure the schedule starts all tasks.
+        await asyncio.sleep(0)
         return task_manager
 
     async def test_wake_phrase_in_final_transcription(self):

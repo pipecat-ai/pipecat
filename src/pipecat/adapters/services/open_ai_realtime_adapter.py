@@ -43,20 +43,26 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         """Get the identifier used in LLMSpecificMessage instances for OpenAI Realtime."""
         return "openai-realtime"
 
-    def get_llm_invocation_params(self, context: LLMContext) -> OpenAIRealtimeLLMInvocationParams:
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, system_instruction: Optional[str] = None
+    ) -> OpenAIRealtimeLLMInvocationParams:
         """Get OpenAI Realtime-specific LLM invocation parameters from a universal LLM context.
-
-        This is a placeholder until support for universal LLMContext machinery is added for OpenAI Realtime.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            system_instruction: Optional system instruction from service settings.
 
         Returns:
             Dictionary of parameters for invoking OpenAI Realtime's API.
         """
         messages = self._from_universal_context_messages(self.get_messages(context))
+        effective_system = self._resolve_system_instruction(
+            messages.system_instruction,
+            system_instruction,
+            discard_context_system=True,
+        )
         return {
-            "system_instruction": messages.system_instruction,
+            "system_instruction": effective_system,
             "messages": messages.messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
@@ -65,7 +71,7 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
     def get_messages_for_logging(self, context) -> List[Dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about OpenAI Realtime.
 
-        Removes or truncates sensitive data like image content for safe logging.
+        Binary data (images, audio) is replaced with short placeholders.
 
         This is a placeholder until support for universal LLMContext machinery is added for OpenAI Realtime.
 
@@ -75,25 +81,7 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             List of messages in a format ready for logging about OpenAI Realtime.
         """
-        # NOTE: this is the same as in OpenAIAdapter, as that's what it was
-        # prior to a refactor. Worth noting that for OpenAI Realtime
-        # specifically, not everything handled here is necessarily supported
-        # (or supported yet).
-        msgs = []
-        for message in self.get_messages(context):
-            msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    for item in msg["content"]:
-                        if item["type"] == "image_url":
-                            if item["image_url"]["url"].startswith("data:image/"):
-                                item["image_url"]["url"] = "data:image/..."
-                        if item["type"] == "input_audio":
-                            item["input_audio"]["data"] = "..."
-            if "mime_type" in msg and msg["mime_type"].startswith("image/"):
-                msg["data"] = "..."
-            msgs.append(msg)
-        return msgs
+        return self.get_messages(context, truncate_large_values=True)
 
     @dataclass
     class ConvertedMessages:
@@ -116,8 +104,8 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         messages = copy.deepcopy(universal_context_messages)
         system_instruction = None
 
-        # If we have a "system" message as our first message, let's pull that out into session
-        # "instructions"
+        # If we have a "system" message as our first message,
+        # pull that out into session "instructions"
         if messages[0].get("role") == "system":
             system = messages.pop(0)
             content = system.get("content")
@@ -127,6 +115,11 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
                 system_instruction = content[0].get("text")
             if not messages:
                 return self.ConvertedMessages(messages=[], system_instruction=system_instruction)
+
+        # Convert any remaining "system"/"developer" messages to "user"
+        for msg in messages:
+            if msg.get("role") in ("system", "developer"):
+                msg["role"] = "user"
 
         # If we have just a single "user" item, we can just send it normally
         if len(messages) == 1 and messages[0].get("role") == "user":
@@ -225,18 +218,10 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
             List of function definitions in OpenAI Realtime format.
         """
         functions_schema = tools_schema.standard_tools
-        standard_tools = [
+        formatted_standard_tools = [
             self._to_openai_realtime_function_format(func) for func in functions_schema
         ]
-
-        # For backward compatibility, OpenAI Realtime can still be used with
-        # tools in dict format, even though it always uses `LLMContext` under
-        # the hood (via `LLMContext.from_openai_context()`).
-        # To support this behavior, we use "shimmed" custom tools here.
-        # (We maintain this backward compatibility because users aren't
-        # *knowingly* opting into the new `LLMContext`.)
-        shimmed_tools = []
+        custom_openai_tools = []
         if tools_schema.custom_tools:
-            shimmed_tools = tools_schema.custom_tools.get(AdapterType.SHIM, [])
-
-        return standard_tools + shimmed_tools
+            custom_openai_tools = tools_schema.custom_tools.get(AdapterType.OPENAI, [])
+        return formatted_standard_tools + custom_openai_tools

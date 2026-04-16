@@ -83,7 +83,7 @@ class HeyGenClient:
     1. WebSocket connection for avatar control and audio streaming
     2. LiveKit connection for receiving avatar video and audio
 
-    Attributes:
+    Parameters:
         HEY_GEN_SAMPLE_RATE (int): The required sample rate for HeyGen's audio processing (24000 Hz)
     """
 

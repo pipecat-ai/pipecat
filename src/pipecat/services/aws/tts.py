@@ -369,31 +369,3 @@ class AWSPollyTTSService(TTSService):
         except (BotoCoreError, ClientError) as error:
             error_message = f"AWS Polly TTS error: {str(error)}"
             yield ErrorFrame(error=error_message)
-
-
-class PollyTTSService(AWSPollyTTSService):
-    """Deprecated alias for AWSPollyTTSService.
-
-    .. deprecated:: 0.0.67
-        `PollyTTSService` is deprecated, use `AWSPollyTTSService` instead.
-
-    """
-
-    Settings = AWSPollyTTSSettings
-
-    def __init__(self, **kwargs):
-        """Initialize the deprecated PollyTTSService.
-
-        Args:
-            **kwargs: All arguments passed to AWSPollyTTSService.
-        """
-        super().__init__(**kwargs)
-
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'PollyTTSService' is deprecated, use 'AWSPollyTTSService' instead.",
-                DeprecationWarning,
-            )

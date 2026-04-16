@@ -16,10 +16,11 @@ service-specific adapter.
 
 import asyncio
 import base64
+import copy
 import io
 import wave
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
+from typing import Any, Callable, List, Optional, TypeAlias, Union
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -30,11 +31,8 @@ from openai.types.chat import (
 )
 from PIL import Image
 
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
-
-if TYPE_CHECKING:
-    from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 
 # "Re-export" types from OpenAI that we're using as universal context types.
 # NOTE: if universal message types need to someday diverge from OpenAI's, we
@@ -69,51 +67,6 @@ class LLMContext:
     content for LLM conversations. Provides methods for message manipulation,
     and content formatting.
     """
-
-    @staticmethod
-    def from_openai_context(openai_context: "OpenAILLMContext") -> "LLMContext":
-        """Create a universal LLM context from an OpenAI-specific context.
-
-        NOTE: this should only be used internally, for facilitating migration
-        from OpenAILLMContext to LLMContext. New user code should use
-        LLMContext directly.
-
-        .. deprecated:: 0.0.99
-            `from_openai_context()` is deprecated and will be removed in a future version.
-            Directly use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-            See `OpenAILLMContext` docstring for migration guide.
-
-        Args:
-            openai_context: The OpenAI LLM context to convert.
-
-        Returns:
-            New LLMContext instance with converted messages and settings.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "from_openai_context() (likely invoked by create_context_aggregator()) is deprecated and will be removed in a future version. "
-                "Directly use the universal LLMContext and LLMContextAggregatorPair instead. "
-                "See OpenAILLMContext docstring for migration guide.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        # Convert tools to ToolsSchema if needed.
-        # If the tools are already a ToolsSchema, this is a no-op.
-        # Otherwise, we wrap them in a shim ToolsSchema.
-        converted_tools = openai_context.tools
-        if isinstance(converted_tools, list):
-            converted_tools = ToolsSchema(
-                standard_tools=[], custom_tools={AdapterType.SHIM: converted_tools}
-            )
-        return LLMContext(
-            messages=openai_context.get_messages(),
-            tools=converted_tools,
-            tool_choice=openai_context.tool_choice,
-        )
 
     def __init__(
         self,
@@ -246,34 +199,12 @@ class LLMContext:
         """
         return self.get_messages()
 
-    def get_messages_for_persistent_storage(self) -> List[LLMContextMessage]:
-        """Get messages suitable for persistent storage.
-
-        NOTE: the only reason this method exists is because we're "silently"
-        switching from OpenAILLMContext to LLMContext under the hood in some
-        services and don't want to trip up users who may have been relying on
-        this method, which is part of the public API of OpenAILLMContext but
-        doesn't need to be for LLMContext.
-
-        .. deprecated:: 0.0.92
-            Use `get_messages()` instead.
-
-        Returns:
-            List of conversation messages.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "get_messages_for_persistent_storage() is deprecated, use get_messages() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        return self.get_messages()
-
-    def get_messages(self, llm_specific_filter: Optional[str] = None) -> List[LLMContextMessage]:
+    def get_messages(
+        self,
+        llm_specific_filter: Optional[str] = None,
+        *,
+        truncate_large_values: bool = False,
+    ) -> List[LLMContextMessage]:
         """Get the current messages list.
 
         Args:
@@ -282,22 +213,110 @@ class LLMContext:
                 messages. If messages end up being filtered, an error will be
                 logged; this is intended to catch accidental use of
                 incompatible LLM-specific messages.
+            truncate_large_values: If True, return deep copies of messages with
+                large values shortened. For standard messages, known binary
+                data (base64-encoded images, audio) is replaced with short
+                placeholders. For LLM-specific messages, long string values
+                are truncated.
 
         Returns:
             List of conversation messages.
         """
         if llm_specific_filter is None:
-            return self._messages
-        filtered_messages = [
-            msg
-            for msg in self._messages
-            if not isinstance(msg, LLMSpecificMessage) or msg.llm == llm_specific_filter
-        ]
-        if len(filtered_messages) < len(self._messages):
-            logger.error(
-                f"Attempted to use incompatible LLMSpecificMessages with LLM '{llm_specific_filter}'."
-            )
-        return filtered_messages
+            messages = self._messages
+        else:
+            messages = [
+                msg
+                for msg in self._messages
+                if not isinstance(msg, LLMSpecificMessage) or msg.llm == llm_specific_filter
+            ]
+            if len(messages) < len(self._messages):
+                logger.error(
+                    f"Attempted to use incompatible LLMSpecificMessages with LLM '{llm_specific_filter}'."
+                )
+
+        if truncate_large_values:
+            messages = LLMContext._truncate_large_values_from_messages(messages)
+
+        return messages
+
+    @staticmethod
+    def _truncate_large_values_from_messages(
+        messages: List[LLMContextMessage],
+    ) -> List[LLMContextMessage]:
+        """Return deep copies of messages with large values replaced by placeholders.
+
+        For standard (universal-format) messages, the following known binary
+        patterns are replaced with short placeholders:
+
+        - ``image_url`` items with ``data:image/...`` base64 URLs
+        - ``input_audio`` items with ``input_audio.data`` or ``audio`` fields
+        - ``audio`` items with an ``audio`` field
+        - Top-level messages with a ``mime_type`` starting with ``image/``
+
+        For ``LLMSpecificMessage`` instances, long string values are truncated
+        since the internal structure is provider-specific.
+        """
+        result = []
+        for message in messages:
+            if isinstance(message, LLMSpecificMessage):
+                msg_copy = copy.deepcopy(message)
+                msg_copy.message = LLMContext._truncate_long_strings(msg_copy.message)
+                result.append(msg_copy)
+                continue
+
+            msg = copy.deepcopy(message)
+            content = msg.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    item_type = item.get("type")
+                    if item_type == "image_url":
+                        url = item.get("image_url", {}).get("url", "")
+                        if url.startswith("data:image/"):
+                            item["image_url"]["url"] = "data:image/..."
+                    elif item_type == "input_audio":
+                        if "input_audio" in item:
+                            item["input_audio"]["data"] = "..."
+                        if "audio" in item:
+                            item["audio"] = "..."
+                    elif item_type == "audio":
+                        if "audio" in item:
+                            item["audio"] = "..."
+
+            if msg.get("mime_type", "").startswith("image/"):
+                msg["data"] = "..."
+
+            result.append(msg)
+        return result
+
+    @staticmethod
+    def _truncate_long_strings(value: Any, *, max_length: int = 100) -> Any:
+        """Recursively truncate long strings in a nested structure.
+
+        Preserves the structure of dicts and lists while truncating any string
+        values that exceed ``max_length``.
+
+        Args:
+            value: The value to process (dict, list, str, or other).
+            max_length: Strings longer than this are truncated.
+
+        Returns:
+            A copy of the structure with long strings truncated.
+        """
+        if isinstance(value, str):
+            if len(value) > max_length:
+                return f"{value[:max_length]}...({len(value)} chars)"
+            return value
+        elif isinstance(value, dict):
+            return {
+                k: LLMContext._truncate_long_strings(v, max_length=max_length)
+                for k, v in value.items()
+            }
+        elif isinstance(value, list):
+            return [
+                LLMContext._truncate_long_strings(item, max_length=max_length) for item in value
+            ]
+        return value
 
     @property
     def tools(self) -> ToolsSchema | NotGiven:
@@ -340,6 +359,17 @@ class LLMContext:
             messages: New list of messages to replace the current history.
         """
         self._messages[:] = messages
+
+    def transform_messages(
+        self, transform: Callable[[List[LLMContextMessage]], List[LLMContextMessage]]
+    ):
+        """Transform the current messages using the provided function.
+
+        Args:
+            transform: A function that takes the current list of messages and returns
+                a modified list of messages to set in the context.
+        """
+        self.set_messages(transform(self._messages))
 
     def set_tools(self, tools: ToolsSchema | NotGiven = NOT_GIVEN):
         """Set the available tools for the LLM.

@@ -57,7 +57,7 @@ class UserTurnStrategies:
         start: [VADUserTurnStartStrategy, TranscriptionUserTurnStartStrategy]
          stop: [TurnAnalyzerUserTurnStopStrategy(LocalSmartTurnAnalyzerV3)]
 
-    Attributes:
+    Parameters:
         start: A list of user turn start strategies used to detect when
             the user starts speaking.
         stop: A list of user turn stop strategies used to decide when

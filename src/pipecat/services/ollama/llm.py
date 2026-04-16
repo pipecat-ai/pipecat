@@ -29,6 +29,11 @@ class OLLamaLLMService(OpenAILLMService):
     providing a compatible interface for running large language models locally.
     """
 
+    # OLLama doesn't support the "developer" message role (it seems to quietly
+    # ignore "developer" messages).
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
+
     Settings = OllamaLLMSettings
     _settings: Settings
 

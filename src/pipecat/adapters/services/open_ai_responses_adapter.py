@@ -6,20 +6,17 @@
 
 """OpenAI Responses API adapter for Pipecat."""
 
-import copy
 from typing import Any, Dict, List, Optional, TypedDict
 
-from loguru import logger
 from openai._types import NotGiven as OpenAINotGiven
-from openai.types.responses import FunctionToolParam, ResponseInputItemParam
+from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
     LLMSpecificMessage,
-    NotGiven,
 )
 
 
@@ -27,7 +24,7 @@ class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
     """Context-based parameters for invoking OpenAI Responses API."""
 
     input: List[ResponseInputItemParam]
-    tools: List[FunctionToolParam] | OpenAINotGiven
+    tools: List[ToolParam] | OpenAINotGiven
     instructions: str
 
 
@@ -40,11 +37,6 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
     - Converting Pipecat's standardized tools schema to Responses API function tool format
     - Extracting and sanitizing messages from the LLM context for logging
     """
-
-    def __init__(self):
-        """Initialize the adapter."""
-        super().__init__()
-        self._warned_system_instruction = False
 
     @property
     def id_for_llm_specific_messages(self) -> str:
@@ -67,6 +59,17 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             Dictionary of parameters for the Responses API.
         """
         messages = self.get_messages(context)
+
+        # Check for conflict: system_instruction + initial system message
+        if system_instruction and messages:
+            first_msg = messages[0] if not isinstance(messages[0], LLMSpecificMessage) else None
+            if first_msg and first_msg.get("role") == "system":
+                self._resolve_system_instruction(
+                    first_msg.get("content", ""),
+                    system_instruction,
+                    discard_context_system=False,
+                )
+
         input_items = self._convert_messages_to_input(messages)
 
         params: OpenAIResponsesLLMInvocationParams = {
@@ -80,16 +83,21 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             # OpenAILLMService (system_instruction + empty messages) need the
             # instructions converted to an initial developer message.
             #
-            # NOTE: if/when we support `previous_response_id` and/or
-            # `conversation_id`, we'll need to revisit this logic, as it'll
-            # be legit to provide instructions without input items. Worth
-            # noting that OpenAI's docs suggest these parameters are primarily
-            # for development convenience rather than performance (the model
-            # still processes the full context), and come with the tradeoff
-            # of requiring OpenAI-side 30-day conversation storage, which may
-            # not be desirable for many users. But it could give folks an easy
-            # way to store/switch between conversations without needing to
-            # manage that storage themselves.
+            # NOTE: The service layer (OpenAIResponsesLLMService) internally
+            # manages `previous_response_id` for incremental context delivery
+            # over WebSocket. This runs post-adapter — the adapter always
+            # produces the full input list and the service determines what
+            # subset to send. This empty-input fallback is therefore only
+            # relevant for one-shot or initial calls.
+            #
+            # If we added support for user-provided explicit
+            # `previous_response_id` and/or `conversation_id` (overriding
+            # internal management), we'd need to revisit this logic, as it'd
+            # be legit to provide instructions without input items. Note that
+            # over HTTP, `previous_response_id` requires `store=True` (30-day
+            # OpenAI-side storage), which is why the HTTP variant doesn't use
+            # it. The WebSocket variant avoids this via a connection-local
+            # in-memory cache — see the class docstrings in llm.py.
             if not input_items:
                 params["input"] = [{"role": "developer", "content": system_instruction}]
             else:
@@ -97,7 +105,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
 
         return params
 
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[FunctionToolParam]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[ToolParam]:
         """Convert function schemas to Responses API function tool format.
 
         Args:
@@ -119,12 +127,15 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             if "description" in d:
                 tool["description"] = d["description"]
             result.append(tool)
-        return result
+        custom_openai_tools = []
+        if tools_schema.custom_tools:
+            custom_openai_tools = tools_schema.custom_tools.get(AdapterType.OPENAI, [])
+        return result + custom_openai_tools
 
     def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
         """Get messages from context in a format ready for logging.
 
-        Removes or truncates sensitive data like image content for safe logging.
+        Binary data (images, audio) is replaced with short placeholders.
 
         Args:
             context: The LLM context containing messages.
@@ -132,19 +143,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
         Returns:
             List of messages in a format ready for logging.
         """
-        msgs = []
-        for message in self.get_messages(context):
-            msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    for item in msg["content"]:
-                        if item.get("type") == "image_url":
-                            if item["image_url"]["url"].startswith("data:image/"):
-                                item["image_url"]["url"] = "data:image/..."
-                        if item.get("type") == "input_audio":
-                            item["input_audio"]["data"] = "..."
-            msgs.append(msg)
-        return msgs
+        return self.get_messages(context, truncate_large_values=True)
 
     def _convert_messages_to_input(
         self, messages: List[LLMContextMessage]
@@ -158,24 +157,15 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
             List of Responses API input items.
         """
         result: List[ResponseInputItemParam] = []
-        is_first = True
 
         for message in messages:
             if isinstance(message, LLMSpecificMessage):
                 result.append(message.message)
-                is_first = False
                 continue
 
             role = message.get("role")
 
-            if role == "system":
-                if is_first and not self._warned_system_instruction:
-                    logger.warning(
-                        "System messages in LLMContext are converted to 'developer' role for the "
-                        "Responses API. Consider using settings.system_instruction instead, which "
-                        "maps to the 'instructions' parameter."
-                    )
-                    self._warned_system_instruction = True
+            if role in ("system", "developer"):
                 content = message.get("content", "")
                 if isinstance(content, list):
                     content = self._convert_multimodal_content(content)
@@ -217,8 +207,6 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                         "output": content,
                     }
                 )
-
-            is_first = False
 
         return result
 

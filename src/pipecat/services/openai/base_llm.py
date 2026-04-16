@@ -7,11 +7,10 @@
 """Base LLM service implementation for services that use the AsyncOpenAI client."""
 
 import asyncio
-import base64
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
 import httpx
 from loguru import logger
@@ -22,7 +21,7 @@ from openai import (
     AsyncStream,
     DefaultAsyncHttpxClient,
 )
-from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
@@ -31,15 +30,10 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesFrame,
     LLMTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
@@ -61,15 +55,23 @@ class OpenAILLMSettings(LLMSettings):
 class BaseOpenAILLMService(LLMService):
     """Base class for all services that use the AsyncOpenAI client.
 
-    This service consumes OpenAILLMContextFrame or LLMContextFrame frames,
-    which contain a reference to an OpenAILLMContext or LLMContext object. The
-    context defines what is sent to the LLM for completion, including user,
-    assistant, and system messages, as well as tool choices and function call
-    configurations.
+    This service consumes LLMContextFrame frames, which contain a reference to
+    an LLMContext object. The context defines what is sent to the LLM for
+    completion, including user, assistant, and system messages, as well as tool
+    choices and function call configurations.
     """
 
     Settings = OpenAILLMSettings
     _settings: Settings
+
+    supports_developer_role: bool = True
+    """Whether this service's API supports the "developer" message role.
+
+    OpenAI's native API supports it, but some OpenAI-compatible services
+    (e.g. Cerebras) do not. Subclasses that don't support it should set
+    this to ``False``, which causes the adapter to convert "developer"
+    messages to "user" messages before sending them to the API.
+    """
 
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
@@ -265,19 +267,27 @@ class BaseOpenAILLMService(LLMService):
         """
         return self._full_model_name
 
-    async def get_chat_completions(
-        self, params_from_context: OpenAILLMInvocationParams
-    ) -> AsyncStream[ChatCompletionChunk]:
+    async def get_chat_completions(self, context: LLMContext) -> AsyncStream[ChatCompletionChunk]:
         """Get streaming chat completions from OpenAI API with optional timeout and retry.
 
         Args:
-            params_from_context: Parameters, derived from the LLM context, to
-                use for the chat completion. Contains messages, tools, and tool
-                choice.
+            context: Context to use for the chat completion.
+                Contains messages, tools, and tool choice.
 
         Returns:
             Async stream of chat completion chunks.
         """
+        adapter = self.get_llm_adapter()
+        logger.debug(
+            f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
+        )
+
+        params_from_context: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
+            context,
+            system_instruction=self._settings.system_instruction,
+            convert_developer_to_user=not self.supports_developer_role,
+        )
+
         params = self.build_chat_completion_params(params_from_context)
 
         if self._retry_on_timeout:
@@ -327,22 +337,11 @@ class BaseOpenAILLMService(LLMService):
 
         params.update(self._settings.extra)
 
-        # Prepend system instruction from constructor
-        if self._settings.system_instruction:
-            messages = params.get("messages", [])
-            if messages and messages[0].get("role") == "system":
-                logger.warning(
-                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
-                )
-            params["messages"] = [
-                {"role": "system", "content": self._settings.system_instruction}
-            ] + messages
-
         return params
 
     async def run_inference(
         self,
-        context: LLMContext | OpenAILLMContext,
+        context: LLMContext,
         max_tokens: Optional[int] = None,
         system_instruction: Optional[str] = None,
     ) -> Optional[str]:
@@ -358,15 +357,13 @@ class BaseOpenAILLMService(LLMService):
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
-        if isinstance(context, LLMContext):
-            adapter = self.get_llm_adapter()
-            invocation_params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
-                context
-            )
-        else:
-            invocation_params = OpenAILLMInvocationParams(
-                messages=context.messages, tools=context.tools, tool_choice=context.tool_choice
-            )
+        effective_instruction = system_instruction or self._settings.system_instruction
+        adapter = self.get_llm_adapter()
+        invocation_params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
+            context,
+            system_instruction=effective_instruction,
+            convert_developer_to_user=not self.supports_developer_role,
+        )
 
         # Build params using the same method as streaming completions
         params = self.build_chat_completion_params(invocation_params)
@@ -374,15 +371,6 @@ class BaseOpenAILLMService(LLMService):
         # Override for non-streaming
         params["stream"] = False
         params.pop("stream_options", None)
-
-        # Prepend system instruction if provided
-        if system_instruction is not None:
-            messages = params.get("messages", [])
-            if messages and messages[0].get("role") == "system":
-                logger.warning(
-                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
-                )
-            params["messages"] = [{"role": "system", "content": system_instruction}] + messages
 
         # Override max_tokens if provided
         if max_tokens is not None:
@@ -397,55 +385,8 @@ class BaseOpenAILLMService(LLMService):
 
         return response.choices[0].message.content
 
-    async def _stream_chat_completions_specific_context(
-        self, context: OpenAILLMContext
-    ) -> AsyncStream[ChatCompletionChunk]:
-        logger.debug(
-            f"{self}: Generating chat from LLM-specific context {context.get_messages_for_logging()}"
-        )
-
-        messages: List[ChatCompletionMessageParam] = context.get_messages()
-
-        # base64 encode any images
-        for message in messages:
-            if message.get("mime_type") == "image/jpeg":
-                # Avoid .getvalue() which makes a full copy of BytesIO
-                raw_bytes = message["data"].read()
-                encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
-                text = message.get("content", "")
-                message["content"] = [
-                    {"type": "text", "text": text},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
-                    },
-                ]
-                # Explicit cleanup
-                del message["data"]
-                del message["mime_type"]
-
-        params = OpenAILLMInvocationParams(
-            messages=messages, tools=context.tools, tool_choice=context.tool_choice
-        )
-        chunks = await self.get_chat_completions(params)
-
-        return chunks
-
-    async def _stream_chat_completions_universal_context(
-        self, context: LLMContext
-    ) -> AsyncStream[ChatCompletionChunk]:
-        adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating chat from universal context {adapter.get_messages_for_logging(context)}"
-        )
-
-        params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
-        chunks = await self.get_chat_completions(params)
-
-        return chunks
-
     @traced_llm
-    async def _process_context(self, context: OpenAILLMContext | LLMContext):
+    async def _process_context(self, context: LLMContext):
         functions_list = []
         arguments_list = []
         tool_id_list = []
@@ -456,12 +397,8 @@ class BaseOpenAILLMService(LLMService):
 
         await self.start_ttfb_metrics()
 
-        # Generate chat completions using either OpenAILLMContext or universal LLMContext
-        chunk_stream = await (
-            self._stream_chat_completions_specific_context(context)
-            if isinstance(context, OpenAILLMContext)
-            else self._stream_chat_completions_universal_context(context)
-        )
+        # Generate chat completions from LLMContext
+        chunk_stream = await self.get_chat_completions(context)
 
         # Ensure stream and its async iterator are closed on cancellation/exception
         # to prevent socket leaks and uvloop crashes. Closing the iterator first
@@ -532,7 +469,7 @@ class BaseOpenAILLMService(LLMService):
                     tool_call = chunk.choices[0].delta.tool_calls[0]
                     if tool_call.index != func_idx:
                         functions_list.append(function_name)
-                        arguments_list.append(arguments)
+                        arguments_list.append(arguments or "{}")
                         tool_id_list.append(tool_call_id)
                         function_name = ""
                         arguments = ""
@@ -549,8 +486,10 @@ class BaseOpenAILLMService(LLMService):
 
                 # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
                 # we need to get LLMTextFrame for the transcript
-                elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
-                    "transcript"
+                elif (
+                    hasattr(chunk.choices[0].delta, "audio")
+                    and chunk.choices[0].delta.audio
+                    and chunk.choices[0].delta.audio.get("transcript")
                 ):
                     await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
@@ -558,10 +497,10 @@ class BaseOpenAILLMService(LLMService):
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
-        if function_name and arguments:
+        if function_name:
             # added to the list as last function name and arguments not added to the list
             functions_list.append(function_name)
-            arguments_list.append(arguments)
+            arguments_list.append(arguments or "{}")
             tool_id_list.append(tool_call_id)
 
             function_calls = []
@@ -569,7 +508,11 @@ class BaseOpenAILLMService(LLMService):
             for function_name, arguments, tool_id in zip(
                 functions_list, arguments_list, tool_id_list
             ):
-                arguments = json.loads(arguments)
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    logger.warning(f"{self}: Failed to parse function call arguments: {arguments}")
+                    continue
                 function_calls.append(
                     FunctionCallFromLLM(
                         context=context,
@@ -584,9 +527,7 @@ class BaseOpenAILLMService(LLMService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
 
-        Handles OpenAILLMContextFrame, LLMContextFrame, LLMMessagesFrame,
-        and LLMUpdateSettingsFrame to trigger LLM completions and manage
-        settings.
+        Handles LLMContextFrame to trigger LLM completions.
 
         Args:
             frame: The frame to process.
@@ -594,25 +535,11 @@ class BaseOpenAILLMService(LLMService):
         """
         await super().process_frame(frame, direction)
 
-        context = None
-        if isinstance(frame, OpenAILLMContextFrame):
-            # Handle OpenAI-specific context frames
-            context = frame.context
-        elif isinstance(frame, LLMContextFrame):
-            # Handle universal (LLM-agnostic) LLM context frames
-            context = frame.context
-        elif isinstance(frame, LLMMessagesFrame):
-            # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
-            # LLMContext with it
-            context = OpenAILLMContext.from_messages(frame.messages)
-        else:
-            await self.push_frame(frame, direction)
-
-        if context:
+        if isinstance(frame, LLMContextFrame):
             try:
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
-                await self._process_context(context)
+                await self._process_context(frame.context)
             except httpx.TimeoutException as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
@@ -621,3 +548,5 @@ class BaseOpenAILLMService(LLMService):
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
+        else:
+            await self.push_frame(frame, direction)

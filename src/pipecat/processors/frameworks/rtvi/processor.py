@@ -8,7 +8,7 @@
 
 import asyncio
 import base64
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from loguru import logger
 from pydantic import BaseModel, ValidationError
@@ -31,24 +31,7 @@ from pipecat.frames.frames import (
     SystemFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi.frames import RTVIActionFrame, RTVIClientMessageFrame
-from pipecat.processors.frameworks.rtvi.models_deprecated import (
-    RTVIAction,
-    RTVIActionResponse,
-    RTVIActionResponseData,
-    RTVIActionRun,
-    RTVIBotReadyDataDeprecated,
-    RTVIConfig,
-    RTVIConfigResponse,
-    RTVIDescribeActions,
-    RTVIDescribeActionsData,
-    RTVIDescribeConfig,
-    RTVIDescribeConfigData,
-    RTVIService,
-    RTVIServiceConfig,
-    RTVIServiceOptionConfig,
-    RTVIUpdateConfig,
-)
+from pipecat.processors.frameworks.rtvi.frames import RTVIClientMessageFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserverParams
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
@@ -68,33 +51,23 @@ class RTVIProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        config: Optional[RTVIConfig] = None,
         transport: Optional[BaseTransport] = None,
         **kwargs,
     ):
         """Initialize the RTVI processor.
 
         Args:
-            config: Initial RTVI configuration.
             transport: Transport layer for communication.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._config = config or RTVIConfig(config=[])
 
         self._bot_ready = False
         self._client_ready = False
         self._client_ready_id = ""
-        # Default to 0.3.0 which is the last version before actually having a
-        # "client-version".
-        self._client_version = [0, 3, 0]
+        # Default to 0.0.0 to indicate unknown version.
+        self._client_version = [0, 0, 0]
         self._llm_skip_tts: bool = False  # Keep in sync with llm_service.py's configuration.
-
-        self._registered_actions: Dict[str, RTVIAction] = {}
-        self._registered_services: Dict[str, RTVIService] = {}
-
-        # A task to process incoming action frames.
-        self._action_task: Optional[asyncio.Task] = None
 
         # A task to process incoming transport messages.
         self._message_task: Optional[asyncio.Task] = None
@@ -110,41 +83,6 @@ class RTVIProcessor(FrameProcessor):
             if isinstance(input_transport, BaseInputTransport):
                 self._input_transport = input_transport
                 self._input_transport.enable_audio_in_stream_on_start(False)
-
-    def register_action(self, action: RTVIAction):
-        """Register an action that can be executed via RTVI.
-
-        Args:
-            action: The action to register.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "The actions API is deprecated, use server and client messages instead.",
-                DeprecationWarning,
-            )
-
-        id = self._action_id(action.service, action.action)
-        self._registered_actions[id] = action
-
-    def register_service(self, service: RTVIService):
-        """Register a service that can be configured via RTVI.
-
-        Args:
-            service: The service to register.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "The actions API is deprecated, use server and client messages instead.",
-                DeprecationWarning,
-            )
-
-        self._registered_services[service.name] = service
 
     def create_rtvi_observer(self, *, params: Optional[RTVIObserverParams] = None, **kwargs):
         """Creates a new RTVI Observer.
@@ -171,11 +109,6 @@ class RTVIProcessor(FrameProcessor):
                    If left as None, the Pipecat library and version will be used.
         """
         self._bot_ready = True
-        # Only call the (deprecated) _update_config method if the we're using a
-        # config (which is deprecated). Otherwise we'd always print an
-        # unnecessary deprecation warning.
-        if self._config.config:
-            await self._update_config(self._config, False)
         await self._send_bot_ready(about=about)
 
     async def interrupt_bot(self):
@@ -281,8 +214,6 @@ class RTVIProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             await self._stop(frame)
         # Data frames
-        elif isinstance(frame, RTVIActionFrame):
-            await self._action_queue.put(frame)
         elif isinstance(frame, LLMConfigureOutputFrame):
             self._llm_skip_tts = frame.skip_tts
             await self.push_frame(frame, direction)
@@ -292,9 +223,6 @@ class RTVIProcessor(FrameProcessor):
 
     async def _start(self, frame: StartFrame):
         """Start the RTVI processor tasks."""
-        if not self._action_task:
-            self._action_queue = asyncio.Queue()
-            self._action_task = self.create_task(self._action_task_handler())
         if not self._message_task:
             self._message_queue = asyncio.Queue()
             self._message_task = self.create_task(self._message_task_handler())
@@ -310,20 +238,9 @@ class RTVIProcessor(FrameProcessor):
 
     async def _cancel_tasks(self):
         """Cancel all running tasks."""
-        if self._action_task:
-            await self.cancel_task(self._action_task)
-            self._action_task = None
-
         if self._message_task:
             await self.cancel_task(self._message_task)
             self._message_task = None
-
-    async def _action_task_handler(self):
-        """Handle incoming action frames."""
-        while True:
-            frame = await self._action_queue.get()
-            await self._handle_action(frame.message_id, frame.rtvi_action_run)
-            self._action_queue.task_done()
 
     async def _message_task_handler(self):
         """Handle incoming transport messages."""
@@ -351,44 +268,31 @@ class RTVIProcessor(FrameProcessor):
             match message.type:
                 case "client-ready":
                     data = None
-                    try:
-                        data = RTVI.ClientReadyData.model_validate(message.data)
-                    except ValidationError:
-                        # Not all clients have been updated to RTVI 1.0.0.
-                        # For now, that's okay, we just log their info as unknown.
-                        data = None
-                        pass
+                    raw = message.data or {}
+                    version = raw.get("version")
+                    if isinstance(version, str):
+                        about = RTVI.AboutClientData(library="unknown")
+                        about_raw = raw.get("about")
+                        if about_raw is not None:
+                            try:
+                                about = RTVI.AboutClientData.model_validate(about_raw)
+                            except ValidationError:
+                                logger.warning(
+                                    "Invalid 'about' data in client-ready message, ignoring."
+                                )
+                        data = RTVI.ClientReadyData(version=version, about=about)
                     await self._handle_client_ready(message.id, data)
-                case "describe-actions":
-                    await self._handle_describe_actions(message.id)
-                case "describe-config":
-                    await self._handle_describe_config(message.id)
-                case "get-config":
-                    await self._handle_get_config(message.id)
-                case "update-config":
-                    update_config = RTVIUpdateConfig.model_validate(message.data)
-                    await self._handle_update_config(message.id, update_config)
                 case "disconnect-bot":
                     await self.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
                 case "client-message":
                     data = RTVI.RawClientMessageData.model_validate(message.data)
                     await self._handle_client_message(message.id, data)
-                case "action":
-                    action = RTVIActionRun.model_validate(message.data)
-                    action_frame = RTVIActionFrame(message_id=message.id, rtvi_action_run=action)
-                    await self._action_queue.put(action_frame)
                 case "llm-function-call-result":
                     data = RTVI.LLMFunctionCallResultData.model_validate(message.data)
                     await self._handle_function_call_result(data)
                 case "send-text":
                     data = RTVI.SendTextData.model_validate(message.data)
                     await self._handle_send_text(data)
-                case "append-to-context":
-                    logger.warning(
-                        f"The append-to-context message is deprecated, use send-text instead."
-                    )
-                    data = RTVI.AppendToContextData.model_validate(message.data)
-                    await self._handle_update_context(data)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
 
@@ -406,12 +310,26 @@ class RTVIProcessor(FrameProcessor):
         """Handle the client-ready message from the client."""
         version = data.version if data else None
         logger.debug(f"Received client-ready: version {version}")
+        version_error = None
         if version:
             try:
-                self._client_version = [int(v) for v in version.split(".")]
+                parts = [int(v) for v in version.split(".")]
+                if len(parts) != 3:
+                    raise ValueError
+                self._client_version = parts
+                protocol_major = int(RTVI.PROTOCOL_VERSION.split(".")[0])
+                if self._client_version[0] != protocol_major:
+                    version_error = f"RTVI version {version} is not compatible with server protocol {RTVI.PROTOCOL_VERSION}."
             except ValueError:
-                logger.warning(f"Invalid client version format: {version}")
+                version_error = f"Invalid client version format ({version})."
+        else:
+            version_error = "Client version unknown."
         about = data.about if data else {"library": "unknown"}
+        if version_error:
+            version_error += " Compatibility issues may occur."
+            logger.warning(version_error)
+            await self._send_error_response(request_id, version_error)
+
         logger.debug(f"Client Details: {about}")
         if self._input_transport:
             await self._input_transport.start_audio_in_streaming()
@@ -441,100 +359,6 @@ class RTVIProcessor(FrameProcessor):
             # Handle missing keys, decoding errors, and invalid types
             logger.error(f"Error processing audio buffer: {e}")
 
-    async def _handle_describe_config(self, request_id: str):
-        """Handle a describe-config request."""
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "Configuration helpers are deprecated. If your application needs this behavior, use custom server and client messages.",
-                DeprecationWarning,
-            )
-
-        services = list(self._registered_services.values())
-        message = RTVIDescribeConfig(id=request_id, data=RTVIDescribeConfigData(config=services))
-        await self.push_transport_message(message)
-
-    async def _handle_describe_actions(self, request_id: str):
-        """Handle a describe-actions request."""
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "The Actions API is deprecated, use custom server and client messages instead.",
-                DeprecationWarning,
-            )
-
-        actions = list(self._registered_actions.values())
-        message = RTVIDescribeActions(id=request_id, data=RTVIDescribeActionsData(actions=actions))
-        await self.push_transport_message(message)
-
-    async def _handle_get_config(self, request_id: str):
-        """Handle a get-config request."""
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "Configuration helpers are deprecated. If your application needs this behavior, use custom server and client messages.",
-                DeprecationWarning,
-            )
-
-        message = RTVIConfigResponse(id=request_id, data=self._config)
-        await self.push_transport_message(message)
-
-    def _update_config_option(self, service: str, config: RTVIServiceOptionConfig):
-        """Update a specific configuration option."""
-        for service_config in self._config.config:
-            if service_config.service == service:
-                for option_config in service_config.options:
-                    if option_config.name == config.name:
-                        option_config.value = config.value
-                        return
-                # If we couldn't find a value for this config, we simply need to
-                # add it.
-                service_config.options.append(config)
-
-    async def _update_service_config(self, config: RTVIServiceConfig):
-        """Update configuration for a specific service."""
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "Configuration helpers are deprecated. If your application needs this behavior, use custom server and client messages.",
-                DeprecationWarning,
-            )
-
-        service = self._registered_services[config.service]
-        for option in config.options:
-            handler = service._options_dict[option.name].handler
-            await handler(self, service.name, option)
-            self._update_config_option(service.name, option)
-
-    async def _update_config(self, data: RTVIConfig, interrupt: bool):
-        """Update the RTVI configuration."""
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "Configuration helpers are deprecated. If your application needs this behavior, use custom server and client messages.",
-                DeprecationWarning,
-            )
-
-        if interrupt:
-            await self.interrupt_bot()
-        for service_config in data.config:
-            await self._update_service_config(service_config)
-
-    async def _handle_update_config(self, request_id: str, data: RTVIUpdateConfig):
-        """Handle an update-config request."""
-        await self._update_config(RTVIConfig(config=data.config), data.interrupt)
-        await self._handle_get_config(request_id)
-
     async def _handle_send_text(self, data: RTVI.SendTextData):
         """Handle a send-text message from the client."""
         opts = data.options if data.options is not None else RTVI.SendTextOptions()
@@ -554,15 +378,6 @@ class RTVIProcessor(FrameProcessor):
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)
-
-    async def _handle_update_context(self, data: RTVI.AppendToContextData):
-        if data.run_immediately:
-            await self.interrupt_bot()
-        frame = LLMMessagesAppendFrame(
-            messages=[{"role": data.role, "content": data.content}],
-            run_llm=data.run_immediately,
-        )
-        await self.push_frame(frame)
 
     async def _handle_client_message(self, msg_id: str, data: RTVI.RawClientMessageData):
         """Handle a client message frame."""
@@ -588,24 +403,6 @@ class RTVIProcessor(FrameProcessor):
         )
         await self.push_frame(frame)
 
-    async def _handle_action(self, request_id: Optional[str], data: RTVIActionRun):
-        """Handle an action execution request."""
-        action_id = self._action_id(data.service, data.action)
-        if action_id not in self._registered_actions:
-            await self._send_error_response(request_id, f"Action {action_id} not registered")
-            return
-        action = self._registered_actions[action_id]
-        arguments = {}
-        if data.arguments:
-            for arg in data.arguments:
-                arguments[arg.name] = arg.value
-        result = await action.handler(self, action.service, arguments)
-        # Only send a response if request_id is present. Things that don't care about
-        # action responses (such as webhooks) don't set a request_id
-        if request_id:
-            message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
-            await self.push_transport_message(message)
-
     async def _send_bot_ready(self, about: Mapping[str, Any] = None):
         """Send the bot-ready message to the client.
 
@@ -615,19 +412,10 @@ class RTVIProcessor(FrameProcessor):
         """
         if not about:
             about = {"library": "pipecat-ai", "library_version": f"{pipecat_version()}"}
-        if self._client_version and self._client_version[0] < 1:
-            config = self._config.config
-            message = RTVI.BotReady(
-                id=self._client_ready_id,
-                data=RTVIBotReadyDataDeprecated(
-                    version=RTVI.PROTOCOL_VERSION, about=about, config=config
-                ),
-            )
-        else:
-            message = RTVI.BotReady(
-                id=self._client_ready_id,
-                data=RTVI.BotReadyData(version=RTVI.PROTOCOL_VERSION, about=about),
-            )
+        message = RTVI.BotReady(
+            id=self._client_ready_id,
+            data=RTVI.BotReadyData(version=RTVI.PROTOCOL_VERSION, about=about),
+        )
         await self.push_transport_message(message)
 
     async def _send_server_message(self, message: RTVI.ServerMessage | RTVI.ServerResponse):
@@ -643,7 +431,3 @@ class RTVIProcessor(FrameProcessor):
         """Send an error response message."""
         message = RTVI.ErrorResponse(id=id, data=RTVI.ErrorResponseData(error=error))
         await self.push_transport_message(message)
-
-    def _action_id(self, service: str, action: str) -> str:
-        """Generate an action ID from service and action names."""
-        return f"{service}:{action}"

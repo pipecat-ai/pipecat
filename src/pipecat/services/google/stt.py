@@ -755,7 +755,7 @@ class GoogleSTTService(STTService):
     ) -> None:
         """Update service options dynamically.
 
-        .. deprecated::
+        .. deprecated:: 0.0.104
             Use ``STTUpdateSettingsFrame`` with ``GoogleSTTService.Settings(...)``
             instead.
 
@@ -1004,7 +1004,7 @@ class GoogleSTTService(STTService):
         except Aborted as e:
             # Handle stream abort due to inactivity (409 error).
             # This occurs when no audio is sent to the stream for 10+ seconds,
-            # which can happen when InputAudioRawFrames are blocked (e.g., by STTMuteFilter).
+            # which can happen when InputAudioRawFrames are blocked.
             # Google's STT service automatically closes the stream in this case.
             # We log at DEBUG level (not ERROR) since this is recoverable, then re-raise
             # to trigger automatic reconnection in _stream_audio.

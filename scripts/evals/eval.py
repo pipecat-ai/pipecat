@@ -171,6 +171,7 @@ class EvalRunner:
     async def save_audio(self, name: str, audio: bytes, sample_rate: int, num_channels: int):
         if len(audio) > 0:
             filename = self._recording_file_name(name)
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
             logger.debug(f"Saving {name} audio to {filename}")
             with io.BytesIO() as buffer:
                 with wave.open(buffer, "wb") as wf:

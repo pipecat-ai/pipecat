@@ -7,6 +7,7 @@
 """Base websocket service with automatic reconnection and error handling."""
 
 import asyncio
+import time
 from abc import ABC, abstractmethod
 from typing import Awaitable, Callable, Optional
 
@@ -27,6 +28,13 @@ class WebsocketService(ABC):
     Subclasses implement service-specific connection and message handling logic.
     """
 
+    # Rapid failure detection: when a server accepts the WebSocket handshake but
+    # immediately closes the connection (e.g. invalid API key, policy rejection),
+    # exponential backoff won't help because the handshake keeps succeeding. We
+    # detect this by tracking how long the connection survives after being established.
+    _MIN_STABLE_CONNECTION_DURATION = 5.0  # seconds
+    _MAX_CONSECUTIVE_QUICK_FAILURES = 3
+
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
         """Initialize the websocket service.
 
@@ -38,6 +46,8 @@ class WebsocketService(ABC):
         self._reconnect_on_error = reconnect_on_error
         self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False
+        self._quick_failure_count: int = 0
+        self._last_connect_time: float = 0.0
 
     async def _verify_connection(self) -> bool:
         """Verify the websocket connection is active and responsive.
@@ -86,6 +96,7 @@ class WebsocketService(ABC):
                     logger.warning(f"{self} reconnecting, attempt {attempt}")
                     if await self._reconnect_websocket(attempt):
                         logger.info(f"{self} reconnected successfully on attempt {attempt}")
+                        self._last_connect_time = time.monotonic()
                         return True
                 except Exception as e:
                     last_exception = e
@@ -96,12 +107,12 @@ class WebsocketService(ABC):
                         )
                 wait_time = exponential_backoff_time(attempt)
                 await asyncio.sleep(wait_time)
-            fatal_msg = f"{self} failed to reconnect after {max_retries} attempts"
+            msg = f"{self} failed to reconnect after {max_retries} attempts"
             if last_exception:
-                fatal_msg += f": {last_exception}"
-            logger.error(fatal_msg)
+                msg += f": {last_exception}"
+            logger.error(msg)
             if report_error:
-                await report_error(ErrorFrame(fatal_msg, fatal=True))
+                await report_error(ErrorFrame(msg))
             return False
         finally:
             self._reconnect_in_progress = False
@@ -145,6 +156,31 @@ class WebsocketService(ABC):
                 logger.debug(f"{self} receive loop ended during disconnect")
             return False
 
+        # Check if the connection died too quickly after being established. This
+        # catches cases where the handshake succeeds but the server immediately
+        # closes (e.g. invalid API key). Exponential backoff won't help here
+        # because the handshake keeps succeeding — we need to stop the loop.
+        if self._last_connect_time > 0:
+            connection_duration = time.monotonic() - self._last_connect_time
+            if connection_duration < self._MIN_STABLE_CONNECTION_DURATION:
+                self._quick_failure_count += 1
+                logger.warning(
+                    f"{self} connection lasted only {connection_duration:.1f}s "
+                    f"({self._quick_failure_count}/{self._MAX_CONSECUTIVE_QUICK_FAILURES} "
+                    f"consecutive quick failures)"
+                )
+                if self._quick_failure_count >= self._MAX_CONSECUTIVE_QUICK_FAILURES:
+                    msg = (
+                        f"{self} connection failed {self._MAX_CONSECUTIVE_QUICK_FAILURES} "
+                        f"times immediately after connecting"
+                    )
+                    logger.error(msg)
+                    await report_error(ErrorFrame(msg))
+                    return False
+            else:
+                # Connection was stable — reset the counter.
+                self._quick_failure_count = 0
+
         # Log the message
         logger.warning(error_message)
 
@@ -168,6 +204,7 @@ class WebsocketService(ABC):
             report_error: Callback function to report connection errors.
         """
         while True:
+            self._last_connect_time = time.monotonic()
             try:
                 await self._receive_messages()
                 # _receive_messages() returned normally. This happens when the websocket
@@ -205,6 +242,7 @@ class WebsocketService(ABC):
         additional setup required.
         """
         self._disconnecting = False
+        self._quick_failure_count = 0
 
     async def _disconnect(self):
         """Disconnect from the service and set disconnecting flag.

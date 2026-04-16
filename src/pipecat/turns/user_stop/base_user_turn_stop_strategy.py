@@ -24,7 +24,7 @@ class UserTurnStoppedParams:
     contextual information about how the end of user turn should be handled by
     the user aggregator.
 
-    Attributes:
+    Parameters:
         enable_user_speaking_frames: Whether the user aggregator should emit
             frames indicating user speaking state (e.g., user stopped speaking).
             This is typically enabled by default, but may be disabled when another

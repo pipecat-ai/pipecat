@@ -100,58 +100,6 @@ class DailyOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame):
 
 
 @dataclass
-class DailyTransportMessageFrame(DailyOutputTransportMessageFrame):
-    """Frame for transport messages in Daily calls.
-
-    .. deprecated:: 0.0.87
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `DailyOutputTransportMessageFrame`.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "DailyTransportMessageFrame is deprecated and will be removed in a future version. "
-                "Instead, use DailyOutputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
-class DailyTransportMessageUrgentFrame(DailyOutputTransportMessageUrgentFrame):
-    """Frame for urgent transport messages in Daily calls.
-
-    .. deprecated:: 0.0.87
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `DailyOutputTransportMessageUrgentFrame`.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "DailyTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
-                "Instead, use DailyOutputTransportMessageUrgentFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
 class DailyInputTransportMessageFrame(InputTransportMessageFrame):
     """Frame for input urgent transport messages in Daily calls.
 
@@ -160,31 +108,6 @@ class DailyInputTransportMessageFrame(InputTransportMessageFrame):
     """
 
     participant_id: Optional[str] = None
-
-
-class DailyInputTransportMessageUrgentFrame(DailyInputTransportMessageFrame):
-    """Frame for input urgent transport messages in Daily calls.
-
-    .. deprecated:: 0.0.87
-        This frame is deprecated and will be removed in a future version.
-        Instead, use `DailyInputTransportMessageFrame`.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "DailyInputTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
-                "Instead, use DailyInputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
 
 @dataclass
@@ -1787,17 +1710,6 @@ class DailyInputTransport(BaseInputTransport):
 
         # Audio task when using a virtual speaker (i.e. no user tracks).
         self._audio_in_task: Optional[asyncio.Task] = None
-
-        self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
-
-    @property
-    def vad_analyzer(self) -> Optional[VADAnalyzer]:
-        """Get the Voice Activity Detection analyzer.
-
-        Returns:
-            The VAD analyzer instance if configured.
-        """
-        return self._vad_analyzer
 
     async def start_audio_in_streaming(self):
         """Start receiving audio from participants."""

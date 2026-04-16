@@ -127,6 +127,7 @@ async def run_test(
     expected_down_frames: Optional[Sequence[type]] = None,
     expected_up_frames: Optional[Sequence[type]] = None,
     frames_to_send: Sequence[Frame],
+    frames_to_send_direction: FrameDirection = FrameDirection.DOWNSTREAM,
     ignore_start: bool = True,
     observers: Optional[List[BaseObserver]] = None,
     pipeline_params: Optional[PipelineParams] = None,
@@ -144,6 +145,9 @@ async def run_test(
         expected_down_frames: Expected frame types flowing downstream (optional).
         expected_up_frames: Expected frame types flowing upstream (optional).
         frames_to_send: Sequence of frames to send through the processor.
+        frames_to_send_direction: Direction to send frames_to_send. Downstream
+            frames are pushed from the beginning of the pipeline, upstream frames
+            from the end. Defaults to DOWNSTREAM.
         ignore_start: Whether to ignore StartFrames in frame validation.
         observers: Optional list of observers to attach to the pipeline.
         pipeline_params: Optional pipeline parameters.
@@ -188,7 +192,7 @@ async def run_test(
             if isinstance(frame, SleepFrame):
                 await asyncio.sleep(frame.sleep)
             else:
-                await task.queue_frame(frame)
+                await task.queue_frame(frame, frames_to_send_direction)
 
         if send_end_frame:
             await task.queue_frame(EndFrame())

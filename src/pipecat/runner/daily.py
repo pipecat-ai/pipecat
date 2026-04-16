@@ -275,32 +275,3 @@ async def configure(
         error_msg = f"Error creating Daily room: {e}"
         logger.error(error_msg)
         raise
-
-
-# Keep this for backwards compatibility, but mark as deprecated
-async def configure_with_args(aiohttp_session: aiohttp.ClientSession, parser=None):
-    """Configure Daily room with command-line argument parsing.
-
-    .. deprecated:: 0.0.78
-        This function is deprecated. Use configure() instead which uses
-        environment variables only.
-
-    Args:
-        aiohttp_session: HTTP session for making API requests.
-        parser: Ignored. Kept for backwards compatibility.
-
-    Returns:
-        Tuple containing room URL, authentication token, and None (for args).
-    """
-    import warnings
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("always")
-        warnings.warn(
-            "configure_with_args is deprecated. Use configure() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-    room_url, token = await configure(aiohttp_session)
-    return (room_url, token, None)

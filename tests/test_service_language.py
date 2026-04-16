@@ -102,12 +102,12 @@ class TestTTSLanguageInit:
         assert svc._settings.language == "en"
 
     def test_raw_string_unrecognized(self):
-        """Unrecognized raw string logs a warning and is passed through as-is."""
+        """Unrecognized raw string logs a debug message and is passed through as-is."""
         with patch("pipecat.services.tts_service.logger") as mock_logger:
             svc = _TestTTSService(settings=_TestTTSService.Settings(language="klingon"))
             assert svc._settings.language == "klingon"
-            mock_logger.warning.assert_called_once()
-            assert "klingon" in mock_logger.warning.call_args[0][0]
+            mock_logger.debug.assert_called_once()
+            assert "klingon" in mock_logger.debug.call_args[0][0]
 
     def test_language_none(self):
         """None language is left as None."""
@@ -144,12 +144,12 @@ class TestSTTLanguageInit:
         assert svc._settings.language == "de"
 
     def test_raw_string_unrecognized(self):
-        """Unrecognized raw string logs a warning and is passed through as-is."""
+        """Unrecognized raw string logs a debug message and is passed through as-is."""
         with patch("pipecat.services.stt_service.logger") as mock_logger:
             svc = _TestSTTService(settings=_TestSTTService.Settings(language="klingon"))
             assert svc._settings.language == "klingon"
-            mock_logger.warning.assert_called_once()
-            assert "klingon" in mock_logger.warning.call_args[0][0]
+            mock_logger.debug.assert_called_once()
+            assert "klingon" in mock_logger.debug.call_args[0][0]
 
     def test_language_none(self):
         """None language is left as None."""
@@ -195,13 +195,13 @@ class TestTTSLanguageUpdate:
 
     @pytest.mark.asyncio
     async def test_update_raw_string_unrecognized(self):
-        """Updating with unrecognized string logs warning and passes through."""
+        """Updating with unrecognized string logs debug message and passes through."""
         svc = _TestTTSService(settings=_TestTTSService.Settings(language=None))
         with patch("pipecat.services.tts_service.logger") as mock_logger:
             await svc._update_settings(_TestTTSService.Settings(language="klingon"))
             assert svc._settings.language == "klingon"
-            mock_logger.warning.assert_called_once()
-            assert "klingon" in mock_logger.warning.call_args[0][0]
+            mock_logger.debug.assert_called_once()
+            assert "klingon" in mock_logger.debug.call_args[0][0]
 
 
 # ---------------------------------------------------------------------------
@@ -242,10 +242,10 @@ class TestSTTLanguageUpdate:
 
     @pytest.mark.asyncio
     async def test_update_raw_string_unrecognized(self):
-        """Updating with unrecognized string logs warning and passes through."""
+        """Updating with unrecognized string logs debug message and passes through."""
         svc = _TestSTTService(settings=_TestSTTService.Settings(language=None))
         with patch("pipecat.services.stt_service.logger") as mock_logger:
             await svc._update_settings(_TestSTTService.Settings(language="klingon"))
             assert svc._settings.language == "klingon"
-            mock_logger.warning.assert_called_once()
-            assert "klingon" in mock_logger.warning.call_args[0][0]
+            mock_logger.debug.assert_called_once()
+            assert "klingon" in mock_logger.debug.call_args[0][0]

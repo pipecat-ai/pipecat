@@ -48,15 +48,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
@@ -226,7 +217,6 @@ class OpenAIRealtimeLLMService(LLMService):
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         video_frame_detail: str = "auto",
-        send_transcription_frames: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize the OpenAI Realtime LLM service.
@@ -255,26 +245,8 @@ class OpenAIRealtimeLLMService(LLMService):
                 This sets the image_detail parameter in the OpenAI Realtime API.
                 "auto" lets the model decide, "low" is faster and uses fewer tokens,
                 "high" provides more detail. Defaults to "auto".
-            send_transcription_frames: Whether to emit transcription frames.
-
-                .. deprecated:: 0.0.92
-                    This parameter is deprecated and will be removed in a future version.
-                    Transcription frames are always sent.
-
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        if send_transcription_frames is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`send_transcription_frames` is deprecated and will be removed in a future version. "
-                    "Transcription frames are always sent.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="gpt-realtime-1.5",
@@ -297,11 +269,7 @@ class OpenAIRealtimeLLMService(LLMService):
             default_settings.model = model
 
         if session_properties is not None:
-            _warn_deprecated_param(
-                "session_properties",
-                self.Settings,
-                "session_properties",
-            )
+            self._warn_init_param_moved_to_settings("session_properties", "session_properties")
             default_settings.session_properties = session_properties
             # Sync model/instructions from the deprecated SP arg to top-level,
             # but only if the deprecated `model` arg didn't already set it.
@@ -564,13 +532,8 @@ class OpenAIRealtimeLLMService(LLMService):
 
         if isinstance(frame, TranscriptionFrame):
             pass
-        elif isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
-            context = (
-                frame.context
-                if isinstance(frame, LLMContextFrame)
-                else LLMContext.from_openai_context(frame.context)
-            )
-            await self._handle_context(context)
+        elif isinstance(frame, LLMContextFrame):
+            await self._handle_context(frame.context)
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
@@ -687,14 +650,16 @@ class OpenAIRealtimeLLMService(LLMService):
         adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:
-            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+            llm_invocation_params = adapter.get_llm_invocation_params(
+                self._context, system_instruction=self._settings.system_instruction
+            )
 
             # tools given in the context override the tools in the session properties
             if llm_invocation_params["tools"]:
                 settings.tools = llm_invocation_params["tools"]
 
-            # instructions in the context come from an initial "system" message in the
-            # messages list, and override instructions in the session properties
+            # The adapter resolves conflicts between init-provided and
+            # context-provided system instructions (preferring init-provided).
             if llm_invocation_params["system_instruction"]:
                 settings.instructions = llm_invocation_params["system_instruction"]
 
@@ -1131,74 +1096,3 @@ class OpenAIRealtimeLLMService(LLMService):
             output=json.dumps(result, ensure_ascii=False),
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
-
-    def create_context_aggregator(
-        self,
-        context: OpenAILLMContext,
-        *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> LLMContextAggregatorPair:
-        """Create an instance of OpenAIContextAggregatorPair from an OpenAILLMContext.
-
-        NOTE: this method exists only for backward compatibility. New code
-        should instead do::
-
-            context = LLMContext(...)
-            context_aggregator = LLMContextAggregatorPair(context)
-
-        Constructor keyword arguments for both the user and assistant aggregators can be provided.
-
-        Args:
-            context: The LLM context.
-            user_params: User aggregator parameters.
-            assistant_params: Assistant aggregator parameters.
-
-        Returns:
-            OpenAIContextAggregatorPair: A pair of context aggregators, one for
-            the user and one for the assistant, encapsulated in an
-            OpenAIContextAggregatorPair.
-
-        .. deprecated:: 0.0.99
-            `create_context_aggregator()` is deprecated and will be removed in a future version.
-            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-            See `OpenAILLMContext` docstring for migration guide.
-        """
-        # Log warning about transcription frame direction change in 0.0.92.
-        # We're putting this warning here rather than in the constructor so
-        # that it shows up for folks who haven't updated their code at all
-        # since 0.0.92, gives them a way to acknowledge and dismiss the
-        # warning, and encourages adoption of a new preferred pattern.
-        logger.warning(
-            "As of version 0.0.92, TranscriptionFrames and InterimTranscriptionFrames "
-            "now go upstream from OpenAIRealtimeLLMService, so if you're using "
-            "TranscriptProcessor, say, you'll want to adjust accordingly:\n\n"
-            "pipeline = Pipeline(\n"
-            "  [\n"
-            "    transport.input(),\n"
-            "    context_aggregator.user(),\n\n"
-            "    # BEFORE\n"
-            "    llm,\n"
-            "    transcript.user(),\n\n"
-            "    # AFTER\n"
-            "    transcript.user(),\n"
-            "    llm,\n\n"
-            "    transport.output(),\n"
-            "    transcript.assistant(),\n"
-            "    context_aggregator.assistant(),\n"
-            "  ]\n"
-            ")\n\n"
-            "Also, LLMTextFrames are no longer pushed from "
-            "OpenAIRealtimeLLMService when it's configured with "
-            "output_modalities=['audio']. Listen for TTSTextFrames instead.\n\n"
-            "Once you've made the appropriate changes (if needed), you can "
-            "dismiss this warning by updating to the new context-setup pattern:\n\n"
-            "  context = LLMContext(messages, tools)\n"
-            "  context_aggregator = LLMContextAggregatorPair(context)\n"
-        )
-        # from_openai_context handles deprecation warning already
-        context = LLMContext.from_openai_context(context)
-        assistant_params.expect_stripped_words = False
-        return LLMContextAggregatorPair(
-            context, user_params=user_params, assistant_params=assistant_params
-        )

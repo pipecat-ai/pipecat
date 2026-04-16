@@ -16,7 +16,6 @@ for natural voice control and multi-speaker conversations.
 
 import json
 import os
-import warnings
 
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -521,8 +520,7 @@ class GoogleTTSSettings(TTSSettings):
     speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-#: .. deprecated:: 0.0.105
-#:     Use ``GoogleTTSService.Settings`` instead.
+#: *Deprecated since 0.0.105:* Use ``GoogleTTSService.Settings`` instead.
 GoogleStreamTTSSettings = GoogleTTSSettings
 
 
@@ -1259,7 +1257,6 @@ class GeminiTTSService(GoogleBaseTTSService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
         model: Optional[str] = None,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
@@ -1273,12 +1270,6 @@ class GeminiTTSService(GoogleBaseTTSService):
         """Initializes the Gemini TTS service.
 
         Args:
-            api_key:
-
-                .. deprecated:: 0.0.95
-                    The `api_key` parameter is deprecated. Use `credentials` or
-                    `credentials_path` instead for Google Cloud authentication.
-
             model: Gemini TTS model to use. Must be a TTS model like
                    "gemini-2.5-flash-tts" or "gemini-2.5-pro-tts".
 
@@ -1303,15 +1294,6 @@ class GeminiTTSService(GoogleBaseTTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        # Handle deprecated api_key parameter
-        if api_key is not None:
-            warnings.warn(
-                "The 'api_key' parameter is deprecated and will be removed in a future version. "
-                "Use 'credentials' or 'credentials_path' instead for Google Cloud authentication.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         if sample_rate and sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
                 f"Google TTS only supports {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
