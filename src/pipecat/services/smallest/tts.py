@@ -124,7 +124,7 @@ class SmallestTTSService(InterruptibleTTSService):
         self,
         *,
         api_key: str,
-        base_url: str = "wss://waves-api.smallest.ai",
+        base_url: str = "wss://api.smallest.ai",
         sample_rate: Optional[int] = None,
         settings: Optional[Settings] = None,
         **kwargs,
@@ -216,7 +216,7 @@ class SmallestTTSService(InterruptibleTTSService):
 
     def _build_websocket_url(self) -> str:
         """Build the WebSocket URL from base URL and model."""
-        return f"{self._base_url}/api/v1/{self._settings.model}/get_speech/stream"
+        return f"{self._base_url}/waves/v1/{self._settings.model}/get_speech/stream"
 
     async def start(self, frame: StartFrame):
         """Start the Smallest TTS service.
