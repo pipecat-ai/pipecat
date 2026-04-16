@@ -8,9 +8,10 @@
 
 import asyncio
 import json
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, Optional
+from typing import Any
 
 import httpx
 from loguru import logger
@@ -93,37 +94,33 @@ class BaseOpenAILLMService(LLMService):
             extra: Additional model-specific parameters.
         """
 
-        frequency_penalty: Optional[float] = Field(
-            default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0
-        )
-        presence_penalty: Optional[float] = Field(
-            default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0
-        )
-        seed: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
-        temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
+        frequency_penalty: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0)
+        presence_penalty: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0)
+        seed: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=0)
+        temperature: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
         # Note: top_k is currently not supported by the OpenAI client library,
         # so top_k is ignored right now.
-        top_k: Optional[int] = Field(default=None, ge=0)
-        top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        max_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
-        max_completion_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
-        service_tier: Optional[str] = Field(default_factory=lambda: NOT_GIVEN)
-        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
+        top_k: int | None = Field(default=None, ge=0)
+        top_p: float | None = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        max_tokens: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=1)
+        max_completion_tokens: int | None = Field(default_factory=lambda: NOT_GIVEN, ge=1)
+        service_tier: str | None = Field(default_factory=lambda: NOT_GIVEN)
+        extra: dict[str, Any] | None = Field(default_factory=dict)
 
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
+        model: str | None = None,
         api_key=None,
         base_url=None,
         organization=None,
         project=None,
-        default_headers: Optional[Mapping[str, str]] = None,
-        service_tier: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        retry_timeout_secs: Optional[float] = 5.0,
-        retry_on_timeout: Optional[bool] = False,
+        default_headers: Mapping[str, str] | None = None,
+        service_tier: str | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        retry_timeout_secs: float | None = 5.0,
+        retry_on_timeout: bool | None = False,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -296,7 +293,7 @@ class BaseOpenAILLMService(LLMService):
                     self._client.chat.completions.create(**params), timeout=self._retry_timeout_secs
                 )
                 return chunks
-            except (APITimeoutError, asyncio.TimeoutError):
+            except (TimeoutError, APITimeoutError):
                 # Retry, this time without a timeout so we get a response
                 logger.debug(f"{self}: Retrying chat completion due to timeout")
                 chunks = await self._client.chat.completions.create(**params)
@@ -342,9 +339,9 @@ class BaseOpenAILLMService(LLMService):
     async def run_inference(
         self,
         context: LLMContext,
-        max_tokens: Optional[int] = None,
-        system_instruction: Optional[str] = None,
-    ) -> Optional[str]:
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:

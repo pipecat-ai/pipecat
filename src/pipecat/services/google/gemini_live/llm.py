@@ -17,8 +17,8 @@ import io
 import time
 import uuid
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from enum import StrEnum
+from typing import Any
 
 from loguru import logger
 from PIL import Image
@@ -109,7 +109,7 @@ MAX_CONSECUTIVE_FAILURES = 3
 CONNECTION_ESTABLISHED_THRESHOLD = 10.0  # seconds
 
 
-def language_to_gemini_language(language: Language) -> Optional[str]:
+def language_to_gemini_language(language: Language) -> str | None:
     """Maps a Language enum value to a Gemini Live supported language code.
 
     Source:
@@ -206,7 +206,7 @@ def language_to_gemini_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
-class GeminiModalities(Enum):
+class GeminiModalities(StrEnum):
     """Supported modalities for Gemini Live.
 
     Parameters:
@@ -218,7 +218,7 @@ class GeminiModalities(Enum):
     AUDIO = "AUDIO"
 
 
-class GeminiMediaResolution(str, Enum):
+class GeminiMediaResolution(StrEnum):
     """Media resolution options for Gemini Live.
 
     Parameters:
@@ -245,11 +245,11 @@ class GeminiVADParams(BaseModel):
         silence_duration_ms: Silence duration threshold in milliseconds. Defaults to None.
     """
 
-    disabled: Optional[bool] = Field(default=None)
-    start_sensitivity: Optional[StartSensitivity] = Field(default=None)
-    end_sensitivity: Optional[EndSensitivity] = Field(default=None)
-    prefix_padding_ms: Optional[int] = Field(default=None)
-    silence_duration_ms: Optional[int] = Field(default=None)
+    disabled: bool | None = Field(default=None)
+    start_sensitivity: StartSensitivity | None = Field(default=None)
+    end_sensitivity: EndSensitivity | None = Field(default=None)
+    prefix_padding_ms: int | None = Field(default=None)
+    silence_duration_ms: int | None = Field(default=None)
 
 
 class ContextWindowCompressionParams(BaseModel):
@@ -261,9 +261,7 @@ class ContextWindowCompressionParams(BaseModel):
     """
 
     enabled: bool = Field(default=False)
-    trigger_tokens: Optional[int] = Field(
-        default=None
-    )  # None = use default (80% of context window)
+    trigger_tokens: int | None = Field(default=None)  # None = use default (80% of context window)
 
 
 class InputParams(BaseModel):
@@ -303,23 +301,23 @@ class InputParams(BaseModel):
         extra: Additional parameters. Defaults to empty dict.
     """
 
-    frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
-    max_tokens: Optional[int] = Field(default=4096, ge=1)
-    presence_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
-    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
-    top_k: Optional[int] = Field(default=None, ge=0)
-    top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    modalities: Optional[GeminiModalities] = Field(default=GeminiModalities.AUDIO)
-    language: Optional[Language] = Field(default=Language.EN_US)
-    media_resolution: Optional[GeminiMediaResolution] = Field(
+    frequency_penalty: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=4096, ge=1)
+    presence_penalty: float | None = Field(default=None, ge=0.0, le=2.0)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    top_k: int | None = Field(default=None, ge=0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    modalities: GeminiModalities | None = Field(default=GeminiModalities.AUDIO)
+    language: Language | None = Field(default=Language.EN_US)
+    media_resolution: GeminiMediaResolution | None = Field(
         default=GeminiMediaResolution.UNSPECIFIED
     )
-    vad: Optional[GeminiVADParams] = Field(default=None)
-    context_window_compression: Optional[ContextWindowCompressionParams] = Field(default=None)
-    thinking: Optional[ThinkingConfig] = Field(default=None)
-    enable_affective_dialog: Optional[bool] = Field(default=None)
-    proactivity: Optional[ProactivityConfig] = Field(default=None)
-    extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    vad: GeminiVADParams | None = Field(default=None)
+    context_window_compression: ContextWindowCompressionParams | None = Field(default=None)
+    thinking: ThinkingConfig | None = Field(default=None)
+    enable_affective_dialog: bool | None = Field(default=None)
+    proactivity: ProactivityConfig | None = Field(default=None)
+    extra: dict[str, Any] | None = Field(default_factory=dict)
 
 
 @dataclass
@@ -374,17 +372,17 @@ class GeminiLiveLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
-        system_instruction: Optional[str] = None,
-        tools: Optional[Union[List[dict], ToolsSchema]] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        system_instruction: str | None = None,
+        tools: list[dict] | ToolsSchema | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         inference_on_context_initialization: bool = True,
         file_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/files",
-        http_options: Optional[HttpOptions] = None,
+        http_options: HttpOptions | None = None,
         **kwargs,
     ):
         """Initialize the Gemini Live LLM service.
@@ -537,18 +535,18 @@ class GeminiLiveLLMService(LLMService):
         self._connection_start_time = None
 
         self._file_api_base_url = file_api_base_url
-        self._file_api: Optional[GeminiFileAPI] = None
+        self._file_api: GeminiFileAPI | None = None
 
         # Grounding metadata tracking
         self._search_result_buffer = ""
         self._accumulated_grounding_metadata = None
 
         # Session resumption
-        self._session_resumption_handle: Optional[str] = None
+        self._session_resumption_handle: str | None = None
 
         # Bookkeeping for ending gracefully (i.e. after the bot is finished)
-        self._end_frame_pending_bot_turn_finished: Optional[EndFrame] = None
-        self._end_frame_deferral_timeout_task: Optional[asyncio.Task] = None
+        self._end_frame_pending_bot_turn_finished: EndFrame | None = None
+        self._end_frame_deferral_timeout_task: asyncio.Task | None = None
 
         # Initialize the API client. Subclasses can override this if needed.
         self.create_client()
@@ -908,7 +906,7 @@ class GeminiLiveLLMService(LLMService):
             self._end_frame_deferral_timeout_task.cancel()
         self._end_frame_deferral_timeout_task = None
 
-    def _get_history_config(self) -> Optional[HistoryConfig]:
+    def _get_history_config(self) -> HistoryConfig | None:
         """Return the history config for the Live API connection.
 
         Subclasses can override this to disable history config (e.g. Vertex AI
@@ -916,7 +914,7 @@ class GeminiLiveLLMService(LLMService):
         """
         return HistoryConfig(initial_history_in_client_content=True)
 
-    async def _connect(self, session_resumption_handle: Optional[str] = None):
+    async def _connect(self, session_resumption_handle: str | None = None):
         """Establish client connection to Gemini Live API."""
         if self._session:
             # Here we assume that if we have a client, we are connected. We
@@ -1336,7 +1334,7 @@ class GeminiLiveLLMService(LLMService):
 
     @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(
-        self, tool_call_id: str, tool_name: str, tool_result_message: Dict[str, Any]
+        self, tool_call_id: str, tool_name: str, tool_result_message: dict[str, Any]
     ):
         """Send tool result back to the API."""
         if self._disconnecting or not self._session:
@@ -1513,12 +1511,12 @@ class GeminiLiveLLMService(LLMService):
 
     @traced_stt
     async def _handle_user_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass
 
-    async def _push_user_transcription(self, text: str, result: Optional[LiveServerMessage] = None):
+    async def _push_user_transcription(self, text: str, result: LiveServerMessage | None = None):
         """Push a user transcription frame upstream.
 
         Helper method to ensure consistent handling of user transcriptions
@@ -1697,7 +1695,7 @@ class GeminiLiveLLMService(LLMService):
 
         if grounding_metadata.grounding_chunks and grounding_metadata.grounding_supports:
             # Create a mapping of chunk indices to origins
-            chunk_to_origin: Dict[int, LLMSearchOrigin] = {}
+            chunk_to_origin: dict[int, LLMSearchOrigin] = {}
 
             for index, chunk in enumerate(grounding_metadata.grounding_chunks):
                 if chunk.web:

@@ -10,8 +10,9 @@ This module adds LemonSlice avatars to Daily rooms, enabling
 real-time voice conversations with synchronized avatars.
 """
 
+from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
-from typing import Any, Awaitable, Callable, Mapping, Optional
+from typing import Any
 
 import aiohttp
 from daily.daily import AudioData
@@ -60,14 +61,14 @@ class LemonSliceNewSessionRequest(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    agent_image_url: Optional[str] = None
-    agent_id: Optional[str] = None
-    agent_prompt: Optional[str] = None
-    idle_timeout: Optional[int] = None
-    daily_room_url: Optional[str] = None
-    daily_token: Optional[str] = None
-    lemonslice_properties: Optional[dict] = None
-    api_url: Optional[str] = None
+    agent_image_url: str | None = None
+    agent_id: str | None = None
+    agent_prompt: str | None = None
+    idle_timeout: int | None = None
+    daily_room_url: str | None = None
+    daily_token: str | None = None
+    lemonslice_properties: dict | None = None
+    api_url: str | None = None
 
 
 class LemonSliceCallbacks(BaseModel):
@@ -114,7 +115,7 @@ class LemonSliceTransportClient:
         params: LemonSliceParams = LemonSliceParams(),
         callbacks: LemonSliceCallbacks,
         api_key: str,
-        session_request: Optional[LemonSliceNewSessionRequest] = None,
+        session_request: LemonSliceNewSessionRequest | None = None,
         session: aiohttp.ClientSession,
     ) -> None:
         """Initialize the LemonSlice transport client.
@@ -131,9 +132,9 @@ class LemonSliceTransportClient:
         self._bot_name = bot_name
         self._api = LemonSliceApi(api_key, session)
         self._session_request = session_request or LemonSliceNewSessionRequest()
-        self._session_id: Optional[str] = None
-        self._control_url: Optional[str] = None
-        self._daily_transport_client: Optional[DailyTransportClient] = None
+        self._session_id: str | None = None
+        self._control_url: str | None = None
+        self._daily_transport_client: DailyTransportClient | None = None
         self._callbacks = callbacks
         self._params = params
 
@@ -540,7 +541,7 @@ class LemonSliceOutputTransport(BaseOutputTransport):
         # Whether we have seen a StartFrame already.
         self._initialized = False
         # This is the custom track destination expected by LemonSlice
-        self._transport_destination: Optional[str] = "stream"
+        self._transport_destination: str | None = "stream"
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport.
@@ -692,10 +693,10 @@ class LemonSliceTransport(BaseTransport):
         bot_name: str,
         session: aiohttp.ClientSession,
         api_key: str,
-        session_request: Optional[LemonSliceNewSessionRequest] = None,
+        session_request: LemonSliceNewSessionRequest | None = None,
         params: LemonSliceParams = LemonSliceParams(),
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the LemonSlice transport.
 
@@ -724,8 +725,8 @@ class LemonSliceTransport(BaseTransport):
             session=session,
             params=params,
         )
-        self._input: Optional[LemonSliceInputTransport] = None
-        self._output: Optional[LemonSliceOutputTransport] = None
+        self._input: LemonSliceInputTransport | None = None
+        self._output: LemonSliceOutputTransport | None = None
         self._lemonslice_participant_id = None
 
         # Register supported handlers. The user will only be able to register

@@ -260,6 +260,6 @@ class BaseInputTransport(FrameProcessor):
                     await self.push_frame(frame)
 
                 self._audio_in_queue.task_done()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if not audio_received:
                     continue

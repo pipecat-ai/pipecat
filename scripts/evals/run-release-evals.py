@@ -7,7 +7,7 @@
 import argparse
 import asyncio
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -41,7 +41,7 @@ EVAL_WEATHER_AND_RESTAURANT = EvalConfig(
 
 EVAL_ONLINE_SEARCH = EvalConfig(
     prompt="What's the current date in UTC?",
-    eval=f"Current date in UTC is {datetime.now(timezone.utc).strftime('%A, %B %d, %Y')}.",
+    eval=f"Current date in UTC is {datetime.now(UTC).strftime('%A, %B %d, %Y')}.",
 )
 
 EVAL_SWITCH_LANGUAGE = EvalConfig(

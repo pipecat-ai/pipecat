@@ -16,8 +16,8 @@ import base64
 import json
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Awaitable, Callable, Optional, Union
 
 import aiohttp
 from loguru import logger
@@ -93,8 +93,8 @@ class HeyGenClient:
         api_key: str,
         session: aiohttp.ClientSession,
         params: TransportParams,
-        session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
-        service_type: Optional[ServiceType] = None,
+        session_request: LiveAvatarNewSessionRequest | NewSessionRequest | None = None,
+        service_type: ServiceType | None = None,
         callbacks: HeyGenCallbacks,
         connect_as_user: bool = False,
     ) -> None:
@@ -149,16 +149,16 @@ class HeyGenClient:
         else:
             self._api = LiveAvatarApi(api_key, session=session)
 
-        self._heyGen_session: Optional[StandardSessionResponse] = None
+        self._heyGen_session: StandardSessionResponse | None = None
         self._websocket = None
-        self._task_manager: Optional[BaseTaskManager] = None
+        self._task_manager: BaseTaskManager | None = None
         self._params = params
         self._in_sample_rate = 0
         self._out_sample_rate = 0
         self._connected = False
         self._session_request = session_request
         self._callbacks = callbacks
-        self._event_queue: Optional[asyncio.Queue] = None
+        self._event_queue: asyncio.Queue | None = None
         self._event_task = None
         # Currently supporting to capture the audio and video from a single participant
         self._video_task = None

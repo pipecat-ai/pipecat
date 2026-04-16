@@ -7,7 +7,6 @@
 """Fireworks AI service implementation using OpenAI-compatible interface."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from loguru import logger
 
@@ -37,9 +36,9 @@ class FireworksLLMService(OpenAILLMService):
         self,
         *,
         api_key: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         base_url: str = "https://api.fireworks.ai/inference/v1",
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Fireworks LLM service.

@@ -12,7 +12,7 @@ functionality.
 """
 
 from abc import abstractmethod
-from typing import List, Mapping, Optional
+from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -57,18 +57,18 @@ class TransportParams(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     audio_out_enabled: bool = False
-    audio_out_sample_rate: Optional[int] = None
+    audio_out_sample_rate: int | None = None
     audio_out_channels: int = 1
     audio_out_bitrate: int = 96000
     audio_out_10ms_chunks: int = 4
-    audio_out_mixer: Optional[BaseAudioMixer | Mapping[Optional[str], BaseAudioMixer]] = None
-    audio_out_destinations: List[str] = Field(default_factory=list)
+    audio_out_mixer: BaseAudioMixer | Mapping[str | None, BaseAudioMixer] | None = None
+    audio_out_destinations: list[str] = Field(default_factory=list)
     audio_out_end_silence_secs: int = 2
     audio_out_auto_silence: bool = True
     audio_in_enabled: bool = False
-    audio_in_sample_rate: Optional[int] = None
+    audio_in_sample_rate: int | None = None
     audio_in_channels: int = 1
-    audio_in_filter: Optional[BaseAudioFilter] = None
+    audio_in_filter: BaseAudioFilter | None = None
     audio_in_stream_on_start: bool = True
     audio_in_passthrough: bool = True
     video_in_enabled: bool = False
@@ -79,8 +79,8 @@ class TransportParams(BaseModel):
     video_out_bitrate: int = 800000
     video_out_framerate: int = 30
     video_out_color_format: str = "RGB"
-    video_out_codec: Optional[str] = None
-    video_out_destinations: List[str] = Field(default_factory=list)
+    video_out_codec: str | None = None
+    video_out_destinations: list[str] = Field(default_factory=list)
 
 
 class BaseTransport(BaseObject):
@@ -93,9 +93,9 @@ class BaseTransport(BaseObject):
     def __init__(
         self,
         *,
-        name: Optional[str] = None,
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        name: str | None = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the base transport.
 

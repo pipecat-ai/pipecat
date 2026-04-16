@@ -7,7 +7,6 @@
 """User turn stop strategy based on turn detection analyzers."""
 
 import asyncio
-from typing import Optional
 
 from loguru import logger
 
@@ -62,9 +61,9 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text = ""
         self._turn_complete = False
         self._vad_user_speaking = False
-        self._vad_stopped_time: Optional[float] = None  # Track when VAD stopped was received
+        self._vad_stopped_time: float | None = None  # Track when VAD stopped was received
         self._transcript_finalized = False
-        self._timeout_task: Optional[asyncio.Task] = None
+        self._timeout_task: asyncio.Task | None = None
         self._timeout_expired: bool = False
 
     async def reset(self):
@@ -232,7 +231,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             # Make sure the task is scheduled.
             await asyncio.sleep(0)
 
-    async def _handle_prediction_result(self, result: Optional[MetricsData]):
+    async def _handle_prediction_result(self, result: MetricsData | None):
         """Handle a prediction result event from the turn analyzer."""
         if result:
             await self.push_frame(MetricsFrame(data=[result]))

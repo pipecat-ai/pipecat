@@ -15,7 +15,7 @@ import asyncio
 import io
 import time
 import wave
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 import websockets
 from loguru import logger
@@ -51,8 +51,8 @@ class WebsocketClientParams(TransportParams):
     """
 
     add_wav_header: bool = True
-    additional_headers: Optional[dict[str, str]] = None
-    serializer: Optional[FrameSerializer] = None
+    additional_headers: dict[str, str] | None = None
+    serializer: FrameSerializer | None = None
 
 
 class WebsocketClientCallbacks(BaseModel):
@@ -97,8 +97,8 @@ class WebsocketClientSession:
         self._transport_name = transport_name
 
         self._leave_counter = 0
-        self._task_manager: Optional[BaseTaskManager] = None
-        self._websocket: Optional[websockets.WebSocketClientProtocol] = None
+        self._task_manager: BaseTaskManager | None = None
+        self._websocket: websockets.WebSocketClientProtocol | None = None
 
     @property
     def task_manager(self) -> BaseTaskManager:
@@ -487,7 +487,7 @@ class WebsocketClientTransport(BaseTransport):
     def __init__(
         self,
         uri: str,
-        params: Optional[WebsocketClientParams] = None,
+        params: WebsocketClientParams | None = None,
     ):
         """Initialize the WebSocket client transport.
 
@@ -507,8 +507,8 @@ class WebsocketClientTransport(BaseTransport):
         )
 
         self._session = WebsocketClientSession(uri, self._params, callbacks, self.name)
-        self._input: Optional[WebsocketClientInputTransport] = None
-        self._output: Optional[WebsocketClientOutputTransport] = None
+        self._input: WebsocketClientInputTransport | None = None
+        self._output: WebsocketClientOutputTransport | None = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.

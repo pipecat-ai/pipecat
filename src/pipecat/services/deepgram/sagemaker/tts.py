@@ -14,8 +14,9 @@ streaming audio output.
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -72,10 +73,10 @@ class DeepgramSageMakerTTSService(TTSService):
         *,
         endpoint_name: str,
         region: str,
-        voice: Optional[str] = None,
-        sample_rate: Optional[int] = None,
+        voice: str | None = None,
+        sample_rate: int | None = None,
         encoding: str = "linear16",
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Deepgram SageMaker TTS service.
@@ -122,8 +123,8 @@ class DeepgramSageMakerTTSService(TTSService):
         self._region = region
         self._encoding = encoding
 
-        self._client: Optional[SageMakerBidiClient] = None
-        self._response_task: Optional[asyncio.Task] = None
+        self._client: SageMakerBidiClient | None = None
+        self._response_task: asyncio.Task | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -311,7 +312,7 @@ class DeepgramSageMakerTTSService(TTSService):
                 logger.error(f"{self} error sending Clear message: {e}")
         await super().on_audio_context_interrupted(context_id)
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis by sending Flush command.
 
         This should be called when the LLM finishes a complete response to force

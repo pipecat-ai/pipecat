@@ -15,7 +15,7 @@ import asyncio
 import json
 import time
 import uuid
-from typing import Any, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter
@@ -89,8 +89,8 @@ class SignallingMessage:
         outbound: Types of messages that can be sent to peers.
     """
 
-    Inbound = Union[TrackStatusMessage]  # in case we need to add new messages in the future
-    outbound = Union[RenegotiateMessage]
+    Inbound = TrackStatusMessage  # in case we need to add new messages in the future
+    outbound = RenegotiateMessage
 
 
 class SmallWebRTCTrack:
@@ -112,7 +112,7 @@ class SmallWebRTCTrack:
         self._track = receiver.track
         self._enabled = True
         self._last_recv_time: float = 0.0
-        self._idle_task: Optional[asyncio.Task] = None
+        self._idle_task: asyncio.Task | None = None
         self._idle_timeout: float = 2.0  # seconds before discarding old frames
 
     def set_enabled(self, enabled: bool) -> None:
@@ -145,7 +145,7 @@ class SmallWebRTCTrack:
                 remote_track._queue.get_nowait()  # Remove the oldest frame
                 remote_track._queue.task_done()
 
-    async def recv(self) -> Optional[Frame]:
+    async def recv(self) -> Frame | None:
         """Receive the next frame from the track.
 
         Enables the internal receiving state and starts idle watcher.
@@ -213,7 +213,7 @@ class SmallWebRTCConnection(BaseObject):
 
     def __init__(
         self,
-        ice_servers: Optional[Union[List[str], List[IceServer]]] = None,
+        ice_servers: list[str] | list[IceServer] | None = None,
         connection_timeout_secs: int = 60,
     ):
         """Initialize the WebRTC connection.
@@ -227,7 +227,7 @@ class SmallWebRTCConnection(BaseObject):
         """
         super().__init__()
         if not ice_servers:
-            self.ice_servers: List[IceServer] = []
+            self.ice_servers: list[IceServer] = []
         elif all(isinstance(s, IceServer) for s in ice_servers):
             self.ice_servers = ice_servers
         elif all(isinstance(s, str) for s in ice_servers):
@@ -281,7 +281,7 @@ class SmallWebRTCConnection(BaseObject):
         logger.debug("Initializing new peer connection")
         rtc_config = RTCConfiguration(iceServers=self.ice_servers)
 
-        self._answer: Optional[RTCSessionDescription] = None
+        self._answer: RTCSessionDescription | None = None
         self._pc = RTCPeerConnection(rtc_config)
         self._pc_id = f"{self.name}-{uuid.uuid4().hex}"
         self._setup_listeners()

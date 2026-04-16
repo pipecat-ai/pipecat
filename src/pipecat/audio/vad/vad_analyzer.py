@@ -15,7 +15,6 @@ import asyncio
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
-from typing import Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -68,7 +67,7 @@ class VADAnalyzer(ABC):
     Subclasses must implement the core voice confidence calculation.
     """
 
-    def __init__(self, *, sample_rate: Optional[int] = None, params: Optional[VADParams] = None):
+    def __init__(self, *, sample_rate: int | None = None, params: VADParams | None = None):
         """Initialize the VAD analyzer.
 
         Args:

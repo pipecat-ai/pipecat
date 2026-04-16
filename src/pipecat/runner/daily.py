@@ -37,7 +37,6 @@ Example::
 import os
 import time
 import uuid
-from typing import Dict, List, Optional
 
 import aiohttp
 from loguru import logger
@@ -64,7 +63,7 @@ class DailyRoomConfig(BaseModel):
 
     room_url: str
     token: str
-    sip_endpoint: Optional[str] = None
+    sip_endpoint: str | None = None
 
     def __iter__(self):
         """Enable tuple unpacking for backward compatibility.
@@ -78,18 +77,18 @@ class DailyRoomConfig(BaseModel):
 async def configure(
     aiohttp_session: aiohttp.ClientSession,
     *,
-    api_key: Optional[str] = None,
+    api_key: str | None = None,
     room_exp_duration: float = 2.0,
     token_exp_duration: float = 2.0,
-    sip_caller_phone: Optional[str] = None,
+    sip_caller_phone: str | None = None,
     sip_enable_video: bool = False,
     sip_num_endpoints: int = 1,
     enable_dialout: bool = False,
-    sip_codecs: Optional[Dict[str, List[str]]] = None,
-    sip_provider: Optional[str] = None,
-    room_geo: Optional[str] = None,
-    room_properties: Optional[DailyRoomProperties] = None,
-    token_properties: Optional[DailyMeetingTokenProperties] = None,
+    sip_codecs: dict[str, list[str]] | None = None,
+    sip_provider: str | None = None,
+    room_geo: str | None = None,
+    room_properties: DailyRoomProperties | None = None,
+    token_properties: DailyMeetingTokenProperties | None = None,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
 

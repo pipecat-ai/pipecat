@@ -12,8 +12,8 @@ using REST endpoints for creating images from text prompts.
 
 import asyncio
 import io
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
 
 import aiohttp
 from PIL import Image
@@ -49,13 +49,13 @@ class AzureImageGenServiceREST(ImageGenService):
     def __init__(
         self,
         *,
-        image_size: Optional[str] = None,
+        image_size: str | None = None,
         api_key: str,
         endpoint: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
         api_version="2023-06-01-preview",
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
     ):
         """Initialize the AzureImageGenServiceREST.
 

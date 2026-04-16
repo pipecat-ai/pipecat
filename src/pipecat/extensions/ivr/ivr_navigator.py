@@ -11,7 +11,6 @@ using LLM-based decision making and DTMF tone generation.
 """
 
 from enum import Enum
-from typing import List, Optional
 
 from loguru import logger
 
@@ -72,7 +71,7 @@ class IVRProcessor(FrameProcessor):
         *,
         classifier_prompt: str,
         ivr_prompt: str,
-        ivr_vad_params: Optional[VADParams] = None,
+        ivr_vad_params: VADParams | None = None,
     ):
         """Initialize the IVR processor.
 
@@ -88,7 +87,7 @@ class IVRProcessor(FrameProcessor):
         self._classifier_prompt = classifier_prompt
 
         # Store saved context messages
-        self._saved_messages: List[dict] = []
+        self._saved_messages: list[dict] = []
 
         # XML pattern aggregation
         self._aggregator = PatternPairAggregator()
@@ -98,7 +97,7 @@ class IVRProcessor(FrameProcessor):
         self._register_event_handler("on_conversation_detected")
         self._register_event_handler("on_ivr_status_changed")
 
-    def update_saved_messages(self, messages: List[dict]) -> None:
+    def update_saved_messages(self, messages: list[dict]) -> None:
         """Update the saved context messages.
 
         Sets the messages that are saved when switching between
@@ -109,7 +108,7 @@ class IVRProcessor(FrameProcessor):
         """
         self._saved_messages = messages
 
-    def _get_conversation_history(self) -> List[dict]:
+    def _get_conversation_history(self) -> list[dict]:
         """Get saved context messages without the system message.
 
         Returns:
@@ -409,7 +408,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         *,
         llm: LLMService,
         ivr_prompt: str,
-        ivr_vad_params: Optional[VADParams] = None,
+        ivr_vad_params: VADParams | None = None,
     ):
         """Initialize the IVR navigator.
 

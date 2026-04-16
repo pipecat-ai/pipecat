@@ -7,7 +7,8 @@ Classes:
     AICVADAnalyzer: For aic-sdk (uses 'aic_sdk' module)
 """
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from aic_sdk import VadParameter
 from loguru import logger
@@ -46,10 +47,10 @@ class AICVADAnalyzer(VADAnalyzer):
     def __init__(
         self,
         *,
-        vad_context_factory: Optional[Callable[[], Any]] = None,
-        speech_hold_duration: Optional[float] = None,
-        minimum_speech_duration: Optional[float] = None,
-        sensitivity: Optional[float] = None,
+        vad_context_factory: Callable[[], Any] | None = None,
+        speech_hold_duration: float | None = None,
+        minimum_speech_duration: float | None = None,
+        sensitivity: float | None = None,
     ):
         """Create an AIC VAD analyzer.
 
@@ -77,10 +78,10 @@ class AICVADAnalyzer(VADAnalyzer):
         super().__init__(sample_rate=None, params=fixed_params)
 
         self._vad_context_factory = vad_context_factory
-        self._vad_ctx: Optional[Any] = None
-        self._pending_speech_hold_duration: Optional[float] = speech_hold_duration
-        self._pending_minimum_speech_duration: Optional[float] = minimum_speech_duration
-        self._pending_sensitivity: Optional[float] = sensitivity
+        self._vad_ctx: Any | None = None
+        self._pending_speech_hold_duration: float | None = speech_hold_duration
+        self._pending_minimum_speech_duration: float | None = minimum_speech_duration
+        self._pending_sensitivity: float | None = sensitivity
 
     def bind_vad_context_factory(self, vad_context_factory: Callable[[], Any]):
         """Attach or replace the factory post-construction."""

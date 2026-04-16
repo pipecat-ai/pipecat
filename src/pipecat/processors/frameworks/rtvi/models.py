@@ -14,12 +14,10 @@ Import this module under the ``RTVI`` alias to use as a namespace::
     msg = RTVI.BotReady(id="1", data=RTVI.BotReadyData(version=RTVI.PROTOCOL_VERSION))
 """
 
+from collections.abc import Mapping
 from typing import (
     Any,
-    Dict,
     Literal,
-    Mapping,
-    Optional,
 )
 
 from pydantic import BaseModel
@@ -46,7 +44,7 @@ class Message(BaseModel):
     label: MessageLiteral = MESSAGE_LABEL
     type: str
     id: str
-    data: Optional[Dict[str, Any]] = None
+    data: dict[str, Any] | None = None
 
 
 # -- Client -> Pipecat messages.
@@ -56,7 +54,7 @@ class RawClientMessageData(BaseModel):
     """Data structure expected from client messages sent to the RTVI server."""
 
     t: str
-    d: Optional[Any] = None
+    d: Any | None = None
 
 
 class ClientMessage(BaseModel):
@@ -64,14 +62,14 @@ class ClientMessage(BaseModel):
 
     msg_id: str
     type: str
-    data: Optional[Any] = None
+    data: Any | None = None
 
 
 class RawServerResponseData(BaseModel):
     """Data structure for server responses to client messages."""
 
     t: str
-    d: Optional[Any] = None
+    d: Any | None = None
 
 
 class ServerResponse(BaseModel):
@@ -94,10 +92,10 @@ class AboutClientData(BaseModel):
     """
 
     library: str
-    library_version: Optional[str] = None
-    platform: Optional[str] = None
-    platform_version: Optional[str] = None
-    platform_details: Optional[Any] = None
+    library_version: str | None = None
+    platform: str | None = None
+    platform_version: str | None = None
+    platform_details: Any | None = None
 
 
 class ClientReadyData(BaseModel):
@@ -165,7 +163,7 @@ class BotReadyData(BaseModel):
     """
 
     version: str
-    about: Optional[Mapping[str, Any]] = None
+    about: Mapping[str, Any] | None = None
 
 
 class BotReady(BaseModel):
@@ -226,7 +224,7 @@ class SendTextData(BaseModel):
     """
 
     content: str
-    options: Optional[SendTextOptions] = None
+    options: SendTextOptions | None = None
 
 
 class LLMFunctionCallStartMessageData(BaseModel):
@@ -236,7 +234,7 @@ class LLMFunctionCallStartMessageData(BaseModel):
     the configured function_call_report_level for security.
     """
 
-    function_name: Optional[str] = None
+    function_name: str | None = None
 
 
 class LLMFunctionCallStartMessage(BaseModel):
@@ -270,8 +268,8 @@ class LLMFunctionCallInProgressMessageData(BaseModel):
     """
 
     tool_call_id: str
-    function_name: Optional[str] = None
-    arguments: Optional[Mapping[str, Any]] = None
+    function_name: str | None = None
+    arguments: Mapping[str, Any] | None = None
 
 
 class LLMFunctionCallInProgressMessage(BaseModel):
@@ -295,8 +293,8 @@ class LLMFunctionCallStoppedMessageData(BaseModel):
 
     tool_call_id: str
     cancelled: bool
-    function_name: Optional[str] = None
-    result: Optional[Any] = None
+    function_name: str | None = None
+    result: Any | None = None
 
 
 class LLMFunctionCallStoppedMessage(BaseModel):

@@ -10,7 +10,7 @@ Methods that wrap the Daily API to create rooms, check room URLs, and get meetin
 """
 
 import time
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import aiohttp
@@ -35,8 +35,8 @@ class DailyRoomSipParams(BaseModel):
     video: bool = False
     sip_mode: str = "dial-in"
     num_endpoints: int = 1
-    codecs: Optional[Dict[str, List[str]]] = None
-    provider: Optional[str] = None
+    codecs: dict[str, list[str]] | None = None
+    provider: str | None = None
 
 
 class RecordingsBucketConfig(BaseModel):
@@ -102,20 +102,20 @@ class DailyRoomProperties(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    exp: Optional[float] = None
+    exp: float | None = None
     enable_chat: bool = False
     enable_prejoin_ui: bool = False
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = False
-    enable_dialout: Optional[bool] = None
-    enable_recording: Optional[Literal["cloud", "cloud-audio-only", "local", "raw-tracks"]] = None
-    enable_transcription_storage: Optional[bool] = None
-    geo: Optional[str] = None
-    max_participants: Optional[int] = None
-    recordings_bucket: Optional[RecordingsBucketConfig] = None
-    transcription_bucket: Optional[TranscriptionBucketConfig] = None
-    sip: Optional[DailyRoomSipParams] = None
-    sip_uri: Optional[Dict[str, Any]] = None
+    enable_dialout: bool | None = None
+    enable_recording: Literal["cloud", "cloud-audio-only", "local", "raw-tracks"] | None = None
+    enable_transcription_storage: bool | None = None
+    geo: str | None = None
+    max_participants: int | None = None
+    recordings_bucket: RecordingsBucketConfig | None = None
+    transcription_bucket: TranscriptionBucketConfig | None = None
+    sip: DailyRoomSipParams | None = None
+    sip_uri: dict[str, Any] | None = None
     start_video_off: bool = False
 
     @property
@@ -140,7 +140,7 @@ class DailyRoomParams(BaseModel):
         properties: Room configuration properties.
     """
 
-    name: Optional[str] = None
+    name: str | None = None
     privacy: Literal["private", "public"] = "public"
     properties: DailyRoomProperties = Field(default_factory=DailyRoomProperties)
 
@@ -191,21 +191,21 @@ class DailyMeetingTokenProperties(BaseModel):
         permissions: Specifies the initial default permissions for a non-meeting-owner participant.
     """
 
-    room_name: Optional[str] = None
-    eject_at_token_exp: Optional[bool] = None
-    eject_after_elapsed: Optional[int] = None
-    nbf: Optional[int] = None
-    exp: Optional[int] = None
-    is_owner: Optional[bool] = None
-    user_name: Optional[str] = None
-    user_id: Optional[str] = None
-    enable_screenshare: Optional[bool] = None
-    start_video_off: Optional[bool] = None
-    start_audio_off: Optional[bool] = None
-    enable_recording: Optional[Literal["cloud", "cloud-audio-only", "local", "raw-tracks"]] = None
-    enable_prejoin_ui: Optional[bool] = None
-    start_cloud_recording: Optional[bool] = None
-    permissions: Optional[Dict[str, Any]] = None
+    room_name: str | None = None
+    eject_at_token_exp: bool | None = None
+    eject_after_elapsed: int | None = None
+    nbf: int | None = None
+    exp: int | None = None
+    is_owner: bool | None = None
+    user_name: str | None = None
+    user_id: str | None = None
+    enable_screenshare: bool | None = None
+    start_video_off: bool | None = None
+    start_audio_off: bool | None = None
+    enable_recording: Literal["cloud", "cloud-audio-only", "local", "raw-tracks"] | None = None
+    enable_prejoin_ui: bool | None = None
+    start_cloud_recording: bool | None = None
+    permissions: dict[str, Any] | None = None
 
 
 class DailyMeetingTokenParams(BaseModel):
@@ -304,7 +304,7 @@ class DailyRESTHelper:
         expiry_time: float = 60 * 60,
         eject_at_token_exp: bool = False,
         owner: bool = True,
-        params: Optional[DailyMeetingTokenParams] = None,
+        params: DailyMeetingTokenParams | None = None,
     ) -> str:
         """Generate a meeting token for user to join a Daily room.
 

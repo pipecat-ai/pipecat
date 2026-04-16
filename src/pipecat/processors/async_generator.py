@@ -7,7 +7,8 @@
 """Async generator processor for frame serialization and streaming."""
 
 import asyncio
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from pipecat.frames.frames import (
     CancelFrame,

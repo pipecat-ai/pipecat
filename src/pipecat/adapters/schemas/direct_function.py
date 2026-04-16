@@ -15,16 +15,11 @@ formats).
 
 import inspect
 import types
+from collections.abc import Callable, Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
-    Dict,
-    List,
-    Mapping,
     Protocol,
-    Set,
-    Tuple,
     Union,
     get_args,
     get_origin,
@@ -144,8 +139,8 @@ class BaseDirectFunctionWrapper:
 
     # TODO: maybe to better support things like enums, check if each type is a pydantic type and use its convert-to-jsonschema function
     def _get_parameters_as_jsonschema(
-        self, func: Callable, docstring_params: List[docstring_parser.DocstringParam]
-    ) -> Tuple[Dict[str, Any], List[str]]:
+        self, func: Callable, docstring_params: list[docstring_parser.DocstringParam]
+    ) -> tuple[dict[str, Any], list[str]]:
         """Get function parameters as a dictionary of JSON schemas and a list of required parameters.
 
         Ignore the first parameter, as it's expected to be the "special" one.
@@ -193,7 +188,7 @@ class BaseDirectFunctionWrapper:
 
         return properties, required
 
-    def _typehint_to_jsonschema(self, type_hint: Any) -> Dict[str, Any]:
+    def _typehint_to_jsonschema(self, type_hint: Any) -> dict[str, Any]:
         """Convert a Python type hint to a JSON Schema.
 
         Args:
@@ -216,9 +211,9 @@ class BaseDirectFunctionWrapper:
             return {"type": "number"}
         elif type_hint is bool:
             return {"type": "boolean"}
-        elif type_hint is dict or type_hint is Dict:
+        elif type_hint is dict or type_hint is dict:
             return {"type": "object"}
-        elif type_hint is list or type_hint is List:
+        elif type_hint is list or type_hint is list:
             return {"type": "array"}
 
         # Get origin and arguments for complex types
@@ -230,11 +225,11 @@ class BaseDirectFunctionWrapper:
             return {"anyOf": [self._typehint_to_jsonschema(arg) for arg in args]}
 
         # Handle List, Tuple, Set with specific item types
-        if origin in (list, List, tuple, Tuple, set, Set) and args:
+        if origin in (list, list, tuple, tuple, set, set) and args:
             return {"type": "array", "items": self._typehint_to_jsonschema(args[0])}
 
         # Handle Dict with specific key/value types
-        if origin in (dict, Dict) and len(args) == 2:
+        if origin in (dict, dict) and len(args) == 2:
             # For JSON Schema, keys must be strings
             return {"type": "object", "additionalProperties": self._typehint_to_jsonschema(args[1])}
 

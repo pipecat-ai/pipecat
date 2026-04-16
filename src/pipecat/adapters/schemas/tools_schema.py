@@ -11,7 +11,7 @@ and custom adapter-specific tools in the Pipecat framework.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -39,8 +39,8 @@ class ToolsSchema:
 
     def __init__(
         self,
-        standard_tools: List[FunctionSchema | DirectFunction],
-        custom_tools: Optional[Dict[AdapterType, List[Dict[str, Any]]]] = None,
+        standard_tools: list[FunctionSchema | DirectFunction],
+        custom_tools: dict[AdapterType, list[dict[str, Any]]] | None = None,
     ) -> None:
         """Initialize the tools schema.
 
@@ -66,7 +66,7 @@ class ToolsSchema:
         self._custom_tools = custom_tools
 
     @property
-    def standard_tools(self) -> List[FunctionSchema]:
+    def standard_tools(self) -> list[FunctionSchema]:
         """Get the list of standard function schema tools.
 
         Returns:
@@ -75,7 +75,7 @@ class ToolsSchema:
         return self._standard_tools
 
     @property
-    def custom_tools(self) -> Dict[AdapterType, List[Dict[str, Any]]]:
+    def custom_tools(self) -> dict[AdapterType, list[dict[str, Any]]]:
         """Get the custom tools dictionary.
 
         Returns:
@@ -84,7 +84,7 @@ class ToolsSchema:
         return self._custom_tools
 
     @custom_tools.setter
-    def custom_tools(self, value: Dict[AdapterType, List[Dict[str, Any]]]) -> None:
+    def custom_tools(self, value: dict[AdapterType, list[dict[str, Any]]]) -> None:
         """Set the custom tools dictionary.
 
         Args:

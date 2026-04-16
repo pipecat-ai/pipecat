@@ -87,7 +87,7 @@ def get_rag_content():
     """Get the RAG content from the file."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     rag_content_path = os.path.join(script_dir, "assets", "rag-content.txt")
-    with open(rag_content_path, "r") as f:
+    with open(rag_content_path) as f:
         return f.read()
 
 

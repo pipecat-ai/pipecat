@@ -16,7 +16,7 @@ The module consists of three main components:
 - HeyGenTransport: Main transport implementation that coordinates input/output transports
 """
 
-from typing import Any, Optional, Union
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -309,10 +309,10 @@ class HeyGenTransport(BaseTransport):
         session: aiohttp.ClientSession,
         api_key: str,
         params: HeyGenParams = HeyGenParams(),
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
-        session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
-        service_type: Optional[ServiceType] = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
+        session_request: LiveAvatarNewSessionRequest | NewSessionRequest | None = None,
+        service_type: ServiceType | None = None,
     ):
         """Initialize the HeyGen transport.
 
@@ -346,8 +346,8 @@ class HeyGenTransport(BaseTransport):
                 on_participant_disconnected=self._on_participant_disconnected,
             ),
         )
-        self._input: Optional[HeyGenInputTransport] = None
-        self._output: Optional[HeyGenOutputTransport] = None
+        self._input: HeyGenInputTransport | None = None
+        self._output: HeyGenOutputTransport | None = None
         self._HeyGen_participant_id = None
 
         # Register supported handlers. The user will only be able to register

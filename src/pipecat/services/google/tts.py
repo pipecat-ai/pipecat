@@ -22,8 +22,9 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, List, Literal, Optional
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import BaseModel
@@ -58,7 +59,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_google_tts_language(language: Language) -> Optional[str]:
+def language_to_google_tts_language(language: Language) -> str | None:
     """Convert a Language enum to Google TTS language code.
 
     Source:
@@ -217,7 +218,7 @@ def language_to_google_tts_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
-def language_to_gemini_tts_language(language: Language) -> Optional[str]:
+def language_to_gemini_tts_language(language: Language) -> str | None:
     """Convert a Language enum to Gemini TTS language code.
 
     Source:
@@ -575,25 +576,25 @@ class GoogleHttpTTSService(TTSService):
             google_style: Google-specific voice style.
         """
 
-        pitch: Optional[str] = None
-        rate: Optional[str] = None
-        speaking_rate: Optional[float] = None
-        volume: Optional[str] = None
-        emphasis: Optional[Literal["strong", "moderate", "reduced", "none"]] = None
-        language: Optional[Language] = Language.EN
-        gender: Optional[Literal["male", "female", "neutral"]] = None
-        google_style: Optional[Literal["apologetic", "calm", "empathetic", "firm", "lively"]] = None
+        pitch: str | None = None
+        rate: str | None = None
+        speaking_rate: float | None = None
+        volume: str | None = None
+        emphasis: Literal["strong", "moderate", "reduced", "none"] | None = None
+        language: Language | None = Language.EN
+        gender: Literal["male", "female", "neutral"] | None = None
+        google_style: Literal["apologetic", "calm", "empathetic", "firm", "lively"] | None = None
 
     def __init__(
         self,
         *,
-        credentials: Optional[str] = None,
-        credentials_path: Optional[str] = None,
-        location: Optional[str] = None,
-        voice_id: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        credentials: str | None = None,
+        credentials_path: str | None = None,
+        location: str | None = None,
+        voice_id: str | None = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initializes the Google HTTP TTS service.
@@ -675,7 +676,7 @@ class GoogleHttpTTSService(TTSService):
         )
 
     def _create_client(
-        self, credentials: Optional[str], credentials_path: Optional[str]
+        self, credentials: str | None, credentials_path: str | None
     ) -> texttospeech_v1.TextToSpeechAsyncClient:
         """Create authenticated Google Text-to-Speech client.
 
@@ -689,7 +690,7 @@ class GoogleHttpTTSService(TTSService):
         Raises:
             ValueError: If no valid credentials are provided.
         """
-        creds: Optional[service_account.Credentials] = None
+        creds: service_account.Credentials | None = None
 
         if credentials:
             # Use provided credentials JSON string
@@ -727,7 +728,7 @@ class GoogleHttpTTSService(TTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Google TTS language format.
 
         Args:
@@ -874,7 +875,7 @@ class GoogleBaseTTSService(TTSService):
     """
 
     def _create_client(
-        self, credentials: Optional[str], credentials_path: Optional[str]
+        self, credentials: str | None, credentials_path: str | None
     ) -> texttospeech_v1.TextToSpeechAsyncClient:
         """Create authenticated Google Text-to-Speech client.
 
@@ -888,7 +889,7 @@ class GoogleBaseTTSService(TTSService):
         Raises:
             ValueError: If no valid credentials are provided.
         """
-        creds: Optional[service_account.Credentials] = None
+        creds: service_account.Credentials | None = None
 
         if credentials:
             # Use provided credentials JSON string
@@ -926,7 +927,7 @@ class GoogleBaseTTSService(TTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Google TTS language format.
 
         Args:
@@ -942,7 +943,7 @@ class GoogleBaseTTSService(TTSService):
         streaming_config: texttospeech_v1.StreamingSynthesizeConfig,
         text: str,
         context_id: str,
-        prompt: Optional[str] = None,
+        prompt: str | None = None,
     ) -> AsyncGenerator[Frame, None]:
         """Shared streaming synthesis logic.
 
@@ -1032,20 +1033,20 @@ class GoogleTTSService(GoogleBaseTTSService):
             speaking_rate: The speaking rate, in the range [0.25, 2.0].
         """
 
-        language: Optional[Language] = Language.EN
-        speaking_rate: Optional[float] = None
+        language: Language | None = Language.EN
+        speaking_rate: float | None = None
 
     def __init__(
         self,
         *,
-        credentials: Optional[str] = None,
-        credentials_path: Optional[str] = None,
-        location: Optional[str] = None,
-        voice_id: Optional[str] = None,
-        voice_cloning_key: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        credentials: str | None = None,
+        credentials_path: str | None = None,
+        location: str | None = None,
+        voice_id: str | None = None,
+        voice_cloning_key: str | None = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initializes the Google streaming TTS service.
@@ -1249,22 +1250,22 @@ class GeminiTTSService(GoogleBaseTTSService):
             speaker_configs: List of speaker configurations for multi-speaker mode.
         """
 
-        language: Optional[Language] = Language.EN
-        prompt: Optional[str] = None
+        language: Language | None = Language.EN
+        prompt: str | None = None
         multi_speaker: bool = False
-        speaker_configs: Optional[List[dict]] = None
+        speaker_configs: list[dict] | None = None
 
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
-        credentials: Optional[str] = None,
-        credentials_path: Optional[str] = None,
-        location: Optional[str] = None,
-        voice_id: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        credentials: str | None = None,
+        credentials_path: str | None = None,
+        location: str | None = None,
+        voice_id: str | None = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initializes the Gemini TTS service.
@@ -1353,7 +1354,7 @@ class GeminiTTSService(GoogleBaseTTSService):
             credentials, credentials_path
         )
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Gemini TTS language format.
 
         Args:

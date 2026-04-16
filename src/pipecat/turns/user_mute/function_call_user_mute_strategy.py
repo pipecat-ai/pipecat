@@ -6,8 +6,6 @@
 
 """User mute strategy that mutes the user while a function call is executing."""
 
-from typing import Set
-
 from pipecat.frames.frames import (
     Frame,
     FunctionCallCancelFrame,
@@ -30,7 +28,7 @@ class FunctionCallUserMuteStrategy(BaseUserMuteStrategy):
     def __init__(self):
         """Initialize the function call user mute strategy."""
         super().__init__()
-        self._function_call_in_progress: Set[str] = set()
+        self._function_call_in_progress: set[str] = set()
 
     async def reset(self):
         """Reset the strategy to its initial state."""

@@ -7,7 +7,6 @@
 """Nebius LLM service implementation using OpenAI-compatible interface."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from loguru import logger
 
@@ -41,7 +40,7 @@ class NebiusLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.tokenfactory.nebius.com/v1/",
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Nebius LLM service.

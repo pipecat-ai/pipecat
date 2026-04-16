@@ -8,7 +8,6 @@
 
 import base64
 import json
-from typing import Optional
 
 from loguru import logger
 
@@ -52,16 +51,16 @@ class PlivoFrameSerializer(FrameSerializer):
         """
 
         plivo_sample_rate: int = 8000
-        sample_rate: Optional[int] = None
+        sample_rate: int | None = None
         auto_hang_up: bool = True
 
     def __init__(
         self,
         stream_id: str,
-        call_id: Optional[str] = None,
-        auth_id: Optional[str] = None,
-        auth_token: Optional[str] = None,
-        params: Optional[InputParams] = None,
+        call_id: str | None = None,
+        auth_id: str | None = None,
+        auth_token: str | None = None,
+        params: InputParams | None = None,
     ):
         """Initialize the PlivoFrameSerializer.
 

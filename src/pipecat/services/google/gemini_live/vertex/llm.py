@@ -13,7 +13,6 @@ streaming responses, and tool usage.
 
 import json
 from dataclasses import dataclass
-from typing import List, Optional, Union
 
 from loguru import logger
 
@@ -61,21 +60,21 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
     def __init__(
         self,
         *,
-        credentials: Optional[str] = None,
-        credentials_path: Optional[str] = None,
+        credentials: str | None = None,
+        credentials_path: str | None = None,
         location: str,
         project_id: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
-        system_instruction: Optional[str] = None,
-        tools: Optional[Union[List[dict], ToolsSchema]] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        system_instruction: str | None = None,
+        tools: list[dict] | ToolsSchema | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         inference_on_context_initialization: bool = True,
         file_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/files",
-        http_options: Optional[HttpOptions] = None,
+        http_options: HttpOptions | None = None,
         **kwargs,
     ):
         """Initialize the service for accessing Gemini Live via Google Vertex AI.
@@ -234,7 +233,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         )
 
     @staticmethod
-    def _get_credentials(credentials: Optional[str], credentials_path: Optional[str]) -> str:
+    def _get_credentials(credentials: str | None, credentials_path: str | None) -> str:
         """Retrieve Credentials using Google service account credentials JSON.
 
         Supports multiple authentication methods:
@@ -252,7 +251,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         Raises:
             ValueError: If no valid credentials are provided or found.
         """
-        creds: Optional[service_account.Credentials] = None
+        creds: service_account.Credentials | None = None
 
         if credentials:
             # Parse and load credentials from JSON string

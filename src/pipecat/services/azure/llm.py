@@ -7,7 +7,6 @@
 """Azure OpenAI service implementation for the Pipecat AI framework."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from loguru import logger
 from openai import AsyncAzureOpenAI
@@ -37,9 +36,9 @@ class AzureLLMService(OpenAILLMService):
         *,
         api_key: str,
         endpoint: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         api_version: str = "2024-09-01-preview",
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Azure LLM service.

@@ -4,8 +4,6 @@ This module provides integration with Strands Agents for handling conversational
 interactions. It supports both single agent and multi-agent graphs.
 """
 
-from typing import Optional
-
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -38,9 +36,9 @@ class StrandsAgentsProcessor(FrameProcessor):
 
     def __init__(
         self,
-        agent: Optional[Agent] = None,
-        graph: Optional[Graph] = None,
-        graph_exit_node: Optional[str] = None,
+        agent: Agent | None = None,
+        graph: Graph | None = None,
+        graph_exit_node: str | None = None,
     ):
         """Initialize the Strands Agents processor.
 

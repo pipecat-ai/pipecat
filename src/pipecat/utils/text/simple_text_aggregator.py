@@ -11,7 +11,7 @@ until it finds an end-of-sentence marker, making it suitable for basic TTS
 text processing scenarios.
 """
 
-from typing import AsyncIterator, Optional
+from collections.abc import AsyncIterator
 
 from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, match_endofsentence
 from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
@@ -75,7 +75,7 @@ class SimpleTextAggregator(BaseTextAggregator):
             if result:
                 yield result
 
-    async def _check_sentence_with_lookahead(self, char: str) -> Optional[Aggregation]:
+    async def _check_sentence_with_lookahead(self, char: str) -> Aggregation | None:
         """Check for sentence boundaries using lookahead logic.
 
         This method implements the core sentence detection logic with lookahead.
@@ -120,7 +120,7 @@ class SimpleTextAggregator(BaseTextAggregator):
 
         return None
 
-    async def flush(self) -> Optional[Aggregation]:
+    async def flush(self) -> Aggregation | None:
         """Flush any remaining text in the buffer.
 
         Returns any text remaining in the buffer. This is called at the end

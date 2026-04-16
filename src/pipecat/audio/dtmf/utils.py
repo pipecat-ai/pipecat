@@ -15,7 +15,6 @@ import asyncio
 import io
 import wave
 from importlib.resources import files
-from typing import Dict, Optional
 
 import aiofiles
 
@@ -24,8 +23,8 @@ from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.utils import create_file_resampler
 
 __DTMF_LOCK__ = asyncio.Lock()
-__DTMF_AUDIO__: Dict[KeypadEntry, bytes] = {}
-__DTMF_RESAMPLER__: Optional[BaseAudioResampler] = None
+__DTMF_AUDIO__: dict[KeypadEntry, bytes] = {}
+__DTMF_RESAMPLER__: BaseAudioResampler | None = None
 
 __DTMF_FILE_NAME = {
     KeypadEntry.POUND: "dtmf-pound.wav",

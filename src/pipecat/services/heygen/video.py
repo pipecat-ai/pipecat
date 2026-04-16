@@ -13,7 +13,6 @@ audio/video streaming capabilities through the HeyGen API.
 
 import asyncio
 from dataclasses import dataclass
-from typing import Optional, Union
 
 import aiohttp
 from loguru import logger
@@ -90,9 +89,9 @@ class HeyGenVideoService(AIService):
         *,
         api_key: str,
         session: aiohttp.ClientSession,
-        session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
-        service_type: Optional[ServiceType] = None,
-        settings: Optional[Settings] = None,
+        session_request: LiveAvatarNewSessionRequest | NewSessionRequest | None = None,
+        service_type: ServiceType | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ) -> None:
         """Initialize the HeyGen video service.
@@ -113,8 +112,8 @@ class HeyGenVideoService(AIService):
         super().__init__(settings=default_settings, **kwargs)
         self._api_key = api_key
         self._session = session
-        self._client: Optional[HeyGenClient] = None
-        self._send_task: Optional[asyncio.Task] = None
+        self._client: HeyGenClient | None = None
+        self._send_task: asyncio.Task | None = None
         self._resampler = create_stream_resampler()
         self._is_interrupting = False
         self._session_request = session_request
@@ -367,7 +366,7 @@ class HeyGenVideoService(AIService):
 
                         await self._client.agent_speak(bytes(chunk), self._event_id)
                 self._queue.task_done()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Bot has stopped speaking
                 if self._event_id is not None:
                     await self._client.agent_speak_end(self._event_id)

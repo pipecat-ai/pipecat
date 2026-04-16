@@ -12,7 +12,6 @@ and JSON data to SageMaker model endpoints and receiving streaming responses.
 """
 
 import os
-from typing import Optional
 
 from loguru import logger
 
@@ -80,10 +79,10 @@ class SageMakerBidiClient:
         self.model_invocation_path = model_invocation_path
         self.model_query_string = model_query_string
         self.bidi_endpoint = f"https://runtime.sagemaker.{region}.amazonaws.com:8443"
-        self._client: Optional[SageMakerRuntimeHTTP2Client] = None
-        self._stream: Optional[
-            DuplexEventStream[RequestStreamEventPayloadPart, ResponseStreamEvent, any]
-        ] = None
+        self._client: SageMakerRuntimeHTTP2Client | None = None
+        self._stream: (
+            DuplexEventStream[RequestStreamEventPayloadPart, ResponseStreamEvent, any] | None
+        ) = None
         self._output_stream = None
         self._is_active = False
 
@@ -161,7 +160,7 @@ class SageMakerBidiClient:
             self._is_active = False
             raise RuntimeError(f"Failed to start SageMaker BiDi session: {e}")
 
-    async def send_data(self, data_bytes: bytes, data_type: Optional[str] = None):
+    async def send_data(self, data_bytes: bytes, data_type: str | None = None):
         """Send a chunk of data to the stream.
 
         Generic method for sending any type of data to the SageMaker endpoint.
@@ -232,7 +231,7 @@ class SageMakerBidiClient:
 
         await self.send_data(json.dumps(data).encode("utf-8"), data_type="UTF8")
 
-    async def receive_response(self) -> Optional[ResponseStreamEvent]:
+    async def receive_response(self) -> ResponseStreamEvent | None:
         """Receive a response from the stream.
 
         Blocks until a response is available from the SageMaker endpoint. Returns

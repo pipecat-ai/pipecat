@@ -11,8 +11,9 @@ for creating images from text prompts.
 """
 
 import io
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Literal, Optional
+from typing import Literal
 
 import aiohttp
 from loguru import logger
@@ -55,13 +56,12 @@ class OpenAIImageGenService(ImageGenService):
         self,
         *,
         api_key: str,
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
-        image_size: Optional[
-            Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"]
-        ] = None,
-        model: Optional[str] = None,
-        settings: Optional[Settings] = None,
+        image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"]
+        | None = None,
+        model: str | None = None,
+        settings: Settings | None = None,
     ):
         """Initialize the OpenAI image generation service.
 

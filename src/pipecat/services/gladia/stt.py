@@ -13,8 +13,9 @@ supporting multiple languages, custom vocabulary, and various audio processing o
 import asyncio
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Literal, Optional
+from typing import Any, Literal
 
 import aiohttp
 from loguru import logger
@@ -55,7 +56,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_gladia_language(language: Language) -> Optional[str]:
+def language_to_gladia_language(language: Language) -> str | None:
     """Convert a Language enum to Gladia's language code format.
 
     Args:
@@ -223,13 +224,13 @@ class GladiaSTTService(WebsocketSTTService):
         encoding: str = "wav/pcm",
         bit_depth: int = 16,
         channels: int = 1,
-        sample_rate: Optional[int] = None,
-        model: Optional[str] = None,
-        params: Optional[GladiaInputParams] = None,
+        sample_rate: int | None = None,
+        model: str | None = None,
+        params: GladiaInputParams | None = None,
         max_buffer_size: int = 1024 * 1024 * 20,  # 20MB default buffer
         should_interrupt: bool = True,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = GLADIA_TTFS_P99,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = GLADIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Gladia STT service.
@@ -353,7 +354,7 @@ class GladiaSTTService(WebsocketSTTService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat Language enum to Gladia's language code.
 
         Args:
@@ -587,7 +588,7 @@ class GladiaSTTService(WebsocketSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
+        self, transcript: str, is_final: bool, language: str | None = None
     ):
         await self.stop_processing_metrics()
 

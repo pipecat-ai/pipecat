@@ -6,8 +6,9 @@
 
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
@@ -60,18 +61,18 @@ class GradiumTTSService(WebsocketTTSService):
             temp: Temperature to be used for generation, defaults to 0.6.
         """
 
-        temp: Optional[float] = 0.6
+        temp: float | None = 0.6
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         url: str = "wss://eu.api.gradium.ai/api/speech/tts",
-        model: Optional[str] = None,
-        json_config: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        json_config: str | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Gradium TTS service.
@@ -280,7 +281,7 @@ class GradiumTTSService(WebsocketTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis."""
         flush_id = context_id or self.get_active_audio_context_id()
         if not flush_id or not self._websocket:

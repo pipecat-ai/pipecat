@@ -16,7 +16,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -66,10 +66,10 @@ class AWSBedrockLLMSettings(LLMSettings):
         additional_model_request_fields: Additional model-specific parameters.
     """
 
-    stop_sequences: List[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stop_sequences: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latency: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    additional_model_request_fields: Dict[str, Any] | _NotGiven = field(
+    additional_model_request_fields: dict[str, Any] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -104,27 +104,27 @@ class AWSBedrockLLMService(LLMService):
             additional_model_request_fields: Additional model-specific parameters.
         """
 
-        max_tokens: Optional[int] = Field(default=None, ge=1)
-        temperature: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-        top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-        stop_sequences: Optional[List[str]] = Field(default_factory=lambda: [])
-        latency: Optional[str] = Field(default=None)
-        additional_model_request_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
+        max_tokens: int | None = Field(default=None, ge=1)
+        temperature: float | None = Field(default=None, ge=0.0, le=1.0)
+        top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+        stop_sequences: list[str] | None = Field(default_factory=lambda: [])
+        latency: str | None = Field(default=None)
+        additional_model_request_fields: dict[str, Any] | None = Field(default_factory=dict)
 
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
-        aws_access_key: Optional[str] = None,
-        aws_secret_key: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
-        aws_region: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        stop_sequences: Optional[List[str]] = None,
-        client_config: Optional[Config] = None,
-        retry_timeout_secs: Optional[float] = 5.0,
-        retry_on_timeout: Optional[bool] = False,
+        model: str | None = None,
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
+        aws_session_token: str | None = None,
+        aws_region: str | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        stop_sequences: list[str] | None = None,
+        client_config: Config | None = None,
+        retry_timeout_secs: float | None = 5.0,
+        retry_on_timeout: bool | None = False,
         **kwargs,
     ):
         """Initialize the AWS Bedrock LLM service.
@@ -239,7 +239,7 @@ class AWSBedrockLLMService(LLMService):
         """
         return True
 
-    def _build_inference_config(self) -> Dict[str, Any]:
+    def _build_inference_config(self) -> dict[str, Any]:
         """Build inference config with only the parameters that are set.
 
         This prevents conflicts with models (e.g., Claude Sonnet 4.5) that don't
@@ -262,9 +262,9 @@ class AWSBedrockLLMService(LLMService):
     async def run_inference(
         self,
         context: LLMContext,
-        max_tokens: Optional[int] = None,
-        system_instruction: Optional[str] = None,
-    ) -> Optional[str]:
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
@@ -344,7 +344,7 @@ class AWSBedrockLLMService(LLMService):
                     client.converse_stream(**request_params), timeout=self._retry_timeout_secs
                 )
                 return response
-            except (ReadTimeoutError, asyncio.TimeoutError) as e:
+            except (TimeoutError, ReadTimeoutError) as e:
                 # Retry, this time without a timeout so we get a response
                 logger.debug(f"{self}: Retrying converse_stream due to timeout")
                 response = await client.converse_stream(**request_params)
@@ -553,7 +553,7 @@ class AWSBedrockLLMService(LLMService):
             # also get cancelled.
             use_completion_tokens_estimate = True
             raise
-        except (ReadTimeoutError, asyncio.TimeoutError):
+        except (TimeoutError, ReadTimeoutError):
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)

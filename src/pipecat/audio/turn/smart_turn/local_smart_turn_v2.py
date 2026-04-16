@@ -11,7 +11,7 @@ local end-of-turn detection without requiring network connectivity.
 """
 
 import warnings
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -87,7 +87,7 @@ class LocalSmartTurnAnalyzerV2(BaseSmartTurn):
         self._turn_model.eval()
         logger.debug("Loaded Local Smart Turn v2")
 
-    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using local PyTorch model."""
         inputs = self._turn_processor(
             audio_array,

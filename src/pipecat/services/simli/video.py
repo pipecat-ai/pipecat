@@ -8,7 +8,6 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -71,9 +70,9 @@ class SimliVideoService(AIService):
                 before the avatar disconnects.
         """
 
-        enable_logging: Optional[bool] = None
-        max_session_length: Optional[int] = None
-        max_idle_time: Optional[int] = None
+        enable_logging: bool | None = None
+        max_session_length: int | None = None
+        max_idle_time: int | None = None
 
     def __init__(
         self,
@@ -82,11 +81,11 @@ class SimliVideoService(AIService):
         face_id: str,
         simli_url: str = "https://api.simli.ai",
         is_trinity_avatar: bool = False,
-        params: Optional[InputParams] = None,
-        max_session_length: Optional[int] = None,
-        max_idle_time: Optional[int] = None,
-        enable_logging: Optional[bool] = None,
-        settings: Optional[Settings] = None,
+        params: InputParams | None = None,
+        max_session_length: int | None = None,
+        max_idle_time: int | None = None,
+        enable_logging: bool | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Simli video service.

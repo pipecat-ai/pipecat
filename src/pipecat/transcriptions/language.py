@@ -11,23 +11,9 @@ and BCP 47 standards, supporting both language-only and language-region
 combinations for various speech and text processing services.
 """
 
-import sys
-from enum import Enum
+from enum import StrEnum
 
 from loguru import logger
-
-if sys.version_info < (3, 11):
-
-    class StrEnum(str, Enum):
-        """String enumeration base class for Python < 3.11 compatibility."""
-
-        def __new__(cls, value):
-            """Create a new instance of the StrEnum."""
-            obj = str.__new__(cls, value)
-            obj._value_ = value
-            return obj
-else:
-    from enum import StrEnum
 
 
 class Language(StrEnum):
