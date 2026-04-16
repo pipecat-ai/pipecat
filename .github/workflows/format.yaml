@@ -41,3 +41,7 @@ jobs:
       - name: Ruff linter (all rules)
         id: ruff-check
         run: uv run ruff check
+
+      - name: Type check (pyright)
+        id: pyright
+        run: uv run pyright
