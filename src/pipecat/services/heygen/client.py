@@ -253,7 +253,7 @@ class HeyGenClient:
         await self._ws_connect()
         await self._livekit_connect()
         try:
-            await asyncio.wait_for(self._ws_ready.wait(), timeout=30.0)
+            await asyncio.wait_for(self._ws_ready.wait(), timeout=10.0)
         except asyncio.TimeoutError:
             logger.error("HeyGenClient: Timed out waiting for WebSocket connected state")
             raise Exception("HeyGenClient failed to start: WebSocket did not reach connected state")
