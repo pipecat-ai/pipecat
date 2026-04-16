@@ -50,6 +50,15 @@ _INTERNAL_TYPES = (PipelineSource, BasePipeline)
 
 
 @dataclass
+class _StartFrameInfo:
+    """Captured once when the first StartFrame arrives at a processor."""
+
+    frame_id: int
+    arrival_ns: int
+    wall_clock: float
+
+
+@dataclass
 class _ArrivalInfo:
     """Internal record of when a StartFrame arrived at a processor."""
 
@@ -175,8 +184,8 @@ class StartupTimingObserver(BaseObserver):
         # Collected timings in pipeline order.
         self._timings: list[ProcessorStartupTiming] = []
 
-        # Lock onto the first StartFrame we see (by frame ID).
-        self._start_frame_id: str | None = None
+        # Captured once when the first StartFrame arrives.
+        self._start_frame: _StartFrameInfo | None = None
 
         # Whether we've already emitted the startup timing report.
         self._startup_timing_reported = False
@@ -184,14 +193,8 @@ class StartupTimingObserver(BaseObserver):
         # Whether we've already measured transport timing.
         self._transport_timing_reported = False
 
-        # Timestamp (ns) when we first see a StartFrame arrive at a processor.
-        self._start_frame_arrival_ns: int | None = None
-
         # Bot connected timing (stored for inclusion in the transport report).
         self._bot_connected_secs: float | None = None
-
-        # Wall clock time when the StartFrame was first seen.
-        self._start_wall_clock: float | None = None
 
         self._register_event_handler("on_startup_timing_report")
         self._register_event_handler("on_transport_timing_report")
@@ -233,11 +236,13 @@ class StartupTimingObserver(BaseObserver):
             return
 
         # Lock onto the first StartFrame.
-        if self._start_frame_id is None:
-            self._start_frame_id = data.frame.id
-            self._start_frame_arrival_ns = data.timestamp
-            self._start_wall_clock = time.time()
-        elif data.frame.id != self._start_frame_id:
+        if self._start_frame is None:
+            self._start_frame = _StartFrameInfo(
+                frame_id=data.frame.id,
+                arrival_ns=data.timestamp,
+                wall_clock=time.time(),
+            )
+        elif data.frame.id != self._start_frame.frame_id:
             return
 
         if self._should_track(data.processor):
@@ -268,16 +273,16 @@ class StartupTimingObserver(BaseObserver):
         if not isinstance(data.frame, StartFrame):
             return
 
-        if self._start_frame_id is not None and data.frame.id != self._start_frame_id:
+        if self._start_frame is not None and data.frame.id != self._start_frame.frame_id:
             return
 
         arrival = self._arrivals.pop(data.source.id, None)
-        if arrival is None:
+        if arrival is None or self._start_frame is None:
             return
 
         duration_ns = data.timestamp - arrival.arrival_ts_ns
         duration_secs = duration_ns / 1e9
-        start_offset_secs = (arrival.arrival_ts_ns - self._start_frame_arrival_ns) / 1e9
+        start_offset_secs = (arrival.arrival_ts_ns - self._start_frame.arrival_ns) / 1e9
 
         self._timings.append(
             ProcessorStartupTiming(
@@ -289,22 +294,22 @@ class StartupTimingObserver(BaseObserver):
 
     def _handle_bot_connected(self, data: FramePushed):
         """Record bot connected timing on first BotConnectedFrame."""
-        if self._bot_connected_secs is not None or self._start_frame_arrival_ns is None:
+        if self._bot_connected_secs is not None or self._start_frame is None:
             return
 
-        delta_ns = data.timestamp - self._start_frame_arrival_ns
+        delta_ns = data.timestamp - self._start_frame.arrival_ns
         self._bot_connected_secs = delta_ns / 1e9
 
     async def _handle_client_connected(self, data: FramePushed):
         """Emit transport timing report on first ClientConnectedFrame."""
-        if self._transport_timing_reported or self._start_frame_arrival_ns is None:
+        if self._transport_timing_reported or self._start_frame is None:
             return
 
         self._transport_timing_reported = True
-        delta_ns = data.timestamp - self._start_frame_arrival_ns
+        delta_ns = data.timestamp - self._start_frame.arrival_ns
         client_connected_secs = delta_ns / 1e9
         report = TransportTimingReport(
-            start_time=self._start_wall_clock or 0.0,
+            start_time=self._start_frame.wall_clock,
             bot_connected_secs=self._bot_connected_secs,
             client_connected_secs=client_connected_secs,
         )
@@ -319,7 +324,7 @@ class StartupTimingObserver(BaseObserver):
         total = sum(t.duration_secs for t in self._timings)
 
         report = StartupTimingReport(
-            start_time=self._start_wall_clock or 0.0,
+            start_time=self._start_frame.wall_clock if self._start_frame else 0.0,
             total_duration_secs=total,
             processor_timings=self._timings,
         )

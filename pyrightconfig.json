@@ -6,7 +6,8 @@
     "src/pipecat/clocks",
     "src/pipecat/metrics",
     "src/pipecat/transcriptions",
-    "src/pipecat/frames"
+    "src/pipecat/frames",
+    "src/pipecat/observers"
   ],
   "exclude": [
     "**/*_pb2.py",
