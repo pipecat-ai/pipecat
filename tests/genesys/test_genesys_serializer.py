@@ -10,7 +10,13 @@ import json
 
 import pytest
 
-from pipecat.frames.frames import InputDTMFFrame, OutputTransportMessageUrgentFrame
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    InputDTMFFrame,
+    OutputAudioRawFrame,
+    OutputTransportMessageUrgentFrame,
+)
 from pipecat.serializers.genesys import AudioHookChannel, GenesysAudioHookSerializer
 
 
@@ -121,27 +127,43 @@ class TestGenesysAudioHookSerializer:
         """Test creating a disconnect message."""
         serializer = GenesysAudioHookSerializer()
 
-        msg = serializer.create_disconnect_message(
-            reason="completed",
-            action="transfer",
-        )
+        msg = serializer.create_disconnect_message(reason="completed")
 
         assert msg["type"] == "disconnect"
         assert msg["parameters"]["reason"] == "completed"
-        assert msg["parameters"]["outputVariables"]["action"] == "transfer"
+        assert "outputVariables" not in msg["parameters"]
 
-    def test_create_disconnect_message_with_output_variables(self):
-        """Test creating a disconnect message with custom output variables."""
+    def test_create_disconnect_message_with_custom_reason(self):
+        """Test creating a disconnect message with a custom reason."""
         serializer = GenesysAudioHookSerializer()
 
-        msg = serializer.create_disconnect_message(
-            reason="completed",
-            action="finished",
-            output_variables={"result": "success", "code": "123"},
-        )
+        msg = serializer.create_disconnect_message(reason="error")
 
-        assert msg["parameters"]["outputVariables"]["result"] == "success"
-        assert msg["parameters"]["outputVariables"]["code"] == "123"
+        assert msg["parameters"]["reason"] == "error"
+        assert "outputVariables" not in msg["parameters"]
+
+    def test_create_disconnect_frame(self):
+        """Test creating an urgent disconnect transport frame."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._is_open = True
+
+        frame = serializer.create_disconnect_frame(reason="completed")
+
+        assert frame is not None
+        assert isinstance(frame, OutputTransportMessageUrgentFrame)
+        assert frame.message["type"] == "disconnect"
+        assert serializer.is_waiting_for_close is True
+
+    def test_create_disconnect_frame_only_once_while_waiting(self):
+        """Test that disconnect frame is emitted once while waiting for close."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._is_open = True
+
+        first_frame = serializer.create_disconnect_frame()
+        second_frame = serializer.create_disconnect_frame()
+
+        assert first_frame is not None
+        assert second_frame is None
 
     def test_create_error_message(self):
         """Test creating an error message."""
@@ -256,6 +278,21 @@ class TestGenesysAudioHookSerializer:
         assert result.message["parameters"]["outputVariables"]["intent"] == "support"
         assert result.message["parameters"]["outputVariables"]["resolved"] is True
         assert result.message["parameters"]["outputVariables"]["transfer_to"] == "agent_queue"
+
+    @pytest.mark.asyncio
+    async def test_handle_close_message_clears_waiting_for_close(self, sample_close_message):
+        """Test that close handling clears disconnect waiting state."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._is_open = True
+        serializer.create_disconnect_frame()
+
+        assert serializer.is_waiting_for_close is True
+
+        result = await serializer.deserialize(json.dumps(sample_close_message))
+
+        assert isinstance(result, OutputTransportMessageUrgentFrame)
+        assert result.message["type"] == "closed"
+        assert serializer.is_waiting_for_close is False
 
     # ==================== Output Variables Tests ====================
 
@@ -374,3 +411,49 @@ class TestGenesysAudioHookSerializer:
         assert response1["seq"] == 1
         assert response2["seq"] == 2
         assert response3["seq"] == 3
+
+    @pytest.mark.asyncio
+    async def test_serialize_endframe_disconnect_only_once(self):
+        """Test EndFrame/CancelFrame emits one disconnect while waiting for close."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._is_open = True
+
+        first_payload = await serializer.serialize(EndFrame())
+        second_payload = await serializer.serialize(CancelFrame())
+
+        assert first_payload is not None
+        first_message = json.loads(first_payload)
+        assert first_message["type"] == "disconnect"
+        assert serializer.is_waiting_for_close is True
+        assert second_payload is None
+
+    @pytest.mark.asyncio
+    async def test_serialize_endframe_disconnect_does_not_include_output_variables(self):
+        """Test automatic disconnect keeps output variables for closed response only."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._is_open = True
+        serializer.set_output_variables({"intent": "billing", "resolved": True})
+
+        payload = await serializer.serialize(EndFrame())
+
+        assert payload is not None
+        message = json.loads(payload)
+        assert message["type"] == "disconnect"
+        assert "outputVariables" not in message["parameters"]
+
+    @pytest.mark.asyncio
+    async def test_serialize_audio_returns_none_while_waiting_for_close(self):
+        """Test audio is blocked while waiting for close after disconnect."""
+        serializer = GenesysAudioHookSerializer()
+        serializer._is_open = True
+        serializer._waiting_for_close = True
+
+        payload = await serializer.serialize(
+            OutputAudioRawFrame(
+                audio=b"\x00\x00" * 160,
+                sample_rate=16000,
+                num_channels=1,
+            )
+        )
+
+        assert payload is None
