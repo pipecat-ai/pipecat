@@ -12,7 +12,6 @@ and context aggregation functionality.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 from loguru import logger
 
@@ -48,8 +47,8 @@ class GrokLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.x.ai/v1",
-        model: Optional[str] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the GrokLLMService with API key and model.

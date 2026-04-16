@@ -10,8 +10,8 @@ import asyncio
 import time
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, Optional
+from enum import StrEnum
+from typing import Any
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -32,7 +32,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 
-class FluxMessageType(str, Enum):
+class FluxMessageType(StrEnum):
     """Deepgram Flux WebSocket message types.
 
     These are the top-level message types that can be received from the
@@ -46,7 +46,7 @@ class FluxMessageType(str, Enum):
     CONFIGURE_FAILURE = "ConfigureFailure"
 
 
-class FluxEventType(str, Enum):
+class FluxEventType(StrEnum):
     """Deepgram Flux TurnInfo event types.
 
     These events are contained within TurnInfo messages and indicate
@@ -99,8 +99,8 @@ class DeepgramFluxSTTBase(STTService):
         self,
         *,
         encoding: str = "linear16",
-        mip_opt_out: Optional[bool] = None,
-        tag: Optional[list] = None,
+        mip_opt_out: bool | None = None,
+        tag: list | None = None,
         should_interrupt: bool = True,
         settings: Settings,
         **kwargs,
@@ -128,8 +128,8 @@ class DeepgramFluxSTTBase(STTService):
         self._connection_established_event = asyncio.Event()
 
         # Watchdog state — see _watchdog_task_handler for details
-        self._last_stt_time: Optional[float] = None
-        self._watchdog_task: Optional[asyncio.Task] = None
+        self._last_stt_time: float | None = None
+        self._watchdog_task: asyncio.Task | None = None
         self._user_is_speaking = False
 
         # Flux event handlers
@@ -340,7 +340,7 @@ class DeepgramFluxSTTBase(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass
@@ -349,7 +349,7 @@ class DeepgramFluxSTTBase(STTService):
     # Message handling
     # ------------------------------------------------------------------
 
-    def _validate_message(self, data: Dict[str, Any]) -> bool:
+    def _validate_message(self, data: dict[str, Any]) -> bool:
         """Validate basic message structure from Deepgram Flux.
 
         Ensures the received message has the expected structure before processing.
@@ -370,7 +370,7 @@ class DeepgramFluxSTTBase(STTService):
 
         return True
 
-    async def _handle_message(self, data: Dict[str, Any]):
+    async def _handle_message(self, data: dict[str, Any]):
         """Handle a parsed message from Deepgram Flux.
 
         Routes messages to appropriate handlers based on their type. Validates
@@ -416,7 +416,7 @@ class DeepgramFluxSTTBase(STTService):
         # Notify connection is established
         self._connection_established_event.set()
 
-    async def _handle_fatal_error(self, data: Dict[str, Any]):
+    async def _handle_fatal_error(self, data: dict[str, Any]):
         """Handle fatal error messages from Deepgram Flux.
 
         Fatal errors indicate unrecoverable issues with the connection or
@@ -435,7 +435,7 @@ class DeepgramFluxSTTBase(STTService):
         # Error will be handled by the transport's receive loop error handler
         raise Exception(deepgram_error)
 
-    async def _handle_turn_info(self, data: Dict[str, Any]):
+    async def _handle_turn_info(self, data: dict[str, Any]):
         """Handle TurnInfo events from Deepgram Flux.
 
         TurnInfo messages contain various turn-based events that indicate
@@ -504,7 +504,7 @@ class DeepgramFluxSTTBase(STTService):
         logger.trace(f"Received event TurnResumed: {event}")
         await self._call_event_handler("on_turn_resumed")
 
-    def _calculate_average_confidence(self, transcript_data) -> Optional[float]:
+    def _calculate_average_confidence(self, transcript_data) -> float | None:
         """Calculate the average confidence from transcript data.
 
         Return None if the data is missing or invalid.
@@ -520,7 +520,7 @@ class DeepgramFluxSTTBase(STTService):
             return None
         return sum(confidences) / len(confidences)
 
-    async def _handle_end_of_turn(self, transcript: str, data: Dict[str, Any]):
+    async def _handle_end_of_turn(self, transcript: str, data: dict[str, Any]):
         """Handle EndOfTurn events from Deepgram Flux.
 
         EndOfTurn events are fired when Deepgram Flux determines that a speaking
@@ -567,7 +567,7 @@ class DeepgramFluxSTTBase(STTService):
         await self.broadcast_frame(UserStoppedSpeakingFrame)
         await self._call_event_handler("on_end_of_turn", transcript)
 
-    async def _handle_eager_end_of_turn(self, transcript: str, data: Dict[str, Any]):
+    async def _handle_eager_end_of_turn(self, transcript: str, data: dict[str, Any]):
         """Handle EagerEndOfTurn events from Deepgram Flux.
 
         EagerEndOfTurn events are fired when the end-of-turn confidence reaches the

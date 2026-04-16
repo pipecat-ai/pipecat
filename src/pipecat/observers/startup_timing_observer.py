@@ -36,7 +36,6 @@ Example::
 
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Type
 
 from pydantic import BaseModel, Field
 
@@ -84,7 +83,7 @@ class StartupTimingReport(BaseModel):
 
     start_time: float
     total_duration_secs: float
-    processor_timings: List[ProcessorStartupTiming] = Field(default_factory=list)
+    processor_timings: list[ProcessorStartupTiming] = Field(default_factory=list)
 
 
 class TransportTimingReport(BaseModel):
@@ -98,8 +97,8 @@ class TransportTimingReport(BaseModel):
     """
 
     start_time: float
-    bot_connected_secs: Optional[float] = None
-    client_connected_secs: Optional[float] = None
+    bot_connected_secs: float | None = None
+    client_connected_secs: float | None = None
 
 
 class StartupTimingObserver(BaseObserver):
@@ -157,7 +156,7 @@ class StartupTimingObserver(BaseObserver):
     def __init__(
         self,
         *,
-        processor_types: Optional[Tuple[Type[FrameProcessor], ...]] = None,
+        processor_types: tuple[type[FrameProcessor], ...] | None = None,
         **kwargs,
     ):
         """Initialize the startup timing observer.
@@ -171,13 +170,13 @@ class StartupTimingObserver(BaseObserver):
         self._processor_types = processor_types
 
         # Map processor ID -> arrival info.
-        self._arrivals: Dict[int, _ArrivalInfo] = {}
+        self._arrivals: dict[int, _ArrivalInfo] = {}
 
         # Collected timings in pipeline order.
-        self._timings: List[ProcessorStartupTiming] = []
+        self._timings: list[ProcessorStartupTiming] = []
 
         # Lock onto the first StartFrame we see (by frame ID).
-        self._start_frame_id: Optional[str] = None
+        self._start_frame_id: str | None = None
 
         # Whether we've already emitted the startup timing report.
         self._startup_timing_reported = False
@@ -186,13 +185,13 @@ class StartupTimingObserver(BaseObserver):
         self._transport_timing_reported = False
 
         # Timestamp (ns) when we first see a StartFrame arrive at a processor.
-        self._start_frame_arrival_ns: Optional[int] = None
+        self._start_frame_arrival_ns: int | None = None
 
         # Bot connected timing (stored for inclusion in the transport report).
-        self._bot_connected_secs: Optional[float] = None
+        self._bot_connected_secs: float | None = None
 
         # Wall clock time when the StartFrame was first seen.
-        self._start_wall_clock: Optional[float] = None
+        self._start_wall_clock: float | None = None
 
         self._register_event_handler("on_startup_timing_report")
         self._register_event_handler("on_transport_timing_report")

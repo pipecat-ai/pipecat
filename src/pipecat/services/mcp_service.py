@@ -7,8 +7,9 @@
 """MCP (Model Context Protocol) client for integrating external tools with LLMs."""
 
 import json
+from collections.abc import Callable
 from contextlib import AsyncExitStack
-from typing import Any, Callable, Dict, List, Optional, TypeAlias
+from typing import Any, TypeAlias
 
 from loguru import logger
 
@@ -53,8 +54,8 @@ class MCPClient(BaseObject):
     def __init__(
         self,
         server_params: ServerParameters,
-        tools_filter: Optional[List[str]] = None,
-        tools_output_filters: Optional[Dict[str, Callable[[Any], Any]]] = None,
+        tools_filter: list[str] | None = None,
+        tools_output_filters: dict[str, Callable[[Any], Any]] | None = None,
         **kwargs,
     ):
         """Initialize the MCP client with server parameters.
@@ -70,8 +71,8 @@ class MCPClient(BaseObject):
         self._server_params = server_params
         self._tools_filter = tools_filter
         self._tools_output_filters = tools_output_filters or {}
-        self._exit_stack: Optional[AsyncExitStack] = None
-        self._active_session: Optional[ClientSession] = None
+        self._exit_stack: AsyncExitStack | None = None
+        self._active_session: ClientSession | None = None
 
         if not isinstance(
             server_params,
@@ -195,7 +196,7 @@ class MCPClient(BaseObject):
             llm.register_function(function_schema.name, self._tool_wrapper)
 
     def _convert_mcp_schema_to_pipecat(
-        self, tool_name: str, tool_schema: Dict[str, Any]
+        self, tool_name: str, tool_schema: dict[str, Any]
     ) -> FunctionSchema:
         """Convert an mcp tool schema to Pipecat's FunctionSchema format.
 
@@ -276,7 +277,7 @@ class MCPClient(BaseObject):
 
     async def _list_tools_helper(self, session):
         available_tools = await session.list_tools()
-        tool_schemas: List[FunctionSchema] = []
+        tool_schemas: list[FunctionSchema] = []
 
         logger.debug(f"Found {len(available_tools.tools)} available tools")
 

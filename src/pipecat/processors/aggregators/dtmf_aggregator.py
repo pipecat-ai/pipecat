@@ -12,7 +12,6 @@ for downstream processing by LLM context aggregators.
 """
 
 import asyncio
-from typing import Optional
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
@@ -62,7 +61,7 @@ class DTMFAggregator(FrameProcessor):
         self._prefix = prefix
 
         self._digit_event = asyncio.Event()
-        self._aggregation_task: Optional[asyncio.Task] = None
+        self._aggregation_task: asyncio.Task | None = None
 
     async def cleanup(self) -> None:
         """Clean up resources."""
@@ -130,7 +129,7 @@ class DTMFAggregator(FrameProcessor):
             try:
                 await asyncio.wait_for(self._digit_event.wait(), timeout=self._idle_timeout)
                 self._digit_event.clear()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if self._aggregation:
                     await self._flush_aggregation()
 

@@ -12,7 +12,6 @@ avatar functionality through Tavus's streaming API.
 
 import asyncio
 from dataclasses import dataclass
-from typing import Optional
 
 import aiohttp
 from daily.daily import AudioData, VideoFrame
@@ -69,7 +68,7 @@ class TavusVideoService(AIService):
         replica_id: str,
         persona_id: str = "pipecat-stream",
         session: aiohttp.ClientSession,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ) -> None:
         """Initialize the Tavus video service.
@@ -94,15 +93,15 @@ class TavusVideoService(AIService):
         self._persona_id = persona_id
 
         self._other_participant_has_joined = False
-        self._client: Optional[TavusTransportClient] = None
+        self._client: TavusTransportClient | None = None
 
         self._conversation_id: str
         self._resampler = create_stream_resampler()
 
         self._audio_buffer = bytearray()
-        self._send_task: Optional[asyncio.Task] = None
+        self._send_task: asyncio.Task | None = None
         # This is the custom track destination expected by Tavus
-        self._transport_destination: Optional[str] = "stream"
+        self._transport_destination: str | None = "stream"
         self._transport_ready = False
 
     async def setup(self, setup: FrameProcessorSetup):

@@ -8,7 +8,6 @@
 
 import base64
 import json
-from typing import Optional
 
 from loguru import logger
 
@@ -48,10 +47,10 @@ class ExotelFrameSerializer(FrameSerializer):
         """
 
         exotel_sample_rate: int = 8000
-        sample_rate: Optional[int] = None
+        sample_rate: int | None = None
 
     def __init__(
-        self, stream_sid: str, call_sid: Optional[str] = None, params: Optional[InputParams] = None
+        self, stream_sid: str, call_sid: str | None = None, params: InputParams | None = None
     ):
         """Initialize the ExotelFrameSerializer.
 

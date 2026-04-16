@@ -10,19 +10,11 @@ import asyncio
 import uuid
 import warnings
 from abc import abstractmethod
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import (
     Any,
-    AsyncGenerator,
-    AsyncIterator,
-    Awaitable,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
 )
 
 from loguru import logger
@@ -77,10 +69,10 @@ class TTSContext:
     """
 
     append_to_context: bool = True
-    push_assistant_aggregation: Optional[bool] = False
+    push_assistant_aggregation: bool | None = False
 
 
-class TextAggregationMode(str, Enum):
+class TextAggregationMode(StrEnum):
     """Controls how incoming text is aggregated before TTS synthesis.
 
     Parameters:
@@ -145,8 +137,8 @@ class TTSService(AIService):
     def __init__(
         self,
         *,
-        text_aggregation_mode: Optional[TextAggregationMode] = None,
-        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
+        aggregate_sentences: bool | None = None,
         # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
         # otherwise subclass must do it
         push_text_frames: bool = True,
@@ -166,22 +158,21 @@ class TTSService(AIService):
         # (helps prevent some TTS services from vocalizing trailing punctuation)
         append_trailing_space: bool = False,
         # TTS output sample rate
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         # Types of text aggregations that should not be spoken.
-        skip_aggregator_types: Optional[List[str]] = [],
+        skip_aggregator_types: list[str] | None = [],
         # A list of callables to transform text before just before sending it to TTS.
         # Each callable takes the aggregated text and its type, and returns the transformed text.
         # To register, provide a list of tuples of (aggregation_type | '*', transform_function).
-        text_transforms: Optional[
-            List[
-                Tuple[AggregationType | str, Callable[[str, str | AggregationType], Awaitable[str]]]
-            ]
-        ] = None,
+        text_transforms: list[
+            tuple[AggregationType | str, Callable[[str, str | AggregationType], Awaitable[str]]]
+        ]
+        | None = None,
         # Text filter executed after text has been aggregated.
-        text_filters: Optional[Sequence[BaseTextFilter]] = None,
+        text_filters: Sequence[BaseTextFilter] | None = None,
         # Audio transport destination of the generated frames.
-        transport_destination: Optional[str] = None,
-        settings: Optional[TTSSettings] = None,
+        transport_destination: str | None = None,
+        settings: TTSSettings | None = None,
         # if True, the context ID is reused within an LLM turn
         reuse_context_id_within_turn: bool = True,
         **kwargs,
@@ -288,24 +279,24 @@ class TTSService(AIService):
         self._sample_rate = 0
         self._text_aggregator = SimpleTextAggregator(aggregation_type=self._text_aggregation_mode)
 
-        self._skip_aggregator_types: List[str] = skip_aggregator_types or []
-        self._text_transforms: List[
-            Tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
+        self._skip_aggregator_types: list[str] = skip_aggregator_types or []
+        self._text_transforms: list[
+            tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
         ] = text_transforms or []
         # TODO: Deprecate _text_filters when added to LLMTextProcessor
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
-        self._transport_destination: Optional[str] = transport_destination
+        self._transport_destination: str | None = transport_destination
 
         self._resampler = create_stream_resampler()
 
         self._processing_text: bool = False
-        self._tts_contexts: Dict[str, TTSContext] = {}
+        self._tts_contexts: dict[str, TTSContext] = {}
         self._streamed_text: str = ""
         self._text_aggregation_metrics_started: bool = False
 
         # Word timestamp state
         self._initial_word_timestamp: int = -1
-        self._initial_word_times: List[Tuple[str, float, Optional[str]]] = []
+        self._initial_word_times: list[tuple[str, float, str | None]] = []
         # PTS of the last word frame pushed via _add_word_timestamps, used to assign
         # correct PTS to TTSStoppedFrame and LLMFullResponseEndFrame.
         self._word_last_pts: int = 0
@@ -327,10 +318,10 @@ class TTSService(AIService):
         # they clear at different times: _turn_context_id is cleared when the LLM turn
         # ends (synthesis done) while _playing_context_id remains set until the audio
         # finishes playing. Merging them would null out the playback cursor prematurely.
-        self._playing_context_id: Optional[str] = None
-        self._turn_context_id: Optional[str] = None
-        self._audio_contexts: Dict[str, asyncio.Queue] = {}
-        self._audio_context_task: Optional[asyncio.Task] = None
+        self._playing_context_id: str | None = None
+        self._turn_context_id: str | None = None
+        self._audio_contexts: dict[str, asyncio.Queue] = {}
+        self._audio_context_task: asyncio.Task | None = None
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -467,7 +458,7 @@ class TTSService(AIService):
         """
         pass
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a language to the service-specific language format.
 
         Args:
@@ -491,7 +482,7 @@ class TTSService(AIService):
             return text + " "
         return text
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any buffered audio data.
 
         Args:
@@ -793,8 +784,8 @@ class TTSService(AIService):
         iterator: AsyncIterator[bytes],
         *,
         strip_wav_header: bool = False,
-        in_sample_rate: Optional[int] = None,
-        context_id: Optional[str] = None,
+        in_sample_rate: int | None = None,
+        context_id: str | None = None,
     ) -> AsyncGenerator[Frame, None]:
         """Stream audio frames from an async byte iterator with optional resampling.
 
@@ -896,9 +887,9 @@ class TTSService(AIService):
     async def _push_tts_frames(
         self,
         src_frame: AggregatedTextFrame,
-        includes_inter_frame_spaces: Optional[bool] = False,
-        append_tts_text_to_context: Optional[bool] = True,
-        push_assistant_aggregation: Optional[bool] = False,
+        includes_inter_frame_spaces: bool | None = False,
+        append_tts_text_to_context: bool | None = True,
+        push_assistant_aggregation: bool | None = False,
     ):
         type = src_frame.aggregated_by
         text = src_frame.text
@@ -1069,7 +1060,7 @@ class TTSService(AIService):
         self._initial_word_times = []
 
     async def add_word_timestamps(
-        self, word_times: List[Tuple[str, float]], context_id: Optional[str] = None
+        self, word_times: list[tuple[str, float]], context_id: str | None = None
     ):
         """Add word timestamps for processing.
 
@@ -1096,7 +1087,7 @@ class TTSService(AIService):
             await self._add_word_timestamps(word_times=word_times, context_id=context_id)
 
     async def _add_word_timestamps(
-        self, word_times: List[Tuple[str, float]], context_id: Optional[str] = None
+        self, word_times: list[tuple[str, float]], context_id: str | None = None
     ):
         """Process word timestamps directly, building and pushing TTSTextFrames inline.
 
@@ -1194,11 +1185,11 @@ class TTSService(AIService):
             self._playing_context_id
         )
 
-    def get_audio_contexts(self) -> List[str]:
+    def get_audio_contexts(self) -> list[str]:
         """Get a list of all available audio contexts."""
         return list(self._audio_contexts.keys())
 
-    def get_active_audio_context_id(self) -> Optional[str]:
+    def get_active_audio_context_id(self) -> str | None:
         """Get the active audio context ID.
 
         Returns:
@@ -1242,7 +1233,7 @@ class TTSService(AIService):
             #           must be emitted in-order relative to surrounding audio contexts.
             #   None  – shutdown sentinel (sent by stop()).
             self._serialization_queue: asyncio.Queue = asyncio.Queue()
-            self._audio_contexts: Dict[str, asyncio.Queue] = {}
+            self._audio_contexts: dict[str, asyncio.Queue] = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
     async def _stop_audio_context_task(self):
@@ -1342,7 +1333,7 @@ class TTSService(AIService):
                         await self.push_error_frame(frame)
                     else:
                         await self.push_frame(frame)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
                 if should_push_stop_frame and self._push_stop_frames:

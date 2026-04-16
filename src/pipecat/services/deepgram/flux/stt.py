@@ -8,7 +8,7 @@
 
 import json
 import time
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 from loguru import logger
 from pydantic import BaseModel
@@ -90,27 +90,27 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             min_confidence: Optional. Minimum confidence required confidence to create a TranscriptionFrame
         """
 
-        eager_eot_threshold: Optional[float] = None
-        eot_threshold: Optional[float] = None
-        eot_timeout_ms: Optional[int] = None
+        eager_eot_threshold: float | None = None
+        eot_threshold: float | None = None
+        eot_timeout_ms: int | None = None
         keyterm: list = []
-        mip_opt_out: Optional[bool] = None
+        mip_opt_out: bool | None = None
         tag: list = []
-        min_confidence: Optional[float] = None  # New parameter
+        min_confidence: float | None = None  # New parameter
 
     def __init__(
         self,
         *,
         api_key: str,
         url: str = "wss://api.deepgram.com/v2/listen",
-        sample_rate: Optional[int] = None,
-        mip_opt_out: Optional[bool] = None,
-        model: Optional[str] = None,
+        sample_rate: int | None = None,
+        mip_opt_out: bool | None = None,
+        model: str | None = None,
         flux_encoding: str = "linear16",
-        tag: Optional[list] = None,
-        params: Optional[InputParams] = None,
+        tag: list | None = None,
+        params: InputParams | None = None,
         should_interrupt: bool = True,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Deepgram Flux STT service.

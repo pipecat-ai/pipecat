@@ -6,7 +6,6 @@
 
 import asyncio
 import unittest
-from typing import List
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 from pipecat.audio.vad.vad_controller import VADController
@@ -125,7 +124,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         analyzer = MockVADAnalyzer()
         controller = VADController(analyzer)
 
-        pushed_frames: List[tuple] = []
+        pushed_frames: list[tuple] = []
 
         @controller.event_handler("on_push_frame")
         async def on_push_frame(_controller, frame: Frame, direction: FrameDirection):
@@ -143,7 +142,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         analyzer = MockVADAnalyzer()
         controller = VADController(analyzer)
 
-        broadcast_calls: List[tuple] = []
+        broadcast_calls: list[tuple] = []
 
         @controller.event_handler("on_broadcast_frame")
         async def on_broadcast_frame(_controller, frame_cls, **kwargs):
@@ -192,7 +191,7 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         analyzer = MockVADAnalyzer()
         controller = VADController(analyzer)
 
-        broadcast_calls: List[tuple] = []
+        broadcast_calls: list[tuple] = []
 
         @controller.event_handler("on_broadcast_frame")
         async def on_broadcast_frame(_controller, frame_cls, **kwargs):

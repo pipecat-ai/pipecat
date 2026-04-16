@@ -7,7 +7,6 @@
 """Turn start strategy configuration."""
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.turns.user_start import (
@@ -23,7 +22,7 @@ from pipecat.turns.user_stop import (
 )
 
 
-def default_user_turn_start_strategies() -> List[BaseUserTurnStartStrategy]:
+def default_user_turn_start_strategies() -> list[BaseUserTurnStartStrategy]:
     """Return the default user turn start strategies.
 
     Returns ``[VADUserTurnStartStrategy, TranscriptionUserTurnStartStrategy]``.
@@ -39,7 +38,7 @@ def default_user_turn_start_strategies() -> List[BaseUserTurnStartStrategy]:
     return [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
 
 
-def default_user_turn_stop_strategies() -> List[BaseUserTurnStopStrategy]:
+def default_user_turn_stop_strategies() -> list[BaseUserTurnStopStrategy]:
     """Return the default user turn stop strategies.
 
     Returns ``[TurnAnalyzerUserTurnStopStrategy(LocalSmartTurnAnalyzerV3)]``.
@@ -65,8 +64,8 @@ class UserTurnStrategies:
 
     """
 
-    start: Optional[List[BaseUserTurnStartStrategy]] = None
-    stop: Optional[List[BaseUserTurnStopStrategy]] = None
+    start: list[BaseUserTurnStartStrategy] | None = None
+    stop: list[BaseUserTurnStopStrategy] | None = None
 
     def __post_init__(self):
         if not self.start:

@@ -12,8 +12,8 @@ generating speech from text input using HTTP streaming with Server-Sent Events.
 
 import base64
 import struct
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -63,9 +63,9 @@ class MistralTTSService(TTSService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        settings: Optional[Settings] = None,
+        api_key: str | None = None,
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize Mistral TTS service.

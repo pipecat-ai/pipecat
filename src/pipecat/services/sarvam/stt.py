@@ -12,8 +12,9 @@ can handle multiple audio formats for Indian language speech recognition.
 """
 
 import base64
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, Literal, Optional
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import BaseModel
@@ -99,13 +100,13 @@ class ModelConfig:
     supports_prompt: bool
     supports_mode: bool
     supports_language: bool
-    default_language: Optional[str]
-    default_mode: Optional[str]
+    default_language: str | None
+    default_mode: str | None
     use_translate_endpoint: bool
     use_translate_method: bool
 
 
-MODEL_CONFIGS: Dict[str, ModelConfig] = {
+MODEL_CONFIGS: dict[str, ModelConfig] = {
     "saarika:v2.5": ModelConfig(
         supports_prompt=False,
         supports_mode=False,
@@ -192,26 +193,24 @@ class SarvamSTTService(STTService):
             high_vad_sensitivity: Enable high VAD (Voice Activity Detection) sensitivity. Defaults to None.
         """
 
-        language: Optional[Language] = None
-        prompt: Optional[str] = None
-        mode: Optional[Literal["transcribe", "translate", "verbatim", "translit", "codemix"]] = None
-        vad_signals: Optional[bool] = None
-        high_vad_sensitivity: Optional[bool] = None
+        language: Language | None = None
+        prompt: str | None = None
+        mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | None = None
+        vad_signals: bool | None = None
+        high_vad_sensitivity: bool | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: Optional[str] = None,
-        mode: Optional[
-            Literal["transcribe", "translate", "verbatim", "translit", "codemix"]
-        ] = None,
-        sample_rate: Optional[int] = None,
+        model: str | None = None,
+        mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | None = None,
+        sample_rate: int | None = None,
         input_audio_codec: str = "wav",
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = SARVAM_TTFS_P99,
-        keepalive_timeout: Optional[float] = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = SARVAM_TTFS_P99,
+        keepalive_timeout: float | None = None,
         keepalive_interval: float = 5.0,
         **kwargs,
     ):
@@ -339,7 +338,7 @@ class SarvamSTTService(STTService):
         """
         return language_to_sarvam_language(language)
 
-    def _get_language_string(self) -> Optional[str]:
+    def _get_language_string(self) -> str | None:
         """Resolve the current language setting to a Sarvam language code string."""
         if self._settings.language:
             return language_to_sarvam_language(self._settings.language)
@@ -408,7 +407,7 @@ class SarvamSTTService(STTService):
 
         return changed
 
-    async def set_prompt(self, prompt: Optional[str]):
+    async def set_prompt(self, prompt: str | None):
         """Set the transcription/translation prompt and reconnect.
 
         .. deprecated:: 0.0.104
@@ -731,7 +730,7 @@ class SarvamSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing.
 

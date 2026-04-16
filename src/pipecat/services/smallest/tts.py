@@ -12,9 +12,10 @@ Waves API for real-time text-to-speech synthesis.
 
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, AsyncGenerator, Optional
+from enum import StrEnum
+from typing import Any
 
 from loguru import logger
 
@@ -42,14 +43,14 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class SmallestTTSModel(str, Enum):
+class SmallestTTSModel(StrEnum):
     """Available Smallest AI TTS models."""
 
     LIGHTNING_V2 = "lightning-v2"
     LIGHTNING_V3_1 = "lightning-v3.1"
 
 
-def language_to_smallest_tts_language(language: Language) -> Optional[str]:
+def language_to_smallest_tts_language(language: Language) -> str | None:
     """Convert a Language enum to a Smallest TTS language string.
 
     Args:
@@ -171,7 +172,7 @@ class SmallestTTSService(InterruptibleTTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Smallest service language format.
 
         Args:

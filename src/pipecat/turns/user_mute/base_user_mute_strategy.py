@@ -6,8 +6,6 @@
 
 """Base strategy for deciding whether user frames should be muted."""
 
-from typing import Optional
-
 from pipecat.frames.frames import Frame
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
@@ -32,7 +30,7 @@ class BaseUserMuteStrategy(BaseObject):
     def __init__(self, **kwargs):
         """Initialize the base user mute strategy."""
         super().__init__(**kwargs)
-        self._task_manager: Optional[BaseTaskManager] = None
+        self._task_manager: BaseTaskManager | None = None
 
     @property
     def task_manager(self) -> BaseTaskManager:

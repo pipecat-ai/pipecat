@@ -9,7 +9,7 @@
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 import websockets
 from loguru import logger
@@ -42,7 +42,7 @@ class WebsocketService(ABC):
             reconnect_on_error: Whether to automatically reconnect on connection errors.
             **kwargs: Additional arguments (unused, for compatibility).
         """
-        self._websocket: Optional[websockets.WebSocketClientProtocol] = None
+        self._websocket: websockets.WebSocketClientProtocol | None = None
         self._reconnect_on_error = reconnect_on_error
         self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False
@@ -81,7 +81,7 @@ class WebsocketService(ABC):
     async def _try_reconnect(
         self,
         max_retries: int = 3,
-        report_error: Optional[Callable[[ErrorFrame], Awaitable[None]]] = None,
+        report_error: Callable[[ErrorFrame], Awaitable[None]] | None = None,
     ) -> bool:
         # Prevent concurrent reconnection attempts
         if self._reconnect_in_progress:
@@ -89,7 +89,7 @@ class WebsocketService(ABC):
             return False
 
         self._reconnect_in_progress = True
-        last_exception: Optional[Exception] = None
+        last_exception: Exception | None = None
         try:
             for attempt in range(1, max_retries + 1):
                 try:
@@ -136,7 +136,7 @@ class WebsocketService(ABC):
         self,
         error_message: str,
         report_error: Callable[[ErrorFrame], Awaitable[None]],
-        error: Optional[Exception] = None,
+        error: Exception | None = None,
     ) -> bool:
         """Check if reconnection should be attempted and try if appropriate.
 

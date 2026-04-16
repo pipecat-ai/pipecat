@@ -9,7 +9,7 @@
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 from loguru import logger
 from openai import NotGiven
@@ -34,9 +34,9 @@ except ModuleNotFoundError as e:
 class GeminiLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Gemini LLM."""
 
-    system_instruction: Optional[str]
-    messages: List[Content]
-    tools: List[Any] | NotGiven
+    system_instruction: str | None
+    messages: list[Content]
+    tools: list[Any] | NotGiven
 
 
 class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
@@ -54,7 +54,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         return "google"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, *, system_instruction: Optional[str] = None
+        self, context: LLMContext, *, system_instruction: str | None = None
     ) -> GeminiLLMInvocationParams:
         """Get Gemini-specific LLM invocation parameters from a universal LLM context.
 
@@ -81,7 +81,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             "tools": self.from_standard_tools(context.tools),
         }
 
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Dict[str, Any]]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
         """Convert tool schemas to Gemini's function-calling format.
 
         Args:
@@ -92,7 +92,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             Includes both converted standard tools and any custom Gemini-specific tools.
         """
 
-        def _strip_additional_properties(schema: Dict[str, Any]) -> Dict[str, Any]:
+        def _strip_additional_properties(schema: dict[str, Any]) -> dict[str, Any]:
             """Recursively remove "additionalProperties" fields from JSON schema, as they're not supported by Gemini.
 
             Args:
@@ -139,7 +139,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         return formatted_standard_tools + custom_gemini_tools
 
-    def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
+    def get_messages_for_logging(self, context: LLMContext) -> list[dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about Gemini.
 
         Removes or truncates sensitive data like image content for safe logging.
@@ -173,8 +173,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     class ConvertedMessages:
         """Container for Google-formatted messages converted from universal context."""
 
-        messages: List[Content]
-        system_instruction: Optional[str] = None
+        messages: list[Content]
+        system_instruction: str | None = None
 
     @dataclass
     class MessageConversionResult:
@@ -184,20 +184,20 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         for any tool calls discovered in the message.
         """
 
-        content: Optional[Content] = None
-        tool_call_id_to_name_mapping: Dict[str, str] = field(default_factory=dict)
+        content: Content | None = None
+        tool_call_id_to_name_mapping: dict[str, str] = field(default_factory=dict)
 
     @dataclass
     class MessageConversionParams:
         """Parameters for converting a single universal context message to Google format."""
 
-        tool_call_id_to_name_mapping: Dict[str, str]
+        tool_call_id_to_name_mapping: dict[str, str]
 
     def _from_universal_context_messages(
         self,
-        universal_context_messages: List[LLMContextMessage],
+        universal_context_messages: list[LLMContextMessage],
         *,
-        system_instruction: Optional[str] = None,
+        system_instruction: str | None = None,
     ) -> ConvertedMessages:
         """Restructures messages to ensure proper Google format and message ordering.
 
@@ -443,8 +443,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         )
 
     def _merge_parallel_tool_calls_for_thinking(
-        self, thought_signature_dicts: List[dict], messages: List[Content]
-    ) -> List[Content]:
+        self, thought_signature_dicts: list[dict], messages: list[Content]
+    ) -> list[Content]:
         """Merge parallel tool calls into single Content objects when thinking is enabled.
 
         Gemini expects parallel tool calls (multiple function calls made
@@ -540,7 +540,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         return merged_messages
 
     def _apply_thought_signatures_to_messages(
-        self, thought_signature_dicts: List[dict], messages: List[Content]
+        self, thought_signature_dicts: list[dict], messages: list[Content]
     ) -> None:
         """Apply thought signatures to corresponding assistant messages.
 

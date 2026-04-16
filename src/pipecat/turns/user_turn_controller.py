@@ -7,7 +7,6 @@
 """This module defines a controller for managing user turn lifecycle."""
 
 import asyncio
-from typing import Optional, Type
 
 from pipecat.frames.frames import (
     Frame,
@@ -85,13 +84,13 @@ class UserTurnController(BaseObject):
         self._user_turn_strategies = user_turn_strategies
         self._user_turn_stop_timeout = user_turn_stop_timeout
 
-        self._task_manager: Optional[BaseTaskManager] = None
+        self._task_manager: BaseTaskManager | None = None
 
         self._user_speaking = False
 
         self._user_turn = False
         self._user_turn_stop_timeout_event = asyncio.Event()
-        self._user_turn_stop_timeout_task: Optional[asyncio.Task] = None
+        self._user_turn_stop_timeout_task: asyncio.Task | None = None
 
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
@@ -235,7 +234,7 @@ class UserTurnController(BaseObject):
     async def _on_broadcast_frame(
         self,
         strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
-        frame_cls: Type[Frame],
+        frame_cls: type[Frame],
         **kwargs,
     ):
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
@@ -256,7 +255,7 @@ class UserTurnController(BaseObject):
         await self._call_event_handler("on_reset_aggregation", strategy)
 
     async def _trigger_user_turn_start(
-        self, strategy: Optional[BaseUserTurnStartStrategy], params: UserTurnStartedParams
+        self, strategy: BaseUserTurnStartStrategy | None, params: UserTurnStartedParams
     ):
         # Prevent two consecutive user turn starts.
         if self._user_turn:
@@ -276,7 +275,7 @@ class UserTurnController(BaseObject):
         await self._call_event_handler("on_user_turn_started", strategy, params)
 
     async def _trigger_user_turn_stop(
-        self, strategy: Optional[BaseUserTurnStopStrategy], params: UserTurnStoppedParams
+        self, strategy: BaseUserTurnStopStrategy | None, params: UserTurnStoppedParams
     ):
         # Prevent two consecutive user turn stops.
         if not self._user_turn:
@@ -299,7 +298,7 @@ class UserTurnController(BaseObject):
                     timeout=self._user_turn_stop_timeout,
                 )
                 self._user_turn_stop_timeout_event.clear()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if self._user_turn and not self._user_speaking:
                     await self._call_event_handler("on_user_turn_stop_timeout")
                     await self._trigger_user_turn_stop(

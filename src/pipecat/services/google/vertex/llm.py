@@ -17,7 +17,6 @@ from dataclasses import dataclass
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
-from typing import Optional
 
 from loguru import logger
 
@@ -64,17 +63,17 @@ class GoogleVertexLLMService(GoogleLLMService):
     def __init__(
         self,
         *,
-        credentials: Optional[str] = None,
-        credentials_path: Optional[str] = None,
-        model: Optional[str] = None,
+        credentials: str | None = None,
+        credentials_path: str | None = None,
+        model: str | None = None,
         location: str = "us-east4",
         project_id: str,
-        params: Optional[GoogleLLMService.InputParams] = None,
-        settings: Optional[Settings] = None,
-        system_instruction: Optional[str] = None,
-        tools: Optional[list] = None,
-        tool_config: Optional[dict] = None,
-        http_options: Optional[HttpOptions] = None,
+        params: GoogleLLMService.InputParams | None = None,
+        settings: Settings | None = None,
+        system_instruction: str | None = None,
+        tools: list | None = None,
+        tool_config: dict | None = None,
+        http_options: HttpOptions | None = None,
         **kwargs,
     ):
         """Initializes the VertexLLMService.
@@ -186,7 +185,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         )
 
     @staticmethod
-    def _get_credentials(credentials: Optional[str], credentials_path: Optional[str]):
+    def _get_credentials(credentials: str | None, credentials_path: str | None):
         """Retrieve Credentials using Google service account credentials.
 
         Supports multiple authentication methods:
@@ -204,7 +203,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         Raises:
             ValueError: If no valid credentials are provided or found.
         """
-        creds: Optional[service_account.Credentials] = None
+        creds: service_account.Credentials | None = None
 
         if credentials:
             # Parse and load credentials from JSON string

@@ -10,8 +10,8 @@ This module provides common functionality for services implementing the Whisper 
 interface, including language mapping, metrics generation, and error handling.
 """
 
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from openai import AsyncOpenAI
@@ -40,7 +40,7 @@ class BaseWhisperSTTSettings(STTSettings):
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-def language_to_whisper_language(language: Language) -> Optional[str]:
+def language_to_whisper_language(language: Language) -> str | None:
     """Maps pipecat Language enum to Whisper API language codes.
 
     Language support for Whisper API.
@@ -128,16 +128,16 @@ class BaseWhisperSTTService(SegmentedSTTService):
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        language: Optional[Language] = None,
-        prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        language: Language | None = None,
+        prompt: str | None = None,
+        temperature: float | None = None,
         include_prob_metrics: bool = False,
         push_empty_transcripts: bool = False,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = WHISPER_TTFS_P99,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = WHISPER_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Whisper STT service.
@@ -217,7 +217,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         self._include_prob_metrics = include_prob_metrics
         self._push_empty_transcripts = push_empty_transcripts
 
-    def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
+    def _create_client(self, api_key: str | None, base_url: str | None):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     def can_generate_metrics(self) -> bool:
@@ -228,7 +228,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert from pipecat Language to service language code.
 
         Args:
@@ -241,7 +241,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass

@@ -16,7 +16,7 @@ import inspect
 import traceback
 from abc import ABC
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -38,7 +38,7 @@ class EventHandler:
     """
 
     name: str
-    handlers: List[Any]
+    handlers: list[Any]
     is_sync: bool
 
 
@@ -50,7 +50,7 @@ class BaseObject(ABC):
     classes in the framework should inherit from this base class.
     """
 
-    def __init__(self, *, name: Optional[str] = None, **kwargs):
+    def __init__(self, *, name: str | None = None, **kwargs):
         """Initialize the base object.
 
         Args:
@@ -62,7 +62,7 @@ class BaseObject(ABC):
         self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
 
         # Registered event handlers.
-        self._event_handlers: Dict[str, EventHandler] = {}
+        self._event_handlers: dict[str, EventHandler] = {}
 
         # Set of tasks being executed. When a task finishes running it gets
         # automatically removed from the set. When we cleanup we wait for all

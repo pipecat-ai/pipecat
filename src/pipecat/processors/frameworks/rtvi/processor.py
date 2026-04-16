@@ -8,7 +8,8 @@
 
 import asyncio
 import base64
-from typing import Any, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, ValidationError
@@ -51,7 +52,7 @@ class RTVIProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        transport: Optional[BaseTransport] = None,
+        transport: BaseTransport | None = None,
         **kwargs,
     ):
         """Initialize the RTVI processor.
@@ -70,7 +71,7 @@ class RTVIProcessor(FrameProcessor):
         self._llm_skip_tts: bool = False  # Keep in sync with llm_service.py's configuration.
 
         # A task to process incoming transport messages.
-        self._message_task: Optional[asyncio.Task] = None
+        self._message_task: asyncio.Task | None = None
 
         self._register_event_handler("on_bot_started")
         self._register_event_handler("on_client_ready")
@@ -84,7 +85,7 @@ class RTVIProcessor(FrameProcessor):
                 self._input_transport = input_transport
                 self._input_transport.enable_audio_in_stream_on_start(False)
 
-    def create_rtvi_observer(self, *, params: Optional[RTVIObserverParams] = None, **kwargs):
+    def create_rtvi_observer(self, *, params: RTVIObserverParams | None = None, **kwargs):
         """Creates a new RTVI Observer.
 
         Args:

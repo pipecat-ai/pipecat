@@ -12,7 +12,7 @@ visual content.
 """
 
 from abc import abstractmethod
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 from pipecat.frames.frames import Frame, UserImageRawFrame
 from pipecat.processors.frame_processor import FrameDirection
@@ -28,7 +28,7 @@ class VisionService(AIService):
     with the AI service infrastructure for metrics and lifecycle management.
     """
 
-    def __init__(self, *, settings: Optional[VisionSettings] = None, **kwargs):
+    def __init__(self, *, settings: VisionSettings | None = None, **kwargs):
         """Initialize the vision service.
 
         Args:

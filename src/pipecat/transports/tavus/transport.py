@@ -12,8 +12,9 @@ audio/video streaming capabilities through the Tavus API.
 """
 
 import os
+from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
-from typing import Any, Awaitable, Callable, Mapping, Optional
+from typing import Any
 
 import aiohttp
 from daily.daily import AudioData
@@ -197,8 +198,8 @@ class TavusTransportClient:
         self._api = TavusApi(api_key, session)
         self._replica_id = replica_id
         self._persona_id = persona_id
-        self._conversation_id: Optional[str] = None
-        self._client: Optional[DailyTransportClient] = None
+        self._conversation_id: str | None = None
+        self._client: DailyTransportClient | None = None
         self._callbacks = callbacks
         self._params = params
 
@@ -417,9 +418,7 @@ class TavusTransportClient:
             return False
         return await self._client.write_audio_frame(frame)
 
-    async def register_audio_destination(
-        self, destination: str, auto_silence: Optional[bool] = True
-    ):
+    async def register_audio_destination(self, destination: str, auto_silence: bool | None = True):
         """Register an audio destination for output.
 
         Args:
@@ -563,7 +562,7 @@ class TavusOutputTransport(BaseOutputTransport):
         # Whether we have seen a StartFrame already.
         self._initialized = False
         # This is the custom track destination expected by Tavus
-        self._transport_destination: Optional[str] = "stream"
+        self._transport_destination: str | None = "stream"
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport.
@@ -693,8 +692,8 @@ class TavusTransport(BaseTransport):
         replica_id: str,
         persona_id: str = "pipecat-stream",
         params: TavusParams = TavusParams(),
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the Tavus transport.
 
@@ -726,8 +725,8 @@ class TavusTransport(BaseTransport):
             session=session,
             params=params,
         )
-        self._input: Optional[TavusInputTransport] = None
-        self._output: Optional[TavusOutputTransport] = None
+        self._input: TavusInputTransport | None = None
+        self._output: TavusOutputTransport | None = None
         self._tavus_participant_id = None
 
         # Register supported handlers. The user will only be able to register

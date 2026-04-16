@@ -12,8 +12,8 @@ transcription using segmented audio processing.
 
 import base64
 import os
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -28,7 +28,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 
-def language_to_fal_language(language: Language) -> Optional[str]:
+def language_to_fal_language(language: Language) -> str | None:
     """Convert a Language enum to Fal's Wizper language code.
 
     Args:
@@ -171,7 +171,7 @@ class FalSTTService(SegmentedSTTService):
             version: Version of Wizper model to use. Defaults to '3'.
         """
 
-        language: Optional[Language] = Language.EN
+        language: Language | None = Language.EN
         task: str = "transcribe"
         chunk_level: str = "segment"
         version: str = "3"
@@ -179,15 +179,15 @@ class FalSTTService(SegmentedSTTService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        aiohttp_session: Optional[aiohttp.ClientSession] = None,
+        api_key: str | None = None,
+        aiohttp_session: aiohttp.ClientSession | None = None,
         task: str = "transcribe",
         chunk_level: str = "segment",
         version: str = "3",
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = FAL_TTFS_P99,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = FAL_TTFS_P99,
         **kwargs,
     ):
         """Initialize the FalSTTService with API key and parameters.
@@ -266,7 +266,7 @@ class FalSTTService(SegmentedSTTService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Fal's service-specific language code.
 
         Args:
@@ -279,7 +279,7 @@ class FalSTTService(SegmentedSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
+        self, transcript: str, is_final: bool, language: str | None = None
     ):
         """Handle a transcription result with tracing."""
         await self.stop_processing_metrics()

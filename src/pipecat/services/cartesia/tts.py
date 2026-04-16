@@ -8,9 +8,10 @@
 
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, AsyncGenerator, List, Optional
+from enum import StrEnum
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -56,12 +57,12 @@ class GenerationConfig(BaseModel):
             and Marian.
     """
 
-    volume: Optional[float] = None
-    speed: Optional[float] = None
-    emotion: Optional[str] = None
+    volume: float | None = None
+    speed: float | None = None
+    emotion: str | None = None
 
 
-def language_to_cartesia_language(language: Language) -> Optional[str]:
+def language_to_cartesia_language(language: Language) -> str | None:
     """Convert a Language enum to Cartesia language code.
 
     Args:
@@ -118,7 +119,7 @@ def language_to_cartesia_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
-class CartesiaEmotion(str, Enum):
+class CartesiaEmotion(StrEnum):
     """Predefined Emotions supported by Cartesia."""
 
     # Primary emotions supported by Cartesia
@@ -222,25 +223,25 @@ class CartesiaTTSService(WebsocketTTSService):
             pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
 
-        language: Optional[Language] = Language.EN
-        generation_config: Optional[GenerationConfig] = None
-        pronunciation_dict_id: Optional[str] = None
+        language: Language | None = Language.EN
+        generation_config: GenerationConfig | None = None
+        pronunciation_dict_id: str | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         cartesia_version: str = "2025-04-16",
         url: str = "wss://api.cartesia.ai/tts/websocket",
-        model: Optional[str] = None,
-        sample_rate: Optional[int] = None,
+        model: str | None = None,
+        sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        text_aggregation_mode: Optional[TextAggregationMode] = None,
-        aggregate_sentences: Optional[bool] = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
+        aggregate_sentences: bool | None = None,
         **kwargs,
     ):
         """Initialize the Cartesia TTS service.
@@ -362,7 +363,7 @@ class CartesiaTTSService(WebsocketTTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Cartesia language format.
 
         Args:
@@ -408,8 +409,8 @@ class CartesiaTTSService(WebsocketTTSService):
         return base_lang in cjk_languages
 
     def _process_word_timestamps_for_language(
-        self, words: List[str], starts: List[float]
-    ) -> List[tuple[str, float]]:
+        self, words: list[str], starts: list[float]
+    ) -> list[tuple[str, float]]:
         """Process word timestamps based on the current language.
 
         For CJK languages, Cartesia groups related characters in the same timestamp message.
@@ -576,7 +577,7 @@ class CartesiaTTSService(WebsocketTTSService):
         """
         await super().on_audio_context_completed(context_id)
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio and finalize the current context.
 
         Args:
@@ -715,24 +716,24 @@ class CartesiaHttpTTSService(TTSService):
             pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
 
-        language: Optional[Language] = Language.EN
-        generation_config: Optional[GenerationConfig] = None
-        pronunciation_dict_id: Optional[str] = None
+        language: Language | None = Language.EN
+        generation_config: GenerationConfig | None = None
+        pronunciation_dict_id: str | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
-        model: Optional[str] = None,
+        voice_id: str | None = None,
+        model: str | None = None,
         base_url: str = "https://api.cartesia.ai",
         cartesia_version: str = "2026-03-01",
-        aiohttp_session: Optional[aiohttp.ClientSession] = None,
-        sample_rate: Optional[int] = None,
+        aiohttp_session: aiohttp.ClientSession | None = None,
+        sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Cartesia HTTP TTS service.
@@ -825,7 +826,7 @@ class CartesiaHttpTTSService(TTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Cartesia language format.
 
         Args:

@@ -6,12 +6,12 @@
 
 """Utility functions for Google services."""
 
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 from pipecat import version as pipecat_version
 
 
-def update_google_client_http_options(http_options: Optional[Union[Dict[str, Any], Any]]) -> Any:
+def update_google_client_http_options(http_options: dict[str, Any] | Any | None) -> Any:
     """Updates http_options with the x-goog-api-client header.
 
     Args:

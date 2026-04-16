@@ -11,7 +11,8 @@ model management, settings handling, and frame processing lifecycle methods.
 """
 
 import warnings
-from typing import Any, AsyncGenerator, Dict
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from loguru import logger
 
@@ -51,7 +52,7 @@ class AIService(FrameProcessor):
             or ServiceSettings()
         )
         self._sync_model_name_to_metrics()
-        self._session_properties: Dict[str, Any] = {}
+        self._session_properties: dict[str, Any] = {}
         self._tracing_enabled: bool = False
         self._tracing_context = None
 
@@ -104,7 +105,7 @@ class AIService(FrameProcessor):
         """
         pass
 
-    async def _update_settings(self, delta: ServiceSettings) -> Dict[str, Any]:
+    async def _update_settings(self, delta: ServiceSettings) -> dict[str, Any]:
         """Apply a settings delta and return the changed fields.
 
         The delta is applied to ``_settings`` and a dict mapping each changed

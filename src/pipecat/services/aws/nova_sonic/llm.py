@@ -19,7 +19,7 @@ import wave
 from dataclasses import dataclass, field
 from enum import Enum
 from importlib.resources import files
-from typing import Any, List, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -163,22 +163,22 @@ class Params(BaseModel):
     """
 
     # Audio input
-    input_sample_rate: Optional[int] = Field(default=16000)
-    input_sample_size: Optional[int] = Field(default=16)
-    input_channel_count: Optional[int] = Field(default=1)
+    input_sample_rate: int | None = Field(default=16000)
+    input_sample_size: int | None = Field(default=16)
+    input_channel_count: int | None = Field(default=1)
 
     # Audio output
-    output_sample_rate: Optional[int] = Field(default=24000)
-    output_sample_size: Optional[int] = Field(default=16)
-    output_channel_count: Optional[int] = Field(default=1)
+    output_sample_rate: int | None = Field(default=24000)
+    output_sample_size: int | None = Field(default=16)
+    output_channel_count: int | None = Field(default=1)
 
     # Inference
-    max_tokens: Optional[int] = Field(default=1024)
-    top_p: Optional[float] = Field(default=0.9)
-    temperature: Optional[float] = Field(default=0.7)
+    max_tokens: int | None = Field(default=1024)
+    top_p: float | None = Field(default=0.9)
+    temperature: float | None = Field(default=0.7)
 
     # Turn-taking
-    endpointing_sensitivity: Optional[str] = Field(default=None)
+    endpointing_sensitivity: str | None = Field(default=None)
 
     @property
     def audio_config(self) -> "AudioConfig":
@@ -206,14 +206,14 @@ class AudioConfig(BaseModel):
     """
 
     # Input
-    input_sample_rate: Optional[int] = Field(default=16000)
-    input_sample_size: Optional[int] = Field(default=16)
-    input_channel_count: Optional[int] = Field(default=1)
+    input_sample_rate: int | None = Field(default=16000)
+    input_sample_size: int | None = Field(default=16)
+    input_channel_count: int | None = Field(default=1)
 
     # Output
-    output_sample_rate: Optional[int] = Field(default=24000)
-    output_sample_size: Optional[int] = Field(default=16)
-    output_channel_count: Optional[int] = Field(default=1)
+    output_sample_rate: int | None = Field(default=24000)
+    output_sample_size: int | None = Field(default=16)
+    output_channel_count: int | None = Field(default=1)
 
 
 @dataclass
@@ -248,15 +248,15 @@ class AWSNovaSonicLLMService(LLMService):
         *,
         secret_access_key: str,
         access_key_id: str,
-        session_token: Optional[str] = None,
+        session_token: str | None = None,
         region: str,
         model: str = "amazon.nova-2-sonic-v1:0",
         voice_id: str = "matthew",
-        params: Optional[Params] = None,
-        audio_config: Optional[AudioConfig] = None,
-        settings: Optional[Settings] = None,
-        system_instruction: Optional[str] = None,
-        tools: Optional[ToolsSchema] = None,
+        params: Params | None = None,
+        audio_config: AudioConfig | None = None,
+        settings: Settings | None = None,
+        system_instruction: str | None = None,
+        tools: ToolsSchema | None = None,
         **kwargs,
     ):
         """Initializes the AWS Nova Sonic LLM service.
@@ -363,7 +363,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._access_key_id = access_key_id
         self._session_token = session_token
         self._region = region
-        self._client: Optional[BedrockRuntimeClient] = None
+        self._client: BedrockRuntimeClient | None = None
 
         # Audio I/O config (hardware settings, not runtime-tunable)
         # Priority: audio_config > params (deprecated) > defaults
@@ -383,29 +383,30 @@ class AWSNovaSonicLLMService(LLMService):
             )
             self._settings.endpointing_sensitivity = None
 
-        self._context: Optional[LLMContext] = None
-        self._stream: Optional[
+        self._context: LLMContext | None = None
+        self._stream: (
             DuplexEventStream[
                 InvokeModelWithBidirectionalStreamInput,
                 InvokeModelWithBidirectionalStreamOutput,
                 InvokeModelWithBidirectionalStreamOperationOutput,
             ]
-        ] = None
-        self._receive_task: Optional[asyncio.Task] = None
-        self._prompt_name: Optional[str] = None
-        self._input_audio_content_name: Optional[str] = None
-        self._content_being_received: Optional[CurrentContent] = None
+            | None
+        ) = None
+        self._receive_task: asyncio.Task | None = None
+        self._prompt_name: str | None = None
+        self._input_audio_content_name: str | None = None
+        self._content_being_received: CurrentContent | None = None
         self._assistant_is_responding = False
         self._ready_to_send_context = False
         self._triggering_assistant_response = False
         self._waiting_for_trigger_transcription = False
         self._disconnecting = False
-        self._connected_time: Optional[float] = None
+        self._connected_time: float | None = None
         self._wants_connection = False
         self._user_text_buffer = ""
         self._completed_tool_calls = set()
         self._audio_input_started = False
-        self._pending_speculative_text: Optional[str] = None
+        self._pending_speculative_text: str | None = None
 
         file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
@@ -762,7 +763,7 @@ class AWSNovaSonicLLMService(LLMService):
         """
         await self._send_client_event(session_start)
 
-    async def _send_prompt_start_event(self, tools: List[Any]):
+    async def _send_prompt_start_event(self, tools: list[Any]):
         if not self._prompt_name:
             return
 

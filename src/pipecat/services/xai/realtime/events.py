@@ -12,7 +12,7 @@ https://docs.x.ai/docs/guides/voice/agent
 
 import json
 import uuid
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -82,7 +82,7 @@ class TurnDetection(BaseModel):
         type: Detection type, must be "server_vad" or None for manual.
     """
 
-    type: Optional[Literal["server_vad"]] = "server_vad"
+    type: Literal["server_vad"] | None = "server_vad"
 
 
 #
@@ -97,7 +97,7 @@ class AudioInput(BaseModel):
         format: The format configuration for input audio.
     """
 
-    format: Optional[Union[PCMAudioFormat, PCMUAudioFormat, PCMAAudioFormat]] = None
+    format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
 
 
 class AudioOutput(BaseModel):
@@ -107,7 +107,7 @@ class AudioOutput(BaseModel):
         format: The format configuration for output audio.
     """
 
-    format: Optional[Union[PCMAudioFormat, PCMUAudioFormat, PCMAAudioFormat]] = None
+    format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
 
 
 class AudioConfiguration(BaseModel):
@@ -118,8 +118,8 @@ class AudioConfiguration(BaseModel):
         output: Configuration for output audio.
     """
 
-    input: Optional[AudioInput] = None
-    output: Optional[AudioOutput] = None
+    input: AudioInput | None = None
+    output: AudioOutput | None = None
 
 
 #
@@ -147,7 +147,7 @@ class XSearchTool(BaseModel):
     """
 
     type: Literal["x_search"] = "x_search"
-    allowed_x_handles: Optional[List[str]] = None
+    allowed_x_handles: list[str] | None = None
 
 
 class FileSearchTool(BaseModel):
@@ -162,8 +162,8 @@ class FileSearchTool(BaseModel):
     """
 
     type: Literal["file_search"] = "file_search"
-    vector_store_ids: List[str]
-    max_num_results: Optional[int] = 10
+    vector_store_ids: list[str]
+    max_num_results: int | None = 10
 
 
 class FunctionTool(BaseModel):
@@ -179,11 +179,11 @@ class FunctionTool(BaseModel):
     type: Literal["function"] = "function"
     name: str
     description: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
 
 
 # Union type for all Grok tools
-GrokTool = Union[WebSearchTool, XSearchTool, FileSearchTool, FunctionTool, Dict[str, Any]]
+GrokTool = WebSearchTool | XSearchTool | FileSearchTool | FunctionTool | dict[str, Any]
 
 
 #
@@ -215,14 +215,14 @@ class SessionProperties(BaseModel):
     # Needed to support ToolSchema in tools field.
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    instructions: Optional[str] = None
-    voice: Optional[GrokVoice | str] = "Ara"
-    turn_detection: Optional[TurnDetection] = Field(
+    instructions: str | None = None
+    voice: GrokVoice | str | None = "Ara"
+    turn_detection: TurnDetection | None = Field(
         default_factory=lambda: TurnDetection(type="server_vad")
     )
-    audio: Optional[AudioConfiguration] = None
+    audio: AudioConfiguration | None = None
     # Tools can be ToolsSchema when provided by user, or list of dicts for API
-    tools: Optional[ToolsSchema | List[GrokTool]] = None
+    tools: ToolsSchema | list[GrokTool] | None = None
 
 
 #
@@ -241,9 +241,9 @@ class ItemContent(BaseModel):
     """
 
     type: Literal["text", "audio", "input_text", "input_audio", "output_text", "output_audio"]
-    text: Optional[str] = None
-    audio: Optional[str] = None  # base64-encoded audio
-    transcript: Optional[str] = None
+    text: str | None = None
+    audio: str | None = None  # base64-encoded audio
+    transcript: str | None = None
 
 
 class ConversationItem(BaseModel):
@@ -263,15 +263,15 @@ class ConversationItem(BaseModel):
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4().hex))
-    object: Optional[Literal["realtime.item"]] = None
+    object: Literal["realtime.item"] | None = None
     type: Literal["message", "function_call", "function_call_output"]
-    status: Optional[Literal["completed", "in_progress", "incomplete"]] = None
-    role: Optional[Literal["user", "assistant", "system", "tool"]] = None
-    content: Optional[List[ItemContent]] = None
-    call_id: Optional[str] = None
-    name: Optional[str] = None
-    arguments: Optional[str] = None
-    output: Optional[str] = None
+    status: Literal["completed", "in_progress", "incomplete"] | None = None
+    role: Literal["user", "assistant", "system", "tool"] | None = None
+    content: list[ItemContent] | None = None
+    call_id: str | None = None
+    name: str | None = None
+    arguments: str | None = None
+    output: str | None = None
 
 
 class RealtimeConversation(BaseModel):
@@ -293,7 +293,7 @@ class ResponseProperties(BaseModel):
         modalities: Output modalities for the response (text, audio, or both).
     """
 
-    modalities: Optional[List[Literal["text", "audio"]]] = ["text", "audio"]
+    modalities: list[Literal["text", "audio"]] | None = ["text", "audio"]
 
 
 #
@@ -312,11 +312,11 @@ class RealtimeError(BaseModel):
         event_id: Event ID associated with the error, if applicable.
     """
 
-    type: Optional[str] = None
-    code: Optional[str] = ""
+    type: str | None = None
+    code: str | None = ""
     message: str
-    param: Optional[str] = None
-    event_id: Optional[str] = None
+    param: str | None = None
+    event_id: str | None = None
 
 
 #
@@ -390,7 +390,7 @@ class ConversationItemCreateEvent(ClientEvent):
     """
 
     type: Literal["conversation.item.create"] = "conversation.item.create"
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item: ConversationItem
 
 
@@ -403,7 +403,7 @@ class ResponseCreateEvent(ClientEvent):
     """
 
     type: Literal["response.create"] = "response.create"
-    response: Optional[ResponseProperties] = None
+    response: ResponseProperties | None = None
 
 
 class ResponseCancelEvent(ClientEvent):
@@ -471,7 +471,7 @@ class ConversationItemAdded(ServerEvent):
     """
 
     type: Literal["conversation.item.added"]
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item: ConversationItem
 
 
@@ -527,7 +527,7 @@ class InputAudioBufferCommitted(ServerEvent):
     """
 
     type: Literal["input_audio_buffer.committed"]
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item_id: str
 
 
@@ -646,11 +646,11 @@ class ResponseFunctionCallArgumentsDelta(ServerEvent):
     """
 
     type: Literal["response.function_call_arguments.delta"]
-    response_id: Optional[str] = None
-    item_id: Optional[str] = None
+    response_id: str | None = None
+    item_id: str | None = None
     call_id: str
     delta: str
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
 
 
 class ResponseFunctionCallArgumentsDone(ServerEvent):
@@ -680,9 +680,9 @@ class Usage(BaseModel):
         output_tokens: Number of output tokens used.
     """
 
-    total_tokens: Optional[int] = None
-    input_tokens: Optional[int] = None
-    output_tokens: Optional[int] = None
+    total_tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class Response(BaseModel):
@@ -699,9 +699,9 @@ class Response(BaseModel):
     id: str
     object: Literal["realtime.response"]
     status: Literal["completed", "in_progress", "incomplete", "cancelled", "failed"]
-    status_details: Optional[Any] = None
-    output: List[ConversationItem]
-    usage: Optional[Usage] = None
+    status_details: Any | None = None
+    output: list[ConversationItem]
+    usage: Usage | None = None
 
 
 class ResponseCreated(ServerEvent):
@@ -727,7 +727,7 @@ class ResponseDone(ServerEvent):
 
     type: Literal["response.done"]
     response: Response
-    usage: Optional[Usage] = None
+    usage: Usage | None = None
 
 
 class ResponseOutputItemDone(ServerEvent):
@@ -755,7 +755,7 @@ class ContentPart(BaseModel):
     """
 
     type: str
-    transcript: Optional[str] = None
+    transcript: str | None = None
 
 
 class ResponseContentPartAdded(ServerEvent):

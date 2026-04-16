@@ -24,8 +24,8 @@ verifies TTSTextFrame ordering relative to LLMFullResponseEndFrame.
 
 import asyncio
 import unittest
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
-from typing import AsyncGenerator, List, Sequence, Tuple
 
 import pytest
 
@@ -215,7 +215,7 @@ class MockWebSocketPauseTTSService(TTSService):
 
 def _assert_group_ordering(
     down_frames: Sequence[Frame],
-    expected_groups: List[Tuple[str, str]],
+    expected_groups: list[tuple[str, str]],
 ) -> None:
     """Assert two (or more) TTS+FooFrame groups are in strict order.
 
@@ -240,7 +240,7 @@ def _assert_group_ordering(
     )
 
     # Build groups: everything up to and including each FooFrame.
-    groups: List[List[Frame]] = []
+    groups: list[list[Frame]] = []
     prev = 0
     for idx in foo_indices:
         groups.append(relevant[prev : idx + 1])
@@ -298,7 +298,7 @@ def _assert_group_ordering(
 _GROUPS = [("test 1", "1"), ("test 2", "2")]
 
 
-def _make_frames_no_sleep() -> List[Frame]:
+def _make_frames_no_sleep() -> list[Frame]:
     """Return two TTSSpeakFrame+FooFrame pairs sent back-to-back.
 
     Only correct for services that pause downstream processing until the audio

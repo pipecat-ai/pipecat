@@ -12,8 +12,8 @@ support for custom handlers and configurable actions for when a pattern is found
 """
 
 import re
+from collections.abc import AsyncIterator, Awaitable, Callable
 from enum import Enum
-from typing import AsyncIterator, Awaitable, Callable, List, Optional, Tuple
 
 from loguru import logger
 
@@ -182,7 +182,7 @@ class PatternPairAggregator(SimpleTextAggregator):
 
     async def _process_complete_patterns(
         self, text: str, last_processed_position: int = 0
-    ) -> Tuple[List[PatternMatch], str]:
+    ) -> tuple[list[PatternMatch], str]:
         """Process newly complete pattern pairs in the text.
 
         Searches for pattern pairs that have been completed since last_processed_position,
@@ -246,7 +246,7 @@ class PatternPairAggregator(SimpleTextAggregator):
 
         return all_matches, processed_text
 
-    def _match_start_of_pattern(self, text: str) -> Optional[Tuple[int, dict]]:
+    def _match_start_of_pattern(self, text: str) -> tuple[int, dict] | None:
         """Check if text contains incomplete pattern pairs.
 
         Determines whether the text contains any start patterns without

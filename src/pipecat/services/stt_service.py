@@ -12,7 +12,8 @@ import time
 import warnings
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from loguru import logger
 from websockets.protocol import State
@@ -82,12 +83,12 @@ class STTService(AIService):
         self,
         *,
         audio_passthrough=True,
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         stt_ttfb_timeout: float = 2.0,
-        ttfs_p99_latency: Optional[float] = None,
-        keepalive_timeout: Optional[float] = None,
+        ttfs_p99_latency: float | None = None,
+        keepalive_timeout: float | None = None,
         keepalive_interval: float = 5.0,
-        settings: Optional[STTSettings] = None,
+        settings: STTSettings | None = None,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -152,7 +153,7 @@ class STTService(AIService):
 
         # STT TTFB tracking state
         self._stt_ttfb_timeout = stt_ttfb_timeout
-        self._ttfb_timeout_task: Optional[asyncio.Task] = None
+        self._ttfb_timeout_task: asyncio.Task | None = None
         self._user_speaking: bool = False
         self._finalize_pending: bool = False
         self._finalize_requested: bool = False
@@ -161,7 +162,7 @@ class STTService(AIService):
         # Keepalive state
         self._keepalive_timeout = keepalive_timeout
         self._keepalive_interval = keepalive_interval
-        self._keepalive_task: Optional[asyncio.Task] = None
+        self._keepalive_task: asyncio.Task | None = None
         self._last_audio_time: float = 0
 
         # VAD-aware reconnect state
@@ -261,7 +262,7 @@ class STTService(AIService):
         settings_cls = type(self._settings)
         await self._update_settings(settings_cls(language=language))
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a language to the service-specific language format.
 
         Args:
@@ -690,7 +691,7 @@ class SegmentedSTTService(STTService):
     VAD detection.
     """
 
-    def __init__(self, *, sample_rate: Optional[int] = None, **kwargs):
+    def __init__(self, *, sample_rate: int | None = None, **kwargs):
         """Initialize the segmented STT service.
 
         Args:

@@ -10,7 +10,7 @@ This module provides helper classes for interacting with the LemonSlice API,
 including session creation and termination.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -38,15 +38,15 @@ class LemonSliceApi:
     async def create_session(
         self,
         *,
-        agent_image_url: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        agent_prompt: Optional[str] = None,
-        idle_timeout: Optional[int] = None,
-        daily_room_url: Optional[str] = None,
-        daily_token: Optional[str] = None,
-        connection_properties: Optional[dict[str, Any]] = None,
-        extra_properties: Optional[dict[str, Any]] = None,
-        api_url: Optional[str] = None,
+        agent_image_url: str | None = None,
+        agent_id: str | None = None,
+        agent_prompt: str | None = None,
+        idle_timeout: int | None = None,
+        daily_room_url: str | None = None,
+        daily_token: str | None = None,
+        connection_properties: dict[str, Any] | None = None,
+        extra_properties: dict[str, Any] | None = None,
+        api_url: str | None = None,
     ) -> dict:
         """Create a new session with the specified agent_id or agent_image_url.
 

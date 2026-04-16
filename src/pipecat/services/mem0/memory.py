@@ -12,7 +12,7 @@ historical information.
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -61,13 +61,13 @@ class Mem0MemoryService(FrameProcessor):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        local_config: Optional[Dict[str, Any]] = None,
-        user_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        host: Optional[str] = None,
+        api_key: str | None = None,
+        local_config: dict[str, Any] | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        params: InputParams | None = None,
+        host: str | None = None,
     ):
         """Initialize the Mem0 memory service.
 
@@ -109,7 +109,7 @@ class Mem0MemoryService(FrameProcessor):
         self.last_query = None
         logger.info(f"Initialized Mem0MemoryService with {user_id=}, {agent_id=}, {run_id=}")
 
-    async def get_memories(self) -> List[Dict[str, Any]]:
+    async def get_memories(self) -> list[dict[str, Any]]:
         """Retrieve all stored memories for the configured user/agent/run IDs.
 
         This is a convenience method for accessing memories outside the pipeline,
@@ -148,7 +148,7 @@ class Mem0MemoryService(FrameProcessor):
             logger.error(f"Error retrieving memories from Mem0: {e}")
             return []
 
-    async def _store_messages(self, messages: List[Dict[str, Any]]):
+    async def _store_messages(self, messages: list[dict[str, Any]]):
         """Store messages in Mem0.
 
         Runs the blocking Mem0 API call in a background thread to avoid
@@ -174,7 +174,7 @@ class Mem0MemoryService(FrameProcessor):
         except Exception as e:
             logger.error(f"Error storing messages in Mem0: {e}")
 
-    async def _retrieve_memories(self, query: str) -> List[Dict[str, Any]]:
+    async def _retrieve_memories(self, query: str) -> list[dict[str, Any]]:
         """Retrieve relevant memories from Mem0.
 
         Runs the blocking Mem0 API call in a background thread to avoid

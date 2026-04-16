@@ -9,7 +9,7 @@
 API to communicate with WhatsApp Cloud API.
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -44,7 +44,7 @@ class WhatsAppError(BaseModel):
     code: int
     message: str
     href: str
-    error_data: Dict[str, Any]
+    error_data: dict[str, Any]
 
 
 class WhatsAppConnectCall(BaseModel):
@@ -68,7 +68,7 @@ class WhatsAppConnectCall(BaseModel):
     to: str
     event: str  # "connect"
     timestamp: str
-    direction: Optional[str]
+    direction: str | None
     session: WhatsAppSession
 
 
@@ -97,12 +97,12 @@ class WhatsAppTerminateCall(BaseModel):
     to: str
     event: str  # "terminate"
     timestamp: str
-    direction: Optional[str]
-    biz_opaque_callback_data: Optional[str] = None
-    status: Optional[str] = None  # "FAILED" or "COMPLETED" or "REJECTED"
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    duration: Optional[int] = None
+    direction: str | None
+    biz_opaque_callback_data: str | None = None
+    status: str | None = None  # "FAILED" or "COMPLETED" or "REJECTED"
+    start_time: str | None = None
+    end_time: str | None = None
+    duration: int | None = None
 
 
 class WhatsAppProfile(BaseModel):
@@ -151,8 +151,8 @@ class WhatsAppConnectCallValue(BaseModel):
 
     messaging_product: str
     metadata: WhatsAppMetadata
-    contacts: List[WhatsAppContact]
-    calls: List[WhatsAppConnectCall]
+    contacts: list[WhatsAppContact]
+    calls: list[WhatsAppConnectCall]
 
 
 class WhatsAppTerminateCallValue(BaseModel):
@@ -167,8 +167,8 @@ class WhatsAppTerminateCallValue(BaseModel):
 
     messaging_product: str
     metadata: WhatsAppMetadata
-    calls: List[WhatsAppTerminateCall]
-    errors: Optional[List[WhatsAppError]] = None
+    calls: list[WhatsAppTerminateCall]
+    errors: list[WhatsAppError] | None = None
 
 
 class WhatsAppChange(BaseModel):
@@ -179,7 +179,7 @@ class WhatsAppChange(BaseModel):
         field: Always "calls" for calling webhooks
     """
 
-    value: Union[WhatsAppConnectCallValue, WhatsAppTerminateCallValue]
+    value: WhatsAppConnectCallValue | WhatsAppTerminateCallValue
     field: str
 
 
@@ -192,7 +192,7 @@ class WhatsAppEntry(BaseModel):
     """
 
     id: str
-    changes: List[WhatsAppChange]
+    changes: list[WhatsAppChange]
 
 
 class WhatsAppWebhookRequest(BaseModel):
@@ -207,7 +207,7 @@ class WhatsAppWebhookRequest(BaseModel):
     """
 
     object: str
-    entry: List[WhatsAppEntry]
+    entry: list[WhatsAppEntry]
 
 
 class WhatsAppApi:

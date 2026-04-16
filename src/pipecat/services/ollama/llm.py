@@ -7,7 +7,6 @@
 """OLLama LLM service implementation for Pipecat AI framework."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from loguru import logger
 
@@ -40,9 +39,9 @@ class OLLamaLLMService(OpenAILLMService):
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
+        model: str | None = None,
         base_url: str = "http://localhost:11434/v1",
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize OLLama LLM service.

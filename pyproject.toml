@@ -194,6 +194,7 @@ line-length = 100
 select = [
     "D", # Docstring rules
     "I", # Import rules
+    "UP", # Modern Python
 ]
 ignore = [
     "D105",  # Missing docstring in magic methods (__str__, __repr__, etc.)

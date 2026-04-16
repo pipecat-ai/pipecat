@@ -289,7 +289,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
                 timeout=1.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         assert upstream_received
@@ -317,7 +317,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
                 timeout=1.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         assert upstream_received
@@ -346,7 +346,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
                 timeout=1.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         assert "First" in upstream_texts
@@ -382,7 +382,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
                 timeout=1.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         assert heartbeats_counter == expected_heartbeats
 
@@ -417,7 +417,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                     task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
                     timeout=0.6,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
             log_text = log_output.getvalue()
@@ -441,7 +441,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
                 timeout=0.3,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             assert True
         else:
             assert False

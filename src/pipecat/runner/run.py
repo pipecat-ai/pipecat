@@ -74,7 +74,7 @@ import uuid
 from contextlib import asynccontextmanager
 from http import HTTPMethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TypedDict, Union
+from typing import Any, TypedDict
 
 import aiohttp
 from fastapi.responses import FileResponse, Response
@@ -106,7 +106,7 @@ os.environ["ENV"] = "local"
 
 TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
 
-RUNNER_DOWNLOADS_FOLDER: Optional[str] = None
+RUNNER_DOWNLOADS_FOLDER: str | None = None
 RUNNER_HOST: str = "localhost"
 RUNNER_PORT: int = 7860
 
@@ -220,17 +220,17 @@ def _setup_webrtc_routes(app: FastAPI, args: argparse.Namespace):
         return
 
     class IceServer(TypedDict, total=False):
-        urls: Union[str, List[str]]
+        urls: str | list[str]
 
     class IceConfig(TypedDict):
-        iceServers: List[IceServer]
+        iceServers: list[IceServer]
 
     class StartBotResult(TypedDict, total=False):
         sessionId: str
-        iceConfig: Optional[IceConfig]
+        iceConfig: IceConfig | None
 
     # In-memory store of active sessions: session_id -> session info
-    active_sessions: Dict[str, Dict[str, Any]] = {}
+    active_sessions: dict[str, dict[str, Any]] = {}
 
     # Mount the frontend
     app.mount("/client", SmallWebRTCPrebuiltUI)
@@ -418,7 +418,7 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
         return
 
     # Global WhatsApp client instance
-    whatsapp_client: Optional[WhatsAppClient] = None
+    whatsapp_client: WhatsAppClient | None = None
 
     @app.get(
         "/whatsapp",
@@ -857,7 +857,7 @@ def _validate_and_clean_proxy(proxy: str) -> str:
     return proxy
 
 
-def runner_downloads_folder() -> Optional[str]:
+def runner_downloads_folder() -> str | None:
     """Returns the folder where files are stored for later download."""
     return RUNNER_DOWNLOADS_FOLDER
 
@@ -872,7 +872,7 @@ def runner_port() -> int:
     return RUNNER_PORT
 
 
-def main(parser: Optional[argparse.ArgumentParser] = None):
+def main(parser: argparse.ArgumentParser | None = None):
     """Start the Pipecat development runner.
 
     Parses command-line arguments and starts a FastAPI server configured

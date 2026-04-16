@@ -12,7 +12,6 @@ Supports 8kHz and 16kHz sample rates.
 """
 
 import time
-from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -135,7 +134,7 @@ class SileroVADAnalyzer(VADAnalyzer):
     with automatic model state management and periodic resets.
     """
 
-    def __init__(self, *, sample_rate: Optional[int] = None, params: Optional[VADParams] = None):
+    def __init__(self, *, sample_rate: int | None = None, params: VADParams | None = None):
         """Initialize the Silero VAD analyzer.
 
         Args:

@@ -6,8 +6,6 @@
 
 """Frame processor for managing the user turn lifecycle."""
 
-from typing import Optional, Type
-
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -64,7 +62,7 @@ class UserTurnProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        user_turn_strategies: Optional[UserTurnStrategies] = None,
+        user_turn_strategies: UserTurnStrategies | None = None,
         user_turn_stop_timeout: float = 5.0,
         user_idle_timeout: float = 0,
         **kwargs,
@@ -165,7 +163,7 @@ class UserTurnProcessor(FrameProcessor):
     ):
         await self.push_frame(frame, direction)
 
-    async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
+    async def _on_broadcast_frame(self, controller, frame_cls: type[Frame], **kwargs):
         await self.broadcast_frame(frame_cls, **kwargs)
 
     async def _on_user_turn_started(

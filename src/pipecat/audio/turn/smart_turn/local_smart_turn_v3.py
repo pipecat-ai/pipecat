@@ -10,7 +10,7 @@ This module provides a smart turn analyzer that uses an ONNX model for
 local end-of-turn detection without requiring network connectivity.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 import onnxruntime as ort
@@ -32,9 +32,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
     enabling offline operation without network dependencies.
     """
 
-    def __init__(
-        self, *, smart_turn_model_path: Optional[str] = None, cpu_count: int = 1, **kwargs
-    ):
+    def __init__(self, *, smart_turn_model_path: str | None = None, cpu_count: int = 1, **kwargs):
         """Initialize the local ONNX smart-turn-v3 analyzer.
 
         Args:
@@ -138,7 +136,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
         return soxr.resample(audio_array, actual_rate, _MODEL_SAMPLE_RATE, quality="VHQ")
 
-    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using local ONNX model."""
 
         def truncate_audio_to_last_n_seconds(

@@ -17,21 +17,20 @@ import hmac
 import json
 import struct
 import urllib.parse
-from typing import Dict, Optional
 
 
 def get_presigned_url(
     *,
     region: str,
-    credentials: Dict[str, Optional[str]],
+    credentials: dict[str, str | None],
     language_code: str,
     media_encoding: str = "pcm",
     sample_rate: int = 16000,
     number_of_channels: int = 1,
     enable_partial_results_stabilization: bool = True,
     partial_results_stability: str = "high",
-    vocabulary_name: Optional[str] = None,
-    vocabulary_filter_name: Optional[str] = None,
+    vocabulary_name: str | None = None,
+    vocabulary_filter_name: str | None = None,
     show_speaker_label: bool = False,
     enable_channel_identification: bool = False,
 ) -> str:
@@ -199,7 +198,7 @@ class AWSTranscribePresignedURL:
             self.canonical_querystring += "&vocabulary-name=" + vocabulary_name
 
         # Create payload hash
-        self.payload_hash = hashlib.sha256("".encode("utf-8")).hexdigest()
+        self.payload_hash = hashlib.sha256(b"").hexdigest()
 
         # Create canonical request
         self.canonical_request = f"{self.method}\n{self.canonical_uri}\n{self.canonical_querystring}\n{self.canonical_headers}\n{self.signed_headers}\n{self.payload_hash}"
@@ -213,7 +212,7 @@ class AWSTranscribePresignedURL:
 
         # Calculate signature
         k_date = hmac.new(
-            f"AWS4{self.secret_key}".encode("utf-8"), self.datestamp.encode("utf-8"), hashlib.sha256
+            f"AWS4{self.secret_key}".encode(), self.datestamp.encode("utf-8"), hashlib.sha256
         ).digest()
         k_region = hmac.new(k_date, self.region.encode("utf-8"), hashlib.sha256).digest()
         k_service = hmac.new(k_region, self.service.encode("utf-8"), hashlib.sha256).digest()

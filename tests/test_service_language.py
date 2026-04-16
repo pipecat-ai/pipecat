@@ -10,7 +10,8 @@ Verifies that Language enums, raw strings (e.g. "de-DE"), and unrecognized
 strings are all resolved correctly at both init time and runtime update time.
 """
 
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
+from typing import Optional
 from unittest.mock import patch
 
 import pytest
@@ -45,7 +46,7 @@ class _TestTTSService(TTSService):
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         yield  # pragma: no cover
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         return resolve_language(language, _LANGUAGE_MAP, use_base_code=True)
 
 
@@ -64,7 +65,7 @@ class _TestSTTService(STTService):
     async def process_audio_frame(self, frame, direction):
         pass  # pragma: no cover
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         return resolve_language(language, _LANGUAGE_MAP, use_base_code=True)
 
 
