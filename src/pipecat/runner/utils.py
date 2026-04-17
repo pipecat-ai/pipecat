@@ -416,9 +416,9 @@ def _get_transport_params(transport_key: str, transport_params: dict[str, Callab
 
 async def _create_telephony_transport(
     websocket: WebSocket,
-    params: Any | None = None,
-    transport_type: str = None,
-    call_data: dict = None,
+    params: Any,
+    transport_type: str,
+    call_data: dict,
 ) -> BaseTransport:
     """Create a telephony transport with pre-parsed WebSocket data.
 
@@ -432,12 +432,6 @@ async def _create_telephony_transport(
         Configured FastAPIWebsocketTransport ready for telephony use.
     """
     from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
-
-    if params is None:
-        raise ValueError(
-            "FastAPIWebsocketParams must be provided. "
-            "The serializer and add_wav_header will be set automatically."
-        )
 
     # Always set add_wav_header to False for telephony
     params.add_wav_header = False

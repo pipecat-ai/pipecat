@@ -10,7 +10,8 @@
     "src/pipecat/observers",
     "src/pipecat/extensions",
     "src/pipecat/turns",
-    "src/pipecat/pipeline"
+    "src/pipecat/pipeline",
+    "src/pipecat/runner"
   ],
   "exclude": [
     "**/*_pb2.py",
