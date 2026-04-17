@@ -7,7 +7,8 @@
     "src/pipecat/metrics",
     "src/pipecat/transcriptions",
     "src/pipecat/frames",
-    "src/pipecat/observers"
+    "src/pipecat/observers",
+    "src/pipecat/extensions"
   ],
   "exclude": [
     "**/*_pb2.py",
