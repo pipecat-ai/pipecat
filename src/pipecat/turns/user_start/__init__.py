@@ -11,9 +11,15 @@ from .transcription_user_turn_start_strategy import TranscriptionUserTurnStartSt
 from .vad_user_turn_start_strategy import VADUserTurnStartStrategy
 from .wake_phrase_user_turn_start_strategy import WakePhraseUserTurnStartStrategy
 
+try:
+    from .krisp_viva_ip_user_turn_start_strategy import KrispVivaIPUserTurnStartStrategy
+except ImportError:
+    KrispVivaIPUserTurnStartStrategy = None
+
 __all__ = [
     "BaseUserTurnStartStrategy",
     "ExternalUserTurnStartStrategy",
+    "KrispVivaIPUserTurnStartStrategy",
     "MinWordsUserTurnStartStrategy",
     "TranscriptionUserTurnStartStrategy",
     "UserTurnStartedParams",

@@ -4,20 +4,24 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Interruptible bot with Krisp VIVA noise filtering and turn detection.
+"""Interruptible bot with Krisp VIVA noise filtering, turn detection, and IP.
 
 This example demonstrates a conversational bot with:
 - Krisp VIVA noise reduction on incoming audio
-- Krisp VIVA Turn detection for natural interruptions
+- Krisp VIVA Turn detection for end-of-turn
+- Krisp Interruption Prediction (IP) to filter backchannels from real interruptions
 - Voice activity detection (VAD)
 
 Required environment variables:
 - KRISP_VIVA_FILTER_MODEL_PATH: Path to the Krisp noise filter model file (.kef)
 - KRISP_VIVA_TURN_MODEL_PATH: Path to the Krisp turn detection model file (.kef)
-- DEEPGRAM_API_KEY: Deepgram API key for STT/TTS
+- KRISP_VIVA_IP_MODEL_PATH: Path to the Krisp IP model file (.kef)
+- DEEPGRAM_API_KEY: Deepgram API key for STT
+- CARTESIA_API_KEY: Cartesia API key for TTS
 - OPENAI_API_KEY: OpenAI API key for LLM
 
 Optional environment variables:
+- KRISP_VIVA_API_KEY: Krisp SDK API key (or set in code)
 - KRISP_NOISE_SUPPRESSION_LEVEL: Noise suppression level 0-100 (default: 100)
   Higher values = more aggressive noise reduction
 """
@@ -49,31 +53,30 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_start import (
+    KrispVivaIPUserTurnStartStrategy,
+    TranscriptionUserTurnStartStrategy,
+)
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
-
-krisp_viva_filter = KrispVivaFilter()
-
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=krisp_viva_filter,
+        audio_in_filter=KrispVivaFilter(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=krisp_viva_filter,
+        audio_in_filter=KrispVivaFilter(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=krisp_viva_filter,
+        audio_in_filter=KrispVivaFilter(),
     ),
 }
 
@@ -102,7 +105,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=KrispVivaTurn())]
+                start=[
+                    KrispVivaIPUserTurnStartStrategy(threshold=0.5),
+                    TranscriptionUserTurnStartStrategy(),
+                ],
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=KrispVivaTurn())],
             ),
             vad_analyzer=SileroVADAnalyzer(),  # or KrispVivaVadAnalyzer
         ),
