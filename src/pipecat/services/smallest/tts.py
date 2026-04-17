@@ -172,6 +172,10 @@ class SmallestTTSService(InterruptibleTTSService):
         """
         return True
 
+    async def flush_audio(self, context_id: str | None = None):
+        """Flush any buffered audio data."""
+        pass
+
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Smallest service language format.
 
