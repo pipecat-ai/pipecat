@@ -11,21 +11,10 @@ from .transcription_user_turn_start_strategy import TranscriptionUserTurnStartSt
 from .vad_user_turn_start_strategy import VADUserTurnStartStrategy
 from .wake_phrase_user_turn_start_strategy import WakePhraseUserTurnStartStrategy
 
-_LAZY_IMPORTS = {
-    "KrispVivaIPUserTurnStartStrategy": ".krisp_viva_ip_user_turn_start_strategy",
-}
-
-
-def __getattr__(name: str):
-    if name in _LAZY_IMPORTS:
-        import importlib
-
-        module = importlib.import_module(_LAZY_IMPORTS[name], __name__)
-        value = getattr(module, name)
-        globals()[name] = value
-        return value
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
+try:
+    from .krisp_viva_ip_user_turn_start_strategy import KrispVivaIPUserTurnStartStrategy
+except ImportError:
+    KrispVivaIPUserTurnStartStrategy = None
 
 __all__ = [
     "BaseUserTurnStartStrategy",

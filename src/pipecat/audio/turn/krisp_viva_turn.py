@@ -36,7 +36,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use KrispVivaTurn, you need to install krisp_audio.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class KrispTurnParams(BaseTurnParams):
