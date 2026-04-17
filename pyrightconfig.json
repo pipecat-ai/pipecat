@@ -9,7 +9,8 @@
     "src/pipecat/frames",
     "src/pipecat/observers",
     "src/pipecat/extensions",
-    "src/pipecat/turns"
+    "src/pipecat/turns",
+    "src/pipecat/pipeline"
   ],
   "exclude": [
     "**/*_pb2.py",

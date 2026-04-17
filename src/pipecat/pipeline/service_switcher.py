@@ -6,6 +6,7 @@
 
 """Service switcher for switching between different services at runtime, with different switching strategies."""
 
+from collections.abc import Sequence
 from typing import Any, Generic, TypeVar
 
 from loguru import logger
@@ -42,7 +43,7 @@ class ServiceSwitcherStrategy(BaseObject):
             ...
     """
 
-    def __init__(self, services: list[FrameProcessor]):
+    def __init__(self, services: Sequence[FrameProcessor]):
         """Initialize the service switcher strategy with a list of services.
 
         Note:
@@ -56,7 +57,7 @@ class ServiceSwitcherStrategy(BaseObject):
         if len(services) == 0:
             raise Exception(f"ServiceSwitcherStrategy needs at least one service")
 
-        self._services = services
+        self._services = list(services)
         self._active_service = services[0]
 
         self._register_event_handler("on_service_switched")
@@ -223,7 +224,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
     def __init__(
         self,
-        services: list[FrameProcessor],
+        services: Sequence[FrameProcessor],
         strategy_type: type[StrategyType] = ServiceSwitcherStrategyManual,
     ):
         """Initialize the service switcher with a list of services and a switching strategy.
@@ -235,7 +236,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         """
         _strategy = strategy_type(services)
         super().__init__(*self._make_pipeline_definitions(services, _strategy))
-        self._services = services
+        self._services = list(services)
         self._strategy = _strategy
 
     @property
@@ -250,7 +251,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
     @staticmethod
     def _make_pipeline_definitions(
-        services: list[FrameProcessor], strategy: ServiceSwitcherStrategy
+        services: Sequence[FrameProcessor], strategy: ServiceSwitcherStrategy
     ) -> list[Any]:
         pipelines = []
         for service in services:
