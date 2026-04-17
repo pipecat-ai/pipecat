@@ -125,8 +125,8 @@ class SmallestTTSService(InterruptibleTTSService):
         *,
         api_key: str,
         base_url: str = "wss://api.smallest.ai",
-        sample_rate: Optional[int] = None,
-        settings: Optional[Settings] = None,
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Smallest AI WebSocket TTS service.
