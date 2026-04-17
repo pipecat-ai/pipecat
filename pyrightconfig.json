@@ -8,7 +8,8 @@
     "src/pipecat/transcriptions",
     "src/pipecat/frames",
     "src/pipecat/observers",
-    "src/pipecat/extensions"
+    "src/pipecat/extensions",
+    "src/pipecat/turns"
   ],
   "exclude": [
     "**/*_pb2.py",
