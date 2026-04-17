@@ -396,8 +396,11 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
     ]
     missing = [v for v in required_vars if not os.getenv(v)]
     if missing:
+        missing_list = "\n    ".join(missing)
         logger.error(
-            f"Missing required environment variables for WhatsApp transport: {', '.join(missing)}"
+            f"""Missing required environment variables for WhatsApp transport:
+    {missing_list}
+            """
         )
         return
 
