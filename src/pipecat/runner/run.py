@@ -156,6 +156,8 @@ def _get_bot_module():
                 spec = importlib.util.spec_from_file_location(
                     module_name, os.path.join(cwd, filename)
                 )
+                if spec is None or spec.loader is None:
+                    continue
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
@@ -386,28 +388,26 @@ def _add_lifespan_to_app(app: FastAPI, new_lifespan):
 
 def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
     """Set up WhatsApp-specific routes."""
-    WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
-    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
-    WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
-    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN")
-
-    if not all(
-        [
-            WHATSAPP_APP_SECRET,
-            WHATSAPP_PHONE_NUMBER_ID,
-            WHATSAPP_TOKEN,
-            WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
-        ]
-    ):
+    required_vars = [
+        "WHATSAPP_APP_SECRET",
+        "WHATSAPP_PHONE_NUMBER_ID",
+        "WHATSAPP_TOKEN",
+        "WHATSAPP_WEBHOOK_VERIFICATION_TOKEN",
+    ]
+    missing = [v for v in required_vars if not os.getenv(v)]
+    if missing:
+        missing_list = "\n    ".join(missing)
         logger.error(
-            """Missing required environment variables for WhatsApp transport:
-    WHATSAPP_APP_SECRET
-    WHATSAPP_PHONE_NUMBER_ID
-    WHATSAPP_TOKEN
-    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN
+            f"""Missing required environment variables for WhatsApp transport:
+    {missing_list}
             """
         )
         return
+
+    WHATSAPP_APP_SECRET = os.environ["WHATSAPP_APP_SECRET"]
+    WHATSAPP_PHONE_NUMBER_ID = os.environ["WHATSAPP_PHONE_NUMBER_ID"]
+    WHATSAPP_TOKEN = os.environ["WHATSAPP_TOKEN"]
+    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.environ["WHATSAPP_WEBHOOK_VERIFICATION_TOKEN"]
 
     try:
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection

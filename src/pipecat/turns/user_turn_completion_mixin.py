@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMTextFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 # Turn completion markers
 USER_TURN_COMPLETE_MARKER = "✓"
@@ -178,7 +178,7 @@ class UserTurnCompletionConfig:
         return self.incomplete_long_prompt or DEFAULT_INCOMPLETE_LONG_PROMPT
 
 
-class UserTurnCompletionLLMServiceMixin:
+class UserTurnCompletionLLMServiceMixin(FrameProcessor):
     """Mixin that adds turn completion detection to LLM services.
 
     This mixin provides methods to push LLM text with turn completion detection.
@@ -292,7 +292,7 @@ class UserTurnCompletionLLMServiceMixin:
 
             # Push through pipeline to trigger LLM response
             await self.push_frame(
-                LLMMessagesAppendFrame(messages=[{"role": "system", "content": prompt}])
+                LLMMessagesAppendFrame(messages=[{"role": "developer", "content": prompt}])
             )
             await self.push_frame(LLMRunFrame())
 

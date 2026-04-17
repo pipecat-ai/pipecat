@@ -1,0 +1,21 @@
+{
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "All",
+  "include": [
+    "src/pipecat/clocks",
+    "src/pipecat/metrics",
+    "src/pipecat/transcriptions",
+    "src/pipecat/frames",
+    "src/pipecat/observers",
+    "src/pipecat/extensions",
+    "src/pipecat/turns",
+    "src/pipecat/pipeline",
+    "src/pipecat/runner"
+  ],
+  "exclude": [
+    "**/*_pb2.py",
+    "**/__pycache__"
+  ],
+  "reportMissingImports": false
+}

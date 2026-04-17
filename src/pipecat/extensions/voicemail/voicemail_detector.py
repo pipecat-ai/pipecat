@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
@@ -617,9 +617,9 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             self._validate_prompt(custom_system_prompt)
 
         # Set up the LLM context with the classification prompt
-        self._messages = [
+        self._messages: list[LLMContextMessage] = [
             {
-                "role": "system",
+                "role": "developer",
                 "content": self._prompt,
             },
         ]

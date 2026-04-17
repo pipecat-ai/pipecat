@@ -122,4 +122,4 @@ class LiveKitRunnerArguments(RunnerArguments):
 
     room_name: str
     url: str
-    token: str | None = None
+    token: str

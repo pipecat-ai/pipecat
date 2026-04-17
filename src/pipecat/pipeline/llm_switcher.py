@@ -6,7 +6,7 @@
 
 """LLM switcher for switching between different LLMs at runtime, with different switching strategies."""
 
-from typing import Any
+from typing import Any, cast
 
 from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.pipeline.service_switcher import (
@@ -15,6 +15,7 @@ from pipecat.pipeline.service_switcher import (
     StrategyType,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.services.llm_service import LLMService
 
 
@@ -38,7 +39,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
             strategy_type: The strategy class to use for switching between LLMs.
                 Defaults to ``ServiceSwitcherStrategyManual``.
         """
-        super().__init__(llms, strategy_type)
+        super().__init__(cast(list[FrameProcessor], llms), strategy_type)
 
     @property
     def llms(self) -> list[LLMService]:
@@ -47,7 +48,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         Returns:
             List of LLM services managed by this switcher.
         """
-        return self.services
+        return cast(list[LLMService], self.services)
 
     @property
     def active_llm(self) -> LLMService:
@@ -56,7 +57,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         Returns:
             The currently active LLM service, or None if no LLM is active.
         """
-        return self.strategy.active_service
+        return cast(LLMService, self.strategy.active_service)
 
     async def run_inference(self, context: LLMContext, **kwargs) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context, using the currently active LLM.
