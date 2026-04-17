@@ -1363,12 +1363,21 @@ class GeminiLiveLLMService(LLMService):
             self._ready_for_realtime_input = True
         elif self._context:
             # Reconnect without session resumption (e.g. error occurred
-            # before server sent a resumption handle).
-            # TODO: ideally we'd re-send conversation history here via
-            # _create_initial_response(), but that currently doesn't handle
-            # the reconnect case properly. This should be very rare — the
-            # connection would have to drop before we've received our first
-            # session_resumption_handle from the server.
+            # before server sent a resumption handle): re-seed conversation
+            # history so the new session retains full context before
+            # accepting input.
+            try:
+                adapter = self.get_llm_adapter()
+                messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
+                if messages:
+                    logger.info(
+                        f"Re-seeding {len(messages)} conversation turns after reconnect"
+                    )
+                    await self._session.send_client_content(
+                        turns=messages, turn_complete=False
+                    )
+            except Exception as e:
+                logger.error(f"Failed to re-seed conversation on reconnect: {e}")
             self._ready_for_realtime_input = True
         else:
             # Initial connection: session is ready before context has
