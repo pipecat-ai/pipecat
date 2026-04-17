@@ -15,9 +15,11 @@ from loguru import logger
 try:
     import krisp_audio
 except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use the Krisp instance, you need to install krisp_audio.")
-    raise ImportError(f"Missing module: {e}") from e
+    raise ImportError(
+        "krisp_audio is required for Krisp audio features. "
+        "Install it to use KrispVivaFilter, KrispVivaVadAnalyzer, "
+        "KrispVivaTurn, or KrispVivaIPUserTurnStartStrategy."
+    ) from e
 
 
 # Mapping of sample rates (Hz) to Krisp SDK SamplingRate enums
