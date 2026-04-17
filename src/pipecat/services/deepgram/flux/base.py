@@ -611,12 +611,16 @@ class DeepgramFluxSTTBase(STTService):
     def _primary_detected_language(self, data: dict[str, Any]) -> Language | None:
         """Extract the primary detected language from a TurnInfo payload.
 
-        Only populated by ``flux-general-multi``; returns ``None`` otherwise.
+        On ``flux-general-multi`` the language is read from TurnInfo's
+        ``languages`` field. On ``flux-general-en`` the field is absent, so we
+        fall back to ``Language.EN`` to match the model's fixed language.
         """
         codes = data.get("languages") or []
-        if not codes:
-            return None
-        return _code_to_pipecat_language(codes[0])
+        if codes:
+            return _code_to_pipecat_language(codes[0])
+        if self._settings.model == "flux-general-en":
+            return Language.EN
+        return None
 
     async def _handle_end_of_turn(self, transcript: str, data: dict[str, Any]):
         """Handle EndOfTurn events from Deepgram Flux.

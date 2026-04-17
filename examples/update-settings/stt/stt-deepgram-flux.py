@@ -23,7 +23,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.flux.base import DeepgramFluxSTTSettings
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
@@ -118,7 +117,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating Deepgram Flux STT settings: eot_threshold, keyterm")
         await task.queue_frame(
             STTUpdateSettingsFrame(
-                delta=DeepgramFluxSTTSettings(
+                delta=DeepgramFluxSTTService.Settings(
                     eot_threshold=0.8,
                     keyterm=["Pipecat", "Deepgram"],
                 )
@@ -130,7 +129,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await asyncio.sleep(10)
         logger.info("Updating Deepgram Flux STT settings: language_hints=[es]")
         await task.queue_frame(
-            STTUpdateSettingsFrame(delta=DeepgramFluxSTTSettings(language_hints=[Language.ES]))
+            STTUpdateSettingsFrame(
+                delta=DeepgramFluxSTTService.Settings(language_hints=[Language.ES])
+            )
         )
 
     @transport.event_handler("on_client_disconnected")
