@@ -1,0 +1,102 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      gitref:
+        type: string
+        description: 'Branch, tag, or commit to build'
+        required: true
+        default: 'main'
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    name: 'Build and release wheel'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.gitref || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: get_version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get latest release tag, fall back to git describe on first run
+          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null)
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
+            LATEST_TAG=$(git describe --tags --abbrev=0)
+          fi
+
+          # Extract base version (strip leading v and any .postN suffix)
+          BASE_VERSION=$(echo "${LATEST_TAG#v}" | sed -E 's/\.post[0-9]+$//')
+          BASE_TAG="v${BASE_VERSION}"
+
+          # Find the next available .postN suffix
+          SUFFIX=1
+          while gh release view "${BASE_TAG}.post${SUFFIX}" &>/dev/null; do
+            SUFFIX=$((SUFFIX + 1))
+          done
+
+          TAG="${BASE_TAG}.post${SUFFIX}"
+          VERSION="${BASE_VERSION}.post${SUFFIX}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION (tag: $TAG)"
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: 'latest'
+      
+      - name: Set up Python
+        run: uv python install 3.12
+      
+      - name: Install development dependencies
+        run: uv sync --group dev
+      
+      - name: Build project
+        run: uv build --wheel
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.get_version.outputs.version }}
+      
+      - name: Upload wheel as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipecat-wheel-${{ github.run_number }}-${{ github.sha }}
+          path: ./dist
+          retention-days: 90
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.tag }}
+          name: Vonage/pipecat ${{ steps.get_version.outputs.tag }}
+          body: |
+            Latest automated build of Vonage/pipecat
+            
+            **Branch:** ${{ github.ref_name }}
+            **Commit:** ${{ github.sha }}
+            **Run:** #${{ github.run_number }}
+            
+            ## Installation
+            
+            ```bash
+            pip install https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.tag }}/pipecat_ai-${{ steps.get_version.outputs.version }}-py3-none-any.whl
+            ```
+          files: dist/*.whl
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
