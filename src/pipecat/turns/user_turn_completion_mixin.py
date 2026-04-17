@@ -292,7 +292,7 @@ class UserTurnCompletionLLMServiceMixin:
 
             # Push through pipeline to trigger LLM response
             await self.push_frame(
-                LLMMessagesAppendFrame(messages=[{"role": "system", "content": prompt}])
+                LLMMessagesAppendFrame(messages=[{"role": "developer", "content": prompt}])
             )
             await self.push_frame(LLMRunFrame())
 
