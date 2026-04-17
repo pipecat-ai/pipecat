@@ -15,6 +15,7 @@ from pipecat.pipeline.service_switcher import (
     StrategyType,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.services.llm_service import LLMService
 
 
@@ -38,7 +39,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
             strategy_type: The strategy class to use for switching between LLMs.
                 Defaults to ``ServiceSwitcherStrategyManual``.
         """
-        super().__init__(llms, strategy_type)
+        super().__init__(cast(list[FrameProcessor], llms), strategy_type)
 
     @property
     def llms(self) -> list[LLMService]:
