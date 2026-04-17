@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -46,7 +45,6 @@ def default_user_turn_stop_strategies() -> List[BaseUserTurnStopStrategy]:
     Returns ``[TurnAnalyzerUserTurnStopStrategy(LocalSmartTurnAnalyzerV3)]``.
     Useful when building a custom strategy list that extends the defaults.
     """
-
     return [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
 
 
