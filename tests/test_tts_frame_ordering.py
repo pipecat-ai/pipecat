@@ -208,6 +208,103 @@ class MockWebSocketPauseTTSService(TTSService):
             yield
 
 
+class _MockWordTimestampHttpTTSService(TTSService):
+    """HTTP-style TTS: yields audio synchronously, calls add_word_timestamps first.
+
+    ``word_times`` pins the exact tokens and their timestamps.  When omitted the
+    service splits the input text on spaces, assigning 0.1 s gaps.
+    """
+
+    def __init__(
+        self,
+        includes_inter_frame_spaces: bool = False,
+        word_times: list[tuple[str, float]] | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
+            push_text_frames=False,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+        self._includes_inter_frame_spaces = includes_inter_frame_spaces
+        self._word_times = word_times
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        word_times = self._word_times or [(w, i * 0.1) for i, w in enumerate(text.split())]
+        await self.add_word_timestamps(
+            word_times,
+            context_id=context_id,
+            includes_inter_frame_spaces=self._includes_inter_frame_spaces,
+        )
+        yield TTSAudioRawFrame(
+            audio=_FAKE_AUDIO,
+            sample_rate=_SAMPLE_RATE,
+            num_channels=1,
+            context_id=context_id,
+        )
+
+
+class _MockWordTimestampWSTTSService(TTSService):
+    """WebSocket-style TTS: delivers audio asynchronously via the audio context.
+
+    Word timestamps are enqueued as ``_WordTimestampEntry`` items (audio context
+    already exists at call time) and processed by ``_handle_audio_context`` in
+    playback order.
+
+    ``word_times`` pins the exact tokens and their timestamps.  When omitted the
+    service splits the input text on spaces, assigning 0.1 s gaps.
+    """
+
+    def __init__(
+        self,
+        includes_inter_frame_spaces: bool = False,
+        word_times: list[tuple[str, float]] | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=False,
+            pause_frame_processing=False,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+        self._includes_inter_frame_spaces = includes_inter_frame_spaces
+        self._word_times = word_times
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        async def _deliver():
+            await asyncio.sleep(0.01)
+            word_times = self._word_times or [(w, i * 0.1) for i, w in enumerate(text.split())]
+            await self.add_word_timestamps(
+                word_times,
+                context_id=context_id,
+                includes_inter_frame_spaces=self._includes_inter_frame_spaces,
+            )
+            await self.append_to_audio_context(
+                context_id,
+                TTSAudioRawFrame(
+                    audio=_FAKE_AUDIO,
+                    sample_rate=_SAMPLE_RATE,
+                    num_channels=1,
+                    context_id=context_id,
+                ),
+            )
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
+
+        self.create_task(_deliver(), name=f"mock_ws_word_deliver_{context_id}")
+        if False:
+            yield
+
+
 # ---------------------------------------------------------------------------
 # Assertion helper
 # ---------------------------------------------------------------------------
@@ -404,6 +501,160 @@ async def test_http_push_text_llm_response_end_after_tts_text():
         f"LLMFullResponseEndFrame (pos {end_idx}) must come after the last "
         f"TTSTextFrame (pos {last_tts_text_idx}). Got: {type_names}"
     )
+
+
+@pytest.mark.asyncio
+async def test_http_word_timestamps_verbatim_tokens():
+    """HTTP path: text, PTS order, flag, and text-before-audio are all verified.
+
+    Word timestamps arrive in the audio context queue before the audio frame.
+    _handle_audio_context caches them, then flushes when the first audio frame
+    arrives (start_word_timestamps), so TTSTextFrames must be emitted before
+    the TTSAudioRawFrame in the downstream sequence.
+    """
+    word_times = [("hello", 0.0), ("world", 0.2)]
+    tts = _MockWordTimestampHttpTTSService(
+        includes_inter_frame_spaces=True,
+        word_times=word_times,
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    down = frames_received[0]
+    tts_text_frames = [f for f in down if isinstance(f, TTSTextFrame)]
+    audio_frames = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+
+    assert [f.text for f in tts_text_frames] == ["hello", "world"]
+    assert all(f.includes_inter_frame_spaces is True for f in tts_text_frames)
+
+    pts_values = [f.pts for f in tts_text_frames]
+    assert pts_values == sorted(pts_values) and len(set(pts_values)) == len(pts_values), (
+        f"PTS values must be strictly increasing, got {pts_values}"
+    )
+
+    # TTSTextFrames must precede the audio frame (they are flushed from cache
+    # at the moment the first audio chunk sets the timestamp baseline).
+    last_text_idx = max(down.index(f) for f in tts_text_frames)
+    first_audio_idx = down.index(audio_frames[0])
+    assert last_text_idx < first_audio_idx, (
+        "TTSTextFrames must appear before TTSAudioRawFrame in the downstream sequence"
+    )
+
+
+@pytest.mark.asyncio
+async def test_http_word_timestamps_punctuation_tokens():
+    """Verbatim punctuation tokens are preserved with flag=True; default flag is False.
+
+    Models the Inworld API scenario: the TTS returns tokens exactly as sent.
+    Space placement rule:
+      - word-follows-word: space is the leading char of the next word (e.g. " world")
+      - word-follows-punctuation: space is the trailing char of the punctuation token
+        (e.g. "! "), so the following word token carries no leading space.
+    The flag must reach every frame and the text must not be modified.
+    Also acts as a regression guard that flag=False is the default.
+    """
+    verbatim_tokens = [
+        ("hello", 0.0),
+        (" world", 0.15),
+        ("! ", 0.3),
+        ("How", 0.45),
+        (" are", 0.6),
+        (" you", 0.75),
+        ("?", 0.9),
+    ]
+    expected_texts = ["hello", " world", "! ", "How", " are", " you", "?"]
+
+    # With flag=True: all tokens verbatim, all frames carry the flag.
+    tts_ifs = _MockWordTimestampHttpTTSService(
+        includes_inter_frame_spaces=True,
+        word_times=verbatim_tokens,
+    )
+    frames_ifs = await run_test(
+        tts_ifs,
+        frames_to_send=[TTSSpeakFrame(text="hello world! How are you?", append_to_context=False)],
+    )
+    text_frames_ifs = [f for f in frames_ifs[0] if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in text_frames_ifs] == expected_texts, (
+        "Verbatim tokens must not be modified"
+    )
+    assert all(f.includes_inter_frame_spaces is True for f in text_frames_ifs)
+
+    # With flag=False (default): same tokens, flag must be False on every frame.
+    tts_plain = _MockWordTimestampHttpTTSService(
+        word_times=verbatim_tokens,
+    )
+    frames_plain = await run_test(
+        tts_plain,
+        frames_to_send=[TTSSpeakFrame(text="hello world! How are you?", append_to_context=False)],
+    )
+    text_frames_plain = [f for f in frames_plain[0] if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in text_frames_plain] == expected_texts
+    assert all(f.includes_inter_frame_spaces is False for f in text_frames_plain)
+
+
+@pytest.mark.asyncio
+async def test_websocket_word_timestamps_verbatim_tokens():
+    """WebSocket path: _WordTimestampEntry carries verbatim text, PTS, and flag.
+
+    Unlike the HTTP path the word timestamps are sent asynchronously from a
+    background task.  They arrive before the audio frame and are cached until
+    start_word_timestamps() fires, so the same text-before-audio ordering
+    property must hold.
+    """
+    word_times = [("hello", 0.0), ("world", 0.2)]
+    tts = _MockWordTimestampWSTTSService(
+        includes_inter_frame_spaces=True,
+        word_times=word_times,
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    down = frames_received[0]
+    tts_text_frames = [f for f in down if isinstance(f, TTSTextFrame)]
+    audio_frames = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+
+    assert [f.text for f in tts_text_frames] == ["hello", "world"]
+    assert all(f.includes_inter_frame_spaces is True for f in tts_text_frames)
+
+    pts_values = [f.pts for f in tts_text_frames]
+    assert pts_values == sorted(pts_values) and len(set(pts_values)) == len(pts_values), (
+        f"PTS values must be strictly increasing, got {pts_values}"
+    )
+
+    last_text_idx = max(down.index(f) for f in tts_text_frames)
+    first_audio_idx = down.index(audio_frames[0])
+    assert last_text_idx < first_audio_idx, (
+        "TTSTextFrames must appear before TTSAudioRawFrame in the downstream sequence"
+    )
+
+
+@pytest.mark.asyncio
+async def test_websocket_word_timestamps_punctuation_tokens():
+    """WebSocket path: verbatim punctuation tokens reach TTSTextFrame unchanged."""
+    verbatim_tokens = [
+        ("hello", 0.0),
+        (" world", 0.15),
+        ("! ", 0.3),
+        ("How", 0.45),
+        (" are", 0.6),
+        (" you", 0.75),
+        ("?", 0.9),
+    ]
+    tts = _MockWordTimestampWSTTSService(
+        includes_inter_frame_spaces=True,
+        word_times=verbatim_tokens,
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world! How are you?", append_to_context=False)],
+    )
+    text_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in text_frames] == ["hello", " world", "! ", "How", " are", " you", "?"], (
+        "Verbatim tokens must not be modified"
+    )
+    assert all(f.includes_inter_frame_spaces is True for f in text_frames)
 
 
 if __name__ == "__main__":
