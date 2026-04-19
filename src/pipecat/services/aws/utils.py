@@ -4,10 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""AWS Transcribe utility functions and classes for WebSocket streaming.
+"""AWS utility functions for Pipecat services.
 
-This module provides utilities for creating presigned URLs, building event messages,
-and handling AWS event stream protocol for real-time transcription services.
+This module provides shared credential resolution and AWS Transcribe utilities
+for creating presigned URLs, building event messages, and handling AWS event
+stream protocol for real-time transcription services.
 """
 
 import binascii
@@ -15,8 +16,89 @@ import datetime
 import hashlib
 import hmac
 import json
+import os
 import struct
 import urllib.parse
+from dataclasses import dataclass
+from typing import Any
+
+from loguru import logger
+
+
+@dataclass
+class AWSCredentials:
+    """Resolved AWS credentials ready for use by any AWS service."""
+
+    access_key: str | None
+    secret_key: str | None
+    session_token: str | None
+    region: str
+
+
+def resolve_credentials(
+    *,
+    aws_access_key_id: str | None = None,
+    aws_secret_access_key: str | None = None,
+    aws_session_token: str | None = None,
+    region: str | None = None,
+) -> AWSCredentials:
+    """Resolve AWS credentials using the standard fallback chain.
+
+    Resolution order:
+    1. Explicit parameters
+    2. Environment variables (``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``,
+       ``AWS_SESSION_TOKEN``, ``AWS_REGION``)
+    3. Default boto3/botocore credential chain (instance profiles, IRSA,
+       ECS task roles, SSO, credential files, etc.)
+
+    The boto3 fallback (step 3) is only attempted when *both* access key and
+    secret key are still unresolved after steps 1-2.  This avoids replacing
+    explicitly provided credentials with ambient ones.
+
+    Args:
+        aws_access_key_id: Explicit access key ID.
+        aws_secret_access_key: Explicit secret access key.
+        aws_session_token: Explicit session token.
+        region: Explicit AWS region.
+
+    Returns:
+        An :class:`AWSCredentials` instance.  ``access_key`` and
+        ``secret_key`` may still be ``None`` if no credentials could be
+        resolved (the caller should raise an appropriate error).
+    """
+    access_key = aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID")
+    secret_key = aws_secret_access_key or os.getenv("AWS_SECRET_ACCESS_KEY")
+    session_token = aws_session_token or os.getenv("AWS_SESSION_TOKEN")
+    resolved_region = region or os.getenv("AWS_REGION", "us-east-1")
+
+    # Fall back to the boto3 credential provider chain (pod roles, IRSA,
+    # instance profiles, SSO, credential files, etc.) when explicit
+    # credentials were not supplied.
+    if not access_key and not secret_key:
+        try:
+            import boto3
+
+            session = boto3.Session(region_name=resolved_region)
+            creds = session.get_credentials()
+            if creds:
+                frozen = creds.get_frozen_credentials()
+                access_key = access_key or frozen.access_key
+                secret_key = secret_key or frozen.secret_key
+                session_token = session_token or frozen.token
+        except ImportError:
+            logger.debug(
+                "boto3 not available for credential chain fallback; "
+                "install pipecat-ai[aws] for full credential support."
+            )
+        except Exception as e:
+            logger.warning(f"Failed to resolve AWS credentials via boto3 chain: {e}")
+
+    return AWSCredentials(
+        access_key=access_key,
+        secret_key=secret_key,
+        session_token=session_token,
+        region=resolved_region,
+    )
 
 
 def get_presigned_url(
