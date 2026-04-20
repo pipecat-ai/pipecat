@@ -261,18 +261,22 @@ class MCPClient(BaseObject):
         supports_subscribe = bool(caps and caps.resources and caps.resources.subscribe)
         supports_list_changed = bool(caps and caps.resources and caps.resources.listChanged)
 
-        result = await session.list_resources()
-
-        resources = []
-        for r in result.resources:
-            resources.append(
-                MCPResource(
-                    uri=str(r.uri),
-                    name=r.name or str(r.uri),
-                    description=r.description,
-                    mime_type=r.mimeType,
+        resources: List[MCPResource] = []
+        cursor: Optional[str] = None
+        while True:
+            result = await session.list_resources(cursor=cursor)
+            for r in result.resources:
+                resources.append(
+                    MCPResource(
+                        uri=str(r.uri),
+                        name=r.name or str(r.uri),
+                        description=r.description,
+                        mime_type=r.mimeType,
+                    )
                 )
-            )
+            cursor = result.nextCursor
+            if not cursor:
+                break
 
         logger.debug(f"Found {len(resources)} available resources")
 
