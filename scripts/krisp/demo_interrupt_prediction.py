@@ -45,7 +45,6 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 # Load .env file from the script directory if present
 script_dir = Path(__file__).parent
@@ -81,7 +80,6 @@ from pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy import (
     KrispVivaIPUserTurnStartStrategy,
 )
 
-
 AVAILABLE_STRATEGIES = ["krisp-ip", "vad"]
 AVAILABLE_VADS = ["silero", "krisp"]
 
@@ -91,7 +89,7 @@ def create_vad(
     params: VADParams,
     sample_rate: int,
     frame_duration_ms: int = 10,
-) -> Tuple[VADAnalyzer, str]:
+) -> tuple[VADAnalyzer, str]:
     """Create and configure a VAD analyzer by name.
 
     Args:
@@ -131,7 +129,7 @@ class StrategyResult:
     """Results for one interruption strategy."""
 
     name: str
-    interruption_times: List[float] = field(default_factory=list)
+    interruption_times: list[float] = field(default_factory=list)
     init_time_ms: float = 0.0
 
 
@@ -175,7 +173,7 @@ def _mix_audio(base: np.ndarray, overlay: np.ndarray, start: int = 0) -> np.ndar
 def _build_annotated_audio(
     user_audio: np.ndarray,
     sample_rate: int,
-    interruption_times: List[float],
+    interruption_times: list[float],
     beep: np.ndarray,
 ) -> np.ndarray:
     """Build annotated audio: user audio with beep markers at interruption points."""
@@ -192,8 +190,8 @@ def _build_annotated_audio(
 
 async def process_audio(
     input_path: str,
-    strategy_names: List[str],
-    model_path: Optional[str] = None,
+    strategy_names: list[str],
+    model_path: str | None = None,
     threshold: float = 0.5,
     frame_duration_ms: int = 20,
     output_dir: str = "./demo_output",
@@ -239,7 +237,7 @@ async def process_audio(
     )
 
     # Initialize the pipecat IP strategy if krisp-ip is requested
-    ip_strategy: Optional[KrispVivaIPUserTurnStartStrategy] = None
+    ip_strategy: KrispVivaIPUserTurnStartStrategy | None = None
     ip_init_ms = 0.0
     use_ip = "krisp-ip" in strategy_names
 
@@ -258,7 +256,7 @@ async def process_audio(
         print(f"  IP strategy ready in {ip_init_ms:.1f}ms (threshold={threshold})")
 
     # Prepare per-strategy results
-    results: Dict[str, StrategyResult] = {}
+    results: dict[str, StrategyResult] = {}
     for name in strategy_names:
         init_ms = ip_init_ms if name == "krisp-ip" else 0.0
         results[name] = StrategyResult(name=name, init_time_ms=init_ms)
@@ -270,15 +268,15 @@ async def process_audio(
     print(f"  Strategies: {', '.join(strategy_names)}")
 
     # Shared VAD state
-    speech_segments: List[Tuple[float, float]] = []
-    current_speech_start: Optional[float] = None
+    speech_segments: list[tuple[float, float]] = []
+    current_speech_start: float | None = None
     prev_vad_state: VADState = VADState.QUIET
     vad_speaking = False
 
     # Per-strategy state: tracks whether a strategy already fired during the
     # current speech segment.  Reset on each VAD stop so every segment is
     # evaluated independently (regression-test mode).
-    strategy_fired: Dict[str, bool] = {name: False for name in strategy_names}
+    strategy_fired: dict[str, bool] = {name: False for name in strategy_names}
 
     frames_processed = 0
 
@@ -366,7 +364,7 @@ async def process_audio(
     input_stem = Path(input_path).stem
     beep = _generate_beep(sample_rate)
 
-    annotated_audio_map: Dict[str, np.ndarray] = {}
+    annotated_audio_map: dict[str, np.ndarray] = {}
 
     for name, result in results.items():
         annotated = _build_annotated_audio(
@@ -434,8 +432,8 @@ STRATEGY_COLORS_TERM = {
 
 def _format_ascii_timeline(
     duration_secs: float,
-    speech_segments: List[Tuple[float, float]],
-    results: Dict[str, StrategyResult],
+    speech_segments: list[tuple[float, float]],
+    results: dict[str, StrategyResult],
     width: int = 80,
 ) -> str:
     """Render ASCII timeline comparing strategies."""
@@ -445,7 +443,7 @@ def _format_ascii_timeline(
     def time_to_col(t: float) -> int:
         return min(int(t / duration_secs * bar_width), bar_width - 1)
 
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append("")
     lines.append("Visual Timeline:")
 
@@ -494,12 +492,12 @@ def _format_summary(
     duration_secs: float,
     threshold: float,
     frame_duration_ms: int,
-    speech_segments: List[Tuple[float, float]],
-    results: Dict[str, StrategyResult],
+    speech_segments: list[tuple[float, float]],
+    results: dict[str, StrategyResult],
     vad_type: str = "silero",
 ) -> str:
     """Format text summary comparing strategies."""
-    lines: List[str] = []
+    lines: list[str] = []
     sep = "=" * 60
 
     vad_label = "Krisp VIVA" if vad_type == "krisp" else "Silero"
@@ -560,10 +558,10 @@ def _generate_html_report(
     duration_secs: float,
     sample_rate: int,
     threshold: float,
-    speech_segments: List[Tuple[float, float]],
-    results: Dict[str, StrategyResult],
+    speech_segments: list[tuple[float, float]],
+    results: dict[str, StrategyResult],
     output_path: str,
-    annotated_audio: Optional[Dict[str, np.ndarray]] = None,
+    annotated_audio: dict[str, np.ndarray] | None = None,
     vad_type: str = "silero",
 ) -> None:
     """Generate a self-contained HTML report comparing strategies."""
@@ -571,7 +569,7 @@ def _generate_html_report(
     seg_json = ", ".join(f"[{s:.3f},{e:.3f}]" for s, e in speech_segments)
 
     # Build per-strategy JSON
-    strategy_blocks: List[str] = []
+    strategy_blocks: list[str] = []
     for name, result in results.items():
         color = STRATEGY_COLORS.get(name, "#2196F3")
         ints_json = ", ".join(f"{t:.3f}" for t in result.interruption_times)

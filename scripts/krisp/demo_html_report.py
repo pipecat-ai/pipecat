@@ -9,11 +9,9 @@ import io
 import math
 import os
 import statistics
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import soundfile as sf
-
 from demo_types import METHOD_TIMEOUT, AnalyzerResult
 
 
@@ -28,11 +26,11 @@ def generate_html_report(
     input_path: str,
     duration_secs: float,
     sample_rate: int,
-    speech_segments: List[Tuple[float, float]],
-    results: Dict[str, AnalyzerResult],
+    speech_segments: list[tuple[float, float]],
+    results: dict[str, AnalyzerResult],
     viva_filter_used: bool,
     output_path: str,
-    annotated_audio: Optional[Dict[str, np.ndarray]] = None,
+    annotated_audio: dict[str, np.ndarray] | None = None,
     vad_info: str = "Silero",
 ) -> None:
     """Generate a self-contained HTML report with interactive timeline.
@@ -54,7 +52,7 @@ def generate_html_report(
     seg_json = ", ".join(f"[{s:.3f},{e:.3f}]" for s, e in speech_segments)
 
     # Build per-analyzer audio data URIs
-    audio_uris: Dict[str, str] = {}
+    audio_uris: dict[str, str] = {}
     if annotated_audio:
         for name, samples in annotated_audio.items():
             audio_uris[name] = _encode_wav_base64(samples, sample_rate)

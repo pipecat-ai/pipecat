@@ -7,7 +7,6 @@ per-analyzer timeline report formatting.
 import math
 import os
 import statistics
-from typing import Dict, List, Optional, Tuple
 
 from demo_types import (
     METHOD_ON_DEMAND,
@@ -23,7 +22,7 @@ def method_symbol(method: str) -> str:
     return {"streaming": "S", "on-demand": "D", "timeout": "T"}.get(method, "?")
 
 
-def _delay_label(delay: Optional[float]) -> str:
+def _delay_label(delay: float | None) -> str:
     """Qualitative label for a detection delay."""
     if delay is None:
         return ""
@@ -38,8 +37,8 @@ def _delay_label(delay: Optional[float]) -> str:
 
 def format_ascii_timeline(
     duration_secs: float,
-    speech_segments: List[Tuple[float, float]],
-    results: Dict[str, AnalyzerResult],
+    speech_segments: list[tuple[float, float]],
+    results: dict[str, AnalyzerResult],
     width: int = 80,
 ) -> str:
     """Render an ASCII timeline showing speech and turn markers.
@@ -60,7 +59,7 @@ def format_ascii_timeline(
     def time_to_col(t: float) -> int:
         return min(int(t / duration_secs * bar_width), bar_width - 1)
 
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append("")
     lines.append("Visual Timeline:")
 
@@ -113,8 +112,8 @@ def format_ascii_timeline(
 
 
 def format_comparison_table(
-    speech_segments: List[Tuple[float, float]],
-    results: Dict[str, AnalyzerResult],
+    speech_segments: list[tuple[float, float]],
+    results: dict[str, AnalyzerResult],
 ) -> str:
     """Format a per-turn side-by-side comparison table.
 
@@ -127,7 +126,7 @@ def format_comparison_table(
 
     seg_ends = [end for _, end in speech_segments]
 
-    def find_speech_end(ts: float) -> Optional[float]:
+    def find_speech_end(ts: float) -> float | None:
         best = None
         for se in seg_ends:
             if se <= ts + 0.01:
@@ -142,7 +141,7 @@ def format_comparison_table(
                 all_anchors.add(anchor)
     anchors = sorted(all_anchors)
 
-    anchor_events: Dict[float, Dict[str, Optional[TurnEvent]]] = {}
+    anchor_events: dict[float, dict[str, TurnEvent | None]] = {}
     for anchor in anchors:
         anchor_events[anchor] = {}
         for name, result in results.items():
@@ -154,7 +153,7 @@ def format_comparison_table(
                     break
             anchor_events[anchor][name] = match
 
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append("")
     sep = "=" * 90
     lines.append(sep)
@@ -173,7 +172,7 @@ def format_comparison_table(
     for idx, anchor in enumerate(anchors, 1):
         row = f"  {idx:>4}  {anchor:>9.2f}s"
 
-        delays: Dict[str, float] = {}
+        delays: dict[str, float] = {}
         for name in names:
             event = anchor_events[anchor].get(name)
             if event is None:
@@ -219,13 +218,13 @@ def format_comparison_table(
 
 
 def format_summary(
-    results: Dict[str, AnalyzerResult],
+    results: dict[str, AnalyzerResult],
 ) -> str:
     """Format an enhanced comparison summary with consistency metrics."""
     if len(results) < 2:
         return ""
 
-    lines: List[str] = []
+    lines: list[str] = []
     sep = "=" * 90
     lines.append("")
     lines.append(sep)
@@ -237,7 +236,7 @@ def format_summary(
         n_turns = len(result.turn_events)
         total_delays = [e.total_delay for e in result.turn_events if e.total_delay is not None]
 
-        methods: Dict[str, int] = {}
+        methods: dict[str, int] = {}
         for e in result.turn_events:
             methods[e.method] = methods.get(e.method, 0) + 1
 
@@ -286,12 +285,12 @@ def format_timeline(
     duration_secs: float,
     threshold: float,
     frame_duration_ms: int,
-    speech_segments: List[Tuple[float, float]],
+    speech_segments: list[tuple[float, float]],
     result: AnalyzerResult,
     viva_filter_used: bool = False,
 ) -> str:
     """Format a text timeline report for one analyzer."""
-    lines: List[str] = []
+    lines: list[str] = []
     sep = "=" * 60
 
     lines.append(sep)
@@ -350,7 +349,7 @@ def format_timeline(
                 " -- outlier likely due to VAD truncating speech"
             )
 
-    methods: Dict[str, int] = {}
+    methods: dict[str, int] = {}
     for e in result.turn_events:
         methods[e.method] = methods.get(e.method, 0) + 1
     if methods:

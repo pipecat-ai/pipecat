@@ -32,7 +32,6 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 # Load .env file from the script directory if present
 script_dir = Path(__file__).parent
@@ -62,9 +61,6 @@ src_dir = project_root / "src"
 if src_dir.exists() and str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
-from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
-from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
-
 from demo_formatting import (
     format_ascii_timeline,
     format_comparison_table,
@@ -81,6 +77,8 @@ from demo_types import (
     TurnEvent,
 )
 
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 
 AVAILABLE_ANALYZERS = ["krisp", "smart-turn-v3"]
 AVAILABLE_VADS = ["silero", "krisp"]
@@ -91,7 +89,7 @@ def create_vad(
     params: VADParams,
     sample_rate: int,
     frame_duration_ms: int = 10,
-) -> Tuple[VADAnalyzer, str]:
+) -> tuple[VADAnalyzer, str]:
     """Create and configure a VAD analyzer by name.
 
     Args:
@@ -246,7 +244,7 @@ def generate_beep(
 def mix_beeps(
     audio_data: np.ndarray,
     sample_rate: int,
-    turn_timestamps: List[float],
+    turn_timestamps: list[float],
     beep: np.ndarray,
 ) -> np.ndarray:
     """Mix beep tones into audio at the given timestamps."""
@@ -263,7 +261,7 @@ def mix_beeps(
 
 async def process_audio(
     input_path: str,
-    analyzer_names: List[str],
+    analyzer_names: list[str],
     threshold: float = 0.5,
     frame_duration_ms: int = 20,
     beep_freq: int = 1000,
@@ -315,8 +313,8 @@ async def process_audio(
     )
 
     # Create turn analyzers
-    analyzers: Dict[str, BaseTurnAnalyzer] = {}
-    results: Dict[str, AnalyzerResult] = {}
+    analyzers: dict[str, BaseTurnAnalyzer] = {}
+    results: dict[str, AnalyzerResult] = {}
 
     for name in analyzer_names:
         print(f"\nInitializing analyzer: {name}...")
@@ -342,14 +340,14 @@ async def process_audio(
     print(f"  Frame size: {frame_size_samples} samples ({frame_duration_ms}ms)")
 
     # State tracking
-    speech_segments: List[Tuple[float, float]] = []
-    current_speech_start: Optional[float] = None
+    speech_segments: list[tuple[float, float]] = []
+    current_speech_start: float | None = None
     prev_vad_state: VADState = VADState.QUIET
     vad_speaking = False
 
     # Per-analyzer state
-    silence_start: Dict[str, Optional[float]] = {name: None for name in analyzers}
-    eot_called: Dict[str, bool] = {name: False for name in analyzers}
+    silence_start: Dict[str, float | None] = {name: None for name in analyzers}
+    eot_called: dict[str, bool] = {name: False for name in analyzers}
 
     audio_buffer = np.array([], dtype=np.int16)
     frames_processed = 0
@@ -476,7 +474,7 @@ async def process_audio(
 
     print(f"Generating outputs in: {output_dir}/")
 
-    annotated_audio_map: Dict[str, np.ndarray] = {}
+    annotated_audio_map: dict[str, np.ndarray] = {}
 
     for name, result in results.items():
         timeline = format_timeline(

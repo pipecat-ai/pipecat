@@ -25,12 +25,10 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
-
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
@@ -52,8 +50,8 @@ class AudioRecorder:
         self,
         output_path: str = "recording.wav",
         sample_rate: int = SAMPLE_RATE,
-        max_duration: Optional[float] = None,
-        device: Optional[int] = None,
+        max_duration: float | None = None,
+        device: int | None = None,
     ):
         self.output_path = output_path
         self.sample_rate = sample_rate
@@ -61,7 +59,7 @@ class AudioRecorder:
         self.device = device
 
         self._running = False
-        self._stream: Optional[sd.InputStream] = None
+        self._stream: sd.InputStream | None = None
         self._buffers: list[np.ndarray] = []
         self._peak: int = 0
         self._start_time: float = 0.0
@@ -73,7 +71,7 @@ class AudioRecorder:
         self._buffers.append(indata.copy())
         self._peak = max(self._peak, int(np.abs(indata).max()))
 
-    def record(self) -> Optional[str]:
+    def record(self) -> str | None:
         """Record until Ctrl-C or max_duration, then save.
 
         Returns:
@@ -139,7 +137,7 @@ class AudioRecorder:
 
         return self._save()
 
-    def _save(self) -> Optional[str]:
+    def _save(self) -> str | None:
         if not self._buffers:
             print("  Nothing recorded.")
             return None
