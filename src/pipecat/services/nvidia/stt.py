@@ -49,7 +49,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_nvidia_nemotron_speech_language(language: Language) -> Optional[str]:
+def language_to_nvidia_nemotron_speech_language(language: Language) -> str | None:
     """Maps Language enum to NVIDIA Nemotron Speech ASR language codes.
 
     Source:
@@ -59,7 +59,7 @@ def language_to_nvidia_nemotron_speech_language(language: Language) -> Optional[
         language: Language enum value.
 
     Returns:
-        Optional[str]: NVIDIA Nemotron Speech language code or None if not supported.
+        str | None: NVIDIA Nemotron Speech language code or None if not supported.
     """
     LANGUAGE_MAP = {
         # Arabic
@@ -172,7 +172,7 @@ class NvidiaSTTService(STTService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         model_function_map: Mapping[str, str] = {
             "function_id": "bb0837de-8c7b-481f-9ec8-ef5663e9c1fa",
@@ -189,8 +189,8 @@ class NvidiaSTTService(STTService):
         stop_history_eou: int = -1,
         stop_threshold_eou: float = -1.0,
         custom_configuration: str = "",
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = NVIDIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the NVIDIA Nemotron Speech STT service.
@@ -280,10 +280,11 @@ class NvidiaSTTService(STTService):
 
     def _initialize_client(self):
         """Initialize the NVIDIA Nemotron Speech ASR client with authentication metadata."""
-        metadata = [
-            ["function-id", self._function_id],
-            ["authorization", f"Bearer {self._api_key}"],
-        ]
+        metadata = []
+        if self._function_id:
+            metadata.append(["function-id", self._function_id])
+        if self._api_key:
+            metadata.append(["authorization", f"Bearer {self._api_key}"])
         auth = riva.client.Auth(None, self._use_ssl, self._server, metadata)
 
         self._asr_service = riva.client.ASRService(auth)
@@ -484,14 +485,12 @@ class NvidiaSTTService(STTService):
                             transcript,
                             self._user_id,
                             time_now_iso8601(),
-                            self._settings.language,
                             result=result,
                         )
                     )
                     await self._handle_transcription(
                         transcript=transcript,
                         is_final=result.is_final,
-                        language=self._settings.language,
                     )
                 else:
                     await self.push_frame(
@@ -499,7 +498,6 @@ class NvidiaSTTService(STTService):
                             transcript,
                             self._user_id,
                             time_now_iso8601(),
-                            self._settings.language,
                             result=result,
                         )
                     )
@@ -584,7 +582,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         model_function_map: Mapping[str, str] = {
             "function_id": "ee8dc628-76de-4acc-8595-1836e7e857bd",
@@ -594,8 +592,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         params: InputParams | None = None,
         use_ssl: bool = True,
         custom_configuration: str = "",
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = NVIDIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the NVIDIA Nemotron Speech segmented STT service.
@@ -669,7 +667,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         self._config = None
         self._asr_service = None
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat Language enum to NVIDIA Nemotron Speech's language code.
 
         Args:
@@ -686,10 +684,11 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             return
 
         # Set up authentication metadata for NVIDIA Cloud Functions
-        metadata = [
-            ["function-id", self._function_id],
-            ["authorization", f"Bearer {self._api_key}"],
-        ]
+        metadata = []
+        if self._function_id:
+            metadata.append(["function-id", self._function_id])
+        if self._api_key:
+            metadata.append(["authorization", f"Bearer {self._api_key}"])
 
         # Create authenticated client
         auth = riva.client.Auth(None, self._use_ssl, self._server, metadata)
@@ -808,11 +807,10 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                             text,
                             self._user_id,
                             time_now_iso8601(),
-                            self._settings.language,
                         )
                         transcription_found = True
 
-                        await self._handle_transcription(text, True, self._settings.language)
+                        await self._handle_transcription(text, True)
 
             if not transcription_found:
                 logger.debug(
