@@ -157,9 +157,7 @@ class AudioRecorder:
                 resampled = src.resample(audio_float, ratio, "sinc_best")
                 audio = (resampled * 32768.0).clip(-32768, 32767).astype(np.int16)
                 save_rate = self.sample_rate
-                print(
-                    f"\n  Resampled {self._actual_sample_rate} Hz → {self.sample_rate} Hz"
-                )
+                print(f"\n  Resampled {self._actual_sample_rate} Hz → {self.sample_rate} Hz")
             except ImportError:
                 print(
                     f"\n  ⚠ Saving at {self._actual_sample_rate} Hz (install 'samplerate'"
@@ -198,7 +196,7 @@ def list_devices():
     sep = "=" * 75
     print(sep)
     print(f"  {'#':<5} {'Name':<50} {'Ch':>4}  {'Rate':>6}")
-    print(f"  {'-'*5} {'-'*50} {'-'*4}  {'-'*6}")
+    print(f"  {'-' * 5} {'-' * 50} {'-' * 4}  {'-' * 6}")
 
     devices = sd.query_devices()
     for i, dev in enumerate(devices):
@@ -229,13 +227,15 @@ Examples:
     )
 
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=str,
         default="recording.wav",
         help="Output WAV file path (default: recording.wav)",
     )
     parser.add_argument(
-        "-d", "--duration",
+        "-d",
+        "--duration",
         type=float,
         default=None,
         help="Max recording duration in seconds (default: unlimited, Ctrl+C to stop)",
@@ -247,14 +247,16 @@ Examples:
         help="Input device index (use --list-devices to see options)",
     )
     parser.add_argument(
-        "-r", "--sample-rate",
+        "-r",
+        "--sample-rate",
         type=int,
         default=SAMPLE_RATE,
         choices=[8000, 16000, 24000, 32000, 48000],
         help="Sample rate in Hz (default: 16000)",
     )
     parser.add_argument(
-        "--list-devices", "-l",
+        "--list-devices",
+        "-l",
         action="store_true",
         help="List available audio input devices and exit",
     )

@@ -73,13 +73,9 @@ def format_ascii_timeline(
         tag = f"{sec}"
         if col + len(tag) <= bar_width:
             ruler_label = (
-                ruler_label[: label_width + col]
-                + tag
-                + ruler_label[label_width + col + len(tag) :]
+                ruler_label[: label_width + col] + tag + ruler_label[label_width + col + len(tag) :]
             )
-        ruler_ticks = (
-            ruler_ticks[: label_width + col] + "|" + ruler_ticks[label_width + col + 1 :]
-        )
+        ruler_ticks = ruler_ticks[: label_width + col] + "|" + ruler_ticks[label_width + col + 1 :]
     lines.append(f"  {'Time(s)':>{label_width - 2}}  {ruler_label[label_width:]}")
     lines.append(f"  {'':>{label_width - 2}}  {ruler_ticks[label_width:]}")
 
@@ -211,9 +207,7 @@ def format_comparison_table(
 
     lines.append("")
     lines.append(
-        "  [S]=streaming (real-time)  "
-        "[D]=on-demand (at VAD stop)  "
-        "[T]=timeout (silence fallback)"
+        "  [S]=streaming (real-time)  [D]=on-demand (at VAD stop)  [T]=timeout (silence fallback)"
     )
     lines.append(
         "  * Delays are total latency from estimated speech end."
@@ -241,9 +235,7 @@ def format_summary(
 
     for name, result in results.items():
         n_turns = len(result.turn_events)
-        total_delays = [
-            e.total_delay for e in result.turn_events if e.total_delay is not None
-        ]
+        total_delays = [e.total_delay for e in result.turn_events if e.total_delay is not None]
 
         methods: Dict[str, int] = {}
         for e in result.turn_events:
@@ -266,9 +258,7 @@ def format_summary(
             )
             if has_vad_wait:
                 vad_secs = result.turn_events[0].vad_stop_secs
-                lines.append(
-                    f"    (includes {vad_secs:.1f}s VAD wait before analyzer is invoked)"
-                )
+                lines.append(f"    (includes {vad_secs:.1f}s VAD wait before analyzer is invoked)")
             if len(total_delays) >= 3 and max(total_delays) > med * 2.5 and med > 0.01:
                 lines.append(
                     f"    Note: max ({max(total_delays):.3f}s) >> median ({med:.3f}s)"
@@ -307,9 +297,7 @@ def format_timeline(
     lines.append(sep)
     lines.append(f"Turn-Taking Analysis: {analyzer_name}")
     lines.append(sep)
-    lines.append(
-        f"Audio: {os.path.basename(input_path)} ({sample_rate} Hz, {duration_secs:.2f}s)"
-    )
+    lines.append(f"Audio: {os.path.basename(input_path)} ({sample_rate} Hz, {duration_secs:.2f}s)")
     lines.append(f"Threshold: {threshold}, Frame duration: {frame_duration_ms}ms")
     lines.append("VAD: Silero (stop_secs=0.2)")
     if viva_filter_used:
@@ -349,16 +337,12 @@ def format_timeline(
 
     lines.append("Summary:")
     lines.append(f"  Turns detected: {len(result.turn_events)}")
-    total_delays = [
-        e.total_delay for e in result.turn_events if e.total_delay is not None
-    ]
+    total_delays = [e.total_delay for e in result.turn_events if e.total_delay is not None]
     if total_delays:
         avg = sum(total_delays) / len(total_delays)
         med = statistics.median(total_delays)
         std = math.sqrt(sum((d - avg) ** 2 for d in total_delays) / len(total_delays))
-        lines.append(
-            f"  Total latency: median={med:.3f}s  avg={avg:.3f}s (stddev: {std:.3f}s)"
-        )
+        lines.append(f"  Total latency: median={med:.3f}s  avg={avg:.3f}s (stddev: {std:.3f}s)")
         lines.append(f"  Min: {min(total_delays):.3f}s  Max: {max(total_delays):.3f}s")
         if len(total_delays) >= 3 and max(total_delays) > med * 2.5 and med > 0.01:
             lines.append(

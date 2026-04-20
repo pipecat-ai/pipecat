@@ -326,9 +326,7 @@ async def process_audio(
             analyzers[name] = analyzer
             init_ms = (time.time() - t0) * 1000
             timeout_s = analyzer.params.stop_secs if is_smart_turn(analyzer) else None
-            results[name] = AnalyzerResult(
-                name=name, init_time_ms=init_ms, timeout_secs=timeout_s
-            )
+            results[name] = AnalyzerResult(name=name, init_time_ms=init_ms, timeout_secs=timeout_s)
             print(f"  {name} initialized in {init_ms:.1f}ms")
         except Exception as e:
             print(f"  Error initializing {name}: {e}")
@@ -380,9 +378,7 @@ async def process_audio(
                 prev_vad_state != VADState.SPEAKING and vad_state == VADState.SPEAKING
             )
             vad_just_stopped = (
-                prev_vad_state != VADState.QUIET
-                and vad_state == VADState.QUIET
-                and vad_speaking
+                prev_vad_state != VADState.QUIET and vad_state == VADState.QUIET and vad_speaking
             )
 
             if vad_just_started:

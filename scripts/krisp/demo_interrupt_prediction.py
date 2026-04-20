@@ -125,6 +125,7 @@ def create_vad(
 # Data types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StrategyResult:
     """Results for one interruption strategy."""
@@ -137,6 +138,7 @@ class StrategyResult:
 # ---------------------------------------------------------------------------
 # Audio helpers
 # ---------------------------------------------------------------------------
+
 
 def _encode_wav_base64(audio: np.ndarray, sample_rate: int) -> str:
     """Encode int16 audio as a base64 WAV data URI."""
@@ -186,6 +188,7 @@ def _build_annotated_audio(
 # ---------------------------------------------------------------------------
 # Core processing
 # ---------------------------------------------------------------------------
+
 
 async def process_audio(
     input_path: str,
@@ -292,13 +295,9 @@ async def process_audio(
 
         # VAD (shared) — smoothed state with start/stop debouncing
         vad_state = vad._run_analyzer(frame_bytes)
-        vad_just_started = (
-            prev_vad_state != VADState.SPEAKING and vad_state == VADState.SPEAKING
-        )
+        vad_just_started = prev_vad_state != VADState.SPEAKING and vad_state == VADState.SPEAKING
         vad_just_stopped = (
-            prev_vad_state != VADState.QUIET
-            and vad_state == VADState.QUIET
-            and vad_speaking
+            prev_vad_state != VADState.QUIET and vad_state == VADState.QUIET and vad_speaking
         )
 
         # Raw per-frame VAD: True when the last raw confidence check passed,
@@ -341,7 +340,9 @@ async def process_audio(
             ip_strategy._vad_flag = raw_speaking
             ip_strategy._speech_active = vad_speaking
             audio_frame = InputAudioRawFrame(
-                audio=frame_bytes, sample_rate=sample_rate, num_channels=1,
+                audio=frame_bytes,
+                sample_rate=sample_rate,
+                num_channels=1,
             )
             result = await ip_strategy.process_frame(audio_frame)
             if result == ProcessFrameResult.STOP and not strategy_fired.get("krisp-ip", False):
@@ -369,7 +370,10 @@ async def process_audio(
 
     for name, result in results.items():
         annotated = _build_annotated_audio(
-            user_audio, sample_rate, result.interruption_times, beep,
+            user_audio,
+            sample_rate,
+            result.interruption_times,
+            beep,
         )
         annotated_audio_map[name] = annotated
 
@@ -380,10 +384,18 @@ async def process_audio(
 
     # ---- Terminal output ----
     print(_format_ascii_timeline(duration_secs, speech_segments, results))
-    print(_format_summary(
-        input_path, sample_rate, duration_secs, threshold,
-        frame_duration_ms, speech_segments, results, vad_type,
-    ))
+    print(
+        _format_summary(
+            input_path,
+            sample_rate,
+            duration_secs,
+            threshold,
+            frame_duration_ms,
+            speech_segments,
+            results,
+            vad_type,
+        )
+    )
 
     # HTML report
     html_path = os.path.join(output_dir, f"{input_stem}_ip_report.html")
@@ -445,9 +457,9 @@ def _format_ascii_timeline(
         tag = f"{sec}"
         pos = label_width + col
         if pos + len(tag) < len(ruler_label):
-            ruler_label = ruler_label[:pos] + tag + ruler_label[pos + len(tag):]
+            ruler_label = ruler_label[:pos] + tag + ruler_label[pos + len(tag) :]
         if pos < len(ruler_ticks):
-            ruler_ticks = ruler_ticks[:pos] + "|" + ruler_ticks[pos + 1:]
+            ruler_ticks = ruler_ticks[:pos] + "|" + ruler_ticks[pos + 1 :]
     lines.append(f"  {'Time(s)':>{label_width - 2}}  {ruler_label[label_width:]}")
     lines.append(f"  {'':>{label_width - 2}}  {ruler_ticks[label_width:]}")
 
@@ -469,8 +481,7 @@ def _format_ascii_timeline(
 
     lines.append("")
     lines.append(
-        f"  {'Legend:':>{label_width - 2}}  "
-        "#=user speech  !=interruption detected  .=no detection"
+        f"  {'Legend:':>{label_width - 2}}  #=user speech  !=interruption detected  .=no detection"
     )
     lines.append("")
 
@@ -496,9 +507,7 @@ def _format_summary(
     lines.append(sep)
     lines.append("Interrupt Prediction: Strategy Comparison")
     lines.append(sep)
-    lines.append(
-        f"Audio: {os.path.basename(input_path)} ({sample_rate} Hz, {duration_secs:.2f}s)"
-    )
+    lines.append(f"Audio: {os.path.basename(input_path)} ({sample_rate} Hz, {duration_secs:.2f}s)")
     lines.append(f"IP threshold: {threshold}, Frame duration: {frame_duration_ms}ms")
     lines.append(f"VAD: {vad_label} (confidence=0.7, stop_secs=0.2)")
     lines.append(f"Speech segments: {len(speech_segments)}")
@@ -854,6 +863,7 @@ STRATEGIES.forEach(s => {{
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(

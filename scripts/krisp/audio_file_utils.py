@@ -95,7 +95,7 @@ def resample_audio(
     source_rate: int,
     target_rate: int,
     verbose: bool = False,
-) -> Tuple[np.ndarray, int]:
+) -> tuple[np.ndarray, int]:
     """Resample int16 audio using linear interpolation.
 
     Args:

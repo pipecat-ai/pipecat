@@ -71,9 +71,7 @@ def generate_html_report(
             for e in result.turn_events
         )
         timeout_count = sum(1 for e in result.turn_events if e.method == METHOD_TIMEOUT)
-        total_delays = [
-            e.total_delay for e in result.turn_events if e.total_delay is not None
-        ]
+        total_delays = [e.total_delay for e in result.turn_events if e.total_delay is not None]
         avg_d = sum(total_delays) / len(total_delays) if total_delays else 0
         med_d = statistics.median(total_delays) if total_delays else 0
         std_d = (
