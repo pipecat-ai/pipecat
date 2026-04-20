@@ -6,6 +6,7 @@
 
 """MCP (Model Context Protocol) client for integrating external tools with LLMs."""
 
+import asyncio
 import json
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -322,32 +323,43 @@ class MCPClient(BaseObject):
             blob=blob,
         )
 
-    async def read_all_resources(self) -> List[MCPResource]:
+    async def read_all_resources(self, max_concurrency: int = 10) -> List[MCPResource]:
         """List and read all resources from the MCP server.
 
         Convenience method that combines ``list_resources()`` and
         ``read_resource()`` to fetch all resources with their content
-        in a single call.
+        in a single call. Reads are issued concurrently, bounded by
+        ``max_concurrency`` to avoid overwhelming the server.
+
+        Args:
+            max_concurrency: Maximum number of concurrent read requests.
 
         Returns:
-            A list of MCPResource objects with content populated.
+            A list of MCPResource objects with content populated, in the
+            same order as returned by ``list_resources()``. Individual
+            read failures are logged and skipped.
 
         Raises:
             RuntimeError: If the client is not connected.
         """
         resource_list = await self.list_resources()
-        resources = []
-        for r in resource_list.resources:
-            try:
-                full = await self.read_resource(r.uri)
-                # Preserve the metadata from list_resources
-                full.name = r.name
-                full.description = r.description
-                full.mime_type = full.mime_type or r.mime_type
-                resources.append(full)
-            except Exception as e:
-                logger.warning(f"Failed to read resource '{r.uri}': {e}")
-                continue
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def _read_one(r: MCPResource) -> Optional[MCPResource]:
+            async with semaphore:
+                try:
+                    full = await self.read_resource(r.uri)
+                except Exception as e:
+                    logger.warning(f"Failed to read resource '{r.uri}': {e}")
+                    return None
+            # Preserve the metadata from list_resources
+            full.name = r.name
+            full.description = r.description
+            full.mime_type = full.mime_type or r.mime_type
+            return full
+
+        results = await asyncio.gather(*(_read_one(r) for r in resource_list.resources))
+        resources = [r for r in results if r is not None]
 
         logger.debug(f"Read {len(resources)} of {len(resource_list.resources)} resources")
 
