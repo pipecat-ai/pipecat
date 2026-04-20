@@ -17,7 +17,6 @@ interrupted by brief acknowledgements or filler words.
 """
 
 import os
-from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -78,7 +77,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
     def __init__(
         self,
         *,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         threshold: float = 0.5,
         frame_duration_ms: int = 20,
         api_key: str = "",
@@ -117,8 +116,8 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         self._sdk_acquired = False
         self._ip_session = None
-        self._samples_per_frame: Optional[int] = None
-        self._sample_rate: Optional[int] = None
+        self._samples_per_frame: int | None = None
+        self._sample_rate: int | None = None
 
         # State tracking
         self._speech_active = False

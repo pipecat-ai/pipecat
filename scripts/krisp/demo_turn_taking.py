@@ -50,7 +50,7 @@ if _env_file.exists():
 try:
     import numpy as np
     import soundfile as sf  # noqa: F401
-    from audio_file_utils import read_audio_file, write_audio_file
+    from audio_file_utils import read_audio_file, resample_audio, write_audio_file
 except ImportError as e:
     print(f"Error: Missing required dependencies: {e}")
     print("Install with: pip install soundfile numpy")
@@ -282,6 +282,10 @@ async def process_audio(
     duration_secs = len(audio_data) / sample_rate
 
     print(f"\nAudio: {duration_secs:.2f}s, {sample_rate} Hz")
+
+    # Resample to 16 kHz if needed (Silero VAD only supports 8/16 kHz)
+    audio_data, sample_rate = resample_audio(audio_data, sample_rate, 16000, verbose=True)
+    duration_secs = len(audio_data) / sample_rate
 
     # Optionally apply VIVA noise filter (same as pipeline's KrispVivaFilter)
     if use_viva_filter:

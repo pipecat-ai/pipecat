@@ -91,6 +91,45 @@ def read_audio_file(input_path: str, verbose: bool = False) -> Tuple[np.ndarray,
     return audio_data, sample_rate
 
 
+def resample_audio(
+    audio_data: np.ndarray,
+    source_rate: int,
+    target_rate: int,
+    verbose: bool = False,
+) -> Tuple[np.ndarray, int]:
+    """Resample int16 audio using linear interpolation.
+
+    Args:
+        audio_data: Source audio as int16 numpy array.
+        source_rate: Source sample rate in Hz.
+        target_rate: Desired sample rate in Hz.
+        verbose: If True, print resampling details.
+
+    Returns:
+        Tuple of (resampled_audio, target_rate).
+    """
+    if source_rate == target_rate:
+        return audio_data, target_rate
+
+    if verbose:
+        print(f"\nResampling {source_rate} Hz → {target_rate} Hz...")
+
+    num_target_samples = int(len(audio_data) * target_rate / source_rate)
+    audio_float = audio_data.astype(np.float64)
+    indices = np.arange(num_target_samples) * source_rate / target_rate
+    left = np.floor(indices).astype(int)
+    right = np.minimum(left + 1, len(audio_data) - 1)
+    frac = indices - left
+    resampled = audio_float[left] * (1 - frac) + audio_float[right] * frac
+    result = resampled.clip(-32768, 32767).astype(np.int16)
+
+    if verbose:
+        duration = len(result) / target_rate
+        print(f"  Resampled: {duration:.2f}s, {target_rate} Hz, {len(result)} samples")
+
+    return result, target_rate
+
+
 def write_audio_file(
     output_path: str, audio_data: np.ndarray, sample_rate: int, verbose: bool = False
 ) -> None:

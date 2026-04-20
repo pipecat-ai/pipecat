@@ -35,7 +35,7 @@ import soundfile as sf
 SAMPLE_RATE = 16000
 CHANNELS = 1
 DTYPE = "int16"
-BLOCK_SIZE = 320  # 20 ms at 16 kHz
+FRAME_MS = 20
 
 
 class AudioRecorder:
@@ -65,6 +65,7 @@ class AudioRecorder:
         self._buffers: list[np.ndarray] = []
         self._peak: int = 0
         self._start_time: float = 0.0
+        self._actual_sample_rate: int = sample_rate
 
     def _callback(self, indata: np.ndarray, frames: int, time_info, status):
         if status:
@@ -82,10 +83,10 @@ class AudioRecorder:
         self._buffers.clear()
         self._peak = 0
 
-        frame_ms = BLOCK_SIZE / self.sample_rate * 1000
+        block_size = int(self.sample_rate * FRAME_MS / 1000)
 
         print(f"Recording to: {self.output_path}")
-        print(f"  Sample rate: {self.sample_rate} Hz, frame: {frame_ms:.0f} ms, mono int16")
+        print(f"  Requested sample rate: {self.sample_rate} Hz, frame: {FRAME_MS} ms, mono int16")
         if self.device is not None:
             dev_info = sd.query_devices(self.device)
             print(f"  Input device: [{self.device}] {dev_info['name']}")
@@ -97,10 +98,18 @@ class AudioRecorder:
             samplerate=self.sample_rate,
             channels=CHANNELS,
             dtype=DTYPE,
-            blocksize=BLOCK_SIZE,
+            blocksize=block_size,
             device=self.device,
             callback=self._callback,
         )
+
+        # Read back the actual sample rate the device is using
+        self._actual_sample_rate = int(self._stream.samplerate)
+        if self._actual_sample_rate != self.sample_rate:
+            print(
+                f"  ⚠ Device does not support {self.sample_rate} Hz;"
+                f" recording at {self._actual_sample_rate} Hz instead."
+            )
 
         self._start_time = time.time()
         self._stream.start()
@@ -136,11 +145,32 @@ class AudioRecorder:
             return None
 
         audio = np.concatenate(self._buffers, axis=0).squeeze()
-        duration = len(audio) / self.sample_rate
 
-        sf.write(self.output_path, audio, self.sample_rate, subtype="PCM_16")
+        save_rate = self._actual_sample_rate
+
+        if self._actual_sample_rate != self.sample_rate:
+            try:
+                import samplerate as src
+
+                ratio = self.sample_rate / self._actual_sample_rate
+                audio_float = audio.astype(np.float32) / 32768.0
+                resampled = src.resample(audio_float, ratio, "sinc_best")
+                audio = (resampled * 32768.0).clip(-32768, 32767).astype(np.int16)
+                save_rate = self.sample_rate
+                print(
+                    f"\n  Resampled {self._actual_sample_rate} Hz → {self.sample_rate} Hz"
+                )
+            except ImportError:
+                print(
+                    f"\n  ⚠ Saving at {self._actual_sample_rate} Hz (install 'samplerate'"
+                    f" package to auto-resample to {self.sample_rate} Hz)"
+                )
+
+        duration = len(audio) / save_rate
+        sf.write(self.output_path, audio, save_rate, subtype="PCM_16")
 
         print(f"\n  Saved: {self.output_path}")
+        print(f"  Sample rate: {save_rate} Hz")
         print(f"  Duration: {duration:.2f}s  ({len(audio)} samples)")
         print(f"  Range: [{audio.min()}, {audio.max()}]")
         self._print_next_steps()

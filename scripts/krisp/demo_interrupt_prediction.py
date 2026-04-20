@@ -35,6 +35,7 @@ Requirements:
 """
 
 import argparse
+import asyncio
 import base64
 import io
 import os
@@ -60,7 +61,7 @@ if _env_file.exists():
 try:
     import numpy as np
     import soundfile as sf
-    from audio_file_utils import read_audio_file, write_audio_file
+    from audio_file_utils import read_audio_file, resample_audio, write_audio_file
 except ImportError as e:
     print(f"Error: Missing required dependencies: {e}")
     print("Install with: pip install soundfile numpy")
@@ -73,6 +74,11 @@ if src_dir.exists() and str(src_dir) not in sys.path:
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams, VADState
+from pipecat.frames.frames import InputAudioRawFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame
+from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy import (
+    KrispVivaIPUserTurnStartStrategy,
+)
 
 
 AVAILABLE_STRATEGIES = ["krisp-ip", "vad"]
@@ -83,21 +89,11 @@ AVAILABLE_STRATEGIES = ["krisp-ip", "vad"]
 # ---------------------------------------------------------------------------
 
 @dataclass
-class IPEvent:
-    """A single IP model evaluation at a point in time."""
-
-    timestamp: float
-    probability: float
-    is_interruption: bool
-
-
-@dataclass
 class StrategyResult:
     """Results for one interruption strategy."""
 
     name: str
     interruption_times: List[float] = field(default_factory=list)
-    ip_events: List[IPEvent] = field(default_factory=list)
     init_time_ms: float = 0.0
 
 
@@ -151,39 +147,10 @@ def _build_annotated_audio(
 
 
 # ---------------------------------------------------------------------------
-# IP session
-# ---------------------------------------------------------------------------
-
-def _create_ip_session(model_path: str, sample_rate: int, frame_duration_ms: int):
-    """Create a Krisp IP session. Returns (session, samples_per_frame)."""
-    import krisp_audio
-
-    from pipecat.audio.krisp_instance import (
-        KrispVivaSDKManager,
-        int_to_krisp_frame_duration,
-        int_to_krisp_sample_rate,
-    )
-
-    KrispVivaSDKManager.acquire()
-
-    model_info = krisp_audio.ModelInfo()
-    model_info.path = model_path
-
-    ip_cfg = krisp_audio.IpSessionConfig()
-    ip_cfg.inputSampleRate = int_to_krisp_sample_rate(sample_rate)
-    ip_cfg.inputFrameDuration = int_to_krisp_frame_duration(frame_duration_ms)
-    ip_cfg.modelInfo = model_info
-
-    session = krisp_audio.IpFloat.create(ip_cfg)
-    samples_per_frame = int(sample_rate * frame_duration_ms / 1000)
-    return session, samples_per_frame
-
-
-# ---------------------------------------------------------------------------
 # Core processing
 # ---------------------------------------------------------------------------
 
-def process_audio(
+async def process_audio(
     input_path: str,
     strategy_names: List[str],
     model_path: Optional[str] = None,
@@ -193,6 +160,10 @@ def process_audio(
     verbose: bool = False,
 ) -> None:
     """Process audio through multiple interruption strategies and compare.
+
+    Uses ``KrispVivaIPUserTurnStartStrategy`` from the pipecat integration
+    rather than calling the Krisp SDK directly, so the demo always stays in
+    sync with the pipeline behaviour.
 
     Args:
         input_path: Path to user audio file.
@@ -204,9 +175,13 @@ def process_audio(
     """
     user_audio, sample_rate = read_audio_file(input_path, verbose=True)
     duration_secs = len(user_audio) / sample_rate
-    num_samples = len(user_audio)
 
     print(f"\nAudio: {duration_secs:.2f}s, {sample_rate} Hz")
+
+    # Resample to 16 kHz if needed (Silero VAD only supports 8/16 kHz)
+    user_audio, sample_rate = resample_audio(user_audio, sample_rate, 16000, verbose=True)
+    duration_secs = len(user_audio) / sample_rate
+    num_samples = len(user_audio)
 
     # Initialize VAD (shared across all strategies)
     print("\nInitializing Silero VAD...")
@@ -214,9 +189,8 @@ def process_audio(
     vad.set_sample_rate(sample_rate)
     print(f"  Silero VAD ready (confidence={vad.params.confidence}, stop_secs=0.2)")
 
-    # Initialize IP session if krisp-ip strategy is requested
-    ip_session = None
-    samples_per_frame = None
+    # Initialize the pipecat IP strategy if krisp-ip is requested
+    ip_strategy: Optional[KrispVivaIPUserTurnStartStrategy] = None
     ip_init_ms = 0.0
     use_ip = "krisp-ip" in strategy_names
 
@@ -224,13 +198,15 @@ def process_audio(
         if not model_path:
             print("Error: krisp-ip strategy requires KRISP_VIVA_IP_MODEL_PATH")
             sys.exit(1)
-        print("\nInitializing Krisp IP model...")
+        print("\nInitializing Krisp IP strategy (pipecat integration)...")
         t0 = time.time()
-        ip_session, samples_per_frame = _create_ip_session(
-            model_path, sample_rate, frame_duration_ms
+        ip_strategy = KrispVivaIPUserTurnStartStrategy(
+            model_path=model_path,
+            threshold=threshold,
+            frame_duration_ms=frame_duration_ms,
         )
         ip_init_ms = (time.time() - t0) * 1000
-        print(f"  IP model ready in {ip_init_ms:.1f}ms (threshold={threshold})")
+        print(f"  IP strategy ready in {ip_init_ms:.1f}ms (threshold={threshold})")
 
     # Prepare per-strategy results
     results: Dict[str, StrategyResult] = {}
@@ -238,7 +214,7 @@ def process_audio(
         init_ms = ip_init_ms if name == "krisp-ip" else 0.0
         results[name] = StrategyResult(name=name, init_time_ms=init_ms)
 
-    frame_size = samples_per_frame if samples_per_frame else int(sample_rate * frame_duration_ms / 1000)
+    frame_size = int(sample_rate * frame_duration_ms / 1000)
 
     print(f"\nProcessing audio...")
     print(f"  Frame size: {frame_size} samples ({frame_duration_ms}ms)")
@@ -250,11 +226,10 @@ def process_audio(
     prev_vad_state: VADState = VADState.QUIET
     vad_speaking = False
 
-    # Per-strategy state: once a strategy fires, the bot stops and
-    # that strategy is no longer evaluated (matches real pipeline behavior).
+    # Per-strategy state: tracks whether a strategy already fired during the
+    # current speech segment.  Reset on each VAD stop so every segment is
+    # evaluated independently (regression-test mode).
     strategy_fired: Dict[str, bool] = {name: False for name in strategy_names}
-    ip_decision_made = False
-    ip_audio_buffer = bytearray()
 
     frames_processed = 0
 
@@ -283,70 +258,39 @@ def process_audio(
         if vad_just_started:
             vad_speaking = True
             current_speech_start = timestamp
-            ip_decision_made = False
-            ip_audio_buffer.clear()
 
-            # VAD strategy: first speech start = interruption, then bot stops
-            if "vad" in results and not strategy_fired["vad"]:
+            # VAD strategy: every speech start = interruption
+            if "vad" in results and not strategy_fired.get("vad", False):
                 results["vad"].interruption_times.append(timestamp)
                 strategy_fired["vad"] = True
                 if verbose:
                     print(f"  [vad] Interruption at {timestamp:.2f}s (VAD speech start)")
+
+            # Feed VAD-started frame to the IP strategy
+            if ip_strategy:
+                await ip_strategy.process_frame(VADUserStartedSpeakingFrame())
 
         if vad_just_stopped:
             vad_speaking = False
             if current_speech_start is not None:
                 speech_segments.append((current_speech_start, timestamp))
                 current_speech_start = None
-            ip_decision_made = False
-            ip_audio_buffer.clear()
+            # Feed VAD-stopped frame to the IP strategy (resets its state)
+            if ip_strategy:
+                await ip_strategy.process_frame(VADUserStoppedSpeakingFrame())
+            # Reset per-segment flags so the next speech segment is evaluated
+            for k in strategy_fired:
+                strategy_fired[k] = False
 
-        # Krisp IP strategy: feed audio during speech, classify
-        if (
-            use_ip
-            and not strategy_fired.get("krisp-ip", False)
-            and vad_speaking
-            and not ip_decision_made
-            and ip_session is not None
-            and samples_per_frame is not None
-        ):
-            ip_audio_buffer.extend(frame_bytes)
-
-            total_ip_samples = len(ip_audio_buffer) // 2
-            num_complete = total_ip_samples // samples_per_frame
-
-            if num_complete > 0:
-                bytes_to_process = num_complete * samples_per_frame * 2
-                audio_to_process = bytes(ip_audio_buffer[:bytes_to_process])
-                ip_audio_buffer = ip_audio_buffer[bytes_to_process:]
-
-                audio_int16 = np.frombuffer(audio_to_process, dtype=np.int16)
-                audio_float32 = audio_int16.astype(np.float32) / 32768.0
-                ip_frames = audio_float32.reshape(-1, samples_per_frame)
-
-                for ip_frame in ip_frames:
-                    ip_prob = ip_session.process(ip_frame.tolist(), True)
-                    is_interruption = ip_prob >= threshold
-
-                    event = IPEvent(
-                        timestamp=timestamp,
-                        probability=ip_prob,
-                        is_interruption=is_interruption,
-                    )
-                    results["krisp-ip"].ip_events.append(event)
-
-                    if verbose:
-                        marker = " *** INTERRUPTION ***" if is_interruption else ""
-                        print(
-                            f"  [krisp-ip] [{timestamp:.2f}s] prob={ip_prob:.3f}"
-                            f" (threshold={threshold}){marker}"
-                        )
-
-                    if is_interruption:
-                        results["krisp-ip"].interruption_times.append(timestamp)
-                        ip_decision_made = True
-                        strategy_fired["krisp-ip"] = True
-                        break
+        # Feed audio to the IP strategy; it handles buffering and decision internally
+        if ip_strategy and not strategy_fired.get("krisp-ip", False):
+            audio_frame = InputAudioRawFrame(
+                audio=frame_bytes, sample_rate=sample_rate, num_channels=1,
+            )
+            result = await ip_strategy.process_frame(audio_frame)
+            if result == ProcessFrameResult.STOP:
+                results["krisp-ip"].interruption_times.append(timestamp)
+                strategy_fired["krisp-ip"] = True
 
         prev_vad_state = vad_state
 
@@ -402,10 +346,8 @@ def process_audio(
     print(f"\n  Listen to the annotated WAV files -- beeps mark detected interruptions.")
 
     # Cleanup
-    if use_ip:
-        from pipecat.audio.krisp_instance import KrispVivaSDKManager
-
-        KrispVivaSDKManager.release()
+    if ip_strategy:
+        await ip_strategy.cleanup()
     print("\nDone.")
 
 
@@ -508,44 +450,24 @@ def _format_summary(
             lines.append(f"  Init time: {result.init_time_ms:.1f}ms")
 
         if result.interruption_times:
-            first = result.interruption_times[0]
-            lines.append(f"  Interruption at: {first:.2f}s")
+            for idx, t in enumerate(result.interruption_times, 1):
+                lines.append(f"  Interruption {idx}: {t:.2f}s")
         else:
             lines.append(f"  No interruptions detected")
 
-        if result.ip_events:
-            probs = [e.probability for e in result.ip_events]
-            lines.append(f"  IP evaluations: {len(probs)}")
-            lines.append(f"  IP prob mean/max: {sum(probs)/len(probs):.3f} / {max(probs):.3f}")
-
         lines.append("")
 
-    # Comparison verdict
-    if len(results) >= 2:
-        lines.append("Comparison:")
-        items = list(results.items())
-        for name, result in items:
-            if result.interruption_times:
-                first = result.interruption_times[0]
-                lines.append(f"  {name}: bot interrupted at {first:.2f}s")
-            else:
-                lines.append(f"  {name}: no interruption (bot plays full audio)")
-
-        # Highlight the difference
-        times = {n: r.interruption_times[0] for n, r in results.items() if r.interruption_times}
-        if len(times) >= 2:
-            earliest = min(times, key=times.get)
-            latest = max(times, key=times.get)
-            diff = times[latest] - times[earliest]
-            if diff > 0.01:
-                lines.append(
-                    f"  {earliest} interrupts {diff:.2f}s earlier than {latest}"
-                )
-                if earliest == "vad":
-                    lines.append(
-                        f"  (vad fires on first speech -- likely a backchannel;"
-                        f" krisp-ip waits for genuine interruption)"
-                    )
+    # Per-segment comparison
+    if len(results) >= 2 and speech_segments:
+        lines.append("Per-segment comparison:")
+        for seg_idx, (seg_start, seg_end) in enumerate(speech_segments, 1):
+            lines.append(f"  Segment {seg_idx} [{seg_start:.2f}s - {seg_end:.2f}s]:")
+            for name, result in results.items():
+                seg_ints = [t for t in result.interruption_times if seg_start <= t <= seg_end + 0.5]
+                if seg_ints:
+                    lines.append(f"    {name}: interrupted at {seg_ints[0]:.2f}s")
+                else:
+                    lines.append(f"    {name}: no interruption (backchannel)")
         lines.append("")
 
     lines.append(sep)
@@ -582,34 +504,16 @@ def _generate_html_report(
         color = STRATEGY_COLORS.get(name, "#2196F3")
         ints_json = ", ".join(f"{t:.3f}" for t in result.interruption_times)
 
-        events_json = ""
-        if result.ip_events:
-            events_json = ", ".join(
-                f'{{"t":{e.timestamp:.3f},"p":{e.probability:.4f},'
-                f'"int":{str(e.is_interruption).lower()}}}'
-                for e in result.ip_events
-            )
-
-        probs = [e.probability for e in result.ip_events]
-        mean_prob = sum(probs) / len(probs) if probs else 0
-        max_prob = max(probs) if probs else 0
-
         audio_uri = ""
         if annotated_audio and name in annotated_audio:
             audio_uri = _encode_wav_base64(annotated_audio[name], sample_rate)
-
-        first_t = result.interruption_times[0] if result.interruption_times else -1
 
         strategy_blocks.append(
             f'{{"name":"{name}","color":"{color}",'
             f'"init_ms":{result.init_time_ms:.1f},'
             f'"n_int":{len(result.interruption_times)},'
-            f'"first_t":{first_t:.3f},'
-            f'"mean_prob":{mean_prob:.3f},"max_prob":{max_prob:.3f},'
-            f'"n_eval":{len(result.ip_events)},'
             f'"audio":"{audio_uri}",'
-            f'"ints":[{ints_json}],'
-            f'"events":[{events_json}]}}'
+            f'"ints":[{ints_json}]}}'
         )
     strategies_json = ",\n      ".join(strategy_blocks)
 
@@ -689,8 +593,6 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
                  font-size: 0.85em; }}
   .card .stat .label {{ color: #888; }}
   .card .note {{ color: #ffb74d; font-size: 0.8em; margin-top: 8px; }}
-  .threshold-line {{ position: absolute; width: 100%; border-top: 1px dashed #ff9800;
-                     z-index: 1; }}
   footer {{ margin-top: 24px; color: #555; font-size: 0.75em; text-align: center; }}
 </style>
 </head>
@@ -713,14 +615,6 @@ IP threshold: {threshold} &mdash; {n_speech} speech segments</p>
   </div>
 </div>
 <div class="summary" id="cards"></div>
-<div class="container" id="prob-section" style="margin-top:20px;display:none">
-  <h3 style="margin-bottom:12px;font-size:1em;">IP Probability Over Time</h3>
-  <div id="prob-chart" style="position:relative;height:60px;background:#0f3460;border-radius:4px">
-  </div>
-  <div style="display:flex;justify-content:space-between;font-size:0.7em;color:#666;margin-top:4px">
-    <span>0.0</span><span>threshold={threshold}</span><span>1.0</span>
-  </div>
-</div>
 <footer>Generated by demo_interrupt_prediction.py</footer>
 
 <script>
@@ -877,39 +771,15 @@ STRATEGIES.forEach(s => {{
   else if (s.n_int === 0)
     note = '<div class="note">No interruptions -- all speech classified as backchannel</div>';
 
-  let ipStats = '';
-  if (s.n_eval > 0) {{
-    ipStats = '<div class="stat"><span class="label">IP evaluations</span><span>' + s.n_eval + '</span></div>'
-      + '<div class="stat"><span class="label">Mean / Max prob</span><span>' +
-        s.mean_prob.toFixed(3) + ' / ' + s.max_prob.toFixed(3) + '</span></div>';
-  }}
-
+  let intsStr = s.n_int > 0 ? s.ints.map(t => t.toFixed(2) + 's').join(', ') : 'N/A';
   cards.innerHTML += '<div class="card"><h3 style="color:' + s.color + '">' + s.name + '</h3>'
-    + '<div class="stat"><span class="label">Interruption detected</span><span>'
-    + (s.n_int > 0 ? 'Yes' : 'No') + '</span></div>'
-    + '<div class="stat"><span class="label">Interrupt at</span><span>' +
-        (s.first_t >= 0 ? s.first_t.toFixed(2) + 's' : 'N/A') + '</span></div>'
+    + '<div class="stat"><span class="label">Interruptions detected</span><span>'
+    + s.n_int + '</span></div>'
+    + '<div class="stat"><span class="label">Interrupt at</span><span>' + intsStr + '</span></div>'
     + (s.init_ms > 0 ? '<div class="stat"><span class="label">Init time</span><span>' +
         s.init_ms.toFixed(0) + 'ms</span></div>' : '')
-    + ipStats
     + note + '</div>';
 }});
-
-// ---- IP Probability chart (only if krisp-ip has events) ----
-const ipStrategy = STRATEGIES.find(s => s.events && s.events.length > 0);
-if (ipStrategy) {{
-  document.getElementById('prob-section').style.display = 'block';
-  const chart = document.getElementById('prob-chart');
-  const thresholdPct = (1 - THRESHOLD) * 100;
-  chart.innerHTML = '<div class="threshold-line" style="top:' + thresholdPct + '%"></div>';
-  ipStrategy.events.forEach(e => {{
-    const h = Math.max(2, e.p * 100);
-    const color = e.int ? '#ff1744' : (e.p > 0.3 ? '#ff9800' : '#4ecca3');
-    chart.innerHTML += '<div style="position:absolute;bottom:0;left:' + pct(e.t) +
-      ';width:3px;height:' + h + '%;background:' + color +
-      ';border-radius:1px;opacity:0.8"></div>';
-  }});
-}}
 </script>
 </body>
 </html>"""
@@ -995,14 +865,16 @@ Environment variables:
             print(f"Error: IP model file not found: {model_path}")
             sys.exit(1)
 
-    process_audio(
-        input_path=args.input,
-        strategy_names=strategy_names,
-        model_path=model_path,
-        threshold=args.threshold,
-        frame_duration_ms=args.frame_duration,
-        output_dir=args.output_dir,
-        verbose=args.verbose,
+    asyncio.run(
+        process_audio(
+            input_path=args.input,
+            strategy_names=strategy_names,
+            model_path=model_path,
+            threshold=args.threshold,
+            frame_duration_ms=args.frame_duration,
+            output_dir=args.output_dir,
+            verbose=args.verbose,
+        )
     )
 
 
