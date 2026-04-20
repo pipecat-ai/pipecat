@@ -43,7 +43,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use KrispVivaIPUserTurnStartStrategy, you need to install krisp_audio."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
@@ -121,6 +121,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         # State tracking
         self._speech_active = False
+        self._vad_flag = False
         self._audio_buffer = bytearray()
         self._decision_made = False
 
@@ -167,7 +168,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
     def _reset_state(self):
         """Reset speech tracking state for the next candidate interruption."""
         self._speech_active = False
-        self._audio_buffer.clear()
+        self._vad_flag = False
         self._decision_made = False
 
     async def reset(self):
@@ -211,12 +212,22 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         logger.trace("Krisp VIVA IP: VAD speech started, collecting audio for classification")
         self._speech_active = True
-        self._audio_buffer.clear()
+        self._vad_flag = True
         self._decision_made = False
         return ProcessFrameResult.CONTINUE
 
     async def _handle_audio(self, frame: InputAudioRawFrame) -> ProcessFrameResult:
         """Feed audio to the IP model and check for genuine interruption.
+
+        Every frame is passed to the IP model regardless of speech state so
+        that the model maintains continuous internal state (matching the
+        standalone Krisp SDK behaviour).  ``_vad_flag`` is forwarded as
+        the per-frame VAD input to the model, while ``_speech_active``
+        gates the threshold evaluation.  This separation is important
+        because the IP model may output a high probability one frame
+        *after* the raw VAD goes silent; ``_speech_active`` (set from
+        the debounced VAD in the pipeline) stays True long enough to
+        catch that trailing output.
 
         Args:
             frame: Raw audio input frame.
@@ -224,9 +235,6 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         Returns:
             STOP if the model detects a genuine interruption, CONTINUE otherwise.
         """
-        if not self._speech_active or self._decision_made:
-            return ProcessFrameResult.CONTINUE
-
         self._ensure_session(frame.sample_rate)
 
         if self._ip_session is None or self._samples_per_frame is None:
@@ -252,9 +260,9 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         frames = audio_float32.reshape(-1, self._samples_per_frame)
 
         for ip_frame in frames:
-            ip_prob = self._ip_session.process(ip_frame.tolist(), self._speech_active)
+            ip_prob = self._ip_session.process(ip_frame.tolist(), self._vad_flag)
 
-            if ip_prob >= self._threshold:
+            if self._speech_active and not self._decision_made and ip_prob >= self._threshold:
                 logger.debug(
                     f"Krisp VIVA IP: genuine interruption detected (prob={ip_prob:.3f}, "
                     f"threshold={self._threshold})"
