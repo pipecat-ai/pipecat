@@ -165,7 +165,10 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             result = await strategy.process_frame(self._audio_frame())
 
             self.assertEqual(result, ProcessFrameResult.CONTINUE)
-            self.mock_ip_session.process.assert_not_called()
+            # process() is still called (continuous state), but with vad_flag=False
+            self.mock_ip_session.process.assert_called()
+            args = self.mock_ip_session.process.call_args[0]
+            self.assertFalse(args[1])  # vad_flag should be False
         finally:
             await strategy.cleanup()
 
@@ -182,7 +185,10 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             result = await strategy.process_frame(self._audio_frame())
 
             self.assertEqual(result, ProcessFrameResult.CONTINUE)
-            self.mock_ip_session.process.assert_not_called()
+            # process() is still called (continuous state), but with vad_flag=False
+            self.mock_ip_session.process.assert_called()
+            args = self.mock_ip_session.process.call_args[0]
+            self.assertFalse(args[1])  # vad_flag should be False
         finally:
             await strategy.cleanup()
 
@@ -193,7 +199,11 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         try:
             result = await strategy.process_frame(self._audio_frame())
             self.assertEqual(result, ProcessFrameResult.CONTINUE)
-            self.mock_ip_session.process.assert_not_called()
+            # process() is called (continuous state) even before VAD start,
+            # but _speech_active=False prevents triggering despite high prob
+            self.mock_ip_session.process.assert_called()
+            args = self.mock_ip_session.process.call_args[0]
+            self.assertFalse(args[1])  # vad_flag should be False
         finally:
             await strategy.cleanup()
 
