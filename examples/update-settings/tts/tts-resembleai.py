@@ -50,15 +50,15 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = ResembleAITTSService(
-        api_key=os.getenv("RESEMBLE_API_KEY"),
-        settings=ResembleAITTSService.Settings(voice=os.getenv("RESEMBLE_VOICE_UUID")),
+        api_key=os.environ["RESEMBLE_API_KEY"],
+        settings=ResembleAITTSService.Settings(voice=os.environ["RESEMBLE_VOICE_UUID"]),
     )
 
     llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
@@ -103,7 +103,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating ResembleAI TTS settings: voice (changed)")
         await task.queue_frame(
             TTSUpdateSettingsFrame(
-                delta=ResembleAITTSService.Settings(voice=os.getenv("RESEMBLE_VOICE_UUID_ALT"))
+                delta=ResembleAITTSService.Settings(voice=os.environ["RESEMBLE_VOICE_UUID_ALT"])
             )
         )
 

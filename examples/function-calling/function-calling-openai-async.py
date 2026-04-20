@@ -70,7 +70,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = OpenAISTTService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAISTTService.Settings(
             model="gpt-4o-transcribe",
             prompt="Expect words related weather, such as temperature and conditions. And restaurant names.",
@@ -78,7 +78,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     tts = OpenAITTSService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAITTSService.Settings(
             voice="ballad",
         ),
@@ -86,7 +86,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         enable_async_tool_cancellation=True,
         settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",

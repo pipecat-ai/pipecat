@@ -74,7 +74,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     async with aiohttp.ClientSession() as session:
         stt = SpeechmaticsSTTService(
-            api_key=os.getenv("SPEECHMATICS_API_KEY"),
+            api_key=os.environ["SPEECHMATICS_API_KEY"],
             settings=SpeechmaticsSTTService.Settings(
                 language=Language.EN,
                 speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
@@ -82,7 +82,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         tts = SpeechmaticsTTSService(
-            api_key=os.getenv("SPEECHMATICS_API_KEY"),
+            api_key=os.environ["SPEECHMATICS_API_KEY"],
             settings=SpeechmaticsTTSService.Settings(
                 voice="sarah",
             ),
@@ -90,7 +90,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
+            api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAILLMService.Settings(
                 temperature=0.75,
                 system_instruction="You are a helpful British assistant called Sarah in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Always include punctuation in your responses. Give very short replies - do not give longer replies unless strictly necessary. Respond to what the user said in a concise, funny, creative and helpful way. Use `<Sn/>` tags to identify different speakers - do not use tags in your replies. Do not respond to speakers within `<PASSIVE/>` tags unless explicitly asked to.",

@@ -42,14 +42,14 @@ class SwitchLanguage(ParallelPipeline):
         self._current_language = "English"
 
         english_tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
+            api_key=os.environ["CARTESIA_API_KEY"],
             settings=CartesiaTTSService.Settings(
                 voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
             ),
         )
 
         spanish_tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
+            api_key=os.environ["CARTESIA_API_KEY"],
             settings=CartesiaTTSService.Settings(
                 voice="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
             ),
@@ -101,7 +101,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        api_key=os.environ["DEEPGRAM_API_KEY"],
         settings=DeepgramSTTService.Settings(
             language="multi",
         ),
@@ -110,7 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = SwitchLanguage()
 
     llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way. You can speak the following languages: 'English' and 'Spanish'.",
         ),

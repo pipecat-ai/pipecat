@@ -52,7 +52,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = SonioxSTTService(
-        api_key=os.getenv("SONIOX_API_KEY"),
+        api_key=os.environ["SONIOX_API_KEY"],
         settings=SonioxSTTService.Settings(
             # Add language hints to use a specific language
             # Add strict mode to enforce the language hints
@@ -62,14 +62,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
     )
 
     llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),

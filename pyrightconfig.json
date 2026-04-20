@@ -13,10 +13,7 @@
     "src/pipecat/pipeline",
     "src/pipecat/runner"
   ],
-  "exclude": [
-    "**/*_pb2.py",
-    "**/__pycache__"
-  ],
+  "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
     "src/pipecat/adapters",
     "src/pipecat/audio",
@@ -28,7 +25,6 @@
     "src/pipecat/transports",
     "src/pipecat/utils",
     "tests",
-    "examples",
     "scripts",
     "docs"
   ],

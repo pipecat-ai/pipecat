@@ -57,7 +57,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
         stt = ElevenLabsSTTService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            api_key=os.environ["ELEVENLABS_API_KEY"],
             aiohttp_session=session,
         )
 
@@ -70,7 +70,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
+            api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAILLMService.Settings(
                 system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
             ),

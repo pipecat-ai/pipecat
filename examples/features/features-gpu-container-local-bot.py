@@ -56,10 +56,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = DeepgramTTSService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        api_key=os.environ["DEEPGRAM_API_KEY"],
         settings=DeepgramTTSService.Settings(
             voice="aura-asteria-en",
         ),
@@ -68,7 +68,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(
         # To use OpenAI
-        # api_key=os.getenv("OPENAI_API_KEY"),
+        # api_key=os.environ["OPENAI_API_KEY"],
         # Or, to use a local vLLM (or similar) api server
         settings=OpenAILLMService.Settings(
             model="meta-llama/Meta-Llama-3-8B-Instruct",

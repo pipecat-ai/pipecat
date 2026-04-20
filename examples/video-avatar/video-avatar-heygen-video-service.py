@@ -59,24 +59,24 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
     async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
         tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
+            api_key=os.environ["CARTESIA_API_KEY"],
             settings=CartesiaTTSService.Settings(
                 voice="00967b2f-88a6-4a31-8153-110a92134b9f",
             ),
         )
 
         llm = GoogleLLMService(
-            api_key=os.getenv("GOOGLE_API_KEY"),
+            api_key=os.environ["GOOGLE_API_KEY"],
             settings=GoogleLLMService.Settings(
                 system_instruction="You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
             ),
         )
 
         heyGen = HeyGenVideoService(
-            api_key=os.getenv("HEYGEN_LIVE_AVATAR_API_KEY"),
+            api_key=os.environ["HEYGEN_LIVE_AVATAR_API_KEY"],
             service_type=ServiceType.LIVE_AVATAR,
             session=session,
             session_request=LiveAvatarNewSessionRequest(

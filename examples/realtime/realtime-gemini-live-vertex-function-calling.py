@@ -110,8 +110,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GeminiLiveVertexLLMService(
         credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
-        project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
-        location=os.getenv("GOOGLE_CLOUD_LOCATION"),
+        project_id=os.environ["GOOGLE_CLOUD_PROJECT_ID"],
+        location=os.environ["GOOGLE_CLOUD_LOCATION"],
         settings=GeminiLiveVertexLLMService.Settings(
             system_instruction=system_instruction,
             voice="Puck",  # Aoede, Charon, Fenrir, Kore, Puck

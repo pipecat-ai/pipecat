@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = AzureSTTService(
-        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+        api_key=os.environ["AZURE_SPEECH_API_KEY"],
         region=os.getenv("AZURE_SPEECH_REGION"),
     )
 

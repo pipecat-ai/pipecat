@@ -57,11 +57,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         settings=GoogleSTTService.Settings(
             languages=[Language.EN_US],
         ),
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+        credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
     )
 
     tts = GeminiTTSService(
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+        credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
         settings=GeminiTTSService.Settings(
             model="gemini-2.5-flash-tts",
             voice="Charon",
@@ -71,7 +71,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     llm = GoogleLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
         model="gemini-2.5-flash",
         settings=GoogleLLMService.Settings(
             system_instruction="""You are a helpful assistant in a voice conversation.

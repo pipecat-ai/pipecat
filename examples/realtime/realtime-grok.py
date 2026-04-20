@@ -179,7 +179,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Create the Grok Realtime LLM service
     llm = GrokRealtimeLLMService(
-        api_key=os.getenv("XAI_API_KEY"),
+        api_key=os.environ["XAI_API_KEY"],
         settings=GrokRealtimeLLMService.Settings(
             system_instruction="""You are a helpful and friendly AI assistant powered by Grok.
 

@@ -112,8 +112,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     llm = AzureRealtimeLLMService(
-        api_key=os.getenv("AZURE_REALTIME_API_KEY"),
-        base_url=os.getenv("AZURE_REALTIME_BASE_URL"),
+        api_key=os.environ["AZURE_REALTIME_API_KEY"],
+        base_url=os.environ["AZURE_REALTIME_BASE_URL"],
         settings=AzureRealtimeLLMService.Settings(
             system_instruction="""You are a helpful and friendly AI.
 

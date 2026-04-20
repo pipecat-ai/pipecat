@@ -84,7 +84,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # llm_model can be any supported model or an Inworld Router.
     # See: https://docs.inworld.ai/router/introduction
     llm = InworldRealtimeLLMService(
-        api_key=os.getenv("INWORLD_API_KEY"),
+        api_key=os.environ["INWORLD_API_KEY"],
         llm_model="xai/grok-4-1-fast-non-reasoning",
         voice="Sarah",
         settings=InworldRealtimeLLMService.Settings(

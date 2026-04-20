@@ -23,8 +23,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -54,15 +52,6 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        settings=CartesiaTTSService.Settings(
-            voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-        ),
-    )
-
     system = f"""
     You are a helpful LLM in a voice call.
     Your goal is to answer questions about the user's GitHub repositories and account.
@@ -85,7 +74,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tools = await mcp.get_tools_schema()
 
         llm = GeminiLiveLLMService(
-            api_key=os.getenv("GOOGLE_API_KEY"),
+            api_key=os.environ["GOOGLE_API_KEY"],
             system_instruction=system,
             tools=tools,
         )
