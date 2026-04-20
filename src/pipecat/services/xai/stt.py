@@ -321,7 +321,6 @@ class XAISTTService(WebsocketSTTService):
     async def _handle_message(self, message: dict[str, Any]):
         """Branch on xAI STT event type."""
         msg_type = message.get("type")
-        print(f"xAI STT message: {message}")
 
         if msg_type == "transcript.created":
             self._session_ready.set()
