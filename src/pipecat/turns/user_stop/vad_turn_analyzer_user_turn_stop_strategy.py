@@ -12,8 +12,6 @@ indicates COMPLETE, making it suitable for speech-to-speech pipelines
 where transcriptions arrive too late to be useful for turn decisions.
 """
 
-from typing import Optional
-
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
 from pipecat.frames.frames import (
     Frame,
@@ -126,7 +124,7 @@ class VADTurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         if state == EndOfTurnState.COMPLETE:
             await self.trigger_user_turn_stopped()
 
-    async def _handle_prediction_result(self, result: Optional[MetricsData]):
+    async def _handle_prediction_result(self, result: MetricsData | None):
         """Handle a prediction result event from the turn analyzer."""
         if result:
             await self.push_frame(MetricsFrame(data=[result]))

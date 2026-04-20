@@ -7,7 +7,6 @@
 """Tests for VADTurnAnalyzerUserTurnStopStrategy."""
 
 import unittest
-from typing import Optional, Tuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -40,7 +39,7 @@ class MockTurnAnalyzer(BaseTurnAnalyzer):
         super().__init__()
         self._append_audio_state = EndOfTurnState.INCOMPLETE
         self._analyze_state = EndOfTurnState.INCOMPLETE
-        self._prediction: Optional[MetricsData] = None
+        self._prediction: MetricsData | None = None
         self._speech_triggered = False
 
     @property
@@ -54,7 +53,7 @@ class MockTurnAnalyzer(BaseTurnAnalyzer):
     def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
         return self._append_audio_state
 
-    async def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    async def analyze_end_of_turn(self) -> tuple[EndOfTurnState, MetricsData | None]:
         return self._analyze_state, self._prediction
 
     def update_vad_start_secs(self, vad_start_secs: float):
