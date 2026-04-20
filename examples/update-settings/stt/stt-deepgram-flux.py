@@ -51,7 +51,16 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramFluxSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # Start with the multilingual model and broad hints so Flux can auto-detect
+    # across English and Spanish. TranscriptionFrame.language will reflect
+    # whichever language Flux detected for each turn.
+    stt = DeepgramFluxSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        settings=DeepgramFluxSTTService.Settings(
+            model="flux-general-multi",
+            language_hints=[Language.EN, Language.ES],
+        ),
+    )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -108,17 +117,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating Deepgram Flux STT settings: eot_threshold, keyterm")
         await task.queue_frame(
             STTUpdateSettingsFrame(
-                delta=DeepgramFluxSTTSettings(
+                delta=DeepgramFluxSTTService.Settings(
                     eot_threshold=0.8,
                     keyterm=["Pipecat", "Deepgram"],
                 )
             )
         )
 
+        # Detect-then-lock: narrow the hints to a single language mid-stream.
+        # Sent as a Configure message — no reconnect needed.
         await asyncio.sleep(10)
-        logger.info("Updating Deepgram Flux STT settings: language=es")
+        logger.info("Updating Deepgram Flux STT settings: language_hints=[es]")
         await task.queue_frame(
-            STTUpdateSettingsFrame(delta=DeepgramFluxSTTService.Settings(language=Language.ES))
+            STTUpdateSettingsFrame(
+                delta=DeepgramFluxSTTService.Settings(language_hints=[Language.ES])
+            )
         )
 
     @transport.event_handler("on_client_disconnected")

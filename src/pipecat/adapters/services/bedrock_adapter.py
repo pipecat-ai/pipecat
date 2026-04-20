@@ -10,7 +10,7 @@ import base64
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 from loguru import logger
 
@@ -29,9 +29,9 @@ from pipecat.processors.aggregators.llm_context import (
 class AWSBedrockLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking AWS Bedrock's LLM API."""
 
-    system: Optional[List[dict[str, Any]]]  # [{"text": "system message"}]
-    messages: List[dict[str, Any]]
-    tools: List[dict[str, Any]]
+    system: list[dict[str, Any]] | None  # [{"text": "system message"}]
+    messages: list[dict[str, Any]]
+    tools: list[dict[str, Any]]
     tool_choice: LLMContextToolChoice
 
 
@@ -48,7 +48,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         return "aws"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, *, system_instruction: Optional[str] = None
+        self, context: LLMContext, *, system_instruction: str | None = None
     ) -> AWSBedrockLLMInvocationParams:
         """Get AWS Bedrock-specific LLM invocation parameters from a universal LLM context.
 
@@ -79,7 +79,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             "tool_choice": context.tool_choice,
         }
 
-    def get_messages_for_logging(self, context) -> List[Dict[str, Any]]:
+    def get_messages_for_logging(self, context) -> list[dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about AWS Bedrock.
 
         Removes or truncates sensitive data like image content for safe logging.
@@ -109,14 +109,14 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
     class ConvertedMessages:
         """Container for Bedrock-formatted messages converted from universal context."""
 
-        messages: List[dict[str, Any]]
-        system: Optional[str]
+        messages: list[dict[str, Any]]
+        system: str | None
 
     def _from_universal_context_messages(
         self,
-        universal_context_messages: List[LLMContextMessage],
+        universal_context_messages: list[LLMContextMessage],
         *,
-        system_instruction: Optional[str] = None,
+        system_instruction: str | None = None,
     ) -> ConvertedMessages:
         system = None
 
@@ -305,7 +305,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         return message
 
     @staticmethod
-    def _to_bedrock_function_format(function: FunctionSchema) -> Dict[str, Any]:
+    def _to_bedrock_function_format(function: FunctionSchema) -> dict[str, Any]:
         """Convert a function schema to Bedrock's tool format.
 
         Args:
@@ -328,7 +328,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             }
         }
 
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Dict[str, Any]]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
         """Convert function schemas to Bedrock's function-calling format.
 
         Args:

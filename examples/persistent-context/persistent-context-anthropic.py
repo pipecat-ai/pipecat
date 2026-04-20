@@ -84,7 +84,7 @@ async def load_conversation(params: FunctionCallParams):
     filename = params.arguments["filename"]
     logger.debug(f"loading conversation from {filename}")
     try:
-        with open(filename, "r") as file:
+        with open(filename) as file:
             params.context.set_messages(json.load(file))
             logger.debug(
                 f"loaded conversation from {filename}\n{json.dumps(params.context.get_messages(), indent=4)}"

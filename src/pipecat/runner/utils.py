@@ -32,7 +32,8 @@ Example::
 import json
 import os
 import re
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from fastapi import WebSocket
 from loguru import logger
@@ -373,7 +374,7 @@ def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
     return "\r\n".join(result) + "\r\n"
 
 
-def smallwebrtc_sdp_munging(sdp: str, host: Optional[str]) -> str:
+def smallwebrtc_sdp_munging(sdp: str, host: str | None) -> str:
     """Apply SDP modifications for SmallWebRTC compatibility.
 
     Args:
@@ -389,7 +390,7 @@ def smallwebrtc_sdp_munging(sdp: str, host: Optional[str]) -> str:
     return sdp
 
 
-def _get_transport_params(transport_key: str, transport_params: Dict[str, Callable]) -> Any:
+def _get_transport_params(transport_key: str, transport_params: dict[str, Callable]) -> Any:
     """Get transport parameters from factory function.
 
     Args:
@@ -415,9 +416,9 @@ def _get_transport_params(transport_key: str, transport_params: Dict[str, Callab
 
 async def _create_telephony_transport(
     websocket: WebSocket,
-    params: Optional[Any] = None,
-    transport_type: str = None,
-    call_data: dict = None,
+    params: Any,
+    transport_type: str,
+    call_data: dict,
 ) -> BaseTransport:
     """Create a telephony transport with pre-parsed WebSocket data.
 
@@ -431,12 +432,6 @@ async def _create_telephony_transport(
         Configured FastAPIWebsocketTransport ready for telephony use.
     """
     from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
-
-    if params is None:
-        raise ValueError(
-            "FastAPIWebsocketParams must be provided. "
-            "The serializer and add_wav_header will be set automatically."
-        )
 
     # Always set add_wav_header to False for telephony
     params.add_wav_header = False
@@ -488,7 +483,7 @@ async def _create_telephony_transport(
 
 
 async def create_transport(
-    runner_args: Any, transport_params: Dict[str, Callable]
+    runner_args: Any, transport_params: dict[str, Callable]
 ) -> BaseTransport:
     """Create a transport from runner arguments using factory functions.
 

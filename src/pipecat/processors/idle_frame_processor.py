@@ -7,7 +7,7 @@
 """Idle frame processor for timeout-based callback execution."""
 
 import asyncio
-from typing import Awaitable, Callable, List, Optional
+from collections.abc import Awaitable, Callable
 
 from pipecat.frames.frames import Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -26,7 +26,7 @@ class IdleFrameProcessor(FrameProcessor):
         *,
         callback: Callable[["IdleFrameProcessor"], Awaitable[None]],
         timeout: float,
-        types: Optional[List[type]] = None,
+        types: list[type] | None = None,
         **kwargs,
     ):
         """Initialize the idle frame processor.
@@ -86,5 +86,5 @@ class IdleFrameProcessor(FrameProcessor):
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
                 self._idle_event.clear()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await self._callback(self)

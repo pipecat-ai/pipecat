@@ -45,13 +45,13 @@ class TranscriptHandler:
         output_file: Optional path to file where transcript is saved. If None, outputs to log only.
     """
 
-    def __init__(self, output_file: Optional[str] = None):
+    def __init__(self, output_file: str | None = None):
         """Initialize handler with optional file output.
 
         Args:
             output_file: Path to output file. If None, outputs to log only.
         """
-        self.output_file: Optional[str] = output_file
+        self.output_file: str | None = output_file
         logger.debug(
             f"TranscriptHandler initialized {'with output_file=' + output_file if output_file else 'with log output only'}"
         )

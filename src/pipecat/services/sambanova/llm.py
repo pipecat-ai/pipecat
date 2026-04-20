@@ -8,7 +8,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 from loguru import logger
 from openai import AsyncStream
@@ -51,10 +51,10 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         self,
         *,
         api_key: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         base_url: str = "https://api.sambanova.ai/v1",
-        settings: Optional[Settings] = None,
-        **kwargs: Dict[Any, Any],
+        settings: Settings | None = None,
+        **kwargs: dict[Any, Any],
     ) -> None:
         """Initialize SambaNova LLM service.
 
@@ -88,9 +88,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
     def create_client(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        **kwargs: Dict[Any, Any],
+        api_key: str | None = None,
+        base_url: str | None = None,
+        **kwargs: dict[Any, Any],
     ) -> Any:
         """Create OpenAI-compatible client for SambaNova API endpoint.
 

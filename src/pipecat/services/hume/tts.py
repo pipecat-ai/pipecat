@@ -7,8 +7,9 @@
 import base64
 import os
 import warnings
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 import httpx
 from loguru import logger
@@ -93,18 +94,18 @@ class HumeTTSService(TTSService):
             trailing_silence: Seconds of silence to append at the end (0-5).
         """
 
-        description: Optional[str] = None
-        speed: Optional[float] = None
-        trailing_silence: Optional[float] = None
+        description: str | None = None
+        speed: float | None = None
+        trailing_silence: float | None = None
 
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        voice_id: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        sample_rate: Optional[int] = HUME_SAMPLE_RATE,
-        settings: Optional[Settings] = None,
+        api_key: str | None = None,
+        voice_id: str | None = None,
+        params: InputParams | None = None,
+        sample_rate: int | None = HUME_SAMPLE_RATE,
+        settings: Settings | None = None,
         **kwargs,
     ) -> None:
         """Initialize the HumeTTSService.

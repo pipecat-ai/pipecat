@@ -12,7 +12,6 @@ reporting patterns while maintaining compatibility with the Pipecat framework.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
@@ -50,8 +49,8 @@ class PerplexityLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.perplexity.ai",
-        model: Optional[str] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Perplexity LLM service.

@@ -9,8 +9,8 @@
 API to communicate with LiveAvatar Streaming API.
 """
 
-from enum import Enum
-from typing import Any, Dict, Optional
+from enum import StrEnum
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -28,8 +28,8 @@ class AvatarPersona(BaseModel):
         language (str): Language code for the avatar (default: "en").
     """
 
-    voice_id: Optional[str] = None
-    context_id: Optional[str] = None
+    voice_id: str | None = None
+    context_id: str | None = None
     language: str = "en"
 
 
@@ -47,14 +47,14 @@ class CustomSDKLiveKitConfig(BaseModel):
     livekit_client_token: str
 
 
-class VideoEncoding(str, Enum):
+class VideoEncoding(StrEnum):
     """Enum representing the video encoding."""
 
     H264 = "H264"
     VP8 = "VP8"
 
 
-class VideoQuality(str, Enum):
+class VideoQuality(StrEnum):
     """Enum representing different avatar quality levels."""
 
     low = "low"
@@ -84,10 +84,10 @@ class LiveAvatarNewSessionRequest(BaseModel):
 
     mode: str = "LITE"
     avatar_id: str
-    video_settings: Optional[VideoSettings] = VideoSettings(encoding=VideoEncoding.VP8)
-    is_sandbox: Optional[bool] = False
-    avatar_persona: Optional[AvatarPersona] = None
-    livekit_config: Optional[CustomSDKLiveKitConfig] = None
+    video_settings: VideoSettings | None = VideoSettings(encoding=VideoEncoding.VP8)
+    is_sandbox: bool | None = False
+    avatar_persona: AvatarPersona | None = None
+    livekit_config: CustomSDKLiveKitConfig | None = None
 
 
 class SessionTokenData(BaseModel):
@@ -186,8 +186,8 @@ class LiveAvatarApi(BaseAvatarApi):
         self,
         method: str,
         path: str,
-        params: Optional[Dict[str, Any]] = None,
-        bearer_token: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        bearer_token: str | None = None,
     ) -> Any:
         """Make a request to the LiveAvatar API.
 
@@ -275,6 +275,13 @@ class LiveAvatarApi(BaseAvatarApi):
         else:
             # Fall back to VP8 encoding if video_settings is not provided
             params["video_settings"] = {"encoding": VideoEncoding.VP8.value}
+
+        if request_data.livekit_config is not None:
+            params["livekit_config"] = {
+                "livekit_url": request_data.livekit_config.livekit_url,
+                "livekit_room": request_data.livekit_config.livekit_room,
+                "livekit_client_token": request_data.livekit_config.livekit_client_token,
+            }
 
         logger.debug(f"Creating LiveAvatar session token with params: {params}")
         response = await self._request("POST", "/sessions/token", params)

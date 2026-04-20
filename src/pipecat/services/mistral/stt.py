@@ -10,8 +10,9 @@ This module provides a real-time STT service that integrates with Mistral's
 Voxtral Realtime transcription API using the Mistral SDK's RealtimeConnection.
 """
 
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -88,12 +89,12 @@ class MistralSTTService(STTService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        target_streaming_delay_ms: Optional[int] = None,
-        ttfs_p99_latency: Optional[float] = MISTRAL_TTFS_P99,
-        settings: Optional[Settings] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        sample_rate: int | None = None,
+        target_streaming_delay_ms: int | None = None,
+        ttfs_p99_latency: float | None = MISTRAL_TTFS_P99,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize Mistral STT service.
@@ -128,10 +129,10 @@ class MistralSTTService(STTService):
 
         self._client = Mistral(api_key=api_key, server_url=base_url)
         self._target_streaming_delay_ms = target_streaming_delay_ms
-        self._connection: Optional[RealtimeConnection] = None
+        self._connection: RealtimeConnection | None = None
         self._receive_task = None
         self._accumulated_text = ""
-        self._detected_language: Optional[str] = None
+        self._detected_language: str | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -292,7 +293,7 @@ class MistralSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
+        self, transcript: str, is_final: bool, language: str | None = None
     ):
         """Handle a transcription result with tracing."""
         pass

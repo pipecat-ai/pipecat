@@ -13,8 +13,9 @@ including LLM services, context management, and message aggregation.
 import io
 import os
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from loguru import logger
 from PIL import Image
@@ -88,15 +89,13 @@ class GoogleThinkingConfig(BaseModel):
             Today's models default to not including thoughts (False).
     """
 
-    thinking_budget: Optional[int] = Field(default=None)
+    thinking_budget: int | None = Field(default=None)
 
     # Why `| str` here? To not break compatibility in case Google adds more
     # levels in the future.
-    thinking_level: Optional[Literal["low", "high", "medium", "minimal"] | str] = Field(
-        default=None
-    )
+    thinking_level: Literal["low", "high", "medium", "minimal"] | str | None = Field(default=None)
 
-    include_thoughts: Optional[bool] = Field(default=None)
+    include_thoughts: bool | None = Field(default=None)
 
 
 @dataclass
@@ -160,24 +159,24 @@ class GoogleLLMService(LLMService):
             extra: Additional parameters as a dictionary.
         """
 
-        max_tokens: Optional[int] = Field(default=4096, ge=1)
-        temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
-        top_k: Optional[int] = Field(default=None, ge=0)
-        top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+        max_tokens: int | None = Field(default=4096, ge=1)
+        temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+        top_k: int | None = Field(default=None, ge=0)
+        top_p: float | None = Field(default=None, ge=0.0, le=1.0)
         thinking: Optional["GoogleLLMService.ThinkingConfig"] = Field(default=None)
-        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
+        extra: dict[str, Any] | None = Field(default_factory=dict)
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        system_instruction: Optional[str] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_config: Optional[Dict[str, Any]] = None,
-        http_options: Optional[HttpOptions] = None,
+        model: str | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        system_instruction: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_config: dict[str, Any] | None = None,
+        http_options: HttpOptions | None = None,
         **kwargs,
     ):
         """Initialize the Google LLM service.
@@ -272,9 +271,9 @@ class GoogleLLMService(LLMService):
     async def run_inference(
         self,
         context: LLMContext,
-        max_tokens: Optional[int] = None,
-        system_instruction: Optional[str] = None,
-    ) -> Optional[str]:
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
@@ -327,10 +326,10 @@ class GoogleLLMService(LLMService):
 
     def _build_generation_params(
         self,
-        system_instruction: Optional[str] = None,
-        tools: Optional[List] = None,
-        tool_config: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        system_instruction: str | None = None,
+        tools: list | None = None,
+        tool_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Build generation parameters for Google AI API.
 
         Args:
@@ -367,7 +366,7 @@ class GoogleLLMService(LLMService):
 
         return generation_params
 
-    def _maybe_unset_thinking_budget(self, generation_params: Dict[str, Any]):
+    def _maybe_unset_thinking_budget(self, generation_params: dict[str, Any]):
         try:
             # If we have an image model, we don't apply a thinking default.
             if "image" in self._settings.model:
@@ -393,7 +392,7 @@ class GoogleLLMService(LLMService):
         )
 
         logger.debug(
-            f"{self}: Generating chat from context [{params['system_instruction']}] | {adapter.get_messages_for_logging(context)}"
+            f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
         )
 
         messages = params["messages"]

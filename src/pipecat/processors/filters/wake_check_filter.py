@@ -18,7 +18,6 @@ import re
 import time
 import warnings
 from enum import Enum
-from typing import List
 
 from loguru import logger
 
@@ -71,7 +70,7 @@ class WakeCheckFilter(FrameProcessor):
             self.wake_timer = 0.0
             self.accumulator = ""
 
-    def __init__(self, wake_phrases: List[str], keepalive_timeout: float = 3):
+    def __init__(self, wake_phrases: list[str], keepalive_timeout: float = 3):
         """Initialize the wake phrase filter.
 
         .. deprecated:: 0.0.106

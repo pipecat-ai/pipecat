@@ -12,7 +12,8 @@ runtime configuration changes.
 """
 
 import asyncio
-from typing import Any, Dict, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -70,7 +71,7 @@ class SoundfileMixer(BaseAudioMixer):
         self._sample_rate = 0
 
         self._sound_pos = 0
-        self._sounds: Dict[str, Any] = {}
+        self._sounds: dict[str, Any] = {}
         self._current_sound = default_sound
         self._mixing = mixing
         self._loop = loop

@@ -74,7 +74,7 @@ import uuid
 from contextlib import asynccontextmanager
 from http import HTTPMethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TypedDict, Union
+from typing import Any, TypedDict
 
 import aiohttp
 from fastapi.responses import FileResponse, Response
@@ -106,7 +106,7 @@ os.environ["ENV"] = "local"
 
 TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
 
-RUNNER_DOWNLOADS_FOLDER: Optional[str] = None
+RUNNER_DOWNLOADS_FOLDER: str | None = None
 RUNNER_HOST: str = "localhost"
 RUNNER_PORT: int = 7860
 
@@ -156,6 +156,8 @@ def _get_bot_module():
                 spec = importlib.util.spec_from_file_location(
                     module_name, os.path.join(cwd, filename)
                 )
+                if spec is None or spec.loader is None:
+                    continue
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
@@ -220,17 +222,17 @@ def _setup_webrtc_routes(app: FastAPI, args: argparse.Namespace):
         return
 
     class IceServer(TypedDict, total=False):
-        urls: Union[str, List[str]]
+        urls: str | list[str]
 
     class IceConfig(TypedDict):
-        iceServers: List[IceServer]
+        iceServers: list[IceServer]
 
     class StartBotResult(TypedDict, total=False):
         sessionId: str
-        iceConfig: Optional[IceConfig]
+        iceConfig: IceConfig | None
 
     # In-memory store of active sessions: session_id -> session info
-    active_sessions: Dict[str, Dict[str, Any]] = {}
+    active_sessions: dict[str, dict[str, Any]] = {}
 
     # Mount the frontend
     app.mount("/client", SmallWebRTCPrebuiltUI)
@@ -386,28 +388,26 @@ def _add_lifespan_to_app(app: FastAPI, new_lifespan):
 
 def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
     """Set up WhatsApp-specific routes."""
-    WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
-    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
-    WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
-    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN")
-
-    if not all(
-        [
-            WHATSAPP_APP_SECRET,
-            WHATSAPP_PHONE_NUMBER_ID,
-            WHATSAPP_TOKEN,
-            WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
-        ]
-    ):
+    required_vars = [
+        "WHATSAPP_APP_SECRET",
+        "WHATSAPP_PHONE_NUMBER_ID",
+        "WHATSAPP_TOKEN",
+        "WHATSAPP_WEBHOOK_VERIFICATION_TOKEN",
+    ]
+    missing = [v for v in required_vars if not os.getenv(v)]
+    if missing:
+        missing_list = "\n    ".join(missing)
         logger.error(
-            """Missing required environment variables for WhatsApp transport:
-    WHATSAPP_APP_SECRET
-    WHATSAPP_PHONE_NUMBER_ID
-    WHATSAPP_TOKEN
-    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN
+            f"""Missing required environment variables for WhatsApp transport:
+    {missing_list}
             """
         )
         return
+
+    WHATSAPP_APP_SECRET = os.environ["WHATSAPP_APP_SECRET"]
+    WHATSAPP_PHONE_NUMBER_ID = os.environ["WHATSAPP_PHONE_NUMBER_ID"]
+    WHATSAPP_TOKEN = os.environ["WHATSAPP_TOKEN"]
+    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.environ["WHATSAPP_WEBHOOK_VERIFICATION_TOKEN"]
 
     try:
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
@@ -418,7 +418,7 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
         return
 
     # Global WhatsApp client instance
-    whatsapp_client: Optional[WhatsAppClient] = None
+    whatsapp_client: WhatsAppClient | None = None
 
     @app.get(
         "/whatsapp",
@@ -857,7 +857,7 @@ def _validate_and_clean_proxy(proxy: str) -> str:
     return proxy
 
 
-def runner_downloads_folder() -> Optional[str]:
+def runner_downloads_folder() -> str | None:
     """Returns the folder where files are stored for later download."""
     return RUNNER_DOWNLOADS_FOLDER
 
@@ -872,7 +872,7 @@ def runner_port() -> int:
     return RUNNER_PORT
 
 
-def main(parser: Optional[argparse.ArgumentParser] = None):
+def main(parser: argparse.ArgumentParser | None = None):
     """Start the Pipecat development runner.
 
     Parses command-line arguments and starts a FastAPI server configured

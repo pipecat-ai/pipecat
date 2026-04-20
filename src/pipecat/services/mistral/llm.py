@@ -6,8 +6,8 @@
 
 """Mistral LLM service implementation using OpenAI-compatible interface."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
 
 from loguru import logger
 from openai.types.chat import ChatCompletionMessageParam
@@ -44,8 +44,8 @@ class MistralLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.mistral.ai/v1",
-        model: Optional[str] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Mistral LLM service.
@@ -93,8 +93,8 @@ class MistralLLMService(OpenAILLMService):
         return super().create_client(api_key, base_url, **kwargs)
 
     def _apply_mistral_fixups(
-        self, messages: List[ChatCompletionMessageParam]
-    ) -> List[ChatCompletionMessageParam]:
+        self, messages: list[ChatCompletionMessageParam]
+    ) -> list[ChatCompletionMessageParam]:
         """Apply fixups to messages to meet Mistral-specific requirements.
 
         1. A "tool"-role message must be followed by an assistant message.

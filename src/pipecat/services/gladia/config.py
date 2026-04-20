@@ -6,7 +6,7 @@
 
 """Configuration for the Gladia STT service."""
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -19,8 +19,8 @@ class LanguageConfig(BaseModel):
         code_switching: Whether to auto-detect language changes during transcription
     """
 
-    languages: Optional[List[str]] = None
-    code_switching: Optional[bool] = None
+    languages: list[str] | None = None
+    code_switching: bool | None = None
 
 
 class PreProcessingConfig(BaseModel):
@@ -31,8 +31,8 @@ class PreProcessingConfig(BaseModel):
         speech_threshold: Sensitivity for speech detection (0-1)
     """
 
-    audio_enhancer: Optional[bool] = None
-    speech_threshold: Optional[float] = None
+    audio_enhancer: bool | None = None
+    speech_threshold: float | None = None
 
 
 class CustomVocabularyItem(BaseModel):
@@ -47,8 +47,8 @@ class CustomVocabularyItem(BaseModel):
 
     value: str
     intensity: float
-    pronunciations: Optional[List[str]] = None
-    language: Optional[str] = None
+    pronunciations: list[str] | None = None
+    language: str | None = None
 
 
 class CustomVocabularyConfig(BaseModel):
@@ -59,8 +59,8 @@ class CustomVocabularyConfig(BaseModel):
         default_intensity: Default intensity for simple string vocabulary items
     """
 
-    vocabulary: Optional[List[Union[str, CustomVocabularyItem]]] = None
-    default_intensity: Optional[float] = None
+    vocabulary: list[str | CustomVocabularyItem] | None = None
+    default_intensity: float | None = None
 
 
 class CustomSpellingConfig(BaseModel):
@@ -70,7 +70,7 @@ class CustomSpellingConfig(BaseModel):
         spelling_dictionary: Mapping of correct spellings to phonetic variations
     """
 
-    spelling_dictionary: Optional[Dict[str, List[str]]] = None
+    spelling_dictionary: dict[str, list[str]] | None = None
 
 
 class TranslationConfig(BaseModel):
@@ -86,13 +86,13 @@ class TranslationConfig(BaseModel):
         informal: Force informal language forms when available
     """
 
-    target_languages: Optional[List[str]] = None
-    model: Optional[str] = None
-    match_original_utterances: Optional[bool] = None
-    lipsync: Optional[bool] = None
-    context_adaptation: Optional[bool] = None
-    context: Optional[str] = None
-    informal: Optional[bool] = None
+    target_languages: list[str] | None = None
+    model: str | None = None
+    match_original_utterances: bool | None = None
+    lipsync: bool | None = None
+    context_adaptation: bool | None = None
+    context: str | None = None
+    informal: bool | None = None
 
 
 class RealtimeProcessingConfig(BaseModel):
@@ -110,15 +110,15 @@ class RealtimeProcessingConfig(BaseModel):
         sentiment_analysis: Whether to enable sentiment analysis
     """
 
-    words_accurate_timestamps: Optional[bool] = None
-    custom_vocabulary: Optional[bool] = None
-    custom_vocabulary_config: Optional[CustomVocabularyConfig] = None
-    custom_spelling: Optional[bool] = None
-    custom_spelling_config: Optional[CustomSpellingConfig] = None
-    translation: Optional[bool] = None
-    translation_config: Optional[TranslationConfig] = None
-    named_entity_recognition: Optional[bool] = None
-    sentiment_analysis: Optional[bool] = None
+    words_accurate_timestamps: bool | None = None
+    custom_vocabulary: bool | None = None
+    custom_vocabulary_config: CustomVocabularyConfig | None = None
+    custom_spelling: bool | None = None
+    custom_spelling_config: CustomSpellingConfig | None = None
+    translation: bool | None = None
+    translation_config: TranslationConfig | None = None
+    named_entity_recognition: bool | None = None
+    sentiment_analysis: bool | None = None
 
 
 class MessagesConfig(BaseModel):
@@ -136,15 +136,15 @@ class MessagesConfig(BaseModel):
         receive_lifecycle_events: Whether to receive lifecycle events
     """
 
-    receive_partial_transcripts: Optional[bool] = None
-    receive_final_transcripts: Optional[bool] = None
-    receive_speech_events: Optional[bool] = None
-    receive_pre_processing_events: Optional[bool] = None
-    receive_realtime_processing_events: Optional[bool] = None
-    receive_post_processing_events: Optional[bool] = None
-    receive_acknowledgments: Optional[bool] = None
-    receive_errors: Optional[bool] = None
-    receive_lifecycle_events: Optional[bool] = None
+    receive_partial_transcripts: bool | None = None
+    receive_final_transcripts: bool | None = None
+    receive_speech_events: bool | None = None
+    receive_pre_processing_events: bool | None = None
+    receive_realtime_processing_events: bool | None = None
+    receive_post_processing_events: bool | None = None
+    receive_acknowledgments: bool | None = None
+    receive_errors: bool | None = None
+    receive_lifecycle_events: bool | None = None
 
 
 class GladiaInputParams(BaseModel):
@@ -170,14 +170,14 @@ class GladiaInputParams(BaseModel):
             and stopped frames. Defaults to False.
     """
 
-    encoding: Optional[str] = "wav/pcm"
-    bit_depth: Optional[int] = 16
-    channels: Optional[int] = 1
-    custom_metadata: Optional[Dict[str, Any]] = None
-    endpointing: Optional[float] = None
-    maximum_duration_without_endpointing: Optional[int] = 5
-    language_config: Optional[LanguageConfig] = None
-    pre_processing: Optional[PreProcessingConfig] = None
-    realtime_processing: Optional[RealtimeProcessingConfig] = None
-    messages_config: Optional[MessagesConfig] = None
+    encoding: str | None = "wav/pcm"
+    bit_depth: int | None = 16
+    channels: int | None = 1
+    custom_metadata: dict[str, Any] | None = None
+    endpointing: float | None = None
+    maximum_duration_without_endpointing: int | None = 5
+    language_config: LanguageConfig | None = None
+    pre_processing: PreProcessingConfig | None = None
+    realtime_processing: RealtimeProcessingConfig | None = None
+    messages_config: MessagesConfig | None = None
     enable_vad: bool = False

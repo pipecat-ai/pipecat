@@ -14,7 +14,7 @@ WhatsApp call events.
 import asyncio
 import hashlib
 import hmac
-from typing import Awaitable, Callable, Dict, List, Optional
+from collections.abc import Awaitable, Callable
 
 import aiohttp
 from loguru import logger
@@ -48,8 +48,8 @@ class WhatsAppClient:
         whatsapp_token: str,
         phone_number_id: str,
         session: aiohttp.ClientSession,
-        ice_servers: Optional[List[IceServer]] = None,
-        whatsapp_secret: Optional[str] = None,
+        ice_servers: list[IceServer] | None = None,
+        whatsapp_secret: str | None = None,
     ) -> None:
         """Initialize the WhatsApp client.
 
@@ -65,7 +65,7 @@ class WhatsAppClient:
             whatsapp_token=whatsapp_token, phone_number_id=phone_number_id, session=session
         )
         self._whatsapp_secret = whatsapp_secret
-        self._ongoing_calls_map: Dict[str, SmallWebRTCConnection] = {}
+        self._ongoing_calls_map: dict[str, SmallWebRTCConnection] = {}
 
         # Set default ICE servers if none provided
         if ice_servers is None:
@@ -73,11 +73,11 @@ class WhatsAppClient:
         else:
             self._ice_servers = ice_servers
 
-    def update_ice_servers(self, ice_servers: Optional[List[IceServer]] = None):
+    def update_ice_servers(self, ice_servers: list[IceServer] | None = None):
         """Update the list of ICE servers used for WebRTC connections."""
         self._ice_servers = ice_servers
 
-    def update_whatsapp_secret(self, whatsapp_secret: Optional[str] = None):
+    def update_whatsapp_secret(self, whatsapp_secret: str | None = None):
         """Update the WhatsApp APP secret for validating that the webhook request came from WhatsApp."""
         self._whatsapp_secret = whatsapp_secret
 
@@ -125,7 +125,7 @@ class WhatsAppClient:
         logger.debug("All calls terminated successfully")
 
     async def handle_verify_webhook_request(
-        self, params: Dict[str, str], expected_verification_token: str
+        self, params: dict[str, str], expected_verification_token: str
     ) -> int:
         """Handle a verify webhook request from WhatsApp.
 
@@ -177,9 +177,9 @@ class WhatsAppClient:
     async def handle_webhook_request(
         self,
         request: WhatsAppWebhookRequest,
-        connection_callback: Optional[Callable[[SmallWebRTCConnection], Awaitable[None]]] = None,
-        raw_body: Optional[bytes] = None,
-        sha256_signature: Optional[str] = None,
+        connection_callback: Callable[[SmallWebRTCConnection], Awaitable[None]] | None = None,
+        raw_body: bytes | None = None,
+        sha256_signature: str | None = None,
     ) -> bool:
         """Handle a webhook request from WhatsApp.
 

@@ -14,7 +14,7 @@ were interrupted mid-thought.
 
 import asyncio
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 from loguru import logger
 
@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMTextFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 # Turn completion markers
 USER_TURN_COMPLETE_MARKER = "✓"
@@ -156,11 +156,11 @@ class UserTurnCompletionConfig:
         incomplete_long_prompt: Custom prompt when long timeout expires.
     """
 
-    instructions: Optional[str] = None
+    instructions: str | None = None
     incomplete_short_timeout: float = 5.0
     incomplete_long_timeout: float = 10.0
-    incomplete_short_prompt: Optional[str] = None
-    incomplete_long_prompt: Optional[str] = None
+    incomplete_short_prompt: str | None = None
+    incomplete_long_prompt: str | None = None
 
     @property
     def completion_instructions(self) -> str:
@@ -178,7 +178,7 @@ class UserTurnCompletionConfig:
         return self.incomplete_long_prompt or DEFAULT_INCOMPLETE_LONG_PROMPT
 
 
-class UserTurnCompletionLLMServiceMixin:
+class UserTurnCompletionLLMServiceMixin(FrameProcessor):
     """Mixin that adds turn completion detection to LLM services.
 
     This mixin provides methods to push LLM text with turn completion detection.
@@ -223,8 +223,8 @@ class UserTurnCompletionLLMServiceMixin:
 
         # Timeout handling
         self._user_turn_completion_config = UserTurnCompletionConfig()
-        self._incomplete_timeout_task: Optional[asyncio.Task] = None
-        self._incomplete_type: Optional[Literal["short", "long"]] = None
+        self._incomplete_timeout_task: asyncio.Task | None = None
+        self._incomplete_type: Literal["short", "long"] | None = None
 
     def set_user_turn_completion_config(self, config: UserTurnCompletionConfig):
         """Set the turn completion configuration.
@@ -292,7 +292,7 @@ class UserTurnCompletionLLMServiceMixin:
 
             # Push through pipeline to trigger LLM response
             await self.push_frame(
-                LLMMessagesAppendFrame(messages=[{"role": "system", "content": prompt}])
+                LLMMessagesAppendFrame(messages=[{"role": "developer", "content": prompt}])
             )
             await self.push_frame(LLMRunFrame())
 
@@ -385,7 +385,7 @@ class UserTurnCompletionLLMServiceMixin:
         # Check for incomplete markers (○ short, ◐ long)
         # These indicate the user was cut off or needs time - we suppress the bot's
         # response and start a timeout to re-prompt later.
-        incomplete_type: Optional[Literal["short", "long"]] = None
+        incomplete_type: Literal["short", "long"] | None = None
         if USER_TURN_INCOMPLETE_SHORT_MARKER in self._turn_text_buffer:
             incomplete_type = "short"
         elif USER_TURN_INCOMPLETE_LONG_MARKER in self._turn_text_buffer:

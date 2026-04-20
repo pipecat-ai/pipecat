@@ -8,8 +8,8 @@
 
 import io
 import wave
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -65,8 +65,8 @@ class GroqTTSService(TTSService):
             speed: Speech speed multiplier. Defaults to 1.0.
         """
 
-        language: Optional[Language] = Language.EN
-        speed: Optional[float] = 1.0
+        language: Language | None = Language.EN
+        speed: float | None = 1.0
 
     GROQ_SAMPLE_RATE = 48000  # Groq TTS only supports 48kHz sample rate
 
@@ -75,11 +75,11 @@ class GroqTTSService(TTSService):
         *,
         api_key: str,
         output_format: str = "wav",
-        params: Optional[InputParams] = None,
-        model_name: Optional[str] = None,
-        voice_id: Optional[str] = None,
-        sample_rate: Optional[int] = GROQ_SAMPLE_RATE,
-        settings: Optional[Settings] = None,
+        params: InputParams | None = None,
+        model_name: str | None = None,
+        voice_id: str | None = None,
+        sample_rate: int | None = GROQ_SAMPLE_RATE,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize Groq TTS service.

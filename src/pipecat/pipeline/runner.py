@@ -14,7 +14,6 @@ management.
 import asyncio
 import gc
 import signal
-from typing import Optional
 
 from loguru import logger
 
@@ -34,11 +33,11 @@ class PipelineRunner(BaseObject):
     def __init__(
         self,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         handle_sigint: bool = True,
         handle_sigterm: bool = False,
         force_gc: bool = False,
-        loop: Optional[asyncio.AbstractEventLoop] = None,
+        loop: asyncio.AbstractEventLoop | None = None,
     ):
         """Initialize the pipeline runner.
 

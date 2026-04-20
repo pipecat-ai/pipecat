@@ -13,8 +13,9 @@ WebSocket API for streaming audio transcription.
 import asyncio
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
@@ -78,7 +79,7 @@ def _input_format_from_encoding(encoding: str, sample_rate: int) -> str:
     return encoding
 
 
-def language_to_gradium_language(language: Language) -> Optional[str]:
+def language_to_gradium_language(language: Language) -> str | None:
     """Convert a Language enum to Gradium's language code format.
 
     Args:
@@ -109,7 +110,7 @@ class GradiumSTTSettings(STTSettings):
             Default is 10 (800ms). Lower values like 7-8 give faster response.
     """
 
-    delay_in_frames: Optional[int] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    delay_in_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GradiumSTTService(WebsocketSTTService):
@@ -139,8 +140,8 @@ class GradiumSTTService(WebsocketSTTService):
                 Default is 10 (800ms). Lower values like 7-8 give faster response.
         """
 
-        language: Optional[Language] = None
-        delay_in_frames: Optional[int] = None
+        language: Language | None = None
+        delay_in_frames: int | None = None
 
     def __init__(
         self,
@@ -148,11 +149,11 @@ class GradiumSTTService(WebsocketSTTService):
         api_key: str,
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
         encoding: str = "pcm",
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        json_config: Optional[str] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = GRADIUM_TTFS_P99,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        json_config: str | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = GRADIUM_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Gradium STT service.
@@ -239,7 +240,7 @@ class GradiumSTTService(WebsocketSTTService):
         # and pushed as a TranscriptionFrame.
         self._accumulated_text: list[str] = []
         self._flush_counter = 0
-        self._transcript_aggregation_task: Optional[asyncio.Task] = None
+        self._transcript_aggregation_task: asyncio.Task | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.

@@ -13,7 +13,7 @@ Amazon Bedrock AgentCore Runtime and streams their responses as LLMTextFrames.
 import asyncio
 import json
 import os
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import aioboto3
 from loguru import logger
@@ -31,7 +31,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 def default_context_to_payload_transformer(
     context: LLMContext,
-) -> Optional[str]:
+) -> str | None:
     """Default transformer to create AgentCore payload from LLM context.
 
     Extracts the latest user or system message text and wraps it in {"prompt": "<text>"}.
@@ -68,7 +68,7 @@ def default_context_to_payload_transformer(
     return json.dumps({"prompt": prompt})
 
 
-def default_response_to_output_transformer(response_line: str) -> Optional[str]:
+def default_response_to_output_transformer(response_line: str) -> str | None:
     """Default transformer to extract output text from AgentCore response.
 
     Expects responses with {"response": "<text>"} format.
@@ -110,12 +110,12 @@ class AWSAgentCoreProcessor(FrameProcessor):
     def __init__(
         self,
         agentArn: str,
-        aws_access_key: Optional[str] = None,
-        aws_secret_key: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
-        aws_region: Optional[str] = None,
-        context_to_payload_transformer: Optional[Callable[[LLMContext], Optional[str]]] = None,
-        response_to_output_transformer: Optional[Callable[[str], Optional[str]]] = None,
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
+        aws_session_token: str | None = None,
+        aws_region: str | None = None,
+        context_to_payload_transformer: Callable[[LLMContext], str | None] | None = None,
+        response_to_output_transformer: Callable[[str], str | None] | None = None,
         **kwargs,
     ):
         """Initialize the AWS AgentCore processor.
@@ -157,8 +157,8 @@ class AWSAgentCoreProcessor(FrameProcessor):
 
         # State for managing output response bookends
         self._output_response_open = False
-        self._last_text_frame_time: Optional[float] = None
-        self._close_task: Optional[asyncio.Task] = None
+        self._last_text_frame_time: float | None = None
+        self._close_task: asyncio.Task | None = None
         self._output_response_timeout = 1.0  # seconds
 
     async def _close_output_response_after_timeout(self):

@@ -8,7 +8,7 @@
 
 import json
 import time
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 from loguru import logger
 from pydantic import BaseModel
@@ -24,7 +24,6 @@ from pipecat.services.deepgram.flux.base import (
     FluxMessageType,
 )
 from pipecat.services.websocket_service import WebsocketService
-from pipecat.transcriptions.language import Language
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -49,6 +48,12 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     Provides real-time speech recognition using Deepgram's WebSocket API with Flux capabilities.
     Supports configurable models, VAD events, and various audio processing options
     including advanced turn detection and EagerEndOfTurn events for improved conversational AI performance.
+
+    For multilingual use, set ``model="flux-general-multi"`` and pass
+    ``language_hints`` to bias detection toward specific languages. Hints can
+    be updated mid-stream via ``STTUpdateSettingsFrame`` (e.g. to implement a
+    detect-then-lock flow). ``TranscriptionFrame.language`` reflects whichever
+    language Flux detected for each turn.
 
     Event handlers available (in addition to base events):
 
@@ -90,27 +95,27 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             min_confidence: Optional. Minimum confidence required confidence to create a TranscriptionFrame
         """
 
-        eager_eot_threshold: Optional[float] = None
-        eot_threshold: Optional[float] = None
-        eot_timeout_ms: Optional[int] = None
+        eager_eot_threshold: float | None = None
+        eot_threshold: float | None = None
+        eot_timeout_ms: int | None = None
         keyterm: list = []
-        mip_opt_out: Optional[bool] = None
+        mip_opt_out: bool | None = None
         tag: list = []
-        min_confidence: Optional[float] = None  # New parameter
+        min_confidence: float | None = None  # New parameter
 
     def __init__(
         self,
         *,
         api_key: str,
         url: str = "wss://api.deepgram.com/v2/listen",
-        sample_rate: Optional[int] = None,
-        mip_opt_out: Optional[bool] = None,
-        model: Optional[str] = None,
+        sample_rate: int | None = None,
+        mip_opt_out: bool | None = None,
+        model: str | None = None,
         flux_encoding: str = "linear16",
-        tag: Optional[list] = None,
-        params: Optional[InputParams] = None,
+        tag: list | None = None,
+        params: InputParams | None = None,
         should_interrupt: bool = True,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Deepgram Flux STT service.
@@ -156,6 +161,16 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                         tag=["production", "voice-agent"],
                     ),
                 )
+
+            Multilingual usage with language hints::
+
+                stt = DeepgramFluxSTTService(
+                    api_key="your-api-key",
+                    settings=DeepgramFluxSTTService.Settings(
+                        model="flux-general-multi",
+                        language_hints=[Language.EN, Language.ES],
+                    ),
+                )
         """
         # Note: For DeepgramFluxSTTService, differently from other processes, we need to create
         # the _receive_task inside _connect_websocket, because the websocket should only be
@@ -171,12 +186,13 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="flux-general-en",
-            language=Language.EN,
+            language=None,
             eager_eot_threshold=None,
             eot_threshold=None,
             eot_timeout_ms=None,
             keyterm=[],
             min_confidence=None,
+            language_hints=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)

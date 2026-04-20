@@ -10,9 +10,10 @@ import base64
 import io
 import json
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from typing import Any, Dict, Mapping, Optional, Type
+from typing import Any
 
 from loguru import logger
 from PIL import Image
@@ -117,7 +118,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "OpenAIRealtimeLLMService.Settings") -> Dict[str, Any]:
+    def apply_update(self, delta: "OpenAIRealtimeLLMService.Settings") -> dict[str, Any]:
         """Merge a delta, keeping ``model``/``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -155,7 +156,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
 
     @classmethod
     def from_mapping(
-        cls: Type["OpenAIRealtimeLLMService.Settings"], settings: Mapping[str, Any]
+        cls: type["OpenAIRealtimeLLMService.Settings"], settings: Mapping[str, Any]
     ) -> "OpenAIRealtimeLLMService.Settings":
         """Build a delta from a plain dict, routing SP keys into ``session_properties``.
 
@@ -166,9 +167,9 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
         # Determine which keys belong to our own dataclass fields.
         own_field_names = {f.name for f in dataclass_fields(cls)} - {"extra"}
 
-        top: Dict[str, Any] = {}
-        sp_dict: Dict[str, Any] = {}
-        extra: Dict[str, Any] = {}
+        top: dict[str, Any] = {}
+        sp_dict: dict[str, Any] = {}
+        extra: dict[str, Any] = {}
 
         # Build the SP field set without instantiating (avoid __post_init__
         # cost for every from_mapping call).
@@ -210,10 +211,10 @@ class OpenAIRealtimeLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         base_url: str = "wss://api.openai.com/v1/realtime",
-        session_properties: Optional[events.SessionProperties] = None,
-        settings: Optional[Settings] = None,
+        session_properties: events.SessionProperties | None = None,
+        settings: Settings | None = None,
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         video_frame_detail: str = "auto",
@@ -807,7 +808,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
     @traced_stt
     async def _handle_user_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass

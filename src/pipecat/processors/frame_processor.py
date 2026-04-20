@@ -11,21 +11,17 @@ audio/video processing pipelines. It includes frame processors, pipeline
 management, and frame flow control mechanisms.
 """
 
+from __future__ import annotations
+
 import asyncio
 import dataclasses
 import traceback
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
     Any,
-    Awaitable,
-    Callable,
-    Coroutine,
-    List,
     Optional,
-    Tuple,
-    Type,
-    Union,
 )
 
 from loguru import logger
@@ -79,7 +75,7 @@ class FrameProcessorSetup:
 
     clock: BaseClock
     task_manager: BaseTaskManager
-    observer: Optional[BaseObserver] = None
+    observer: BaseObserver | None = None
 
 
 class FrameProcessorQueue(asyncio.PriorityQueue):
@@ -100,7 +96,7 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
         self.__high_counter = 0
         self.__low_counter = 0
 
-    async def put(self, item: Tuple[Frame, FrameDirection, FrameCallback]):
+    async def put(self, item: tuple[Frame, FrameDirection, FrameCallback]):
         """Put an item into the priority queue.
 
         System frames (`SystemFrame`) have higher priority than any other
@@ -160,9 +156,9 @@ class FrameProcessor(BaseObject):
     def __init__(
         self,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         enable_direct_mode: bool = False,
-        metrics: Optional[FrameProcessorMetrics] = None,
+        metrics: FrameProcessorMetrics | None = None,
         **kwargs,
     ):
         """Initialize the frame processor.
@@ -174,20 +170,20 @@ class FrameProcessor(BaseObject):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(name=name, **kwargs)
-        self._prev: Optional["FrameProcessor"] = None
-        self._next: Optional["FrameProcessor"] = None
+        self._prev: FrameProcessor | None = None
+        self._next: FrameProcessor | None = None
 
         # Enable direct mode to skip queues and process frames right away.
         self._enable_direct_mode = enable_direct_mode
 
         # Clock
-        self._clock: Optional[BaseClock] = None
+        self._clock: BaseClock | None = None
 
         # Task Manager
-        self._task_manager: Optional[BaseTaskManager] = None
+        self._task_manager: BaseTaskManager | None = None
 
         # Observer
-        self._observer: Optional[BaseObserver] = None
+        self._observer: BaseObserver | None = None
 
         # Other properties
         self._enable_metrics = False
@@ -221,8 +217,8 @@ class FrameProcessor(BaseObject):
         # frames right away and queues non-system frames for later processing.
         self.__should_block_system_frames = False
         self.__input_queue = FrameProcessorQueue()
-        self.__input_event: Optional[asyncio.Event] = None
-        self.__input_frame_task: Optional[asyncio.Task] = None
+        self.__input_event: asyncio.Event | None = None
+        self.__input_frame_task: asyncio.Task | None = None
 
         # The process task processes non-system frames.  Non-system frames will
         # be processed as soon as they are received by the processing task
@@ -231,9 +227,9 @@ class FrameProcessor(BaseObject):
         # `resume_processing_frames()` which will wake up the event.
         self.__should_block_frames = False
         self.__process_queue = FrameQueue(frame_getter=lambda item: item[0])
-        self.__process_event: Optional[asyncio.Event] = None
-        self.__process_frame_task: Optional[asyncio.Task] = None
-        self.__process_current_frame: Optional[Frame] = None
+        self.__process_event: asyncio.Event | None = None
+        self.__process_frame_task: asyncio.Task | None = None
+        self.__process_current_frame: Frame | None = None
 
         # Frame processor events.
         self._register_event_handler("on_before_process_frame", sync=True)
@@ -261,7 +257,7 @@ class FrameProcessor(BaseObject):
         return self._name
 
     @property
-    def processors(self) -> List["FrameProcessor"]:
+    def processors(self) -> list[FrameProcessor]:
         """Return the list of sub-processors contained within this processor.
 
         Only compound processors (e.g. pipelines and parallel pipelines) have
@@ -273,7 +269,7 @@ class FrameProcessor(BaseObject):
         return []
 
     @property
-    def entry_processors(self) -> List["FrameProcessor"]:
+    def entry_processors(self) -> list[FrameProcessor]:
         """Return the list of entry processors for this processor.
 
         Entry processors are the first processors in a compound processor
@@ -287,7 +283,7 @@ class FrameProcessor(BaseObject):
         return []
 
     @property
-    def next(self) -> Optional["FrameProcessor"]:
+    def next(self) -> FrameProcessor | None:
         """Get the next processor.
 
         Returns:
@@ -296,7 +292,7 @@ class FrameProcessor(BaseObject):
         return self._next
 
     @property
-    def previous(self) -> Optional["FrameProcessor"]:
+    def previous(self) -> FrameProcessor | None:
         """Get the previous processor.
 
         Returns:
@@ -372,7 +368,7 @@ class FrameProcessor(BaseObject):
         """
         self._metrics.set_core_metrics_data(data)
 
-    async def start_ttfb_metrics(self, *, start_time: Optional[float] = None):
+    async def start_ttfb_metrics(self, *, start_time: float | None = None):
         """Start time-to-first-byte metrics collection.
 
         Args:
@@ -384,7 +380,7 @@ class FrameProcessor(BaseObject):
                 start_time=start_time, report_only_initial_ttfb=self._report_only_initial_ttfb
             )
 
-    async def stop_ttfb_metrics(self, *, end_time: Optional[float] = None):
+    async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop time-to-first-byte metrics collection and push results.
 
         Args:
@@ -396,7 +392,7 @@ class FrameProcessor(BaseObject):
             if frame:
                 await self.push_frame(frame)
 
-    async def start_processing_metrics(self, *, start_time: Optional[float] = None):
+    async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start processing metrics collection.
 
         Args:
@@ -406,7 +402,7 @@ class FrameProcessor(BaseObject):
         if self.can_generate_metrics() and self.metrics_enabled:
             await self._metrics.start_processing_metrics(start_time=start_time)
 
-    async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
+    async def stop_processing_metrics(self, *, end_time: float | None = None):
         """Stop processing metrics collection and push results.
 
         Args:
@@ -458,7 +454,7 @@ class FrameProcessor(BaseObject):
         await self.stop_processing_metrics()
         await self.stop_text_aggregation_metrics()
 
-    def create_task(self, coroutine: Coroutine, name: Optional[str] = None) -> asyncio.Task:
+    def create_task(self, coroutine: Coroutine, name: str | None = None) -> asyncio.Task:
         """Create a new task managed by this processor.
 
         Args:
@@ -474,7 +470,7 @@ class FrameProcessor(BaseObject):
             name = f"{self}::{coroutine.cr_code.co_name}"
         return self.task_manager.create_task(coroutine, name)
 
-    async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = 1.0):
+    async def cancel_task(self, task: asyncio.Task, timeout: float | None = 1.0):
         """Cancel a task managed by this processor.
 
         A default timeout if 1 second is used in order to avoid potential
@@ -511,7 +507,7 @@ class FrameProcessor(BaseObject):
         if self._metrics is not None:
             await self._metrics.cleanup()
 
-    def link(self, processor: "FrameProcessor"):
+    def link(self, processor: FrameProcessor):
         """Link this processor to the next processor in the pipeline.
 
         Args:
@@ -546,7 +542,7 @@ class FrameProcessor(BaseObject):
         self,
         frame: Frame,
         direction: FrameDirection = FrameDirection.DOWNSTREAM,
-        callback: Optional[FrameCallback] = None,
+        callback: FrameCallback | None = None,
     ):
         """Queue a frame for processing.
 
@@ -622,7 +618,7 @@ class FrameProcessor(BaseObject):
     async def push_error(
         self,
         error_msg: str,
-        exception: Optional[Exception] = None,
+        exception: Exception | None = None,
         fatal: bool = False,
     ):
         """Creates and pushes an ErrorFrame upstream.
@@ -720,7 +716,7 @@ class FrameProcessor(BaseObject):
 
         await self.broadcast_interruption()
 
-    async def broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
+    async def broadcast_frame(self, frame_cls: type[Frame], **kwargs):
         """Broadcasts a frame of the specified class upstream and downstream.
 
         This method creates two instances of the given frame class using the
@@ -929,7 +925,7 @@ class FrameProcessor(BaseObject):
         """Reset non-system frame processing queue."""
         self.__process_queue.reset()
 
-    def has_queued_frame(self, frame_type: Union[Type[Frame], Type[UninterruptibleFrame]]) -> bool:
+    def has_queued_frame(self, frame_type: type[Frame] | type[UninterruptibleFrame]) -> bool:
         """Return True if a frame of the given type is waiting in the processing queue.
 
         Delegates to :meth:`FrameQueue.has_frame` so the check is O(distinct
@@ -951,7 +947,7 @@ class FrameProcessor(BaseObject):
             self.__process_frame_task = None
 
     async def __process_frame(
-        self, frame: Frame, direction: FrameDirection, callback: Optional[FrameCallback]
+        self, frame: Frame, direction: FrameDirection, callback: FrameCallback | None
     ):
         try:
             await self._call_event_handler("on_before_process_frame", frame)

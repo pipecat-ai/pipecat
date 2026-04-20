@@ -9,7 +9,7 @@
 import asyncio
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -101,7 +101,7 @@ class LLMContextSummarizer(BaseObject):
         self,
         *,
         context: LLMContext,
-        config: Optional[LLMAutoContextSummarizationConfig] = None,
+        config: LLMAutoContextSummarizationConfig | None = None,
         auto_trigger: bool = True,
     ):
         """Initialize the context summarizer.
@@ -122,10 +122,10 @@ class LLMContextSummarizer(BaseObject):
         self._auto_config = config or LLMAutoContextSummarizationConfig()
         self._auto_trigger = auto_trigger
 
-        self._task_manager: Optional[BaseTaskManager] = None
+        self._task_manager: BaseTaskManager | None = None
 
         self._summarization_in_progress = False
-        self._pending_summary_request_id: Optional[str] = None
+        self._pending_summary_request_id: str | None = None
 
         self._register_event_handler("on_request_summarization", sync=True)
         self._register_event_handler("on_summary_applied")
@@ -269,9 +269,7 @@ class LLMContextSummarizer(BaseObject):
         logger.debug(f"{self}: ✓ Summarization needed - {', '.join(reason)}")
         return True
 
-    async def _request_summarization(
-        self, config_override: Optional[LLMContextSummaryConfig] = None
-    ):
+    async def _request_summarization(self, config_override: LLMContextSummaryConfig | None = None):
         """Request context summarization from LLM service.
 
         Creates a summarization request frame and either handles it directly
@@ -338,7 +336,7 @@ class LLMContextSummarizer(BaseObject):
                 summary=summary,
                 last_summarized_index=last_index,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             error = f"Context summarization timed out after {timeout}s"
             logger.error(f"{self}: {error}")
             result_frame = LLMContextSummaryResultFrame(

@@ -7,7 +7,6 @@
 """Frame serialization interfaces for Pipecat."""
 
 from abc import abstractmethod
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -39,7 +38,7 @@ class FrameSerializer(BaseObject):
 
         ignore_rtvi_messages: bool = True
 
-    def __init__(self, params: Optional[InputParams] = None, **kwargs):
+    def __init__(self, params: InputParams | None = None, **kwargs):
         """Initialize the FrameSerializer.
 
         Args:

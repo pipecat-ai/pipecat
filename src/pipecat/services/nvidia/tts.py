@@ -20,8 +20,9 @@ import os
 import queue
 import textwrap
 import threading
+from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Mapping, Optional
+from typing import Any
 
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -77,8 +78,8 @@ class _SynthesisStreamState:
     response_queue: asyncio.Queue
     stop_event: threading.Event
     rpc_call: Any = None
-    synth_task: Optional[asyncio.Task] = None
-    response_task: Optional[asyncio.Task] = None
+    synth_task: asyncio.Task | None = None
+    response_task: asyncio.Task | None = None
 
 
 class NvidiaTTSService(TTSService):
@@ -104,25 +105,25 @@ class NvidiaTTSService(TTSService):
             quality: Audio quality setting (0-100). Defaults to 20.
         """
 
-        language: Optional[Language] = Language.EN_US
-        quality: Optional[int] = 20
+        language: Language | None = Language.EN_US
+        quality: int | None = 20
 
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: Optional[str] = None,
-        sample_rate: Optional[int] = None,
+        voice_id: str | None = None,
+        sample_rate: int | None = None,
         model_function_map: Mapping[str, str] = {
             "function_id": "877104f7-e885-42b9-8de8-f6e4c6303969",
             "model_name": "magpie-tts-multilingual",
         },
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         use_ssl: bool = True,
-        custom_dictionary: Optional[dict] = None,
-        encoding: Optional[AudioEncoding] = AudioEncoding.LINEAR_PCM,
+        custom_dictionary: dict | None = None,
+        encoding: AudioEncoding | None = AudioEncoding.LINEAR_PCM,
         **kwargs,
     ):
         """Initialize the NVIDIA Nemotron Speech TTS service.
@@ -195,7 +196,7 @@ class NvidiaTTSService(TTSService):
         self._function_id = model_function_map.get("function_id")
         self._use_ssl = use_ssl
 
-        self._custom_dictionary: Optional[str] = None
+        self._custom_dictionary: str | None = None
         if custom_dictionary:
             entries = [f"{k}  {v}" for k, v in custom_dictionary.items()]
             self._custom_dictionary = ",".join(entries)
@@ -205,7 +206,7 @@ class NvidiaTTSService(TTSService):
         self._config = None
 
         # Runtime state for the active streaming turn.
-        self._stream_state: Optional[_SynthesisStreamState] = None
+        self._stream_state: _SynthesisStreamState | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate metrics.
@@ -478,7 +479,7 @@ class NvidiaTTSService(TTSService):
         if self._stream_state is state:
             self._stream_state = None
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio and finalize the current context.
 
         Args:

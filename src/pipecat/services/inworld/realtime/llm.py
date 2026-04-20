@@ -14,9 +14,10 @@ import base64
 import json
 import time
 import urllib.parse
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from typing import Any, Dict, Literal, Mapping, Optional, Type
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -117,7 +118,7 @@ class InworldRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "InworldRealtimeLLMService.Settings") -> Dict[str, Any]:
+    def apply_update(self, delta: "InworldRealtimeLLMService.Settings") -> dict[str, Any]:
         """Merge a delta, keeping ``model``/``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -147,7 +148,7 @@ class InworldRealtimeLLMSettings(LLMSettings):
 
     @classmethod
     def from_mapping(
-        cls: Type["InworldRealtimeLLMService.Settings"], settings: Mapping[str, Any]
+        cls: type["InworldRealtimeLLMService.Settings"], settings: Mapping[str, Any]
     ) -> "InworldRealtimeLLMService.Settings":
         """Build a delta from a plain dict, routing SP keys into ``session_properties``.
 
@@ -157,9 +158,9 @@ class InworldRealtimeLLMSettings(LLMSettings):
         """
         own_field_names = {f.name for f in dataclass_fields(cls)} - {"extra"}
 
-        top: Dict[str, Any] = {}
-        sp_dict: Dict[str, Any] = {}
-        extra: Dict[str, Any] = {}
+        top: dict[str, Any] = {}
+        sp_dict: dict[str, Any] = {}
+        extra: dict[str, Any] = {}
 
         sp_keys = set(events.SessionProperties.model_fields.keys()) - {"model"}
 
@@ -249,13 +250,13 @@ class InworldRealtimeLLMService(LLMService):
         self,
         *,
         api_key: str,
-        llm_model: Optional[str] = None,
-        voice: Optional[str] = None,
-        tts_model: Optional[str] = None,
-        stt_model: Optional[str] = None,
+        llm_model: str | None = None,
+        voice: str | None = None,
+        tts_model: str | None = None,
+        stt_model: str | None = None,
         base_url: str = "wss://api.inworld.ai/api/v1/realtime/session",
         auth_type: Literal["basic", "bearer"] = "basic",
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         start_audio_paused: bool = False,
         **kwargs,
     ):
@@ -375,7 +376,7 @@ class InworldRealtimeLLMService(LLMService):
         """
         self._audio_input_paused = paused
 
-    def _get_configured_sample_rate(self, direction: str) -> Optional[int]:
+    def _get_configured_sample_rate(self, direction: str) -> int | None:
         """Get manually configured sample rate for input or output.
 
         Args:

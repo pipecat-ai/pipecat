@@ -11,6 +11,8 @@ conversation and turn span contexts. Each PipelineTask creates its own
 TracingContext, ensuring concurrent pipelines do not interfere with each other.
 """
 
+from __future__ import annotations
+
 import uuid
 from typing import TYPE_CHECKING, Optional
 
@@ -35,12 +37,12 @@ class TracingContext:
 
     def __init__(self):
         """Initialize the tracing context with empty state."""
-        self._conversation_context: Optional["Context"] = None
-        self._turn_context: Optional["Context"] = None
-        self._conversation_id: Optional[str] = None
+        self._conversation_context: Context | None = None
+        self._turn_context: Context | None = None
+        self._conversation_id: str | None = None
 
     def set_conversation_context(
-        self, span_context: Optional["SpanContext"], conversation_id: Optional[str] = None
+        self, span_context: SpanContext | None, conversation_id: str | None = None
     ):
         """Set the current conversation context.
 
@@ -59,7 +61,7 @@ class TracingContext:
         else:
             self._conversation_context = None
 
-    def get_conversation_context(self) -> Optional["Context"]:
+    def get_conversation_context(self) -> Context | None:
         """Get the OpenTelemetry context for the current conversation.
 
         Returns:
@@ -67,7 +69,7 @@ class TracingContext:
         """
         return self._conversation_context
 
-    def set_turn_context(self, span_context: Optional["SpanContext"]):
+    def set_turn_context(self, span_context: SpanContext | None):
         """Set the current turn context.
 
         Args:
@@ -82,7 +84,7 @@ class TracingContext:
         else:
             self._turn_context = None
 
-    def get_turn_context(self) -> Optional["Context"]:
+    def get_turn_context(self) -> Context | None:
         """Get the OpenTelemetry context for the current turn.
 
         Returns:
@@ -91,7 +93,7 @@ class TracingContext:
         return self._turn_context
 
     @property
-    def conversation_id(self) -> Optional[str]:
+    def conversation_id(self) -> str | None:
         """Get the ID for the current conversation.
 
         Returns:

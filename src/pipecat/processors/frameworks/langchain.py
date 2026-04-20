@@ -6,8 +6,6 @@
 
 """Langchain integration processor for Pipecat."""
 
-from typing import Optional, Union
-
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -45,7 +43,7 @@ class LangchainProcessor(FrameProcessor):
         super().__init__()
         self._chain = chain
         self._transcript_key = transcript_key
-        self._participant_id: Optional[str] = None
+        self._participant_id: str | None = None
 
     def set_participant_id(self, participant_id: str):
         """Set the participant ID for session tracking.
@@ -76,7 +74,7 @@ class LangchainProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     @staticmethod
-    def __get_token_value(text: Union[str, AIMessageChunk]) -> str:
+    def __get_token_value(text: str | AIMessageChunk) -> str:
         """Extract token value from various text types.
 
         Args:

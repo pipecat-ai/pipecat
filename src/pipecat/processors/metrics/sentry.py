@@ -7,7 +7,6 @@
 """Sentry integration for frame processor metrics."""
 
 import asyncio
-from typing import Optional
 
 from loguru import logger
 
@@ -72,7 +71,7 @@ class SentryMetrics(FrameProcessorMetrics):
             sentry_sdk.flush(timeout=5.0)
 
     async def start_ttfb_metrics(
-        self, *, start_time: Optional[float] = None, report_only_initial_ttfb: bool
+        self, *, start_time: float | None = None, report_only_initial_ttfb: bool
     ):
         """Start tracking time-to-first-byte metrics.
 
@@ -93,7 +92,7 @@ class SentryMetrics(FrameProcessorMetrics):
                 f"{self} Sentry transaction started (ID: {self._ttfb_metrics_tx.span_id} Name: {self._ttfb_metrics_tx.name})"
             )
 
-    async def stop_ttfb_metrics(self, *, end_time: Optional[float] = None):
+    async def stop_ttfb_metrics(self, *, end_time: float | None = None):
         """Stop tracking time-to-first-byte metrics.
 
         Args:
@@ -105,7 +104,7 @@ class SentryMetrics(FrameProcessorMetrics):
             await self._sentry_queue.put(self._ttfb_metrics_tx)
             self._ttfb_metrics_tx = None
 
-    async def start_processing_metrics(self, *, start_time: Optional[float] = None):
+    async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start tracking frame processing metrics.
 
         Args:
@@ -122,7 +121,7 @@ class SentryMetrics(FrameProcessorMetrics):
                 f"{self} Sentry transaction started (ID: {self._processing_metrics_tx.span_id} Name: {self._processing_metrics_tx.name})"
             )
 
-    async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
+    async def stop_processing_metrics(self, *, end_time: float | None = None):
         """Stop tracking frame processing metrics.
 
         Args:

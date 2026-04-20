@@ -12,7 +12,7 @@ https://docs.inworld.ai/api-reference/realtimeAPI/realtime/realtime-websocket
 
 import json
 import uuid
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -84,10 +84,10 @@ class TurnDetection(BaseModel):
         interrupt_response: Whether user speech interrupts the current response.
     """
 
-    type: Optional[Literal["server_vad", "semantic_vad"]] = "semantic_vad"
-    eagerness: Optional[str] = None
-    create_response: Optional[bool] = None
-    interrupt_response: Optional[bool] = None
+    type: Literal["server_vad", "semantic_vad"] | None = "semantic_vad"
+    eagerness: str | None = None
+    create_response: bool | None = None
+    interrupt_response: bool | None = None
 
 
 class InputTranscription(BaseModel):
@@ -97,7 +97,7 @@ class InputTranscription(BaseModel):
         model: The STT model to use for transcription.
     """
 
-    model: Optional[str] = None
+    model: str | None = None
 
 
 #
@@ -114,9 +114,9 @@ class AudioInput(BaseModel):
         turn_detection: Configuration for turn detection.
     """
 
-    format: Optional[Union[PCMAudioFormat, PCMUAudioFormat, PCMAAudioFormat]] = None
-    transcription: Optional[InputTranscription] = None
-    turn_detection: Optional[TurnDetection] = None
+    format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    transcription: InputTranscription | None = None
+    turn_detection: TurnDetection | None = None
 
 
 class AudioOutput(BaseModel):
@@ -128,9 +128,9 @@ class AudioOutput(BaseModel):
         voice: The voice ID to use (e.g. "Sarah", "Clive").
     """
 
-    format: Optional[Union[PCMAudioFormat, PCMUAudioFormat, PCMAAudioFormat]] = None
-    model: Optional[str] = None
-    voice: Optional[str] = None
+    format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    model: str | None = None
+    voice: str | None = None
 
 
 class AudioConfiguration(BaseModel):
@@ -141,8 +141,8 @@ class AudioConfiguration(BaseModel):
         output: Configuration for output audio.
     """
 
-    input: Optional[AudioInput] = None
-    output: Optional[AudioOutput] = None
+    input: AudioInput | None = None
+    output: AudioOutput | None = None
 
 
 #
@@ -163,11 +163,11 @@ class FunctionTool(BaseModel):
     type: Literal["function"] = "function"
     name: str
     description: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
 
 
 # Union type for Inworld tools
-InworldTool = Union[FunctionTool, Dict[str, Any]]
+InworldTool = FunctionTool | dict[str, Any]
 
 
 #
@@ -191,15 +191,15 @@ class SessionProperties(BaseModel):
     # Needed to support ToolSchema in tools field.
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    type: Optional[str] = "realtime"
-    model: Optional[str] = None
-    instructions: Optional[str] = None
-    temperature: Optional[float] = None
-    output_modalities: Optional[List[str]] = None
-    audio: Optional[AudioConfiguration] = None
+    type: str | None = "realtime"
+    model: str | None = None
+    instructions: str | None = None
+    temperature: float | None = None
+    output_modalities: list[str] | None = None
+    audio: AudioConfiguration | None = None
     # Tools can be ToolsSchema when provided by user, or list of dicts for API
-    tools: Optional[ToolsSchema | List[InworldTool]] = None
-    provider_data: Optional[Dict[str, Any]] = None
+    tools: ToolsSchema | list[InworldTool] | None = None
+    provider_data: dict[str, Any] | None = None
 
 
 #
@@ -218,9 +218,9 @@ class ItemContent(BaseModel):
     """
 
     type: Literal["text", "audio", "input_text", "input_audio", "output_text", "output_audio"]
-    text: Optional[str] = None
-    audio: Optional[str] = None  # base64-encoded audio
-    transcript: Optional[str] = None
+    text: str | None = None
+    audio: str | None = None  # base64-encoded audio
+    transcript: str | None = None
 
 
 class ConversationItem(BaseModel):
@@ -240,15 +240,15 @@ class ConversationItem(BaseModel):
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4().hex))
-    object: Optional[Literal["realtime.item"]] = None
+    object: Literal["realtime.item"] | None = None
     type: Literal["message", "function_call", "function_call_output"]
-    status: Optional[Literal["completed", "in_progress", "incomplete"]] = None
-    role: Optional[Literal["user", "assistant", "system", "tool"]] = None
-    content: Optional[List[ItemContent]] = None
-    call_id: Optional[str] = None
-    name: Optional[str] = None
-    arguments: Optional[str] = None
-    output: Optional[str] = None
+    status: Literal["completed", "in_progress", "incomplete"] | None = None
+    role: Literal["user", "assistant", "system", "tool"] | None = None
+    content: list[ItemContent] | None = None
+    call_id: str | None = None
+    name: str | None = None
+    arguments: str | None = None
+    output: str | None = None
 
 
 class RealtimeConversation(BaseModel):
@@ -270,7 +270,7 @@ class ResponseProperties(BaseModel):
         modalities: Output modalities for the response (text, audio, or both).
     """
 
-    modalities: Optional[List[Literal["text", "audio"]]] = ["text", "audio"]
+    modalities: list[Literal["text", "audio"]] | None = ["text", "audio"]
 
 
 #
@@ -289,11 +289,11 @@ class RealtimeError(BaseModel):
         event_id: Event ID associated with the error, if applicable.
     """
 
-    type: Optional[str] = None
-    code: Optional[str] = ""
+    type: str | None = None
+    code: str | None = ""
     message: str
-    param: Optional[str] = None
-    event_id: Optional[str] = None
+    param: str | None = None
+    event_id: str | None = None
 
 
 #
@@ -367,7 +367,7 @@ class ConversationItemCreateEvent(ClientEvent):
     """
 
     type: Literal["conversation.item.create"] = "conversation.item.create"
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item: ConversationItem
 
 
@@ -380,7 +380,7 @@ class ResponseCreateEvent(ClientEvent):
     """
 
     type: Literal["response.create"] = "response.create"
-    response: Optional[ResponseProperties] = None
+    response: ResponseProperties | None = None
 
 
 class ResponseCancelEvent(ClientEvent):
@@ -423,7 +423,7 @@ class SessionCreatedEvent(ServerEvent):
     """
 
     type: Literal["session.created"]
-    session: Optional[SessionProperties] = None
+    session: SessionProperties | None = None
 
 
 class SessionUpdatedEvent(ServerEvent):
@@ -462,7 +462,7 @@ class ConversationItemAdded(ServerEvent):
     """
 
     type: Literal["conversation.item.added"]
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item: ConversationItem
 
 
@@ -492,7 +492,7 @@ class ConversationItemInputAudioTranscriptionDelta(ServerEvent):
 
     type: Literal["conversation.item.input_audio_transcription.delta"]
     item_id: str
-    content_index: Optional[int] = None
+    content_index: int | None = None
     delta: str
 
 
@@ -534,7 +534,7 @@ class InputAudioBufferCommitted(ServerEvent):
     """
 
     type: Literal["input_audio_buffer.committed"]
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item_id: str
 
 
@@ -653,11 +653,11 @@ class ResponseFunctionCallArgumentsDelta(ServerEvent):
     """
 
     type: Literal["response.function_call_arguments.delta"]
-    response_id: Optional[str] = None
-    item_id: Optional[str] = None
+    response_id: str | None = None
+    item_id: str | None = None
     call_id: str
     delta: str
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
 
 
 class ResponseFunctionCallArgumentsDone(ServerEvent):
@@ -673,7 +673,7 @@ class ResponseFunctionCallArgumentsDone(ServerEvent):
 
     type: Literal["response.function_call_arguments.done"]
     call_id: str
-    name: Optional[str] = None
+    name: str | None = None
     arguments: str
 
 
@@ -686,9 +686,9 @@ class Usage(BaseModel):
         output_tokens: Number of output tokens used.
     """
 
-    total_tokens: Optional[int] = None
-    input_tokens: Optional[int] = None
-    output_tokens: Optional[int] = None
+    total_tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class Response(BaseModel):
@@ -705,9 +705,9 @@ class Response(BaseModel):
     id: str
     object: Literal["realtime.response"]
     status: Literal["completed", "in_progress", "incomplete", "cancelled", "failed"]
-    status_details: Optional[Any] = None
-    output: List[ConversationItem]
-    usage: Optional[Usage] = None
+    status_details: Any | None = None
+    output: list[ConversationItem]
+    usage: Usage | None = None
 
 
 class ResponseDone(ServerEvent):
@@ -721,7 +721,7 @@ class ResponseDone(ServerEvent):
 
     type: Literal["response.done"]
     response: Response
-    usage: Optional[Usage] = None
+    usage: Usage | None = None
 
 
 class ResponseOutputItemDone(ServerEvent):
@@ -749,7 +749,7 @@ class ContentPart(BaseModel):
     """
 
     type: str
-    transcript: Optional[str] = None
+    transcript: str | None = None
 
 
 class ResponseContentPartAdded(ServerEvent):

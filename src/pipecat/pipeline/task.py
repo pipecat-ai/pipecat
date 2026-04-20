@@ -14,8 +14,9 @@ including heartbeats, idle detection, and observer integration.
 import asyncio
 import importlib.util
 import os
+from collections.abc import AsyncIterable, Iterable
 from pathlib import Path
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Set, Tuple, Type, TypeVar
+from typing import Any, TypeVar
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -74,7 +75,7 @@ class IdleFrameObserver(BaseObserver):
 
     """
 
-    def __init__(self, *, idle_event: asyncio.Event, idle_timeout_frames: Tuple[Type[Frame], ...]):
+    def __init__(self, *, idle_event: asyncio.Event, idle_timeout_frames: tuple[type[Frame], ...]):
         """Initialize the observer.
 
         Args:
@@ -134,7 +135,7 @@ class PipelineParams(BaseModel):
     heartbeats_monitor_secs: float = HEARTBEAT_MONITOR_SECS
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
-    start_metadata: Dict[str, Any] = Field(default_factory=dict)
+    start_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PipelineTask(BasePipelineTask):
@@ -190,22 +191,22 @@ class PipelineTask(BasePipelineTask):
         self,
         pipeline: BasePipeline,
         *,
-        params: Optional[PipelineParams] = None,
-        additional_span_attributes: Optional[dict] = None,
+        params: PipelineParams | None = None,
+        additional_span_attributes: dict | None = None,
         cancel_on_idle_timeout: bool = True,
         cancel_timeout_secs: float = CANCEL_TIMEOUT_SECS,
         check_dangling_tasks: bool = True,
-        clock: Optional[BaseClock] = None,
-        conversation_id: Optional[str] = None,
+        clock: BaseClock | None = None,
+        conversation_id: str | None = None,
         enable_tracing: bool = False,
         enable_turn_tracking: bool = True,
         enable_rtvi: bool = True,
-        idle_timeout_frames: Tuple[Type[Frame], ...] = (BotSpeakingFrame, UserSpeakingFrame),
-        idle_timeout_secs: Optional[float] = IDLE_TIMEOUT_SECS,
-        observers: Optional[List[BaseObserver]] = None,
-        rtvi_processor: Optional[RTVIProcessor] = None,
-        rtvi_observer_params: Optional[RTVIObserverParams] = None,
-        task_manager: Optional[BaseTaskManager] = None,
+        idle_timeout_frames: tuple[type[Frame], ...] = (BotSpeakingFrame, UserSpeakingFrame),
+        idle_timeout_secs: float | None = IDLE_TIMEOUT_SECS,
+        observers: list[BaseObserver] | None = None,
+        rtvi_processor: RTVIProcessor | None = None,
+        rtvi_observer_params: RTVIObserverParams | None = None,
+        task_manager: BaseTaskManager | None = None,
     ):
         """Initialize the PipelineTask.
 
@@ -246,10 +247,10 @@ class PipelineTask(BasePipelineTask):
         self._enable_turn_tracking = enable_turn_tracking
         self._idle_timeout_secs = idle_timeout_secs
         observers = observers or []
-        self._turn_tracking_observer: Optional[TurnTrackingObserver] = None
-        self._user_bot_latency_observer: Optional[UserBotLatencyObserver] = None
-        self._turn_trace_observer: Optional[TurnTraceObserver] = None
-        self._tracing_context: Optional[TracingContext] = None
+        self._turn_tracking_observer: TurnTrackingObserver | None = None
+        self._user_bot_latency_observer: UserBotLatencyObserver | None = None
+        self._turn_trace_observer: TurnTraceObserver | None = None
+        self._tracing_context: TracingContext | None = None
         if self._enable_turn_tracking:
             self._turn_tracking_observer = TurnTrackingObserver()
             observers.append(self._turn_tracking_observer)
@@ -278,13 +279,13 @@ class PipelineTask(BasePipelineTask):
 
         # This queue is the queue used to push frames to the pipeline.
         self._push_queue = asyncio.Queue()
-        self._process_push_task: Optional[asyncio.Task] = None
+        self._process_push_task: asyncio.Task | None = None
 
         # This is the heartbeat queue. When a heartbeat frame is received in the
         # down queue we add it to the heartbeat queue for processing.
         self._heartbeat_queue = asyncio.Queue()
-        self._heartbeat_push_task: Optional[asyncio.Task] = None
-        self._heartbeat_monitor_task: Optional[asyncio.Task] = None
+        self._heartbeat_push_task: asyncio.Task | None = None
+        self._heartbeat_monitor_task: asyncio.Task | None = None
 
         # RTVI support
         self._rtvi = None
@@ -323,7 +324,7 @@ class PipelineTask(BasePipelineTask):
         # processor we consider the pipeline is not idle. We use an observer
         # which will be listening any part of the pipeline.
         self._idle_event = asyncio.Event()
-        self._idle_monitor_task: Optional[asyncio.Task] = None
+        self._idle_monitor_task: asyncio.Task | None = None
         if self._idle_timeout_secs:
             idle_frame_observer = IdleFrameObserver(
                 idle_event=self._idle_event,
@@ -365,8 +366,8 @@ class PipelineTask(BasePipelineTask):
         # in. This is mainly for efficiency reason because each event handler
         # creates a task and most likely you only care about one or two frame
         # types.
-        self._reached_upstream_types: Set[Type[Frame]] = set()
-        self._reached_downstream_types: Set[Type[Frame]] = set()
+        self._reached_upstream_types: set[type[Frame]] = set()
+        self._reached_downstream_types: set[type[Frame]] = set()
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
         self._register_event_handler("on_idle_timeout")
@@ -395,7 +396,7 @@ class PipelineTask(BasePipelineTask):
         return self._pipeline
 
     @property
-    def turn_tracking_observer(self) -> Optional[TurnTrackingObserver]:
+    def turn_tracking_observer(self) -> TurnTrackingObserver | None:
         """Get the turn tracking observer if enabled.
 
         Returns:
@@ -404,7 +405,7 @@ class PipelineTask(BasePipelineTask):
         return self._turn_tracking_observer
 
     @property
-    def turn_trace_observer(self) -> Optional[TurnTraceObserver]:
+    def turn_trace_observer(self) -> TurnTraceObserver | None:
         """Get the turn trace observer if enabled.
 
         Returns:
@@ -424,7 +425,7 @@ class PipelineTask(BasePipelineTask):
         return self._rtvi
 
     @property
-    def reached_upstream_types(self) -> Tuple[Type[Frame], ...]:
+    def reached_upstream_types(self) -> tuple[type[Frame], ...]:
         """Get the currently configured upstream frame type filters.
 
         Returns:
@@ -433,7 +434,7 @@ class PipelineTask(BasePipelineTask):
         return tuple(self._reached_upstream_types)
 
     @property
-    def reached_downstream_types(self) -> Tuple[Type[Frame], ...]:
+    def reached_downstream_types(self) -> tuple[type[Frame], ...]:
         """Get the currently configured downstream frame type filters.
 
         Returns:
@@ -457,7 +458,7 @@ class PipelineTask(BasePipelineTask):
         """
         await self._observer.remove_observer(observer)
 
-    def set_reached_upstream_filter(self, types: Tuple[Type[Frame], ...]):
+    def set_reached_upstream_filter(self, types: tuple[type[Frame], ...]):
         """Set which frame types trigger the on_frame_reached_upstream event.
 
         Args:
@@ -465,7 +466,7 @@ class PipelineTask(BasePipelineTask):
         """
         self._reached_upstream_types = set(types)
 
-    def set_reached_downstream_filter(self, types: Tuple[Type[Frame], ...]):
+    def set_reached_downstream_filter(self, types: tuple[type[Frame], ...]):
         """Set which frame types trigger the on_frame_reached_downstream event.
 
         Args:
@@ -473,7 +474,7 @@ class PipelineTask(BasePipelineTask):
         """
         self._reached_downstream_types = set(types)
 
-    def add_reached_upstream_filter(self, types: Tuple[Type[Frame], ...]):
+    def add_reached_upstream_filter(self, types: tuple[type[Frame], ...]):
         """Add frame types to trigger the on_frame_reached_upstream event.
 
         Args:
@@ -481,7 +482,7 @@ class PipelineTask(BasePipelineTask):
         """
         self._reached_upstream_types.update(types)
 
-    def add_reached_downstream_filter(self, types: Tuple[Type[Frame], ...]):
+    def add_reached_downstream_filter(self, types: tuple[type[Frame], ...]):
         """Add frame types to trigger the on_frame_reached_downstream event.
 
         Args:
@@ -509,7 +510,7 @@ class PipelineTask(BasePipelineTask):
         logger.debug(f"Task {self} scheduled to stop when done")
         await self.queue_frame(EndFrame())
 
-    async def cancel(self, *, reason: Optional[str] = None):
+    async def cancel(self, *, reason: str | None = None):
         """Request the running pipeline to cancel.
 
         Args:
@@ -597,7 +598,7 @@ class PipelineTask(BasePipelineTask):
             for frame in frames:
                 await self.queue_frame(frame, direction)
 
-    async def _cancel(self, *, reason: Optional[str] = None):
+    async def _cancel(self, *, reason: str | None = None):
         """Internal cancellation logic for the pipeline task.
 
         Args:
@@ -685,7 +686,7 @@ class PipelineTask(BasePipelineTask):
                     self._pipeline_end_event.wait(), timeout=self._cancel_timeout_secs
                 )
                 logger.debug(f"{self}: {frame} reached the end of the pipeline.")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     f"{self}: timeout waiting for {frame} to reach the end of the pipeline (being blocked somewhere?)."
                 )
@@ -741,7 +742,7 @@ class PipelineTask(BasePipelineTask):
         await self._observer.cleanup()
 
         # End conversation tracing if it's active - this will also close any active turn span
-        if self._enable_tracing and hasattr(self, "_turn_trace_observer"):
+        if self._enable_tracing and self._turn_trace_observer:
             self._turn_trace_observer.end_conversation_tracing()
 
         # Cleanup pipeline processors.
@@ -895,7 +896,7 @@ class PipelineTask(BasePipelineTask):
                 process_time = (self._clock.get_time() - frame.timestamp) / 1_000_000_000
                 logger.trace(f"{self}: heartbeat frame processed in {process_time} seconds")
                 self._heartbeat_queue.task_done()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     f"{self}: heartbeat frame not received for more than {wait_time} seconds"
                 )
@@ -913,7 +914,7 @@ class PipelineTask(BasePipelineTask):
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._idle_timeout_secs)
                 self._idle_event.clear()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 running = await self._idle_timeout_detected()
 
     async def _idle_timeout_detected(self) -> bool:
@@ -972,7 +973,7 @@ class PipelineTask(BasePipelineTask):
         if tasks:
             logger.warning(f"{self} dangling tasks detected: {tasks}")
 
-    def _create_start_metadata(self) -> Dict[str, Any]:
+    def _create_start_metadata(self) -> dict[str, Any]:
         """Build and return start metadata including user-provided values."""
         start_metadata = {}
 
@@ -981,7 +982,7 @@ class PipelineTask(BasePipelineTask):
 
         return start_metadata
 
-    def _find_processor(self, processor: FrameProcessor, processor_type: Type[T]) -> Optional[T]:
+    def _find_processor(self, processor: FrameProcessor, processor_type: type[T]) -> T | None:
         """Recursively find a processor of the given type in the pipeline."""
         if isinstance(processor, processor_type):
             return processor

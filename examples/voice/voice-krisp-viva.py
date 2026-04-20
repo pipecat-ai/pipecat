@@ -66,17 +66,17 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=krisp_viva_filter,
+        audio_in_filter=KrispVivaFilter(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=krisp_viva_filter,
+        audio_in_filter=KrispVivaFilter(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        audio_in_filter=krisp_viva_filter,
+        audio_in_filter=KrispVivaFilter(),
     ),
 }
 

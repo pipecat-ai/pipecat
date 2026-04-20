@@ -20,7 +20,6 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 from itertools import chain
-from typing import List
 
 from loguru import logger
 
@@ -215,7 +214,7 @@ class SyncParallelPipeline(BasePipeline):
         return self._pipelines
 
     @property
-    def entry_processors(self) -> List["FrameProcessor"]:
+    def entry_processors(self) -> list["FrameProcessor"]:
         """Return the list of entry processors for this processor.
 
         Entry processors are the first processors in a compound processor
@@ -228,7 +227,7 @@ class SyncParallelPipeline(BasePipeline):
         """
         return [s["processor"] for s in self._sources]
 
-    def processors_with_metrics(self) -> List[FrameProcessor]:
+    def processors_with_metrics(self) -> list[FrameProcessor]:
         """Collect processors that can generate metrics from all parallel pipelines.
 
         Returns:

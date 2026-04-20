@@ -14,8 +14,9 @@ import json
 import os
 import random
 import string
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -66,14 +67,14 @@ class AWSTranscribeSTTService(WebsocketSTTService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        aws_access_key_id: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
-        region: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        language: Optional[Language] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = AWS_TRANSCRIBE_TTFS_P99,
+        api_key: str | None = None,
+        aws_access_key_id: str | None = None,
+        aws_session_token: str | None = None,
+        region: str | None = None,
+        sample_rate: int | None = None,
+        language: Language | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = AWS_TRANSCRIBE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the AWS Transcribe STT service.
@@ -496,7 +497,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
+        self, transcript: str, is_final: bool, language: str | None = None
     ):
         pass
 

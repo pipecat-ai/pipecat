@@ -12,7 +12,6 @@ and emit events when speech starts, stops, or is actively detected.
 
 import asyncio
 import time
-from typing import Optional, Type
 
 from loguru import logger
 
@@ -90,7 +89,7 @@ class VADController(BaseObject):
         self._vad_analyzer = vad_analyzer
         self._vad_state: VADState = VADState.QUIET
 
-        self._task_manager: Optional[BaseTaskManager] = None
+        self._task_manager: BaseTaskManager | None = None
 
         # Last time a on_speech_activity was triggered.
         self._speech_activity_time = 0
@@ -102,7 +101,7 @@ class VADController(BaseObject):
         # while in SPEAKING state (e.g. user mutes mic mid-speech).
         self._last_audio_time: float = 0.0
         self._audio_idle_timeout = audio_idle_timeout
-        self._audio_idle_task: Optional[asyncio.Task] = None
+        self._audio_idle_task: asyncio.Task | None = None
 
         self._register_event_handler("on_speech_started", sync=True)
         self._register_event_handler("on_speech_stopped", sync=True)
@@ -234,7 +233,7 @@ class VADController(BaseObject):
         """
         await self._call_event_handler("on_push_frame", frame, direction)
 
-    async def broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
+    async def broadcast_frame(self, frame_cls: type[Frame], **kwargs):
         """Request a frame to be broadcast upstream and downstream.
 
         This emits an on_broadcast_frame event that must be handled by a processor

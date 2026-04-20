@@ -8,7 +8,7 @@
 
 import json
 import uuid
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,14 +61,14 @@ class InputAudioTranscription(BaseModel):
     """Configuration for audio transcription settings."""
 
     model: str = "gpt-4o-transcribe"
-    language: Optional[str]
-    prompt: Optional[str]
+    language: str | None
+    prompt: str | None
 
     def __init__(
         self,
-        model: Optional[str] = "gpt-4o-transcribe",
-        language: Optional[str] = None,
-        prompt: Optional[str] = None,
+        model: str | None = "gpt-4o-transcribe",
+        language: str | None = None,
+        prompt: str | None = None,
     ):
         """Initialize InputAudioTranscription.
 
@@ -90,10 +90,10 @@ class TurnDetection(BaseModel):
         silence_duration_ms: Silence duration to detect speech end in milliseconds. Defaults to 500.
     """
 
-    type: Optional[Literal["server_vad"]] = "server_vad"
-    threshold: Optional[float] = 0.5
-    prefix_padding_ms: Optional[int] = 300
-    silence_duration_ms: Optional[int] = 500
+    type: Literal["server_vad"] | None = "server_vad"
+    threshold: float | None = 0.5
+    prefix_padding_ms: int | None = 300
+    silence_duration_ms: int | None = 500
 
 
 class SemanticTurnDetection(BaseModel):
@@ -106,10 +106,10 @@ class SemanticTurnDetection(BaseModel):
         interrupt_response: Whether to interrupt ongoing responses on turn detection.
     """
 
-    type: Optional[Literal["semantic_vad"]] = "semantic_vad"
-    eagerness: Optional[Literal["low", "medium", "high", "auto"]] = None
-    create_response: Optional[bool] = None
-    interrupt_response: Optional[bool] = None
+    type: Literal["semantic_vad"] | None = "semantic_vad"
+    eagerness: Literal["low", "medium", "high", "auto"] | None = None
+    create_response: bool | None = None
+    interrupt_response: bool | None = None
 
 
 class InputAudioNoiseReduction(BaseModel):
@@ -119,7 +119,7 @@ class InputAudioNoiseReduction(BaseModel):
         type: Noise reduction type for different microphone scenarios.
     """
 
-    type: Optional[Literal["near_field", "far_field"]]
+    type: Literal["near_field", "far_field"] | None
 
 
 class AudioInput(BaseModel):
@@ -132,10 +132,10 @@ class AudioInput(BaseModel):
         turn_detection: Configuration for turn detection, or False to disable.
     """
 
-    format: Optional[Union[PCMAudioFormat, PCMUAudioFormat, PCMAAudioFormat]] = None
-    transcription: Optional[InputAudioTranscription] = None
-    noise_reduction: Optional[InputAudioNoiseReduction] = None
-    turn_detection: Optional[Union[TurnDetection, SemanticTurnDetection, bool]] = None
+    format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    transcription: InputAudioTranscription | None = None
+    noise_reduction: InputAudioNoiseReduction | None = None
+    turn_detection: TurnDetection | SemanticTurnDetection | bool | None = None
 
 
 class AudioOutput(BaseModel):
@@ -147,9 +147,9 @@ class AudioOutput(BaseModel):
         speed: The speed of the model's spoken response.
     """
 
-    format: Optional[Union[PCMAudioFormat, PCMUAudioFormat, PCMAAudioFormat]] = None
-    voice: Optional[str] = None
-    speed: Optional[float] = None
+    format: PCMAudioFormat | PCMUAudioFormat | PCMAAudioFormat | None = None
+    voice: str | None = None
+    speed: float | None = None
 
 
 class AudioConfiguration(BaseModel):
@@ -160,8 +160,8 @@ class AudioConfiguration(BaseModel):
         output: Configuration for output audio.
     """
 
-    input: Optional[AudioInput] = None
-    output: Optional[AudioOutput] = None
+    input: AudioInput | None = None
+    output: AudioOutput | None = None
 
 
 class SessionProperties(BaseModel):
@@ -189,23 +189,23 @@ class SessionProperties(BaseModel):
     # Needed to support ToolSchema in tools field.
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    type: Optional[Literal["realtime"]] = "realtime"
-    object: Optional[Literal["realtime.session"]] = None
-    id: Optional[str] = None
-    model: Optional[str] = None
-    output_modalities: Optional[List[Literal["text", "audio"]]] = None
-    instructions: Optional[str] = None
-    audio: Optional[AudioConfiguration] = None
+    type: Literal["realtime"] | None = "realtime"
+    object: Literal["realtime.session"] | None = None
+    id: str | None = None
+    model: str | None = None
+    output_modalities: list[Literal["text", "audio"]] | None = None
+    instructions: str | None = None
+    audio: AudioConfiguration | None = None
     # Tools can only be ToolsSchema when provided by the user, in either the
     # OpenAIRealtimeLLMService constructor or through LLMUpdateSettingsFrame.
     # We'll never serialize/deserialize ToolsSchema when talking to the server.
-    tools: Optional[ToolsSchema | List[Dict]] = None
-    tool_choice: Optional[Literal["auto", "none", "required"]] = None
-    max_output_tokens: Optional[Union[int, Literal["inf"]]] = None
-    tracing: Optional[Union[Literal["auto"], Dict]] = None
-    prompt: Optional[Dict] = None
-    expires_at: Optional[int] = None
-    include: Optional[List[str]] = None
+    tools: ToolsSchema | list[dict] | None = None
+    tool_choice: Literal["auto", "none", "required"] | None = None
+    max_output_tokens: int | Literal["inf"] | None = None
+    tracing: Literal["auto"] | dict | None = None
+    prompt: dict | None = None
+    expires_at: int | None = None
+    include: list[str] | None = None
 
 
 #
@@ -228,11 +228,11 @@ class ItemContent(BaseModel):
     type: Literal[
         "text", "audio", "input_text", "input_audio", "input_image", "output_text", "output_audio"
     ]
-    text: Optional[str] = None
-    audio: Optional[str] = None  # base64-encoded audio
-    transcript: Optional[str] = None
-    image_url: Optional[str] = None  # base64-encoded image as data URI
-    detail: Optional[Literal["auto", "low", "high"]] = None
+    text: str | None = None
+    audio: str | None = None  # base64-encoded audio
+    transcript: str | None = None
+    image_url: str | None = None  # base64-encoded image as data URI
+    detail: Literal["auto", "low", "high"] | None = None
 
 
 class ConversationItem(BaseModel):
@@ -252,17 +252,17 @@ class ConversationItem(BaseModel):
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4().hex))
-    object: Optional[Literal["realtime.item"]] = None
+    object: Literal["realtime.item"] | None = None
     type: Literal["message", "function_call", "function_call_output"]
-    status: Optional[Literal["completed", "in_progress", "incomplete"]] = None
+    status: Literal["completed", "in_progress", "incomplete"] | None = None
     # role and content are present for message items
-    role: Optional[Literal["user", "assistant", "system"]] = None
-    content: Optional[List[ItemContent]] = None
+    role: Literal["user", "assistant", "system"] | None = None
+    content: list[ItemContent] | None = None
     # these four fields are present for function_call items
-    call_id: Optional[str] = None
-    name: Optional[str] = None
-    arguments: Optional[str] = None
-    output: Optional[str] = None
+    call_id: str | None = None
+    name: str | None = None
+    arguments: str | None = None
+    output: str | None = None
 
 
 class RealtimeConversation(BaseModel):
@@ -290,13 +290,13 @@ class ResponseProperties(BaseModel):
         max_output_tokens: Maximum tokens for this response.
     """
 
-    output_modalities: Optional[List[Literal["text", "audio"]]] = ["audio"]
-    instructions: Optional[str] = None
-    audio: Optional[AudioConfiguration] = None
-    tools: Optional[List[Dict]] = None
-    tool_choice: Optional[Literal["auto", "none", "required"]] = None
-    temperature: Optional[float] = None
-    max_output_tokens: Optional[Union[int, Literal["inf"]]] = None
+    output_modalities: list[Literal["text", "audio"]] | None = ["audio"]
+    instructions: str | None = None
+    audio: AudioConfiguration | None = None
+    tools: list[dict] | None = None
+    tool_choice: Literal["auto", "none", "required"] | None = None
+    temperature: float | None = None
+    max_output_tokens: int | Literal["inf"] | None = None
 
 
 #
@@ -314,10 +314,10 @@ class RealtimeError(BaseModel):
     """
 
     type: str
-    code: Optional[str] = ""
+    code: str | None = ""
     message: str
-    param: Optional[str] = None
-    event_id: Optional[str] = None
+    param: str | None = None
+    event_id: str | None = None
 
 
 #
@@ -346,7 +346,7 @@ class SessionUpdateEvent(ClientEvent):
     type: Literal["session.update"] = "session.update"
     session: SessionProperties
 
-    def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         """Serialize the event to a dictionary.
 
         Handles special serialization for turn_detection where False becomes null.
@@ -412,7 +412,7 @@ class ConversationItemCreateEvent(ClientEvent):
     """
 
     type: Literal["conversation.item.create"] = "conversation.item.create"
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item: ConversationItem
 
 
@@ -465,7 +465,7 @@ class ResponseCreateEvent(ClientEvent):
     """
 
     type: Literal["response.create"] = "response.create"
-    response: Optional[ResponseProperties] = None
+    response: ResponseProperties | None = None
 
 
 class ResponseCancelEvent(ClientEvent):
@@ -543,7 +543,7 @@ class ConversationItemAdded(ServerEvent):
     """
 
     type: Literal["conversation.item.added"]
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item: ConversationItem
 
 
@@ -557,7 +557,7 @@ class ConversationItemDone(ServerEvent):
     """
 
     type: Literal["conversation.item.done"]
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item: ConversationItem
 
 
@@ -941,7 +941,7 @@ class InputAudioBufferCommitted(ServerEvent):
     """
 
     type: Literal["input_audio_buffer.committed"]
-    previous_item_id: Optional[str] = None
+    previous_item_id: str | None = None
     item_id: str
 
 
@@ -976,7 +976,7 @@ class RateLimitsUpdated(ServerEvent):
     """
 
     type: Literal["rate_limits.updated"]
-    rate_limits: List[Dict[str, Any]]
+    rate_limits: list[dict[str, Any]]
 
 
 class CachedTokensDetails(BaseModel):
@@ -987,8 +987,8 @@ class CachedTokensDetails(BaseModel):
         audio_tokens: Number of cached audio tokens.
     """
 
-    text_tokens: Optional[int] = 0
-    audio_tokens: Optional[int] = 0
+    text_tokens: int | None = 0
+    audio_tokens: int | None = 0
 
 
 class TokenDetails(BaseModel):
@@ -1004,11 +1004,11 @@ class TokenDetails(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    cached_tokens: Optional[int] = 0
-    text_tokens: Optional[int] = 0
-    audio_tokens: Optional[int] = 0
-    cached_tokens_details: Optional[CachedTokensDetails] = None
-    image_tokens: Optional[int] = 0
+    cached_tokens: int | None = 0
+    text_tokens: int | None = 0
+    audio_tokens: int | None = 0
+    cached_tokens_details: CachedTokensDetails | None = None
+    image_tokens: int | None = 0
 
 
 class Usage(BaseModel):
@@ -1052,14 +1052,14 @@ class Response(BaseModel):
     object: Literal["realtime.response"]
     status: Literal["completed", "in_progress", "incomplete", "cancelled", "failed"]
     status_details: Any
-    output: List[ConversationItem]
-    output_modalities: Optional[List[Literal["text", "audio"]]] = None
-    max_output_tokens: Optional[Union[int, Literal["inf"]]] = None
-    audio: Optional[AudioConfiguration] = None
-    usage: Optional[Usage] = None
-    voice: Optional[str] = None
-    temperature: Optional[float] = None
-    output_audio_format: Optional[str] = None
+    output: list[ConversationItem]
+    output_modalities: list[Literal["text", "audio"]] | None = None
+    max_output_tokens: int | Literal["inf"] | None = None
+    audio: AudioConfiguration | None = None
+    usage: Usage | None = None
+    voice: str | None = None
+    temperature: float | None = None
+    output_audio_format: str | None = None
 
 
 _server_event_types = {
