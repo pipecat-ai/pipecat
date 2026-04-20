@@ -27,11 +27,13 @@ Outputs:
 Usage:
     python demo_interrupt_prediction.py input.wav
     python demo_interrupt_prediction.py input.wav --strategy krisp-ip --strategy vad
+    python demo_interrupt_prediction.py input.wav --vad krisp
     python demo_interrupt_prediction.py input.wav --threshold 0.6 -v
 
 Requirements:
     pip install soundfile numpy pipecat-ai[krisp]
     Set KRISP_VIVA_IP_MODEL_PATH environment variable for krisp-ip strategy
+    Set KRISP_VIVA_VAD_MODEL_PATH for --vad krisp option
 """
 
 import argparse
@@ -72,9 +74,8 @@ src_dir = project_root / "src"
 if src_dir.exists() and str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams, VADState
-from pipecat.frames.frames import InputAudioRawFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
+from pipecat.frames.frames import InputAudioRawFrame
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy import (
     KrispVivaIPUserTurnStartStrategy,
@@ -82,6 +83,42 @@ from pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy import (
 
 
 AVAILABLE_STRATEGIES = ["krisp-ip", "vad"]
+AVAILABLE_VADS = ["silero", "krisp"]
+
+
+def create_vad(
+    vad_type: str,
+    params: VADParams,
+    sample_rate: int,
+    frame_duration_ms: int = 10,
+) -> Tuple[VADAnalyzer, str]:
+    """Create and configure a VAD analyzer by name.
+
+    Args:
+        vad_type: VAD engine ("silero" or "krisp").
+        params: VAD detection parameters.
+        sample_rate: Audio sample rate in Hz.
+        frame_duration_ms: Frame duration for Krisp VAD (default: 10).
+
+    Returns:
+        Tuple of (VADAnalyzer instance, actual vad_type used).
+    """
+    if vad_type == "silero":
+        from pipecat.audio.vad.silero import SileroVADAnalyzer
+
+        vad = SileroVADAnalyzer(params=params)
+        vad.set_sample_rate(sample_rate)
+        return vad, "silero"
+
+    elif vad_type == "krisp":
+        from pipecat.audio.vad.krisp_viva_vad import KrispVivaVadAnalyzer
+
+        vad = KrispVivaVadAnalyzer(frame_duration=frame_duration_ms, params=params)
+        vad.set_sample_rate(sample_rate)
+        return vad, "krisp"
+
+    else:
+        raise ValueError(f"Unknown VAD type '{vad_type}'. Available: {AVAILABLE_VADS}")
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +195,7 @@ async def process_audio(
     frame_duration_ms: int = 20,
     output_dir: str = "./demo_output",
     verbose: bool = False,
+    vad_type: str = "silero",
 ) -> None:
     """Process audio through multiple interruption strategies and compare.
 
@@ -172,22 +210,30 @@ async def process_audio(
         threshold: IP probability threshold for krisp-ip strategy.
         output_dir: Output directory for generated files.
         verbose: Print per-frame details.
+        vad_type: VAD engine ("silero" or "krisp").
     """
     user_audio, sample_rate = read_audio_file(input_path, verbose=True)
     duration_secs = len(user_audio) / sample_rate
 
     print(f"\nAudio: {duration_secs:.2f}s, {sample_rate} Hz")
 
-    # Resample to 16 kHz if needed (Silero VAD only supports 8/16 kHz)
-    user_audio, sample_rate = resample_audio(user_audio, sample_rate, 16000, verbose=True)
+    # Resample to 16 kHz if needed (Silero VAD only supports 8/16 kHz;
+    # Krisp VAD supports more rates but 16 kHz is a safe common default)
+    if vad_type == "silero":
+        user_audio, sample_rate = resample_audio(user_audio, sample_rate, 16000, verbose=True)
+    elif sample_rate not in (8000, 16000, 32000, 44100, 48000):
+        user_audio, sample_rate = resample_audio(user_audio, sample_rate, 16000, verbose=True)
     duration_secs = len(user_audio) / sample_rate
     num_samples = len(user_audio)
 
     # Initialize VAD (shared across all strategies)
-    print("\nInitializing Silero VAD...")
-    vad = SileroVADAnalyzer(params=VADParams(stop_secs=0.2))
-    vad.set_sample_rate(sample_rate)
-    print(f"  Silero VAD ready (confidence={vad.params.confidence}, stop_secs=0.2)")
+    vad_params = VADParams(stop_secs=0.2)
+    print(f"\nInitializing {vad_type} VAD...")
+    vad, vad_type = create_vad(vad_type, vad_params, sample_rate, frame_duration_ms=10)
+    print(
+        f"  {vad_type} VAD ready (confidence={vad_params.confidence}, "
+        f"stop_secs={vad_params.stop_secs})"
+    )
 
     # Initialize the pipecat IP strategy if krisp-ip is requested
     ip_strategy: Optional[KrispVivaIPUserTurnStartStrategy] = None
@@ -244,7 +290,7 @@ async def process_audio(
         frames_processed += 1
         frame_bytes = chunk.tobytes()
 
-        # VAD (shared)
+        # VAD (shared) — smoothed state with start/stop debouncing
         vad_state = vad._run_analyzer(frame_bytes)
         vad_just_started = (
             prev_vad_state != VADState.SPEAKING and vad_state == VADState.SPEAKING
@@ -255,6 +301,13 @@ async def process_audio(
             and vad_speaking
         )
 
+        # Raw per-frame VAD: True when the last raw confidence check passed,
+        # before the state machine applies start/stop debouncing.
+        # STARTING/SPEAKING → raw voice detected; QUIET/STOPPING → raw silence.
+        raw_speaking = vad_state in (VADState.STARTING, VADState.SPEAKING)
+
+        # Smoothed transitions — used for speech segment tracking and the
+        # "vad" strategy which mirrors pipeline behaviour.
         if vad_just_started:
             vad_speaking = True
             current_speech_start = timestamp
@@ -266,29 +319,32 @@ async def process_audio(
                 if verbose:
                     print(f"  [vad] Interruption at {timestamp:.2f}s (VAD speech start)")
 
-            # Feed VAD-started frame to the IP strategy
-            if ip_strategy:
-                await ip_strategy.process_frame(VADUserStartedSpeakingFrame())
-
         if vad_just_stopped:
             vad_speaking = False
             if current_speech_start is not None:
                 speech_segments.append((current_speech_start, timestamp))
                 current_speech_start = None
-            # Feed VAD-stopped frame to the IP strategy (resets its state)
-            if ip_strategy:
-                await ip_strategy.process_frame(VADUserStoppedSpeakingFrame())
             # Reset per-segment flags so the next speech segment is evaluated
             for k in strategy_fired:
                 strategy_fired[k] = False
+            if ip_strategy:
+                ip_strategy._speech_active = False
+                ip_strategy._decision_made = False
 
-        # Feed audio to the IP strategy; it handles buffering and decision internally
-        if ip_strategy and not strategy_fired.get("krisp-ip", False):
+        # Feed audio to the IP strategy with two separate flags:
+        #   _vad_flag      = raw per-frame VAD (for ip_session.process())
+        #   _speech_active = smoothed detection window (for threshold guard)
+        # The smoothed window stays open slightly after raw VAD goes silent,
+        # which is needed because the IP model may output high probability
+        # one frame *after* the raw VAD transitions to False.
+        if ip_strategy:
+            ip_strategy._vad_flag = raw_speaking
+            ip_strategy._speech_active = vad_speaking
             audio_frame = InputAudioRawFrame(
                 audio=frame_bytes, sample_rate=sample_rate, num_channels=1,
             )
             result = await ip_strategy.process_frame(audio_frame)
-            if result == ProcessFrameResult.STOP:
+            if result == ProcessFrameResult.STOP and not strategy_fired.get("krisp-ip", False):
                 results["krisp-ip"].interruption_times.append(timestamp)
                 strategy_fired["krisp-ip"] = True
 
@@ -326,7 +382,7 @@ async def process_audio(
     print(_format_ascii_timeline(duration_secs, speech_segments, results))
     print(_format_summary(
         input_path, sample_rate, duration_secs, threshold,
-        frame_duration_ms, speech_segments, results,
+        frame_duration_ms, speech_segments, results, vad_type,
     ))
 
     # HTML report
@@ -340,6 +396,7 @@ async def process_audio(
         results=results,
         output_path=html_path,
         annotated_audio=annotated_audio_map,
+        vad_type=vad_type,
     )
     print(f"\n  HTML report: {html_path}")
 
@@ -348,6 +405,8 @@ async def process_audio(
     # Cleanup
     if ip_strategy:
         await ip_strategy.cleanup()
+    if hasattr(vad, "cleanup"):
+        await vad.cleanup()
     print("\nDone.")
 
 
@@ -426,10 +485,13 @@ def _format_summary(
     frame_duration_ms: int,
     speech_segments: List[Tuple[float, float]],
     results: Dict[str, StrategyResult],
+    vad_type: str = "silero",
 ) -> str:
     """Format text summary comparing strategies."""
     lines: List[str] = []
     sep = "=" * 60
+
+    vad_label = "Krisp VIVA" if vad_type == "krisp" else "Silero"
 
     lines.append(sep)
     lines.append("Interrupt Prediction: Strategy Comparison")
@@ -438,7 +500,7 @@ def _format_summary(
         f"Audio: {os.path.basename(input_path)} ({sample_rate} Hz, {duration_secs:.2f}s)"
     )
     lines.append(f"IP threshold: {threshold}, Frame duration: {frame_duration_ms}ms")
-    lines.append(f"VAD: Silero (confidence=0.7, stop_secs=0.2)")
+    lines.append(f"VAD: {vad_label} (confidence=0.7, stop_secs=0.2)")
     lines.append(f"Speech segments: {len(speech_segments)}")
     lines.append("")
 
@@ -493,6 +555,7 @@ def _generate_html_report(
     results: Dict[str, StrategyResult],
     output_path: str,
     annotated_audio: Optional[Dict[str, np.ndarray]] = None,
+    vad_type: str = "silero",
 ) -> None:
     """Generate a self-contained HTML report comparing strategies."""
     basename = os.path.basename(input_path)
@@ -517,11 +580,14 @@ def _generate_html_report(
         )
     strategies_json = ",\n      ".join(strategy_blocks)
 
+    vad_label = "Krisp VIVA" if vad_type == "krisp" else "Silero"
+
     html = _HTML_TEMPLATE.format(
         basename=basename,
         duration_secs=duration_secs,
         sample_rate=sample_rate,
         threshold=threshold,
+        vad_label=vad_label,
         n_speech=len(speech_segments),
         seg_json=seg_json,
         strategies_json=strategies_json,
@@ -599,7 +665,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
 <h1>Interrupt Prediction: Strategy Comparison</h1>
 <p class="meta">{basename} &mdash; {duration_secs:.2f}s, {sample_rate} Hz &mdash;
-IP threshold: {threshold} &mdash; {n_speech} speech segments</p>
+VAD: {vad_label} &mdash; IP threshold: {threshold} &mdash; {n_speech} speech segments</p>
 
 <div class="container">
   <div class="transport" id="transport" style="display:none">
@@ -798,6 +864,7 @@ Examples:
   python demo_interrupt_prediction.py input.wav
   python demo_interrupt_prediction.py input.wav --strategy krisp-ip
   python demo_interrupt_prediction.py input.wav --strategy krisp-ip --strategy vad
+  python demo_interrupt_prediction.py input.wav --vad krisp
   python demo_interrupt_prediction.py input.wav --threshold 0.6 -v
 
 Strategies:
@@ -805,7 +872,8 @@ Strategies:
   vad         VAD-only (any speech = interruption)
 
 Environment variables:
-  KRISP_VIVA_IP_MODEL_PATH  Path to Krisp IP model (.kef)
+  KRISP_VIVA_IP_MODEL_PATH   Path to Krisp IP model (.kef)
+  KRISP_VIVA_VAD_MODEL_PATH  Path to Krisp VAD model (.kef, for --vad krisp)
         """,
     )
 
@@ -836,6 +904,15 @@ Environment variables:
         type=str,
         default="./demo_output",
         help="Output directory (default: ./demo_output)",
+    )
+    parser.add_argument(
+        "--vad",
+        type=str,
+        default="silero",
+        choices=AVAILABLE_VADS,
+        dest="vad_type",
+        help="VAD engine: silero (default) or krisp (requires KRISP_VIVA_VAD_MODEL_PATH). "
+        "Uses production Pipecat VAD parameters.",
     )
     parser.add_argument(
         "-v",
@@ -874,6 +951,7 @@ Environment variables:
             frame_duration_ms=args.frame_duration,
             output_dir=args.output_dir,
             verbose=args.verbose,
+            vad_type=args.vad_type,
         )
     )
 
