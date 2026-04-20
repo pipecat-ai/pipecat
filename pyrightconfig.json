@@ -17,5 +17,20 @@
     "**/*_pb2.py",
     "**/__pycache__"
   ],
+  "ignore": [
+    "src/pipecat/adapters",
+    "src/pipecat/audio",
+    "src/pipecat/processors",
+    "src/pipecat/serializers",
+    "src/pipecat/services",
+    "src/pipecat/sync",
+    "src/pipecat/tests",
+    "src/pipecat/transports",
+    "src/pipecat/utils",
+    "tests",
+    "examples",
+    "scripts",
+    "docs"
+  ],
   "reportMissingImports": false
 }
