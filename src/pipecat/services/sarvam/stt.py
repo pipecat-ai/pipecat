@@ -228,26 +228,6 @@ class SarvamSTTService(STTService):
                 verbatim, translit, codemix. Defaults to "transcribe" for saaras:v3.
             vad_signals: Enable VAD signals in response. Defaults to None.
             high_vad_sensitivity: Enable high VAD sensitivity. Defaults to None.
-            positive_speech_threshold: VAD probability threshold (0.0-1.0) above which
-                a frame is considered speech. Only for saaras:v3.
-            negative_speech_threshold: VAD probability threshold (0.0-1.0) below which
-                a frame is considered silence. Only for saaras:v3.
-            min_speech_frames: Minimum consecutive speech frames to start a segment.
-                Only for saaras:v3.
-            first_turn_min_speech_frames: Minimum speech frames for the first user
-                turn. Only for saaras:v3.
-            negative_frames_count: Silence frames within the window to end a segment.
-                Only for saaras:v3.
-            negative_frames_window: Sliding window size (in frames) for counting
-                negative frames. Only for saaras:v3.
-            start_speech_volume_threshold: Volume (dB) below which audio is too quiet.
-                Only for saaras:v3.
-            interrupt_min_speech_frames: Minimum speech frames for barge-in.
-                Only for saaras:v3.
-            pre_speech_pad_frames: Audio frames to prepend before speech onset.
-                Only for saaras:v3.
-            num_initial_ignored_frames: Leading frames to skip at connection start.
-                Only for saaras:v3.
         """
 
         language: Language | None = None
@@ -255,16 +235,6 @@ class SarvamSTTService(STTService):
         mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | None = None
         vad_signals: bool | None = None
         high_vad_sensitivity: bool | None = None
-        positive_speech_threshold: float | None = None
-        negative_speech_threshold: float | None = None
-        min_speech_frames: int | None = None
-        first_turn_min_speech_frames: int | None = None
-        negative_frames_count: int | None = None
-        negative_frames_window: int | None = None
-        start_speech_volume_threshold: float | None = None
-        interrupt_min_speech_frames: int | None = None
-        pre_speech_pad_frames: int | None = None
-        num_initial_ignored_frames: int | None = None
 
     def __init__(
         self,
@@ -311,7 +281,7 @@ class SarvamSTTService(STTService):
         """
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model="saarika:v2.5",
+            model="saaras:v3",
             language=None,
             prompt=None,
             vad_signals=None,
@@ -343,18 +313,6 @@ class SarvamSTTService(STTService):
                     mode = params.mode
                 default_settings.vad_signals = params.vad_signals
                 default_settings.high_vad_sensitivity = params.high_vad_sensitivity
-                default_settings.positive_speech_threshold = params.positive_speech_threshold
-                default_settings.negative_speech_threshold = params.negative_speech_threshold
-                default_settings.min_speech_frames = params.min_speech_frames
-                default_settings.first_turn_min_speech_frames = params.first_turn_min_speech_frames
-                default_settings.negative_frames_count = params.negative_frames_count
-                default_settings.negative_frames_window = params.negative_frames_window
-                default_settings.start_speech_volume_threshold = (
-                    params.start_speech_volume_threshold
-                )
-                default_settings.interrupt_min_speech_frames = params.interrupt_min_speech_frames
-                default_settings.pre_speech_pad_frames = params.pre_speech_pad_frames
-                default_settings.num_initial_ignored_frames = params.num_initial_ignored_frames
 
         # --- 4. Settings delta (canonical API, always wins) ---
         if settings is not None:
