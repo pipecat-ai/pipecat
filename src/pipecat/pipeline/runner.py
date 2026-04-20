@@ -90,7 +90,7 @@ class PipelineRunner(BaseObject):
             await self._sig_task
 
         if self._force_gc:
-            self._gc_collect()
+            await self._gc_collect()
 
         logger.debug(f"Runner {self} finished running {task}")
 
@@ -136,8 +136,8 @@ class PipelineRunner(BaseObject):
         logger.warning(f"Interruption detected. Cancelling runner {self}")
         await self.cancel()
 
-    def _gc_collect(self):
+    async def _gc_collect(self):
         """Force garbage collection and log results."""
-        collected = gc.collect()
+        collected = await asyncio.to_thread(gc.collect)
         logger.debug(f"Garbage collector: collected {collected} objects.")
         logger.debug(f"Garbage collector: uncollectable objects {gc.garbage}")

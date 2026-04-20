@@ -19,8 +19,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -41,9 +39,10 @@ try:
     from deepgram import AsyncDeepgramClient
     from deepgram.core.events import EventType
     from deepgram.listen.v1.types import (
+        ListenV1CloseStream,
+        ListenV1Finalize,
+        ListenV1KeepAlive,
         ListenV1Results,
-        ListenV1SpeechStarted,
-        ListenV1UtteranceEnd,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -91,7 +90,6 @@ class LiveOptions:
         smart_format: Optional[bool] = None,
         tag: Optional[Any] = None,
         utterance_end_ms: Optional[int] = None,
-        vad_events: Optional[bool] = None,
         version: Optional[str] = None,
         **kwargs,
     ):
@@ -124,7 +122,6 @@ class LiveOptions:
             smart_format: Apply smart formatting to transcripts.
             tag: Custom billing tag (str or list of str).
             utterance_end_ms: Silence duration in ms before an utterance-end event.
-            vad_events: Enable Deepgram VAD speech-started / utterance-end events.
             version: Model version (e.g. ``"latest"``).
             **kwargs: Any additional Deepgram query parameters.
         """
@@ -154,7 +151,6 @@ class LiveOptions:
         self.smart_format = smart_format
         self.tag = tag
         self.utterance_end_ms = utterance_end_ms
-        self.vad_events = vad_events
         self.version = version
         self._extra = kwargs
 
@@ -198,7 +194,6 @@ class DeepgramSTTSettings(STTSettings):
         search: Search terms to highlight (str or list of str).
         smart_format: Apply smart formatting to transcripts.
         utterance_end_ms: Silence duration in ms before an utterance-end event.
-        vad_events: Enable Deepgram VAD speech-started / utterance-end events.
     """
 
     detect_entities: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -216,7 +211,6 @@ class DeepgramSTTSettings(STTSettings):
     search: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     smart_format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     utterance_end_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     def _sync_extra_to_fields(self) -> None:
         """Sync values from extra dict to declared fields.
@@ -291,17 +285,6 @@ class DeepgramSTTService(STTService):
 
     Provides real-time speech recognition using Deepgram's WebSocket API.
     Supports configurable models, languages, and various audio processing options.
-
-    Event handlers available (in addition to STTService events):
-
-    - on_speech_started(service): Deepgram detected start of speech
-    - on_utterance_end(service): Deepgram detected end of utterance
-
-    Example::
-
-        @stt.event_handler("on_speech_started")
-        async def on_speech_started(service):
-            ...
     """
 
     Settings = DeepgramSTTSettings
@@ -311,7 +294,6 @@ class DeepgramSTTService(STTService):
         self,
         *,
         api_key: str,
-        url: str = "",
         base_url: str = "",
         encoding: str = "linear16",
         channels: int = 1,
@@ -323,7 +305,6 @@ class DeepgramSTTService(STTService):
         mip_opt_out: Optional[bool] = None,
         live_options: Optional[LiveOptions] = None,
         addons: Optional[dict] = None,
-        should_interrupt: bool = True,
         settings: Optional[Settings] = None,
         ttfs_p99_latency: Optional[float] = DEEPGRAM_TTFS_P99,
         **kwargs,
@@ -332,11 +313,6 @@ class DeepgramSTTService(STTService):
 
         Args:
             api_key: Deepgram API key for authentication.
-            url: Custom Deepgram API base URL.
-
-                .. deprecated:: 0.0.64
-                    Parameter `url` is deprecated, use `base_url` instead.
-
             base_url: Custom Deepgram API base URL.
             encoding: Audio encoding format. Defaults to "linear16".
             channels: Number of audio channels. Defaults to 1.
@@ -355,33 +331,13 @@ class DeepgramSTTService(STTService):
                     fields and direct init parameters for connection-level config.
 
             addons: Additional Deepgram features to enable.
-            should_interrupt: Whether to interrupt the bot when Deepgram VAD
-                detects the user is speaking.
-
-                .. deprecated:: 0.0.99
-                    This parameter will be removed along with `vad_events` support.
-
             settings: Runtime-updatable settings. When provided alongside
                 ``live_options``, ``settings`` values take precedence (applied
                 after the ``live_options`` merge).
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
-
-        Note:
-            The `vad_events` option in LiveOptions is deprecated as of version 0.0.99 and will be removed in a future version. Please use the Silero VAD instead.
         """
-        if url:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'url' is deprecated, use 'base_url' instead.",
-                    DeprecationWarning,
-                )
-            base_url = url
-
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="nova-3-general",
@@ -401,7 +357,6 @@ class DeepgramSTTService(STTService):
             search=None,
             smart_format=False,
             utterance_end_ms=None,
-            vad_events=False,
         )
 
         # 2. (No step 2, as there are no deprecated direct args)
@@ -458,7 +413,6 @@ class DeepgramSTTService(STTService):
         )
 
         self._addons = addons
-        self._should_interrupt = should_interrupt
         self._encoding = encoding
         self._channels = channels
         self._multichannel = multichannel
@@ -466,18 +420,6 @@ class DeepgramSTTService(STTService):
         self._callback_method = callback_method
         self._tag = tag
         self._mip_opt_out = mip_opt_out
-
-        if self._settings.vad_events:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'vad_events' parameter is deprecated and will be removed in a future version. "
-                    "Please use the Silero VAD instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
 
         # Build client - support optional custom base URL via DeepgramClientEnvironment
         if base_url:
@@ -501,19 +443,7 @@ class DeepgramSTTService(STTService):
 
         self._connection = None
         self._connection_task = None
-
-        if self.vad_enabled:
-            self._register_event_handler("on_speech_started")
-            self._register_event_handler("on_utterance_end")
-
-    @property
-    def vad_enabled(self):
-        """Check if Deepgram VAD events are enabled.
-
-        Returns:
-            True if VAD events are enabled in the current settings.
-        """
-        return self._settings.vad_events
+        self._connection_ready = asyncio.Event()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -522,6 +452,24 @@ class DeepgramSTTService(STTService):
             True, as Deepgram service supports metrics generation.
         """
         return True
+
+    async def _do_reconnect(self):
+        """Disconnect and reconnect to Deepgram, waiting until ready.
+
+        Called by ``STTService._reconnect()`` inside the reconnecting guard.
+        Unlike ``WebsocketSTTService``, Deepgram's ``_connect()`` only
+        launches a background task — the actual WebSocket handshake happens
+        asynchronously. This method waits for ``_connection_ready`` to be set
+        before returning so that buffered audio frames are replayed only after
+        the new connection can accept them.
+
+        Raises:
+            asyncio.TimeoutError: If the connection is not established within
+                05 seconds.
+        """
+        await self._disconnect()
+        await self._connect()
+        await asyncio.wait_for(self._connection_ready.wait(), timeout=5.0)
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if anything changed."""
@@ -534,9 +482,7 @@ class DeepgramSTTService(STTService):
         if isinstance(self._settings, self.Settings):
             self._settings._sync_extra_to_fields()
 
-        if self._connection:
-            await self._disconnect()
-            await self._connect()
+        await self._request_reconnect()
 
         return changed
 
@@ -577,7 +523,11 @@ class DeepgramSTTService(STTService):
             Frame: None (transcription results come via WebSocket callbacks).
         """
         if self._connection:
-            await self._connection.send_media(audio)
+            try:
+                await self._connection.send_media(audio)
+            except Exception as e:
+                logger.warning(f"{self}: send_media failed, connection will reconnect: {e}")
+                self._connection = None
         yield None
 
     def _build_connect_kwargs(self) -> dict:
@@ -648,13 +598,16 @@ class DeepgramSTTService(STTService):
             return
 
         logger.debug("Disconnecting from Deepgram")
-        # Clear self._connection first to prevent run_stt from sending audio
-        # during the close handshake, then close gracefully on the saved ref.
+        # Clear _connection and _connection_ready first to prevent run_stt
+        # from sending audio during the close handshake, and to ensure any
+        # concurrent _do_reconnect() waiter sees a clean state before the
+        # new connection is established.
+        self._connection_ready.clear()
         connection = self._connection
         self._connection = None
 
         if connection:
-            await connection.send_close_stream()
+            await connection.send_close_stream(ListenV1CloseStream(type="CloseStream"))
 
         await self.cancel_task(self._connection_task)
         self._connection_task = None
@@ -670,6 +623,7 @@ class DeepgramSTTService(STTService):
             try:
                 async with self._client.listen.v1.connect(**connect_kwargs) as connection:
                     self._connection = connection
+                    self._connection_ready.set()
                     connection.on(EventType.MESSAGE, self._on_message)
                     connection.on(EventType.ERROR, self._on_error)
 
@@ -678,16 +632,13 @@ class DeepgramSTTService(STTService):
                     keepalive_task = self.create_task(
                         self._keepalive_handler(), f"{self}::keepalive"
                     )
-                    try:
-                        await connection.start_listening()
-                    finally:
-                        await self.cancel_task(keepalive_task)
-            except asyncio.CancelledError:
-                raise
+                    await connection.start_listening()
             except Exception as e:
                 logger.warning(f"{self}: Connection lost, will retry: {e}")
             finally:
+                self._connection_ready.clear()
                 self._connection = None
+                await self.cancel_task(keepalive_task)
 
     async def _keepalive_handler(self):
         """Periodically send KeepAlive frames to prevent server-side timeout.
@@ -699,7 +650,7 @@ class DeepgramSTTService(STTService):
             await asyncio.sleep(5)
             if self._connection:
                 try:
-                    await self._connection.send_keep_alive()
+                    await self._connection.send_keep_alive(ListenV1KeepAlive(type="KeepAlive"))
                     logger.trace(f"{self}: Sent keepalive")
                 except Exception as e:
                     logger.warning(f"{self}: Keepalive failed: {e}")
@@ -715,17 +666,6 @@ class DeepgramSTTService(STTService):
         # Reconnection is handled automatically by the retry loop in
         # _connection_handler once start_listening() exits after the error.
 
-    async def _on_speech_started(self, message):
-        await self._start_metrics()
-        await self._call_event_handler("on_speech_started", message)
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        if self._should_interrupt:
-            await self.broadcast_interruption()
-
-    async def _on_utterance_end(self, message):
-        await self._call_event_handler("on_utterance_end", message)
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
-
     @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None
@@ -734,13 +674,7 @@ class DeepgramSTTService(STTService):
         pass
 
     async def _on_message(self, message):
-        if isinstance(message, ListenV1SpeechStarted):
-            if self.vad_enabled:
-                await self._on_speech_started(message)
-        elif isinstance(message, ListenV1UtteranceEnd):
-            if self.vad_enabled:
-                await self._on_utterance_end(message)
-        elif isinstance(message, ListenV1Results):
+        if isinstance(message, ListenV1Results):
             if not message.channel or len(message.channel.alternatives) == 0:
                 return
             is_final = message.is_final
@@ -788,13 +722,12 @@ class DeepgramSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame) and not self.vad_enabled:
-            # Start metrics if Deepgram VAD is disabled & pipeline VAD has detected speech
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             # Mark that we're awaiting a from_finalize response
             if self._connection:
                 self.request_finalize()
-                await self._connection.send_finalize()
+                await self._connection.send_finalize(ListenV1Finalize(type="Finalize"))
                 logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")

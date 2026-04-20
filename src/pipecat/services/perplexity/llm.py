@@ -14,13 +14,10 @@ reporting patterns while maintaining compatibility with the Pipecat framework.
 from dataclasses import dataclass
 from typing import Optional
 
-from loguru import logger
-
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.adapters.services.perplexity_adapter import PerplexityLLMAdapter
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -41,6 +38,9 @@ class PerplexityLLMService(OpenAILLMService):
     """
 
     adapter_class = PerplexityLLMAdapter
+    # Perplexity doesn't support the "developer" message role.
+    # This value is used by BaseOpenAILLMService when calling the adapter.
+    supports_developer_role = False
 
     Settings = PerplexityLLMSettings
     _settings: Settings
@@ -121,20 +121,9 @@ class PerplexityLLMService(OpenAILLMService):
         if self._settings.max_tokens is not None:
             params["max_tokens"] = self._settings.max_tokens
 
-        # Prepend system instruction if set
-        if self._settings.system_instruction:
-            messages = params.get("messages", [])
-            if messages and messages[0].get("role") == "system":
-                logger.warning(
-                    f"{self}: Both system_instruction and an initial system message in context are set. This may be unintended."
-                )
-            params["messages"] = [
-                {"role": "system", "content": self._settings.system_instruction}
-            ] + messages
-
         return params
 
-    async def _process_context(self, context: OpenAILLMContext | LLMContext):
+    async def _process_context(self, context: LLMContext):
         """Process a context through the LLM and accumulate token usage metrics.
 
         This method overrides the parent class implementation to handle

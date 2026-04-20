@@ -20,14 +20,15 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import create_stream_resampler
-from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
     BotConnectedFrame,
     CancelFrame,
     ClientConnectedFrame,
     EndFrame,
+    Frame,
     ImageRawFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
@@ -89,50 +90,6 @@ class LiveKitOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame
     """
 
     participant_id: Optional[str] = None
-
-
-@dataclass
-class LiveKitTransportMessageFrame(LiveKitOutputTransportMessageFrame):
-    """Frame for transport messages in LiveKit rooms.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "LiveKitTransportMessageFrame is deprecated and will be removed in a future version. "
-                "Instead, use LiveKitOutputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
-class LiveKitTransportMessageUrgentFrame(LiveKitOutputTransportMessageUrgentFrame):
-    """Frame for urgent transport messages in LiveKit rooms.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "LiveKitTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
-                "Instead, use LiveKitOutputTransportMessageUrgentFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
 
 class LiveKitParams(TransportParams):
@@ -650,20 +607,10 @@ class LiveKitInputTransport(BaseInputTransport):
 
         self._audio_in_task = None
         self._video_in_task = None
-        self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
         self._resampler = create_stream_resampler()
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
-
-    @property
-    def vad_analyzer(self) -> Optional[VADAnalyzer]:
-        """Get the Voice Activity Detection analyzer.
-
-        Returns:
-            The VAD analyzer instance if configured.
-        """
-        return self._vad_analyzer
 
     async def start(self, frame: StartFrame):
         """Start the input transport and connect to LiveKit room.
@@ -879,6 +826,21 @@ class LiveKitOutputTransport(BaseOutputTransport):
         """
         await super().cancel(frame)
         await self._client.disconnect()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames, clearing the LiveKit AudioSource buffer on interruption.
+
+        When an InterruptionFrame arrives, any audio already submitted to the
+        LiveKit AudioSource (but not yet played out) is cleared immediately so
+        the bot stops speaking without delay.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame) and self._client._audio_source is not None:
+            self._client._audio_source.clear_queue()
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the output transport with shared client setup.

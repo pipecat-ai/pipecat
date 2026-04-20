@@ -7,7 +7,6 @@
 """Gated LLM context aggregator for controlled message flow."""
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, LLMContextFrame, StartFrame
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.sync.base_notifier import BaseNotifier
 
@@ -49,7 +48,7 @@ class GatedLLMContextAggregator(FrameProcessor):
         if isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
             await self.push_frame(frame)
-        elif isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+        elif isinstance(frame, LLMContextFrame):
             if self._start_open:
                 self._start_open = False
                 await self.push_frame(frame, direction)

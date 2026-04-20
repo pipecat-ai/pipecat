@@ -285,8 +285,8 @@ class CartesiaSTTService(WebsocketSTTService):
         Yields:
             None - transcription results are handled via WebSocket responses.
         """
-        # If the connection is closed, due to timeout, we need to reconnect when the user starts speaking again
-        if not self._websocket or self._websocket.state is State.CLOSED:
+        # If the connection is not open (closed or closing), reconnect
+        if not self._websocket or self._websocket.state is not State.OPEN:
             await self._connect()
 
         await self._websocket.send(audio)
@@ -320,13 +320,10 @@ class CartesiaSTTService(WebsocketSTTService):
         """
         changed = await super()._update_settings(delta)
 
-        # TODO: someday we could reconnect here to apply updated settings.
-        # Code might look something like the below:
-        # if changed:
-        #     await self._disconnect()
-        #     await self._connect()
+        if not changed:
+            return changed
 
-        self._warn_unhandled_updated_settings(changed)
+        await self._request_reconnect()
 
         return changed
 
@@ -351,14 +348,18 @@ class CartesiaSTTService(WebsocketSTTService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def _disconnect_websocket(self):
+        ws = self._websocket
         try:
-            if self._websocket and self._websocket.state is State.OPEN:
+            if ws and ws.state is State.OPEN:
                 logger.debug("Disconnecting from Cartesia STT")
-                await self._websocket.close()
+                await ws.send("done")
+                await ws.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
-            self._websocket = None
+            # Only clear if no concurrent _connect has already replaced it.
+            if self._websocket is ws:
+                self._websocket = None
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):

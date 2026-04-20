@@ -24,13 +24,11 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import (
     InterruptibleTTSService,
@@ -39,7 +37,6 @@ from pipecat.services.tts_service import (
     WebsocketTTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -178,7 +175,6 @@ class RimeTTSService(WebsocketTTSService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         settings: Optional[Settings] = None,
-        text_aggregator: Optional[BaseTextAggregator] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         aggregate_sentences: Optional[bool] = None,
         **kwargs,
@@ -206,11 +202,6 @@ class RimeTTSService(WebsocketTTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
-            text_aggregator: Custom text aggregator for processing input text.
-
-                .. deprecated:: 0.0.95
-                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
-
             text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
@@ -273,7 +264,6 @@ class RimeTTSService(WebsocketTTSService):
             text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
-            push_stop_frames=True,
             pause_frame_processing=True,
             append_trailing_space=True,
             sample_rate=sample_rate,
@@ -285,15 +275,14 @@ class RimeTTSService(WebsocketTTSService):
         self._audio_format = "pcm"
         self._sampling_rate = 0  # updated in start()
 
-        if not text_aggregator:
-            # Always skip tags added for spelled-out text
-            # Note: This is primarily to support backwards compatibility.
-            #    The preferred way of taking advantage of Rime spelling is
-            #    to use an LLMTextProcessor and/or a text_transformer to identify
-            #    and insert these tags for the purpose of the TTS service alone.
-            self._text_aggregator = SkipTagsAggregator(
-                [("spell(", ")")], aggregation_type=self._text_aggregation_mode
-            )
+        # Always skip tags added for spelled-out text
+        # Note: This is primarily to support backwards compatibility.
+        #    The preferred way of taking advantage of Rime spelling is
+        #    to use an LLMTextProcessor and/or a text_transformer to identify
+        #    and insert these tags for the purpose of the TTS service alone.
+        self._text_aggregator = SkipTagsAggregator(
+            [("spell(", ")")], aggregation_type=self._text_aggregation_mode
+        )
 
         # Store service configuration
         self._api_key = api_key
@@ -516,15 +505,16 @@ class RimeTTSService(WebsocketTTSService):
     async def on_audio_context_interrupted(self, context_id: str):
         """Clear the Rime speech queue and stop metrics when the bot is interrupted."""
         await self._close_context(context_id)
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Clear server-side state and stop metrics after the Rime context finishes playing.
 
-        Rime does not send a server-side completion signal (e.g. ``done`` / ``end_of_stream`` /
-        ``audio_end``), so we explicitly send a ``clear`` message to clean up
-        any residual server-side state once all audio has been delivered.
+        Sends a ``clear`` message to clean up any residual server-side state
+        once all audio has been delivered.
         """
         await self._close_context(context_id)
+        await super().on_audio_context_completed(context_id)
 
     def _calculate_word_times(self, words: list, starts: list, ends: list) -> list:
         """Calculate word timing pairs with proper spacing and punctuation.
@@ -598,23 +588,18 @@ class RimeTTSService(WebsocketTTSService):
                         self._cumulative_time = ends[-1] + self._cumulative_time
                         logger.debug(f"Updated cumulative time to: {self._cumulative_time}")
 
+            elif msg["type"] == "done":
+                await self.stop_ttfb_metrics()
+                await self.append_to_audio_context(
+                    context_id, TTSStoppedFrame(context_id=context_id)
+                )
+                await self.remove_audio_context(context_id)
+
             elif msg["type"] == "error":
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Error: {msg['message']}")
                 self.reset_active_audio_context()
-
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push frame and handle end-of-turn conditions.
-
-        Args:
-            frame: The frame to push.
-            direction: The direction to push the frame.
-        """
-        await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)])
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:

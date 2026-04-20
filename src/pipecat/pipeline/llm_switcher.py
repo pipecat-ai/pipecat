@@ -77,7 +77,6 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         self,
         function_name: Optional[str],
         handler: Any,
-        start_callback=None,
         *,
         cancel_on_interruption: bool = True,
         timeout_secs: Optional[float] = None,
@@ -89,12 +88,6 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 all function calls with a catch-all handler.
             handler: The function handler. Should accept a single FunctionCallParams
                 parameter.
-            start_callback: Legacy callback function (deprecated). Put initialization
-                code at the top of your handler instead.
-
-                .. deprecated:: 0.0.59
-                    The `start_callback` parameter is deprecated and will be removed in a future version.
-
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
             timeout_secs: Optional timeout in seconds for the function call.
@@ -103,7 +96,6 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
             llm.register_function(
                 function_name=function_name,
                 handler=handler,
-                start_callback=start_callback,
                 cancel_on_interruption=cancel_on_interruption,
                 timeout_secs=timeout_secs,
             )

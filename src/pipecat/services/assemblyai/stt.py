@@ -101,6 +101,8 @@ class AssemblyAISTTSettings(STTSettings):
         speaker_labels: Enable speaker diarization.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
             audio frames as silence. Only applicable to u3-rt-pro.
+        domain: Optional domain for specialized recognition modes. For example,
+            set to "medical-v1" to enable Medical Mode for healthcare transcription.
     """
 
     formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -118,6 +120,7 @@ class AssemblyAISTTSettings(STTSettings):
     format_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_labels: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AssemblyAISTTService(WebsocketSTTService):
@@ -126,6 +129,16 @@ class AssemblyAISTTService(WebsocketSTTService):
     Provides real-time speech transcription using AssemblyAI's WebSocket API.
     Supports both interim and final transcriptions with configurable parameters
     for audio processing and connection management.
+
+    Event handlers available (in addition to WebsocketSTTService events):
+
+    - on_end_of_turn(service, transcript): Called when AssemblyAI detects end of turn.
+
+    Example::
+
+        @service.event_handler("on_end_of_turn")
+        async def on_end_of_turn(service, transcript):
+            ...
     """
 
     Settings = AssemblyAISTTSettings
@@ -204,6 +217,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             format_turns=True,
             speaker_labels=None,
             vad_threshold=None,
+            domain=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -298,6 +312,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._chunk_size_bytes = 0
 
         self._user_speaking = False
+
+        self._register_event_handler("on_end_of_turn")
 
     def _configure_pipecat_turn_mode(self, settings: Settings, is_u3_pro: bool):
         """Configure settings for Pipecat turn detection mode.
@@ -470,6 +486,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             "format_turns": s.format_turns,
             "speaker_labels": s.speaker_labels,
             "vad_threshold": s.vad_threshold,
+            "domain": s.domain,
         }
 
         for k, v in optional_fields.items():
@@ -736,6 +753,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
                 await self._trace_transcription(transcript_text, True, language)
                 await self.stop_processing_metrics()
+                await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
                 await self.push_frame(
                     InterimTranscriptionFrame(
@@ -769,6 +787,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # above, so ordering is preserved) and upstream.
                 await self.broadcast_frame(UserStoppedSpeakingFrame)
                 self._user_speaking = False
+                await self._call_event_handler("on_end_of_turn", transcript_text)
             else:
                 await self.push_frame(
                     InterimTranscriptionFrame(

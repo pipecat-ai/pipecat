@@ -9,24 +9,7 @@
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from pipecat.frames.frames import DataFrame, SystemFrame
-
-
-@dataclass
-class RTVIActionFrame(DataFrame):
-    """Frame containing an RTVI action to execute.
-
-    Parameters:
-        rtvi_action_run: The action to execute.
-        message_id: Optional message ID for response correlation.
-
-    .. deprecated:: 0.0.75
-        Actions have been removed as part of the RTVI protocol 1.0.0.
-        Use custom client and server messages instead.
-    """
-
-    rtvi_action_run: Any
-    message_id: Optional[str] = None
+from pipecat.frames.frames import SystemFrame
 
 
 @dataclass

@@ -235,9 +235,6 @@ class HumeTTSService(TTSService):
             # Reset timing on interruption or stop
             self._reset_state()
 
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)])
-
     async def update_setting(self, key: str, value: Any) -> None:
         """Runtime updates via key/value pair.
 

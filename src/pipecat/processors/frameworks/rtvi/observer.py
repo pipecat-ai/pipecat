@@ -59,7 +59,6 @@ from pipecat.metrics.metrics import (
     TTSUsageMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIServerMessageFrame,
@@ -94,9 +93,6 @@ class RTVIFunctionCallReportLevel(str, Enum):
 class RTVIObserverParams:
     """Parameters for configuring RTVI Observer behavior.
 
-    .. deprecated:: 0.0.87
-        Parameter `errors_enabled` is deprecated. Error messages are always enabled.
-
     Parameters:
         bot_output_enabled: Indicates if bot output messages should be sent.
         bot_llm_enabled: Indicates if the bot's LLM messages should be sent.
@@ -109,7 +105,6 @@ class RTVIObserverParams:
         user_audio_level_enabled: Indicates if user's audio level messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
         system_logs_enabled: Indicates if system logs should be sent.
-        errors_enabled: [Deprecated] Indicates if errors messages should be sent.
         ignored_sources: List of frame processors whose frames should be silently ignored
             by this observer. Useful for suppressing RTVI messages from secondary pipeline
             branches (e.g. a silent evaluation LLM) that should not be visible to clients.
@@ -153,7 +148,6 @@ class RTVIObserverParams:
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
-    errors_enabled: Optional[bool] = None
     ignored_sources: List[FrameProcessor] = field(default_factory=list)
     skip_aggregator_types: Optional[List[AggregationType | str]] = None
     bot_output_transforms: Optional[
@@ -213,16 +207,6 @@ class RTVIObserver(BaseObserver):
 
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
-
-        if self._params.errors_enabled is not None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter `errors_enabled` is deprecated. Error messages are always enabled.",
-                    DeprecationWarning,
-                )
 
         self._aggregation_transforms: List[
             Tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
@@ -373,10 +357,7 @@ class RTVIObserver(BaseObserver):
             and self._params.user_transcription_enabled
         ):
             await self._handle_user_transcriptions(frame)
-        elif (
-            isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame))
-            and self._params.user_llm_enabled
-        ):
+        elif isinstance(frame, LLMContextFrame) and self._params.user_llm_enabled:
             await self._handle_context(frame)
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
             await self.send_rtvi_message(RTVI.BotLLMStartedMessage())
@@ -590,13 +571,10 @@ class RTVIObserver(BaseObserver):
         if message:
             await self.send_rtvi_message(message)
 
-    async def _handle_context(self, frame: OpenAILLMContextFrame | LLMContextFrame):
+    async def _handle_context(self, frame: LLMContextFrame):
         """Process LLM context frames to extract user messages for the RTVI client."""
         try:
-            if isinstance(frame, OpenAILLMContextFrame):
-                messages = frame.context.messages
-            else:
-                messages = frame.context.get_messages()
+            messages = frame.context.get_messages()
             if not messages:
                 return
 
@@ -612,7 +590,7 @@ class RTVIObserver(BaseObserver):
 
             # Handle OpenAI format (original implementation)
             elif isinstance(message, dict):
-                if message["role"] == "user":
+                if message.get("role") == "user":
                     content = message["content"]
                     if isinstance(content, list):
                         text = " ".join(item["text"] for item in content if "text" in item)

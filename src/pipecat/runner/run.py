@@ -110,6 +110,22 @@ RUNNER_DOWNLOADS_FOLDER: Optional[str] = None
 RUNNER_HOST: str = "localhost"
 RUNNER_PORT: int = 7860
 
+app: FastAPI = FastAPI()
+"""The FastAPI application instance.
+
+Import this to add custom routes from other packages before calling
+:func:`main`::
+
+    from pipecat.runner.run import app, main
+
+    @app.get("/my-route")
+    async def my_route():
+        return {"hello": "world"}
+
+    if __name__ == "__main__":
+        main()
+"""
+
 
 def _get_bot_module():
     """Get the bot module from the calling script."""
@@ -164,10 +180,8 @@ async def _run_telephony_bot(websocket: WebSocket, args: argparse.Namespace):
     await bot_module.bot(runner_args)
 
 
-def _create_server_app(args: argparse.Namespace):
-    """Create FastAPI app with transport-specific routes."""
-    app = FastAPI()
-
+def _configure_server_app(args: argparse.Namespace):
+    """Configure the module-level FastAPI app with transport-specific routes."""
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -187,8 +201,6 @@ def _create_server_app(args: argparse.Namespace):
         _setup_telephony_routes(app, args)
     else:
         logger.warning(f"Unknown transport type: {args.transport}")
-
-    return app
 
 
 def _setup_webrtc_routes(app: FastAPI, args: argparse.Namespace):
@@ -997,8 +1009,8 @@ def main(parser: Optional[argparse.ArgumentParser] = None):
     RUNNER_HOST = args.host
     RUNNER_PORT = args.port
 
-    # Create the app with transport-specific setup
-    app = _create_server_app(args)
+    # Configure the app with transport-specific routes
+    _configure_server_app(args)
 
     # Run the server
     uvicorn.run(app, host=args.host, port=args.port)

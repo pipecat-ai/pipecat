@@ -136,6 +136,58 @@ class TestContextSummarizationMixin(unittest.TestCase):
         self.assertEqual(len(result.messages), 0)
         self.assertEqual(result.last_summarized_index, -1)
 
+    def test_get_messages_to_summarize_mid_conversation_system_message(self):
+        """Test that a system message mid-conversation is included in summarization.
+
+        Regression test for #4286: when the only system message is a mid-conversation
+        injection (not at index 0), get_messages_to_summarize should start from index 0,
+        not after the mid-conversation system message.
+        """
+        context = LLMContext()
+
+        # No system message at index 0 (using system_instruction instead)
+        context.add_message({"role": "user", "content": "Hello"})
+        context.add_message({"role": "assistant", "content": "Hi there"})
+        context.add_message({"role": "user", "content": "Tell me a joke"})
+        context.add_message({"role": "assistant", "content": "Why did the chicken..."})
+        # Mid-conversation system injection (e.g. "The user has been quiet")
+        context.add_message({"role": "system", "content": "The user has been quiet for a while"})
+        context.add_message({"role": "user", "content": "Latest message"})
+        context.add_message({"role": "assistant", "content": "Latest response"})
+
+        # Keep last 2 messages
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        # Should summarize from index 0 (no system preamble to skip)
+        # through index 4, keeping last 2 messages
+        self.assertEqual(len(result.messages), 5)
+        self.assertEqual(result.messages[0]["content"], "Hello")
+        # The mid-conversation system message should be included in summarization
+        self.assertEqual(result.messages[4]["content"], "The user has been quiet for a while")
+        self.assertEqual(result.last_summarized_index, 4)
+
+    def test_get_messages_to_summarize_system_at_index_0_with_mid_system(self):
+        """Test that only messages[0] system message is preserved, not later ones."""
+        context = LLMContext()
+
+        context.add_message({"role": "system", "content": "You are helpful"})
+        context.add_message({"role": "user", "content": "Hello"})
+        context.add_message({"role": "assistant", "content": "Hi"})
+        # Mid-conversation system injection
+        context.add_message({"role": "system", "content": "The user seems frustrated"})
+        context.add_message({"role": "user", "content": "Help me"})
+        context.add_message({"role": "assistant", "content": "Sure"})
+
+        # Keep last 2 messages
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        # Should skip index 0 (system preamble), summarize indices 1-3
+        self.assertEqual(len(result.messages), 3)
+        self.assertEqual(result.messages[0]["content"], "Hello")
+        # Mid-conversation system message is summarized, not treated as preamble
+        self.assertEqual(result.messages[2]["content"], "The user seems frustrated")
+        self.assertEqual(result.last_summarized_index, 3)
+
     def test_format_messages_for_summary(self):
         """Test message formatting for summary."""
 

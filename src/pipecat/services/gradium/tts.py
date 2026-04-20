@@ -301,6 +301,7 @@ class GradiumTTSService(WebsocketTTSService):
         audio context no longer exists.
         """
         await self.stop_all_metrics()
+        await super().on_audio_context_interrupted(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Called after an audio context has finished playing all of its audio.
@@ -309,7 +310,7 @@ class GradiumTTSService(WebsocketTTSService):
         ``end_of_stream`` message (handled in ``_receive_messages``), after
         which the server-side context is already closed.
         """
-        pass
+        await super().on_audio_context_completed(context_id)
 
     async def _receive_messages(self):
         """Process incoming websocket messages, demultiplexing by client_req_id."""
@@ -342,7 +343,7 @@ class GradiumTTSService(WebsocketTTSService):
 
             elif msg["type"] == "end_of_stream":
                 if ctx_id and self.audio_context_available(ctx_id):
-                    await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
+                    await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                     await self.remove_audio_context(ctx_id)
                 if ctx_id:
                     self._setup_context_ids.discard(ctx_id)

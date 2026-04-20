@@ -8,10 +8,10 @@
 
 from unittest.mock import patch
 
+from pipecat.services.deepgram.sagemaker.stt import DeepgramSageMakerSTTSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
-from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTSettings
-from pipecat.services.grok.realtime import events as grok_events
-from pipecat.services.grok.realtime.llm import GrokRealtimeLLMSettings
+from pipecat.services.inworld.realtime import events as inworld_events
+from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMSettings
 from pipecat.services.openai.realtime import events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMSettings
 from pipecat.services.settings import (
@@ -23,6 +23,8 @@ from pipecat.services.settings import (
     _NotGiven,
     is_given,
 )
+from pipecat.services.xai.realtime import events as grok_events
+from pipecat.services.xai.realtime.llm import GrokRealtimeLLMSettings
 
 # ---------------------------------------------------------------------------
 # NOT_GIVEN sentinel
@@ -334,7 +336,6 @@ class TestDeepgramSTTSettingsApplyUpdate:
             smart_format=False,
             punctuate=True,
             profanity_filter=True,
-            vad_events=False,
         )
         defaults.update(kwargs)
         return DeepgramSTTSettings(**defaults)
@@ -430,7 +431,6 @@ class TestDeepgramSTTSettingsFromMapping:
             interim_results=True,
             punctuate=True,
             profanity_filter=True,
-            vad_events=False,
         )
 
         raw = {"punctuate": False, "diarize": True}
@@ -980,4 +980,201 @@ class TestGrokRealtimeSettingsFromMapping:
         assert "session_properties" in changed
         assert store.session_properties.instructions == "Be concise."
         assert store.session_properties.voice == "Eve"
+        assert store.system_instruction == "Be concise."
+
+
+# ---------------------------------------------------------------------------
+# InworldRealtimeLLMSettings: apply_update with bidirectional sync
+# ---------------------------------------------------------------------------
+
+
+class TestInworldRealtimeSettingsApplyUpdate:
+    def _make_store(self, **kwargs) -> InworldRealtimeLLMSettings:
+        """Helper to build a store-mode InworldRealtimeLLMSettings."""
+        defaults = dict(
+            model="openai/gpt-4.1-nano",
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=inworld_events.SessionProperties(),
+        )
+        defaults.update(kwargs)
+        return InworldRealtimeLLMSettings(**defaults)
+
+    def test_top_level_model_syncs_to_sp(self):
+        """Updating top-level model should propagate to session_properties.model."""
+        store = self._make_store()
+        delta = InworldRealtimeLLMSettings(model="openai/gpt-4.1")
+        changed = store.apply_update(delta)
+
+        assert "model" in changed
+        assert store.model == "openai/gpt-4.1"
+        assert store.session_properties.model == "openai/gpt-4.1"
+
+    def test_top_level_system_instruction_syncs_to_sp(self):
+        """Updating top-level system_instruction should propagate to session_properties.instructions."""
+        store = self._make_store()
+        delta = InworldRealtimeLLMSettings(system_instruction="Be helpful.")
+        changed = store.apply_update(delta)
+
+        assert "system_instruction" in changed
+        assert store.system_instruction == "Be helpful."
+        assert store.session_properties.instructions == "Be helpful."
+
+    def test_sp_replaces_wholesale(self):
+        """session_properties in delta replaces the entire stored SP."""
+        store = self._make_store(
+            session_properties=inworld_events.SessionProperties(
+                output_modalities=["audio", "text"],
+                instructions="Old instructions.",
+            ),
+            system_instruction="Old instructions.",
+        )
+
+        new_sp = inworld_events.SessionProperties(output_modalities=["text"])
+        delta = InworldRealtimeLLMSettings(session_properties=new_sp)
+        changed = store.apply_update(delta)
+
+        assert "session_properties" in changed
+        assert store.session_properties.output_modalities == ["text"]
+        # model is synced from top-level
+        assert store.session_properties.model == "openai/gpt-4.1-nano"
+
+    def test_sp_model_syncs_to_top_level(self):
+        """session_properties.model should sync to top-level model."""
+        store = self._make_store()
+        new_sp = inworld_events.SessionProperties(model="openai/gpt-4.1")
+        delta = InworldRealtimeLLMSettings(session_properties=new_sp)
+        changed = store.apply_update(delta)
+
+        assert "model" in changed
+        assert store.model == "openai/gpt-4.1"
+        assert store.session_properties.model == "openai/gpt-4.1"
+
+    def test_sp_instructions_syncs_to_top_level(self):
+        """session_properties.instructions should sync to top-level system_instruction."""
+        store = self._make_store()
+        new_sp = inworld_events.SessionProperties(instructions="New instructions.")
+        delta = InworldRealtimeLLMSettings(session_properties=new_sp)
+        changed = store.apply_update(delta)
+
+        assert "system_instruction" in changed
+        assert store.system_instruction == "New instructions."
+        assert store.session_properties.instructions == "New instructions."
+
+    def test_top_level_model_takes_precedence_over_sp_model(self):
+        """When both model and session_properties.model are in the delta, top-level wins."""
+        store = self._make_store()
+        new_sp = inworld_events.SessionProperties(model="sp-model")
+        delta = InworldRealtimeLLMSettings(model="top-model", session_properties=new_sp)
+        store.apply_update(delta)
+
+        assert store.model == "top-model"
+        assert store.session_properties.model == "top-model"
+
+    def test_top_level_si_takes_precedence_over_sp_instructions(self):
+        """When both system_instruction and SP.instructions are in delta, top-level wins."""
+        store = self._make_store()
+        new_sp = inworld_events.SessionProperties(instructions="sp instructions")
+        delta = InworldRealtimeLLMSettings(
+            system_instruction="top instructions",
+            session_properties=new_sp,
+        )
+        store.apply_update(delta)
+
+        assert store.system_instruction == "top instructions"
+        assert store.session_properties.instructions == "top instructions"
+
+    def test_non_synced_field_update_does_not_affect_sp(self):
+        """Updating a non-synced field like temperature shouldn't touch session_properties."""
+        store = self._make_store(
+            session_properties=inworld_events.SessionProperties(instructions="Keep me."),
+            system_instruction="Keep me.",
+        )
+        original_sp = store.session_properties
+
+        delta = InworldRealtimeLLMSettings(temperature=0.5)
+        changed = store.apply_update(delta)
+
+        assert "temperature" in changed
+        assert store.temperature == 0.5
+        # SP should be untouched (same object)
+        assert store.session_properties is original_sp
+        assert store.session_properties.instructions == "Keep me."
+
+
+# ---------------------------------------------------------------------------
+# InworldRealtimeLLMSettings: from_mapping
+# ---------------------------------------------------------------------------
+
+
+class TestInworldRealtimeSettingsFromMapping:
+    def test_sp_keys_route_to_session_properties(self):
+        """SessionProperties fields (instructions, output_modalities) route into nested SP."""
+        delta = InworldRealtimeLLMSettings.from_mapping(
+            {"instructions": "Be concise.", "output_modalities": ["text"]}
+        )
+        assert is_given(delta.session_properties)
+        assert delta.session_properties.instructions == "Be concise."
+        assert delta.session_properties.output_modalities == ["text"]
+
+    def test_model_routes_to_top_level(self):
+        """model should go to the top-level field, not session_properties."""
+        delta = InworldRealtimeLLMSettings.from_mapping({"model": "openai/gpt-4.1"})
+        assert delta.model == "openai/gpt-4.1"
+        # No session_properties should be created since no SP keys were present
+        assert not is_given(delta.session_properties)
+
+    def test_unknown_keys_go_to_extra(self):
+        """Unrecognized keys should land in extra."""
+        delta = InworldRealtimeLLMSettings.from_mapping({"unknown_param": 42})
+        assert not is_given(delta.model)
+        assert not is_given(delta.session_properties)
+        assert delta.extra == {"unknown_param": 42}
+
+    def test_mixed_keys(self):
+        """model + SP keys + unknown keys are routed correctly."""
+        delta = InworldRealtimeLLMSettings.from_mapping(
+            {
+                "model": "openai/gpt-4.1",
+                "instructions": "Be helpful.",
+                "unknown": "val",
+            }
+        )
+        assert delta.model == "openai/gpt-4.1"
+        assert is_given(delta.session_properties)
+        assert delta.session_properties.instructions == "Be helpful."
+        assert delta.extra == {"unknown": "val"}
+
+    def test_roundtrip_from_mapping_apply_update(self):
+        """Simulate dict-style update: from_mapping -> apply_update."""
+        store = InworldRealtimeLLMSettings(
+            model="openai/gpt-4.1-nano",
+            system_instruction=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=inworld_events.SessionProperties(),
+        )
+
+        raw = {"instructions": "Be concise.", "output_modalities": ["text"]}
+        delta = InworldRealtimeLLMSettings.from_mapping(raw)
+        changed = store.apply_update(delta)
+
+        assert "session_properties" in changed
+        assert store.session_properties.instructions == "Be concise."
+        assert store.session_properties.output_modalities == ["text"]
         assert store.system_instruction == "Be concise."

@@ -46,15 +46,6 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
@@ -404,13 +395,8 @@ class UltravoxRealtimeLLMService(LLMService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
-            context = (
-                frame.context
-                if isinstance(frame, LLMContextFrame)
-                else LLMContext.from_openai_context(frame.context)
-            )
-            await self._handle_context(context)
+        if isinstance(frame, LLMContextFrame):
+            await self._handle_context(frame.context)
         elif isinstance(frame, InterruptionFrame):
             await self.stop_all_metrics()
             await self.push_frame(frame, direction)
@@ -629,40 +615,3 @@ class UltravoxRealtimeLLMService(LLMService):
                     await self.push_frame(LLMFullResponseStartFrame())
                     self._bot_responding = "text"
                 await self.push_frame(LLMTextFrame(text=text or delta))
-
-    def create_context_aggregator(
-        self,
-        context: OpenAILLMContext,
-        *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> LLMContextAggregatorPair:
-        """Create an instance of LLMContextAggregatorPair from an OpenAILLMContext.
-
-        Constructor keyword arguments for both the user and assistant aggregators can be provided.
-
-        NOTE: this method exists only for backward compatibility. New code
-        should instead do::
-
-            context = LLMContext(...)
-            context_aggregator = LLMContextAggregatorPair(context)
-
-        Args:
-            context: The LLM context to use.
-            user_params: User aggregator parameters. Defaults to LLMUserAggregatorParams().
-            assistant_params: Assistant aggregator parameters. Defaults to LLMAssistantAggregatorParams().
-
-        Returns:
-            A pair of user and assistant context aggregators.
-
-        .. deprecated:: 0.0.99
-            `create_context_aggregator()` is deprecated and will be removed in a future version.
-            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-            See `OpenAILLMContext` docstring for migration guide.
-        """
-        # from_openai_context handles deprecation warning
-        context = LLMContext.from_openai_context(context)
-        assistant_params.expect_stripped_words = False
-        return LLMContextAggregatorPair(
-            context, user_params=user_params, assistant_params=assistant_params
-        )

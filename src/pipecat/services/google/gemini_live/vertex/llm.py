@@ -212,6 +212,10 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
             **kwargs,
         )
 
+    def _get_history_config(self):
+        """Vertex AI does not support history_config."""
+        return None
+
     def create_client(self):
         """Create the Gemini client instance."""
         self._client = Client(

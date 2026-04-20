@@ -65,6 +65,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_stopped_time: Optional[float] = None  # Track when VAD stopped was received
         self._transcript_finalized = False
         self._timeout_task: Optional[asyncio.Task] = None
+        self._timeout_expired: bool = False
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -74,6 +75,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = False
         self._vad_stopped_time = None
         self._transcript_finalized = False
+        self._timeout_expired = False
         if self._timeout_task:
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
@@ -149,6 +151,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = True
         self._vad_stopped_time = None
         self._transcript_finalized = False
+        self._timeout_expired = False
         # Cancel any pending timeout
         if self._timeout_task:
             await self.task_manager.cancel_task(self._timeout_task)
@@ -193,6 +196,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._timeout_task = self.task_manager.create_task(
             self._timeout_handler(timeout), f"{self}::_timeout_handler"
         )
+        # Make sure the task is scheduled.
+        await asyncio.sleep(0)
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
@@ -202,6 +207,13 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._transcript_finalized = True
             # For finalized transcripts, trigger immediately if turn is complete
             await self._maybe_trigger_user_turn_stopped()
+        elif self._timeout_expired and self._turn_complete:
+            # The p99 timeout already elapsed without a transcript. Now that
+            # we have one, trigger the turn stop immediately. This handles the
+            # case where the transcript is slower to arrive than the p99 timeout,
+            # trigger the user turn to stop immediately.
+            await self.trigger_user_turn_stopped()
+            return
 
         # Fallback: handle transcripts when no VAD stop was received.
         # This handles edge cases where transcripts arrive without VAD firing.
@@ -217,6 +229,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._timeout_task = self.task_manager.create_task(
                 self._timeout_handler(timeout), f"{self}::_timeout_handler"
             )
+            # Make sure the task is scheduled.
+            await asyncio.sleep(0)
 
     async def _handle_prediction_result(self, result: Optional[MetricsData]):
         """Handle a prediction result event from the turn analyzer."""
@@ -236,6 +250,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         finally:
             self._timeout_task = None
 
+        self._timeout_expired = True
         await self._maybe_trigger_user_turn_stopped()
 
     async def _maybe_trigger_user_turn_stopped(self):

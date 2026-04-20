@@ -147,7 +147,7 @@ Remember: Focus on conversational completeness and how long the user might need.
 class UserTurnCompletionConfig:
     """Configuration for turn completion behavior.
 
-    Attributes:
+    Parameters:
         instructions: Custom instructions for turn completion. If not provided,
             uses default USER_TURN_COMPLETION_INSTRUCTIONS.
         incomplete_short_timeout: Seconds to wait after short incomplete (○) before prompting.
@@ -191,9 +191,7 @@ class UserTurnCompletionLLMServiceMixin:
     When incomplete timeouts expire, the mixin automatically prompts the LLM
     with a contextual follow-up message to re-engage the user.
 
-    Usage:
-        The LLM service controls when to use turn completion by calling
-        _push_turn_text instead of push_frame:
+    Usage example::
 
         # With turn completion:
         if self._filter_incomplete_user_turns:
@@ -201,7 +199,10 @@ class UserTurnCompletionLLMServiceMixin:
         else:
             await self.push_frame(LLMTextFrame(chunk.text))
 
-    The mixin requires that the base class has a `push_frame` method compatible
+    The LLM service controls when to use turn completion by calling
+    ``_push_turn_text`` instead of ``push_frame``.
+
+    The mixin requires that the base class has a ``push_frame`` method compatible
     with FrameProcessor's signature.
     """
 
@@ -254,6 +255,8 @@ class UserTurnCompletionLLMServiceMixin:
             self._incomplete_timeout_handler(incomplete_type, timeout),
             f"_incomplete_timeout_{incomplete_type}",
         )
+        # Make sure the task is scheduled.
+        await asyncio.sleep(0)
 
     async def _cancel_incomplete_timeout(self):
         """Cancel any pending incomplete timeout task."""
