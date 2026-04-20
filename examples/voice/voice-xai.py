@@ -22,8 +22,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.xai.llm import GrokLLMService
+from pipecat.services.xai.stt import XAISTTService
 from pipecat.services.xai.tts import XAIHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -53,7 +53,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = XAISTTService(api_key=os.getenv("XAI_API_KEY"))
 
         tts = XAIHttpTTSService(
             api_key=os.getenv("XAI_API_KEY"),
