@@ -4403,6 +4403,9 @@ websockets-base = [
 whisper = [
     { name = "faster-whisper" },
 ]
+xai = [
+    { name = "websockets" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -4507,6 +4510,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'soniox'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'ultravox'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'websocket'" },
+    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'xai'" },
     { name = "pipecat-ai-small-webrtc-prebuilt", marker = "extra == 'runner'", specifier = ">=2.4.0" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "protobuf", specifier = ">=6.31.1,<7" },
