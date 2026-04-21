@@ -39,9 +39,10 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
       means STT has nothing more to send.
 
     Fallback: when a transcript arrives without a VAD stop event, the
-    strategy waits only user_speech_timeout for inactivity (rearmed on each
-    transcript). stt_timeout has no meaning here since it is defined
-    relative to VAD stop, and STT has already emitted a transcript.
+    user_speech_timeout timer measures inactivity since the last transcript
+    (rearmed on each transcript). stt_timeout has no meaning here since it
+    is defined relative to VAD stop, and STT has already emitted a
+    transcript — so the stt wait is marked done immediately.
     """
 
     def __init__(self, *, user_speech_timeout: float = 0.6, **kwargs):
@@ -63,15 +64,10 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._transcript_finalized = False
         self._vad_stopped_time: float | None = None
 
-        # VAD-driven timers and completion flags.
         self._user_speech_timeout_task: asyncio.Task | None = None
         self._stt_timeout_task: asyncio.Task | None = None
         self._user_speech_wait_done: bool = False
         self._stt_wait_done: bool = False
-
-        # Fallback timer (transcript arrived without VAD stop).
-        self._fallback_timeout_task: asyncio.Task | None = None
-        self._fallback_expired: bool = False
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -82,7 +78,6 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_stopped_time = None
         self._user_speech_wait_done = False
         self._stt_wait_done = False
-        self._fallback_expired = False
         await self._cancel_all_tasks()
 
     async def setup(self, task_manager: BaseTaskManager):
@@ -131,7 +126,6 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_stopped_time = None
         self._user_speech_wait_done = False
         self._stt_wait_done = False
-        self._fallback_expired = False
         await self._cancel_all_tasks()
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
@@ -160,20 +154,13 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
                     f"user_turn_stop_timeout parameter in the LLMUserAggregatorParams."
                 )
 
-        # Any prior fallback timer is superseded by the VAD-driven path.
-        if self._fallback_timeout_task:
-            await self.task_manager.cancel_task(self._fallback_timeout_task)
-            self._fallback_timeout_task = None
-        self._fallback_expired = False
-
-        # user_speech_timeout is the policy floor and always runs.
-        self._user_speech_timeout_task = self.task_manager.create_task(
-            self._user_speech_timeout_handler(self._user_speech_timeout),
-            f"{self}::_user_speech_timeout_handler",
-        )
+        # user_speech_timeout is the policy floor and always runs. A prior
+        # fallback-mode run of the same timer is superseded here.
+        await self._restart_user_speech_timer()
 
         # stt_timeout is a safety net. Short-circuit it if the transcript is
         # already finalized, or if the VAD stop_secs already covered it.
+        self._stt_wait_done = False
         effective_stt_wait = max(0.0, self._stt_timeout - self._stop_secs)
         if self._transcript_finalized or effective_stt_wait <= 0:
             self._stt_wait_done = True
@@ -200,23 +187,33 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
                     await self.task_manager.cancel_task(self._stt_timeout_task)
                     self._stt_timeout_task = None
 
-        # If both VAD-path timers are done (or the fallback timer already
-        # expired), the turn was waiting on text — trigger now.
-        if self._fallback_expired or (self._user_speech_wait_done and self._stt_wait_done):
+        # If both waits are already done, the turn was waiting on text —
+        # trigger now.
+        if self._user_speech_wait_done and self._stt_wait_done:
             await self._maybe_trigger_user_turn_stopped()
             return
 
-        # Fallback: handle transcripts when no VAD stop was received.
-        # Rearm the fallback timer on each transcript to wait for inactivity.
+        # Fallback: transcript arrived without a VAD stop. Measure inactivity
+        # since the last transcript with the user_speech_timer. stt_timeout
+        # has no meaning here (it's defined relative to VAD stop), so mark
+        # the stt wait done immediately.
         if not self._vad_user_speaking and self._vad_stopped_time is None:
-            if self._fallback_timeout_task:
-                await self.task_manager.cancel_task(self._fallback_timeout_task)
-            self._fallback_timeout_task = self.task_manager.create_task(
-                self._fallback_timeout_handler(self._user_speech_timeout),
-                f"{self}::_fallback_timeout_handler",
-            )
-            # Make sure the task is scheduled.
-            await asyncio.sleep(0)
+            self._stt_wait_done = True
+            await self._restart_user_speech_timer()
+
+    async def _restart_user_speech_timer(self):
+        """Cancel any running user_speech timer and start a fresh one."""
+        if self._user_speech_timeout_task:
+            await self.task_manager.cancel_task(self._user_speech_timeout_task)
+            self._user_speech_timeout_task = None
+        self._user_speech_wait_done = False
+        self._user_speech_timeout_task = self.task_manager.create_task(
+            self._user_speech_timeout_handler(self._user_speech_timeout),
+            f"{self}::_user_speech_timeout_handler",
+        )
+        # Make sure the task is scheduled so it can't be cancelled before
+        # starting (which would leave its coroutine un-awaited).
+        await asyncio.sleep(0)
 
     async def _user_speech_timeout_handler(self, timeout: float):
         """Wait user_speech_timeout then attempt to trigger user turn stopped.
@@ -250,41 +247,18 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._stt_wait_done = True
         await self._maybe_trigger_user_turn_stopped()
 
-    async def _fallback_timeout_handler(self, timeout: float):
-        """Wait user_speech_timeout of inactivity on the fallback path.
-
-        Args:
-            timeout: The timeout in seconds to wait.
-        """
-        try:
-            await asyncio.sleep(timeout)
-        except asyncio.CancelledError:
-            return
-        finally:
-            self._fallback_timeout_task = None
-
-        self._fallback_expired = True
-        await self._maybe_trigger_user_turn_stopped()
-
     async def _maybe_trigger_user_turn_stopped(self):
         """Trigger user turn stopped if all required conditions are met.
 
-        VAD path: both user_speech_timeout and stt_timeout must have
-        completed (stt short-circuited by finalization counts as complete).
-        Fallback path: the fallback timer must have completed.
-
-        In all cases, the user must not be currently speaking and at least
-        one transcript must have been received.
+        Both timers must be done (stt is marked done immediately on the
+        fallback path and when finalization short-circuits the safety net),
+        the user must not be currently speaking, and at least one transcript
+        must have been received.
         """
         if self._vad_user_speaking or not self._text:
             return
 
-        if self._vad_stopped_time is not None:
-            if self._user_speech_wait_done and self._stt_wait_done:
-                await self.trigger_user_turn_stopped()
-            return
-
-        if self._fallback_expired:
+        if self._user_speech_wait_done and self._stt_wait_done:
             await self.trigger_user_turn_stopped()
 
     async def _cancel_all_tasks(self):
@@ -295,6 +269,3 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         if self._stt_timeout_task:
             await self.task_manager.cancel_task(self._stt_timeout_task)
             self._stt_timeout_task = None
-        if self._fallback_timeout_task:
-            await self.task_manager.cancel_task(self._fallback_timeout_task)
-            self._fallback_timeout_task = None
