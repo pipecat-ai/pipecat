@@ -13,7 +13,8 @@
     "src/pipecat/runner",
     "src/pipecat/tests",
     "src/pipecat/transcriptions",
-    "src/pipecat/turns"
+    "src/pipecat/turns",
+    "src/pipecat/utils"
   ],
   "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
@@ -23,7 +24,6 @@
     "src/pipecat/serializers",
     "src/pipecat/services",
     "src/pipecat/transports",
-    "src/pipecat/utils",
     "tests"
   ],
   "reportMissingImports": false
