@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "aiofiles>=24.1.0,<27",
-    "aiohttp>=3.11.12,<4",
+    "aiohttp>=3.11.13,<4",
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "docstring_parser>=0.16,<1",
     "loguru~=0.7.3",
