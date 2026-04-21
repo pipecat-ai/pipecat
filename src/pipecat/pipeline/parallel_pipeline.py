@@ -12,7 +12,6 @@ handling of pipeline lifecycle events.
 """
 
 from itertools import chain
-from typing import Dict, List
 
 from loguru import logger
 
@@ -51,7 +50,7 @@ class ParallelPipeline(BasePipeline):
         self._pipelines = []
 
         self._seen_ids = set()
-        self._frame_counter: Dict[int, int] = {}
+        self._frame_counter: dict[int, int] = {}
         self._synchronizing: bool = False
         self._buffered_frames: list[tuple[Frame, FrameDirection]] = []
 
@@ -93,7 +92,7 @@ class ParallelPipeline(BasePipeline):
         return self._pipelines
 
     @property
-    def entry_processors(self) -> List["FrameProcessor"]:
+    def entry_processors(self) -> list["FrameProcessor"]:
         """Return the list of entry processors for this processor.
 
         Entry processors are the first processors in a compound processor
@@ -106,7 +105,7 @@ class ParallelPipeline(BasePipeline):
         """
         return self._pipelines
 
-    def processors_with_metrics(self) -> List[FrameProcessor]:
+    def processors_with_metrics(self) -> list[FrameProcessor]:
         """Collect processors that can generate metrics from all parallel branches.
 
         Returns:

@@ -14,8 +14,9 @@ languages, and various Deepgram features.
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, fields
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -89,11 +90,11 @@ class DeepgramSageMakerSTTService(STTService):
         encoding: str = "linear16",
         channels: int = 1,
         multichannel: bool = False,
-        sample_rate: Optional[int] = None,
-        mip_opt_out: Optional[bool] = None,
-        live_options: Optional[LiveOptions] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = DEEPGRAM_SAGEMAKER_TTFS_P99,
+        sample_rate: int | None = None,
+        mip_opt_out: bool | None = None,
+        live_options: LiveOptions | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = DEEPGRAM_SAGEMAKER_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Deepgram SageMaker STT service.
@@ -196,9 +197,9 @@ class DeepgramSageMakerSTTService(STTService):
         self._multichannel = multichannel
         self._mip_opt_out = mip_opt_out
 
-        self._client: Optional[SageMakerBidiClient] = None
-        self._response_task: Optional[asyncio.Task] = None
-        self._keepalive_task: Optional[asyncio.Task] = None
+        self._client: SageMakerBidiClient | None = None
+        self._response_task: asyncio.Task | None = None
+        self._keepalive_task: asyncio.Task | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -484,7 +485,7 @@ class DeepgramSageMakerSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing.
 

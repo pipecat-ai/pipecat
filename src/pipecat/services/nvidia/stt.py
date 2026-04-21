@@ -7,9 +7,10 @@
 """NVIDIA Riva Speech-to-Text service implementations for real-time and batch transcription."""
 
 import asyncio
+from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, List, Mapping, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
@@ -39,7 +40,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_nvidia_riva_language(language: Language) -> Optional[str]:
+def language_to_nvidia_riva_language(language: Language) -> str | None:
     """Maps Language enum to NVIDIA Riva ASR language codes.
 
     Source:
@@ -113,7 +114,7 @@ class NvidiaSegmentedSTTSettings(STTSettings):
     profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     verbatim_transcripts: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_words: List[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_words: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     boosted_lm_score: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -138,7 +139,7 @@ class NvidiaSTTService(STTService):
             language: Target language for transcription. Defaults to EN_US.
         """
 
-        language: Optional[Language] = Language.EN_US
+        language: Language | None = Language.EN_US
 
     def __init__(
         self,
@@ -149,11 +150,11 @@ class NvidiaSTTService(STTService):
             "function_id": "1598d209-5e27-4d3c-8079-4751568b1081",
             "model_name": "parakeet-ctc-1.1b-asr",
         },
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
         use_ssl: bool = True,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = NVIDIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the NVIDIA Riva STT service.
@@ -269,7 +270,9 @@ class NvidiaSTTService(STTService):
 
         .. deprecated:: 0.0.104
             Model cannot be changed after initialization for NVIDIA Riva streaming STT.
-            Set model and function id in the constructor instead, e.g.::
+            Set model and function id in the constructor instead.
+
+            Example::
 
                 NvidiaSTTService(
                     api_key=...,
@@ -353,7 +356,7 @@ class NvidiaSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass
@@ -458,11 +461,11 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             boosted_lm_score: Score boost for specified words.
         """
 
-        language: Optional[Language] = Language.EN_US
+        language: Language | None = Language.EN_US
         profanity_filter: bool = False
         automatic_punctuation: bool = True
         verbatim_transcripts: bool = False
-        boosted_lm_words: Optional[List[str]] = None
+        boosted_lm_words: list[str] | None = None
         boosted_lm_score: float = 4.0
 
     def __init__(
@@ -474,11 +477,11 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             "function_id": "ee8dc628-76de-4acc-8595-1836e7e857bd",
             "model_name": "canary-1b-asr",
         },
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
         use_ssl: bool = True,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = NVIDIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the NVIDIA Riva segmented STT service.
@@ -553,7 +556,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         self._config = None
         self._asr_service = None
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat Language enum to NVIDIA Riva's language code.
 
         Args:
@@ -653,7 +656,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass

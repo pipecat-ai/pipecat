@@ -13,8 +13,9 @@ output processing, including frame buffering, mixing, timing, and media streamin
 import asyncio
 import itertools
 import time
+from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
+from typing import Any
 
 from loguru import logger
 from PIL import Image
@@ -48,6 +49,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.time import nanoseconds_to_seconds
 
 BOT_VAD_STOP_SECS = 0.35
@@ -86,7 +88,7 @@ class BaseOutputTransport(FrameProcessor):
         # We will have one media sender per output frame destination. This allow
         # us to send multiple streams at the same time if the transport allows
         # it.
-        self._media_senders: Dict[Any, "BaseOutputTransport.MediaSender"] = {}
+        self._media_senders: dict[Any, BaseOutputTransport.MediaSender] = {}
 
     @property
     def sample_rate(self) -> int:
@@ -274,11 +276,14 @@ class BaseOutputTransport(FrameProcessor):
         Args:
             frame: The DTMF frame to write.
         """
-        dtmf_audio = await load_dtmf_audio(frame.button, sample_rate=self._sample_rate)
-        dtmf_audio_frame = OutputAudioRawFrame(
-            audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
-        )
-        await self.write_audio_frame(dtmf_audio_frame)
+        if not frame.buttons:
+            return
+        for button in frame.buttons:
+            dtmf_audio = await load_dtmf_audio(button, sample_rate=self._sample_rate)
+            dtmf_audio_frame = OutputAudioRawFrame(
+                audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
+            )
+            await self.write_audio_frame(dtmf_audio_frame)
 
     async def send_audio(self, frame: OutputAudioRawFrame):
         """Send an audio frame downstream.
@@ -379,7 +384,7 @@ class BaseOutputTransport(FrameProcessor):
             self,
             transport: "BaseOutputTransport",
             *,
-            destination: Optional[str],
+            destination: str | None,
             sample_rate: int,
             audio_chunk_size: int,
             params: TransportParams,
@@ -410,7 +415,7 @@ class BaseOutputTransport(FrameProcessor):
 
             # The user can provide a single mixer, to be used by the default
             # destination, or a destination/mixer mapping.
-            self._mixer: Optional[BaseAudioMixer] = None
+            self._mixer: BaseAudioMixer | None = None
 
             # These are the images that we should send at our desired framerate.
             self._video_images = None
@@ -427,9 +432,9 @@ class BaseOutputTransport(FrameProcessor):
             # Last time the bot actually spoke.
             self._bot_speech_last_time = 0
 
-            self._audio_task: Optional[asyncio.Task] = None
-            self._video_task: Optional[asyncio.Task] = None
-            self._clock_task: Optional[asyncio.Task] = None
+            self._audio_task: asyncio.Task | None = None
+            self._video_task: asyncio.Task | None = None
+            self._clock_task: asyncio.Task | None = None
 
         @property
         def sample_rate(self) -> int:
@@ -511,24 +516,31 @@ class BaseOutputTransport(FrameProcessor):
             await self._cancel_clock_task()
             await self._cancel_video_task()
 
+            # Stop audio mixer so it doesn't keep generating frames after cancellation.
+            if self._mixer:
+                await self._mixer.stop()
+
         async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
 
             Args:
                 _: The start interruption frame (unused).
             """
-            if not self._transport._allow_interruptions:
-                return
-
             # Cancel tasks.
-            await self._cancel_audio_task()
             await self._cancel_clock_task()
             await self._cancel_video_task()
+
+            if self._audio_queue.has_uninterruptible:
+                # Keep the audio task running but drain all interruptible frames
+                # so the pending UninterruptibleFrames are still delivered.
+                self._audio_queue.reset()
+            else:
+                await self._cancel_audio_task()
+                self._create_audio_task()
 
             # Create tasks.
             self._create_video_task()
             self._create_clock_task()
-            self._create_audio_task()
 
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
@@ -612,7 +624,7 @@ class BaseOutputTransport(FrameProcessor):
         def _create_audio_task(self):
             """Create the audio processing task."""
             if not self._audio_task:
-                self._audio_queue = asyncio.Queue()
+                self._audio_queue = FrameQueue()
                 self._audio_task = self._transport.create_task(self._audio_task_handler())
 
         async def _cancel_audio_task(self):
@@ -742,7 +754,7 @@ class BaseOutputTransport(FrameProcessor):
                         )
                         yield frame
                         self._audio_queue.task_done()
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
                         await self._bot_stopped_speaking()
 
@@ -845,7 +857,7 @@ class BaseOutputTransport(FrameProcessor):
             """
             self._video_images = itertools.cycle([image])
 
-        async def _set_video_images(self, images: List[OutputImageRawFrame]):
+        async def _set_video_images(self, images: list[OutputImageRawFrame]):
             """Set multiple video images for cycling output.
 
             Args:

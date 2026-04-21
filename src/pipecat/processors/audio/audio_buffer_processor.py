@@ -11,10 +11,6 @@ of audio from both user input and bot output sources, with support for various a
 configurations and event-driven processing.
 """
 
-from typing import Optional
-
-from loguru import logger
-
 from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -57,7 +53,7 @@ class AudioBufferProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         num_channels: int = 1,
         buffer_size: int = 0,
         enable_turn_audio: bool = False,
@@ -265,7 +261,7 @@ class AudioBufferProcessor(FrameProcessor):
             silence_needed = target_position - current_len
             buffer.extend(b"\x00" * silence_needed)
 
-    async def _process_turn_recording(self, frame: Frame, resampled_audio: Optional[bytes] = None):
+    async def _process_turn_recording(self, frame: Frame, resampled_audio: bytes | None = None):
         """Process frames for turn-based audio recording."""
         # Speaking state (_user_speaking / _bot_speaking) is maintained by
         # _process_recording so it is always up-to-date here.

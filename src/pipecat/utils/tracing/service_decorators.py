@@ -16,15 +16,15 @@ import functools
 import inspect
 import json
 import logging
-from typing import TYPE_CHECKING, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypeVar
 
 # Type imports for type checking only
 if TYPE_CHECKING:
     from opentelemetry import context as context_api
     from opentelemetry import trace
 
-from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -101,11 +101,6 @@ def _get_parent_service_context(self):
     if not is_tracing_available():
         return None
 
-    # TODO: Remove this block and delete class_decorators.py once Traceable is removed.
-    # Legacy: support for classes inheriting from Traceable (currently unused, deprecated).
-    if hasattr(self, "_span") and self._span:
-        return trace.set_span_in_context(self._span)
-
     # Use the conversation context set by TurnTraceObserver via TracingContext.
     tracing_ctx = getattr(self, "_tracing_context", None)
     conversation_context = tracing_ctx.get_conversation_context() if tracing_ctx else None
@@ -170,7 +165,7 @@ def _add_token_usage_to_span(span, token_usage):
             span.set_attribute("gen_ai.usage.reasoning_tokens", reasoning_tokens)
 
 
-def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
+def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Callable:
     """Trace TTS service methods with TTS-specific attributes.
 
     Automatically captures and records:
@@ -242,7 +237,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     raise
                 finally:
                     # Update TTFB metric at the end
-                    ttfb: Optional[float] = getattr(getattr(self, "_metrics", None), "ttfb", None)
+                    ttfb: float | None = getattr(getattr(self, "_metrics", None), "ttfb", None)
                     if ttfb is not None:
                         span.set_attribute("metrics.ttfb", ttfb)
 
@@ -294,7 +289,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     return decorator
 
 
-def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
+def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Callable:
     """Trace STT service methods with transcription attributes.
 
     Automatically captures and records:
@@ -335,9 +330,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 ) as current_span:
                     try:
                         # Get TTFB metric if available
-                        ttfb: Optional[float] = getattr(
-                            getattr(self, "_metrics", None), "ttfb", None
-                        )
+                        ttfb: float | None = getattr(getattr(self, "_metrics", None), "ttfb", None)
 
                         # Use settings from the service if available
                         settings = getattr(self, "_settings", None)
@@ -375,7 +368,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     return decorator
 
 
-def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
+def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Callable:
     """Trace LLM service methods with LLM-specific attributes.
 
     Automatically captures and records:
@@ -459,40 +452,30 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             self.push_frame = traced_push_frame
 
                             # Get messages for logging
-                            # For OpenAILLMContext: use context's own get_messages_for_logging() method
-                            # For LLMContext: use adapter's get_messages_for_logging() which returns
+                            # Use adapter's get_messages_for_logging() which returns
                             # messages in provider's native format with sensitive data sanitized
                             messages = None
                             serialized_messages = None
 
-                            if isinstance(context, OpenAILLMContext):
-                                # OpenAILLMContext and subclasses have their own method
-                                messages = context.get_messages_for_logging()
-                            elif isinstance(context, LLMContext):
-                                # Universal LLMContext - use adapter for provider-native format
-                                if hasattr(self, "get_llm_adapter"):
-                                    adapter = self.get_llm_adapter()
-                                    messages = adapter.get_messages_for_logging(context)
+                            # Use adapter for provider-native format
+                            if hasattr(self, "get_llm_adapter"):
+                                adapter = self.get_llm_adapter()
+                                messages = adapter.get_messages_for_logging(context)
 
                             # Serialize messages if available
                             if messages:
                                 serialized_messages = json.dumps(messages)
 
                             # Get tools
-                            # For OpenAILLMContext: tools may need adapter conversion if set
-                            # For LLMContext: use adapter's from_standard_tools() to convert ToolsSchema
+                            # Use adapter's from_standard_tools() to convert ToolsSchema
                             tools = None
                             serialized_tools = None
                             tool_count = 0
 
-                            if isinstance(context, OpenAILLMContext):
-                                # OpenAILLMContext: tools property handles adapter conversion internally
-                                tools = context.tools
-                            elif isinstance(context, LLMContext):
-                                # Universal LLMContext - use adapter to convert ToolsSchema
-                                if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
-                                    adapter = self.get_llm_adapter()
-                                    tools = adapter.from_standard_tools(context.tools)
+                            # Use adapter to convert ToolsSchema
+                            if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
+                                adapter = self.get_llm_adapter()
+                                tools = adapter.from_standard_tools(context.tools)
 
                             # Serialize and count tools if available
                             # Check if tools is not None and not NOT_GIVEN
@@ -501,36 +484,28 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 tool_count = len(tools) if isinstance(tools, list) else 1
 
                             # Handle system message for different services
+                            # settings.system_instruction takes priority (matches service behavior)
                             system_message = None
-                            if isinstance(context, LLMContext):
-                                # settings.system_instruction takes priority (matches service behavior)
-                                if hasattr(self, "_settings") and getattr(
-                                    self._settings, "system_instruction", None
-                                ):
-                                    system_message = self._settings.system_instruction
-                                else:
-                                    # Fall back to extracting from context messages
-                                    ctx_messages = context.get_messages()
-                                    if ctx_messages:
-                                        first = ctx_messages[0]
-                                        if (
-                                            isinstance(first, dict)
-                                            and first.get("role") == "system"
-                                        ):
-                                            content = first.get("content")
-                                            if isinstance(content, str):
-                                                system_message = content
-                                            elif isinstance(content, list):
-                                                system_message = " ".join(
-                                                    part.get("text", "")
-                                                    for part in content
-                                                    if isinstance(part, dict)
-                                                    and part.get("type") == "text"
-                                                )
-                            elif hasattr(context, "system"):
-                                system_message = context.system
-                            elif hasattr(context, "system_message"):
-                                system_message = context.system_message
+                            if hasattr(self, "_settings") and getattr(
+                                self._settings, "system_instruction", None
+                            ):
+                                system_message = self._settings.system_instruction
+                            else:
+                                # Fall back to extracting from context messages
+                                ctx_messages = context.get_messages()
+                                if ctx_messages:
+                                    first = ctx_messages[0]
+                                    if isinstance(first, dict) and first.get("role") == "system":
+                                        content = first.get("content")
+                                        if isinstance(content, str):
+                                            system_message = content
+                                        elif isinstance(content, list):
+                                            system_message = " ".join(
+                                                part.get("text", "")
+                                                for part in content
+                                                if isinstance(part, dict)
+                                                and part.get("type") == "text"
+                                            )
 
                             # Use given_fields() defensively in case a service doesn't
                             # initialize all settings.
@@ -591,9 +566,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             self.start_llm_usage_metrics = original_start_llm_usage_metrics
 
                         # Update TTFB metric
-                        ttfb: Optional[float] = getattr(
-                            getattr(self, "_metrics", None), "ttfb", None
-                        )
+                        ttfb: float | None = getattr(getattr(self, "_metrics", None), "ttfb", None)
                         if ttfb is not None:
                             current_span.set_attribute("metrics.ttfb", ttfb)
             except Exception as e:

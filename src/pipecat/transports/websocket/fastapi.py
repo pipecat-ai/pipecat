@@ -16,7 +16,7 @@ import io
 import time
 import typing
 import wave
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 from loguru import logger
 from pydantic import BaseModel
@@ -63,9 +63,9 @@ class FastAPIWebsocketParams(TransportParams):
     """
 
     add_wav_header: bool = False
-    serializer: Optional[FrameSerializer] = None
-    session_timeout: Optional[int] = None
-    fixed_audio_packet_size: Optional[int] = None
+    serializer: FrameSerializer | None = None
+    session_timeout: int | None = None
+    fixed_audio_packet_size: int | None = None
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -550,8 +550,8 @@ class FastAPIWebsocketTransport(BaseTransport):
         self,
         websocket: WebSocket,
         params: FastAPIWebsocketParams,
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the FastAPI WebSocket transport.
 

@@ -11,13 +11,14 @@ supporting both Faster Whisper and MLX Whisper backends for efficient inference.
 """
 
 import asyncio
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import AsyncGenerator, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 from loguru import logger
-from typing_extensions import TYPE_CHECKING, override
+from typing_extensions import override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
@@ -96,7 +97,7 @@ class MLXModel(Enum):
     LARGE_V3_TURBO_Q4 = "mlx-community/whisper-large-v3-turbo-q4"
 
 
-def language_to_whisper_language(language: Language) -> Optional[str]:
+def language_to_whisper_language(language: Language) -> str | None:
     """Maps pipecat Language enum to Whisper language codes.
 
     Args:
@@ -213,12 +214,12 @@ class WhisperSTTService(SegmentedSTTService):
     def __init__(
         self,
         *,
-        model: Optional[str | Model] = None,
+        model: str | Model | None = None,
         device: str = "auto",
         compute_type: str = "default",
-        no_speech_prob: Optional[float] = None,
-        language: Optional[Language] = None,
-        settings: Optional[Settings] = None,
+        no_speech_prob: float | None = None,
+        language: Language | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Whisper STT service.
@@ -280,7 +281,7 @@ class WhisperSTTService(SegmentedSTTService):
         self._device = device
         self._compute_type = compute_type
 
-        self._model: Optional[WhisperModel] = None
+        self._model: WhisperModel | None = None
 
         self._load()
 
@@ -292,7 +293,7 @@ class WhisperSTTService(SegmentedSTTService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert from pipecat Language to Whisper language code.
 
         Args:
@@ -325,7 +326,7 @@ class WhisperSTTService(SegmentedSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass
@@ -387,11 +388,11 @@ class WhisperSTTServiceMLX(WhisperSTTService):
     def __init__(
         self,
         *,
-        model: Optional[str | MLXModel] = None,
-        no_speech_prob: Optional[float] = None,
-        language: Optional[Language] = None,
-        temperature: Optional[float] = None,
-        settings: Optional[Settings] = None,
+        model: str | MLXModel | None = None,
+        no_speech_prob: float | None = None,
+        language: Language | None = None,
+        temperature: float | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the MLX Whisper STT service.
@@ -466,7 +467,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass

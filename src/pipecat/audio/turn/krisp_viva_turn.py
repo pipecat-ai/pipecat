@@ -7,7 +7,9 @@
 """Krisp turn analyzer for end-of-turn detection using Krisp VIVA SDK.
 
 This module provides a turn analyzer implementation using Krisp's turn detection
-(Tt) API to determine when a user has finished speaking in a conversation.
+v3 (Tt) API to determine when a user has finished speaking in a conversation.
+The Tt API accepts an external VAD flag alongside audio frames, allowing the
+model to leverage voice activity information for more accurate turn detection.
 
 Note: This analyzer uses a different model than KrispVivaFilter. The model path
 can be specified via the KRISP_VIVA_TURN_MODEL_PATH environment variable or
@@ -16,7 +18,6 @@ passed directly to the constructor.
 
 import os
 import time
-from typing import Optional, Tuple
 
 import numpy as np
 from loguru import logger
@@ -34,7 +35,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use KrispVivaTurn, you need to install krisp_audio.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class KrispTurnParams(BaseTurnParams):
@@ -54,16 +55,18 @@ class KrispTurnParams(BaseTurnParams):
 class KrispVivaTurn(BaseTurnAnalyzer):
     """Turn analyzer using Krisp VIVA SDK for end-of-turn detection.
 
-    Uses Krisp's turn detection (Tt) API to determine when a user has finished
-    speaking. This analyzer requires a valid Krisp model file to operate.
+    Uses Krisp's turn detection v3 (Tt) API to determine when a user has
+    finished speaking. The Tt API receives an external VAD flag with each
+    audio frame, which the ``is_speech`` parameter of ``append_audio``
+    provides. This analyzer requires a valid Krisp model file to operate.
     """
 
     def __init__(
         self,
         *,
-        model_path: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        params: Optional[KrispTurnParams] = None,
+        model_path: str | None = None,
+        sample_rate: int | None = None,
+        params: KrispTurnParams | None = None,
         api_key: str = "",
     ) -> None:
         """Initialize the Krisp turn analyzer.
@@ -119,9 +122,9 @@ class KrispVivaTurn(BaseTurnAnalyzer):
             self._last_probability = None
             self._frame_probabilities = []
             self._last_state = EndOfTurnState.INCOMPLETE
-            self._speech_stopped_time: Optional[float] = None
-            self._e2e_processing_time_ms: Optional[float] = None
-            self._last_metrics: Optional[TurnMetricsData] = None
+            self._speech_stopped_time: float | None = None
+            self._e2e_processing_time_ms: float | None = None
+            self._last_metrics: TurnMetricsData | None = None
 
             # Create session with provided sample rate or default to 16000 Hz
             # This preloads the model to improve latency when set_sample_rate is called later
@@ -159,14 +162,14 @@ class KrispVivaTurn(BaseTurnAnalyzer):
         """Create a turn detection session with the specified sample rate.
 
         Args:
-            sample_rate: Sample rate for the session
+            sample_rate: Sample rate for the session.
 
         Returns:
-            krisp_audio.TtFloat instance
+            krisp_audio.TtFloat instance.
 
         Raises:
-            ValueError: If sample rate or frame duration is not supported
-            RuntimeError: If session creation fails
+            ValueError: If sample rate or frame duration is not supported.
+            RuntimeError: If session creation fails.
         """
         try:
             model_info = krisp_audio.ModelInfo()
@@ -214,7 +217,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
         return self._frame_probabilities
 
     @property
-    def last_probability(self) -> Optional[float]:
+    def last_probability(self) -> float | None:
         """Get the last turn probability value computed.
 
         Returns:
@@ -307,12 +310,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 # Instead, we wait for the model's probability check below to confirm
                 # end-of-turn based on the threshold.
 
-                prob = self._tt_session.process(frame.tolist())
-
-                # Negative values indicate the model is not ready yet (working with 100ms data)
-                # Skip processing until we get positive probabilities
-                if prob < 0:
-                    continue
+                prob = self._tt_session.process(frame.tolist(), is_speech, False)
 
                 # Store the probability for external access
                 self._last_probability = prob
@@ -348,7 +346,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
             self._last_state = error_state
             return error_state
 
-    async def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    async def analyze_end_of_turn(self) -> tuple[EndOfTurnState, MetricsData | None]:
         """Analyze the current audio state to determine if turn has ended.
 
         Returns:

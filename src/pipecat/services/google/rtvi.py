@@ -11,7 +11,7 @@ including models for search responses and an observer for handling Google-specif
 frame types.
 """
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -29,9 +29,9 @@ class RTVISearchResponseMessageData(BaseModel):
         origins: List of search result origins with metadata.
     """
 
-    search_result: Optional[str]
-    rendered_content: Optional[str]
-    origins: List[LLMSearchOrigin]
+    search_result: str | None
+    rendered_content: str | None
+    origins: list[LLMSearchOrigin]
 
 
 class RTVIBotLLMSearchResponseMessage(BaseModel):
@@ -95,7 +95,7 @@ class GoogleRTVIProcessor(RTVIProcessor):
     Creates a specific Google RTVI Observer.
     """
 
-    def create_rtvi_observer(self, *, params: Optional[RTVIObserverParams] = None, **kwargs):
+    def create_rtvi_observer(self, *, params: RTVIObserverParams | None = None, **kwargs):
         """Creates a new RTVI Observer.
 
         Args:

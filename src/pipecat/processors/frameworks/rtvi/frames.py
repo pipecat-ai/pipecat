@@ -7,9 +7,9 @@
 """RTVI pipeline frame definitions."""
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
-from pipecat.frames.frames import DataFrame, SystemFrame
+from pipecat.frames.frames import SystemFrame
 
 
 @dataclass
@@ -37,7 +37,7 @@ class RTVIClientMessageFrame(SystemFrame):
 
     msg_id: str
     type: str
-    data: Optional[Any] = None
+    data: Any | None = None
 
 
 @dataclass
@@ -53,5 +53,5 @@ class RTVIServerResponseFrame(SystemFrame):
     """
 
     client_msg: RTVIClientMessageFrame
-    data: Optional[Any] = None
-    error: Optional[str] = None
+    data: Any | None = None
+    error: str | None = None

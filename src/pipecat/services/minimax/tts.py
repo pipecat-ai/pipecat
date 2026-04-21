@@ -11,8 +11,9 @@ for streaming text-to-speech synthesis.
 """
 
 import json
+from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Mapping, Optional, Self
+from typing import Any, Self
 
 import aiohttp
 from loguru import logger
@@ -30,7 +31,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
-def language_to_minimax_language(language: Language) -> Optional[str]:
+def language_to_minimax_language(language: Language) -> str | None:
     """Convert a Language enum to MiniMax language format.
 
     Args:
@@ -157,26 +158,19 @@ class MiniMaxHttpTTSService(TTSService):
             pitch: Pitch adjustment (range: -12 to 12).
             emotion: Emotional tone (options: "happy", "sad", "angry", "fearful",
                 "disgusted", "surprised", "calm", "fluent").
-            english_normalization: Deprecated; use `text_normalization` instead
-
-                .. deprecated:: 0.0.96
-                    The `english_normalization` parameter is deprecated and will be removed in a future version.
-                    Use the `text_normalization` parameter instead.
-
             text_normalization: Enable text normalization (Chinese/English).
             latex_read: Enable LaTeX formula reading.
             exclude_aggregated_audio: Whether to exclude aggregated audio in final chunk.
         """
 
-        language: Optional[Language] = Language.EN
-        speed: Optional[float] = 1.0
-        volume: Optional[float] = 1.0
-        pitch: Optional[int] = 0
-        emotion: Optional[str] = None
-        english_normalization: Optional[bool] = None  # Deprecated
-        text_normalization: Optional[bool] = None
-        latex_read: Optional[bool] = None
-        exclude_aggregated_audio: Optional[bool] = None
+        language: Language | None = Language.EN
+        speed: float | None = 1.0
+        volume: float | None = 1.0
+        pitch: int | None = 0
+        emotion: str | None = None
+        text_normalization: bool | None = None
+        latex_read: bool | None = None
+        exclude_aggregated_audio: bool | None = None
 
     def __init__(
         self,
@@ -184,13 +178,13 @@ class MiniMaxHttpTTSService(TTSService):
         api_key: str,
         base_url: str = "https://api.minimax.io/v1/t2a_v2",
         group_id: str,
-        model: Optional[str] = None,
-        voice_id: Optional[str] = None,
+        model: str | None = None,
+        voice_id: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         stream: bool = True,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the MiniMax TTS service.
@@ -284,16 +278,6 @@ class MiniMaxHttpTTSService(TTSService):
                         )
 
                 # Resolve text_normalization
-                if params.english_normalization is not None:
-                    import warnings
-
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("always")
-                        warnings.warn(
-                            "Parameter `english_normalization` is deprecated and will be removed in a future version. Use `text_normalization` instead.",
-                            DeprecationWarning,
-                        )
-                    default_settings.text_normalization = params.english_normalization
                 if params.text_normalization is not None:
                     default_settings.text_normalization = params.text_normalization
 
@@ -329,7 +313,7 @@ class MiniMaxHttpTTSService(TTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to MiniMax service language format.
 
         Args:

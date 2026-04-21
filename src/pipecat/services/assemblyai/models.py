@@ -10,7 +10,7 @@ This module defines Pydantic models for handling AssemblyAI's real-time
 transcription WebSocket messages and connection configuration.
 """
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -85,10 +85,10 @@ class TurnMessage(BaseMessage):
     end_of_turn: bool
     transcript: str
     end_of_turn_confidence: float
-    words: List[Word]
-    language_code: Optional[str] = None
-    language_confidence: Optional[float] = None
-    speaker: Optional[str] = Field(default=None, alias="speaker_label")
+    words: list[Word]
+    language_code: str | None = None
+    language_confidence: float | None = None
+    speaker: str | None = Field(default=None, alias="speaker_label")
 
 
 class SpeechStartedMessage(BaseMessage):
@@ -158,19 +158,19 @@ class AssemblyAIConnectionParams(BaseModel):
 
     sample_rate: int = 16000
     encoding: Literal["pcm_s16le", "pcm_mulaw"] = "pcm_s16le"
-    end_of_turn_confidence_threshold: Optional[float] = None
-    min_turn_silence: Optional[int] = None
-    min_end_of_turn_silence_when_confident: Optional[int] = None  # Deprecated
-    max_turn_silence: Optional[int] = None
-    keyterms_prompt: Optional[List[str]] = None
-    prompt: Optional[str] = None
+    end_of_turn_confidence_threshold: float | None = None
+    min_turn_silence: int | None = None
+    min_end_of_turn_silence_when_confident: int | None = None  # Deprecated
+    max_turn_silence: int | None = None
+    keyterms_prompt: list[str] | None = None
+    prompt: str | None = None
     speech_model: Literal[
         "universal-streaming-english", "universal-streaming-multilingual", "u3-rt-pro"
     ] = "u3-rt-pro"
-    language_detection: Optional[bool] = None
+    language_detection: bool | None = None
     format_turns: bool = True
-    speaker_labels: Optional[bool] = None
-    vad_threshold: Optional[float] = None
+    speaker_labels: bool | None = None
+    vad_threshold: float | None = None
 
     @model_validator(mode="after")
     def handle_deprecated_param(self):

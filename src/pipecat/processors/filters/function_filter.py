@@ -10,7 +10,7 @@ This module provides a processor that filters frames based on a custom function,
 allowing for flexible frame filtering logic in processing pipelines.
 """
 
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -29,7 +29,7 @@ class FunctionFilter(FrameProcessor):
     def __init__(
         self,
         filter: FilterType,
-        direction: Optional[FrameDirection] = FrameDirection.DOWNSTREAM,
+        direction: FrameDirection | None = FrameDirection.DOWNSTREAM,
         filter_system_frames: bool = False,
         **kwargs,
     ):

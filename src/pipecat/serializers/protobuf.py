@@ -8,7 +8,6 @@
 
 import dataclasses
 import json
-from typing import Optional
 
 from loguru import logger
 
@@ -61,7 +60,7 @@ class ProtobufFrameSerializer(FrameSerializer):
     }
     DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 
-    def __init__(self, params: Optional[FrameSerializer.InputParams] = None):
+    def __init__(self, params: FrameSerializer.InputParams | None = None):
         """Initialize the Protobuf frame serializer.
 
         Args:

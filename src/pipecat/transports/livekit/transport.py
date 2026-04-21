@@ -13,14 +13,14 @@ event handling for conversational AI applications.
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, List, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import create_stream_resampler
-from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
     BotConnectedFrame,
@@ -79,7 +79,7 @@ class LiveKitOutputTransportMessageFrame(OutputTransportMessageFrame):
         participant_id: Optional ID of the participant this message is for/from.
     """
 
-    participant_id: Optional[str] = None
+    participant_id: str | None = None
 
 
 @dataclass
@@ -90,51 +90,7 @@ class LiveKitOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame
         participant_id: Optional ID of the participant this message is for/from.
     """
 
-    participant_id: Optional[str] = None
-
-
-@dataclass
-class LiveKitTransportMessageFrame(LiveKitOutputTransportMessageFrame):
-    """Frame for transport messages in LiveKit rooms.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "LiveKitTransportMessageFrame is deprecated and will be removed in a future version. "
-                "Instead, use LiveKitOutputTransportMessageFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-
-@dataclass
-class LiveKitTransportMessageUrgentFrame(LiveKitOutputTransportMessageUrgentFrame):
-    """Frame for urgent transport messages in LiveKit rooms.
-
-    Parameters:
-        participant_id: Optional ID of the participant this message is for/from.
-    """
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "LiveKitTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
-                "Instead, use LiveKitOutputTransportMessageUrgentFrame.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+    participant_id: str | None = None
 
 
 class LiveKitParams(TransportParams):
@@ -205,18 +161,18 @@ class LiveKitTransportClient:
         self._params = params
         self._callbacks = callbacks
         self._transport_name = transport_name
-        self._room: Optional[rtc.Room] = None
+        self._room: rtc.Room | None = None
         self._participant_id: str = ""
         self._connected = False
         self._disconnect_counter = 0
-        self._audio_source: Optional[rtc.AudioSource] = None
-        self._audio_track: Optional[rtc.LocalAudioTrack] = None
+        self._audio_source: rtc.AudioSource | None = None
+        self._audio_track: rtc.LocalAudioTrack | None = None
         self._audio_tracks = {}
         self._audio_queue = asyncio.Queue()
         self._video_tracks = {}
         self._video_queue = asyncio.Queue()
         self._other_participant_has_joined = False
-        self._task_manager: Optional[BaseTaskManager] = None
+        self._task_manager: BaseTaskManager | None = None
         self._async_lock = asyncio.Lock()
 
     @property
@@ -337,7 +293,7 @@ class LiveKitTransportClient:
             logger.info(f"Disconnected from {self._room_name}")
             await self._callbacks.on_disconnected()
 
-    async def send_data(self, data: bytes, participant_id: Optional[str] = None):
+    async def send_data(self, data: bytes, participant_id: str | None = None):
         """Send data to participants in the room.
 
         Args:
@@ -402,7 +358,7 @@ class LiveKitTransportClient:
                 logger.error(f"Error publishing audio: {e}")
             return False
 
-    def get_participants(self) -> List[str]:
+    def get_participants(self) -> list[str]:
         """Get list of participant IDs in the room.
 
         Returns:
@@ -652,20 +608,10 @@ class LiveKitInputTransport(BaseInputTransport):
 
         self._audio_in_task = None
         self._video_in_task = None
-        self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
         self._resampler = create_stream_resampler()
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
-
-    @property
-    def vad_analyzer(self) -> Optional[VADAnalyzer]:
-        """Get the Voice Activity Detection analyzer.
-
-        Returns:
-            The VAD analyzer instance if configured.
-        """
-        return self._vad_analyzer
 
     async def start(self, frame: StartFrame):
         """Start the input transport and connect to LiveKit room.
@@ -953,10 +899,16 @@ class LiveKitOutputTransport(BaseOutputTransport):
     async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         """Use LiveKit's native publish_dtmf method for telephone events.
 
+        LiveKit's DTMF API sends a single tone per call, so when
+        ``frame.buttons`` contains multiple entries only the first one is
+        sent.
+
         Args:
             frame: The DTMF frame to write.
         """
-        await self._client.send_dtmf(frame.button.value)
+        if not frame.buttons:
+            return
+        await self._client.send_dtmf(frame.buttons[0].value)
 
     def _convert_pipecat_audio_to_livekit(self, pipecat_audio: bytes) -> rtc.AudioFrame:
         """Convert Pipecat audio data to LiveKit audio frame."""
@@ -1020,9 +972,9 @@ class LiveKitTransport(BaseTransport):
         url: str,
         token: str,
         room_name: str,
-        params: Optional[LiveKitParams] = None,
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        params: LiveKitParams | None = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the LiveKit transport.
 
@@ -1054,8 +1006,8 @@ class LiveKitTransport(BaseTransport):
         self._client = LiveKitTransportClient(
             url, token, room_name, self._params, callbacks, self.name
         )
-        self._input: Optional[LiveKitInputTransport] = None
-        self._output: Optional[LiveKitOutputTransport] = None
+        self._input: LiveKitInputTransport | None = None
+        self._output: LiveKitOutputTransport | None = None
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -1113,7 +1065,7 @@ class LiveKitTransport(BaseTransport):
         if self._output:
             await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
-    def get_participants(self) -> List[str]:
+    def get_participants(self) -> list[str]:
         """Get list of participant IDs in the room.
 
         Returns:
@@ -1215,7 +1167,7 @@ class LiveKitTransport(BaseTransport):
             await self._input.push_app_message(data.decode(), participant_id)
         await self._call_event_handler("on_data_received", data, participant_id)
 
-    async def send_message(self, message: str, participant_id: Optional[str] = None):
+    async def send_message(self, message: str, participant_id: str | None = None):
         """Send a message to participants in the room.
 
         Args:
@@ -1228,7 +1180,7 @@ class LiveKitTransport(BaseTransport):
             )
             await self._output.send_message(frame)
 
-    async def send_message_urgent(self, message: str, participant_id: Optional[str] = None):
+    async def send_message_urgent(self, message: str, participant_id: str | None = None):
         """Send an urgent message to participants in the room.
 
         Args:

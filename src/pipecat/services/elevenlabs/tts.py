@@ -13,17 +13,12 @@ with support for streaming audio, word timestamps, and voice customization.
 import asyncio
 import base64
 import json
+from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from typing import (
     Any,
-    AsyncGenerator,
     ClassVar,
-    Dict,
-    List,
     Literal,
-    Mapping,
-    Optional,
-    Tuple,
     Union,
 )
 
@@ -63,8 +58,6 @@ except ModuleNotFoundError as e:
     logger.error("In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`.")
     raise Exception(f"Missing module: {e}")
 
-ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
-
 # Models that support language codes
 # The following models are excluded as they don't support language codes:
 # - eleven_flash_v2
@@ -76,7 +69,7 @@ ELEVENLABS_MULTILINGUAL_MODELS = {
 }
 
 
-def language_to_elevenlabs_language(language: Language) -> Optional[str]:
+def language_to_elevenlabs_language(language: Language) -> str | None:
     """Convert a Language enum to ElevenLabs language code.
 
     Args:
@@ -141,8 +134,12 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
             return "pcm_22050"
         case 24000:
             return "pcm_24000"
+        case 32000:
+            return "pcm_32000"
         case 44100:
             return "pcm_44100"
+        case 48000:
+            return "pcm_48000"
     logger.warning(
         f"ElevenLabsTTSService: No output format available for {sample_rate} sample rate"
     )
@@ -150,8 +147,8 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
 
 
 def build_elevenlabs_voice_settings(
-    settings: Union[Dict[str, Any], "TTSSettings"],
-) -> Optional[Dict[str, Union[float, bool]]]:
+    settings: Union[dict[str, Any], "TTSSettings"],
+) -> dict[str, float | bool] | None:
     """Build voice settings dictionary for ElevenLabs based on provided settings.
 
     Args:
@@ -253,7 +250,7 @@ def calculate_word_times(
     cumulative_time: float,
     partial_word: str = "",
     partial_word_start_time: float = 0.0,
-) -> tuple[List[Tuple[str, float]], str, float]:
+) -> tuple[list[tuple[str, float]], str, float]:
     """Calculate word timestamps from character alignment information.
 
     Args:
@@ -339,34 +336,34 @@ class ElevenLabsTTSService(WebsocketTTSService):
             pronunciation_dictionary_locators: List of pronunciation dictionary locators to use.
         """
 
-        language: Optional[Language] = None
-        stability: Optional[float] = None
-        similarity_boost: Optional[float] = None
-        style: Optional[float] = None
-        use_speaker_boost: Optional[bool] = None
-        speed: Optional[float] = None
-        auto_mode: Optional[bool] = True
-        enable_ssml_parsing: Optional[bool] = None
-        enable_logging: Optional[bool] = None
-        apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
-        pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None
+        language: Language | None = None
+        stability: float | None = None
+        similarity_boost: float | None = None
+        style: float | None = None
+        use_speaker_boost: bool | None = None
+        speed: float | None = None
+        auto_mode: bool | None = True
+        enable_ssml_parsing: bool | None = None
+        enable_logging: bool | None = None
+        apply_text_normalization: Literal["auto", "on", "off"] | None = None
+        pronunciation_dictionary_locators: list[PronunciationDictionaryLocator] | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
-        model: Optional[str] = None,
+        voice_id: str | None = None,
+        model: str | None = None,
         url: str = "wss://api.elevenlabs.io",
-        sample_rate: Optional[int] = None,
-        auto_mode: bool = True,
-        enable_ssml_parsing: Optional[bool] = None,
-        enable_logging: Optional[bool] = None,
-        pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        text_aggregation_mode: Optional[TextAggregationMode] = None,
-        aggregate_sentences: Optional[bool] = None,
+        sample_rate: int | None = None,
+        auto_mode: bool | None = None,
+        enable_ssml_parsing: bool | None = None,
+        enable_logging: bool | None = None,
+        pronunciation_dictionary_locators: list[PronunciationDictionaryLocator] | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
+        aggregate_sentences: bool | None = None,
         **kwargs,
     ):
         """Initialize the ElevenLabs TTS service.
@@ -385,7 +382,13 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
-            auto_mode: Whether to enable automatic mode optimization.
+            auto_mode: Whether to enable ElevenLabs' auto mode, which reduces
+                latency by disabling server-side chunk scheduling and buffering.
+                Recommended when sending complete sentences or phrases. When
+                None (default), auto mode is enabled for ``SENTENCE``
+                aggregation and disabled for ``TOKEN`` aggregation — because
+                token streaming relies on the server-side chunk scheduler to
+                accumulate enough text for natural-sounding synthesis.
             enable_ssml_parsing: Whether to parse SSML tags in text.
             enable_logging: Whether to enable ElevenLabs server-side logging.
             pronunciation_dictionary_locators: List of pronunciation dictionary
@@ -490,6 +493,17 @@ class ElevenLabsTTSService(WebsocketTTSService):
         self._url = url
 
         # Init-only WebSocket URL params (not runtime-updatable).
+        #
+        # ElevenLabs' auto mode reduces latency by disabling server-side chunk
+        # scheduling and buffering — it's designed for inputs that are already
+        # complete sentences or phrases. In TOKEN mode we stream individual LLM
+        # tokens, so we need the server-side scheduler to accumulate enough
+        # text for natural-sounding synthesis; enabling auto mode there would
+        # hurt quality. When the caller hasn't set auto_mode explicitly, we
+        # derive the right default from the text aggregation strategy.
+        if auto_mode is None:
+            auto_mode = self._text_aggregation_mode != TextAggregationMode.TOKEN
+
         self._auto_mode = auto_mode
         self._enable_ssml_parsing = enable_ssml_parsing
         self._enable_logging = enable_logging
@@ -515,7 +529,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to ElevenLabs language format.
 
         Args:
@@ -606,7 +620,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio and finalize the current context.
 
         Args:
@@ -656,11 +670,11 @@ class ElevenLabsTTSService(WebsocketTTSService):
             output_format = self._output_format
             url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={str(self._auto_mode).lower()}"
 
-            if self._enable_ssml_parsing:
-                url += f"&enable_ssml_parsing={self._enable_ssml_parsing}"
+            if self._enable_ssml_parsing is not None:
+                url += f"&enable_ssml_parsing={str(self._enable_ssml_parsing).lower()}"
 
-            if self._enable_logging:
-                url += f"&enable_logging={self._enable_logging}"
+            if self._enable_logging is not None:
+                url += f"&enable_logging={str(self._enable_logging).lower()}"
 
             if self._settings.apply_text_normalization is not None:
                 url += f"&apply_text_normalization={self._settings.apply_text_normalization}"
@@ -916,30 +930,31 @@ class ElevenLabsHttpTTSService(TTSService):
             pronunciation_dictionary_locators: List of pronunciation dictionary locators to use.
         """
 
-        language: Optional[Language] = None
-        optimize_streaming_latency: Optional[int] = None
-        stability: Optional[float] = None
-        similarity_boost: Optional[float] = None
-        style: Optional[float] = None
-        use_speaker_boost: Optional[bool] = None
-        speed: Optional[float] = None
-        apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
-        pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None
+        language: Language | None = None
+        optimize_streaming_latency: int | None = None
+        stability: float | None = None
+        similarity_boost: float | None = None
+        style: float | None = None
+        use_speaker_boost: bool | None = None
+        speed: float | None = None
+        apply_text_normalization: Literal["auto", "on", "off"] | None = None
+        pronunciation_dictionary_locators: list[PronunciationDictionaryLocator] | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
-        model: Optional[str] = None,
+        model: str | None = None,
         base_url: str = "https://api.elevenlabs.io",
-        sample_rate: Optional[int] = None,
-        pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        text_aggregation_mode: Optional[TextAggregationMode] = None,
-        aggregate_sentences: Optional[bool] = None,
+        sample_rate: int | None = None,
+        enable_logging: bool | None = None,
+        pronunciation_dictionary_locators: list[PronunciationDictionaryLocator] | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
+        aggregate_sentences: bool | None = None,
         **kwargs,
     ):
         """Initialize the ElevenLabs HTTP TTS service.
@@ -959,6 +974,8 @@ class ElevenLabsHttpTTSService(TTSService):
 
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
+            enable_logging: Whether to enable ElevenLabs server-side logging.
+                Set to False for zero retention mode (enterprise only).
             pronunciation_dictionary_locators: List of pronunciation dictionary
                 locators to use.
             params: Additional input parameters for voice customization.
@@ -1040,6 +1057,7 @@ class ElevenLabsHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = base_url
         self._session = aiohttp_session
+        self._enable_logging = enable_logging
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
@@ -1055,7 +1073,7 @@ class ElevenLabsHttpTTSService(TTSService):
         self._partial_word = ""
         self._partial_word_start_time = 0.0
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat Language to ElevenLabs language code.
 
         Args:
@@ -1124,7 +1142,7 @@ class ElevenLabsHttpTTSService(TTSService):
             # End of turn - reset previous text
             self._previous_text = ""
 
-    def calculate_word_times(self, alignment_info: Mapping[str, Any]) -> List[Tuple[str, float]]:
+    def calculate_word_times(self, alignment_info: Mapping[str, Any]) -> list[tuple[str, float]]:
         """Calculate word timing from character alignment data.
 
         This method handles partial words that may span across multiple alignment chunks.
@@ -1205,7 +1223,7 @@ class ElevenLabsHttpTTSService(TTSService):
         # Use the with-timestamps endpoint
         url = f"{self._base_url}/v1/text-to-speech/{self._settings.voice}/stream/with-timestamps"
 
-        payload: Dict[str, Union[str, Dict[str, Union[float, bool]]]] = {
+        payload: dict[str, str | dict[str, float | bool]] = {
             "text": text,
             "model_id": self._settings.model,
         }
@@ -1245,6 +1263,8 @@ class ElevenLabsHttpTTSService(TTSService):
         }
         if self._settings.optimize_streaming_latency is not None:
             params["optimize_streaming_latency"] = self._settings.optimize_streaming_latency
+        if self._enable_logging is not None:
+            params["enable_logging"] = str(self._enable_logging).lower()
 
         try:
             async with self._session.post(

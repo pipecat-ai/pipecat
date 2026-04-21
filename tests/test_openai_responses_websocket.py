@@ -628,29 +628,20 @@ class TestDrainCancelledResponse:
         assert len(cancel_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_drain_timeout_triggers_reconnect(self):
-        """If draining takes too long, should fall back to reconnecting."""
+    async def test_drain_timeout_clears_state(self):
+        """If draining times out, should clear cancellation state."""
         service = _make_service()
         service._needs_drain = True
-        service.stop_all_metrics = AsyncMock()
-        service.push_error = AsyncMock()
 
         mock_ws = AsyncMock()
         # recv() never returns a terminal event — times out
         mock_ws.recv = AsyncMock(side_effect=asyncio.TimeoutError)
-        mock_ws.close = AsyncMock()
         service._websocket = mock_ws
 
-        with patch(
-            "pipecat.services.openai.responses.llm.websocket_connect",
-            new_callable=AsyncMock,
-            return_value=AsyncMock(),
-        ):
-            await service._drain_cancelled_response()
+        await service._drain_cancelled_response()
 
         assert not service._needs_drain
-        # Should have reconnected (old ws closed)
-        mock_ws.close.assert_called_once()
+        assert not service._cancel_pending_response
 
 
 # ---------------------------------------------------------------------------
@@ -688,7 +679,9 @@ class TestConnectionLifecycle:
             new_callable=AsyncMock,
             return_value=AsyncMock(),
         ):
-            await service._reconnect()
+            # _disconnect + _connect is the lifecycle equivalent of the old _reconnect
+            await service._disconnect()
+            await service._connect()
 
         assert service._previous_response_id is None
         mock_ws.close.assert_called_once()
@@ -723,17 +716,10 @@ class TestConnectionLifecycle:
 
     @pytest.mark.asyncio
     async def test_ensure_connected_raises_on_failure(self):
-        from pipecat.services.openai.responses.llm import _RetryableError
-
         service = _make_service()
         service._websocket = None
-        service.push_error = AsyncMock()
+        # Mock _try_reconnect to simulate exhausted retries
+        service._try_reconnect = AsyncMock(return_value=False)
 
-        # Mock connect to fail
-        with patch(
-            "pipecat.services.openai.responses.llm.websocket_connect",
-            new_callable=AsyncMock,
-            side_effect=Exception("Connection refused"),
-        ):
-            with pytest.raises(_RetryableError):
-                await service._ensure_connected()
+        with pytest.raises(ConnectionError):
+            await service._ensure_connected()

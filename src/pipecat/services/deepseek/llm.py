@@ -7,7 +7,6 @@
 """DeepSeek LLM service implementation using OpenAI-compatible interface."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from loguru import logger
 
@@ -42,8 +41,8 @@ class DeepSeekLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.deepseek.com/v1",
-        model: Optional[str] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the DeepSeek LLM service.

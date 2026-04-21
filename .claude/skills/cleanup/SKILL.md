@@ -144,7 +144,7 @@ class InputParams(BaseModel):
 
 #### Examples
 
-Validated against `examples/foundational/07-interruptible.py`:
+Validated against `examples/07-interruptible.py`:
 
 - Proper `create_transport()` usage
 - Correct pipeline structure

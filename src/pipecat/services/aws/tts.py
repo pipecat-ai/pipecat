@@ -11,8 +11,8 @@ supporting multiple languages, voices, and SSML features.
 """
 
 import os
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -37,7 +37,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_aws_language(language: Language) -> Optional[str]:
+def language_to_aws_language(language: Language) -> str | None:
     """Convert a Language enum to AWS Polly language code.
 
     Args:
@@ -137,7 +137,7 @@ class AWSPollyTTSSettings(TTSSettings):
     pitch: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     volume: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    lexicon_names: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lexicon_names: list[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AWSPollyTTSService(TTSService):
@@ -166,24 +166,24 @@ class AWSPollyTTSService(TTSService):
             lexicon_names: List of pronunciation lexicons to apply.
         """
 
-        engine: Optional[str] = None
-        language: Optional[Language] = Language.EN
-        pitch: Optional[str] = None
-        rate: Optional[str] = None
-        volume: Optional[str] = None
-        lexicon_names: Optional[List[str]] = None
+        engine: str | None = None
+        language: Language | None = Language.EN
+        pitch: str | None = None
+        rate: str | None = None
+        volume: str | None = None
+        lexicon_names: list[str] | None = None
 
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        aws_access_key_id: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
-        region: Optional[str] = None,
-        voice_id: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        api_key: str | None = None,
+        aws_access_key_id: str | None = None,
+        aws_session_token: str | None = None,
+        region: str | None = None,
+        voice_id: str | None = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initializes the AWS Polly TTS service.
@@ -268,7 +268,7 @@ class AWSPollyTTSService(TTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to AWS Polly language format.
 
         Args:
@@ -369,31 +369,3 @@ class AWSPollyTTSService(TTSService):
         except (BotoCoreError, ClientError) as error:
             error_message = f"AWS Polly TTS error: {str(error)}"
             yield ErrorFrame(error=error_message)
-
-
-class PollyTTSService(AWSPollyTTSService):
-    """Deprecated alias for AWSPollyTTSService.
-
-    .. deprecated:: 0.0.67
-        `PollyTTSService` is deprecated, use `AWSPollyTTSService` instead.
-
-    """
-
-    Settings = AWSPollyTTSSettings
-
-    def __init__(self, **kwargs):
-        """Initialize the deprecated PollyTTSService.
-
-        Args:
-            **kwargs: All arguments passed to AWSPollyTTSService.
-        """
-        super().__init__(**kwargs)
-
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "'PollyTTSService' is deprecated, use 'AWSPollyTTSService' instead.",
-                DeprecationWarning,
-            )

@@ -7,9 +7,9 @@
 """Kokoro TTS service implementation using kokoro-onnx."""
 
 import os
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncGenerator, Optional
 
 import numpy as np
 from loguru import logger
@@ -119,11 +119,11 @@ class KokoroTTSService(TTSService):
     def __init__(
         self,
         *,
-        voice_id: Optional[str] = None,
-        model_path: Optional[str] = None,
-        voices_path: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        voice_id: str | None = None,
+        model_path: str | None = None,
+        voices_path: str | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Kokoro TTS service.

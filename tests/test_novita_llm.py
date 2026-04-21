@@ -22,7 +22,9 @@ async def test_novita_llm_stream_closed_on_cancellation():
     This prevents socket leaks when the pipeline is interrupted (e.g., user interruption).
     """
     with patch.object(NovitaLLMService, "create_client"):
-        service = NovitaLLMService(api_key="test-key", model="test-model")
+        service = NovitaLLMService(
+            api_key="test-key", settings=NovitaLLMService.Settings(model="test-model")
+        )
         service._client = AsyncMock()
 
         stream_closed = False
@@ -51,8 +53,7 @@ async def test_novita_llm_stream_closed_on_cancellation():
 
         mock_stream = MockAsyncStream()
 
-        service._stream_chat_completions_specific_context = AsyncMock(return_value=mock_stream)
-        service._stream_chat_completions_universal_context = AsyncMock(return_value=mock_stream)
+        service.get_chat_completions = AsyncMock(return_value=mock_stream)
         service.start_ttfb_metrics = AsyncMock()
         service.stop_ttfb_metrics = AsyncMock()
         service.start_llm_usage_metrics = AsyncMock()

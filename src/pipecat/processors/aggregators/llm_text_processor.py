@@ -13,8 +13,6 @@ components such as TTS services or context aggregators. It can be used to pre-ag
 and categorize, modify, or filter direct output tokens from the LLM.
 """
 
-from typing import Optional
-
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     EndFrame,
@@ -38,7 +36,7 @@ class LLMTextProcessor(FrameProcessor):
     output tokens from the LLM.
     """
 
-    def __init__(self, *, text_aggregator: Optional[BaseTextAggregator] = None, **kwargs):
+    def __init__(self, *, text_aggregator: BaseTextAggregator | None = None, **kwargs):
         """Initialize the LLM text processor.
 
         Args:
@@ -91,7 +89,7 @@ class LLMTextProcessor(FrameProcessor):
             out_frame.skip_tts = in_frame.skip_tts
             await self.push_frame(out_frame)
 
-    async def _handle_llm_end(self, skip_tts: Optional[bool] = None):
+    async def _handle_llm_end(self, skip_tts: bool | None = None):
         # Flush any remaining text
         remaining = await self._text_aggregator.flush()
         if remaining:

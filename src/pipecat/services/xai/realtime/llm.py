@@ -13,9 +13,10 @@ https://docs.x.ai/docs/guides/voice/agent
 import base64
 import json
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from typing import Any, Dict, Mapping, Optional, Type
+from typing import Any
 
 from loguru import logger
 
@@ -46,14 +47,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-)
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import (
@@ -118,7 +111,7 @@ class GrokRealtimeLLMSettings(LLMSettings):
 
     # -- apply_update override -----------------------------------------------
 
-    def apply_update(self, delta: "GrokRealtimeLLMService.Settings") -> Dict[str, Any]:
+    def apply_update(self, delta: "GrokRealtimeLLMService.Settings") -> dict[str, Any]:
         """Merge a delta, keeping ``system_instruction`` in sync with SP.
 
         When the delta contains ``session_properties``, it **replaces** the
@@ -150,7 +143,7 @@ class GrokRealtimeLLMSettings(LLMSettings):
 
     @classmethod
     def from_mapping(
-        cls: Type["GrokRealtimeLLMService.Settings"], settings: Mapping[str, Any]
+        cls: type["GrokRealtimeLLMService.Settings"], settings: Mapping[str, Any]
     ) -> "GrokRealtimeLLMService.Settings":
         """Build a delta from a plain dict, routing SP keys into ``session_properties``.
 
@@ -161,9 +154,9 @@ class GrokRealtimeLLMSettings(LLMSettings):
         # Determine which keys belong to our own dataclass fields.
         own_field_names = {f.name for f in dataclass_fields(cls)} - {"extra"}
 
-        top: Dict[str, Any] = {}
-        sp_dict: Dict[str, Any] = {}
-        extra: Dict[str, Any] = {}
+        top: dict[str, Any] = {}
+        sp_dict: dict[str, Any] = {}
+        extra: dict[str, Any] = {}
 
         sp_keys = set(events.SessionProperties.model_fields.keys())
 
@@ -212,8 +205,8 @@ class GrokRealtimeLLMService(LLMService):
         *,
         api_key: str,
         base_url: str = "wss://api.x.ai/v1/realtime",
-        session_properties: Optional[events.SessionProperties] = None,
-        settings: Optional[Settings] = None,
+        session_properties: events.SessionProperties | None = None,
+        settings: Settings | None = None,
         start_audio_paused: bool = False,
         **kwargs,
     ):
@@ -257,11 +250,7 @@ class GrokRealtimeLLMService(LLMService):
 
         # 2. Apply direct init arg overrides (deprecated)
         if session_properties is not None:
-            _warn_deprecated_param(
-                "session_properties",
-                self.Settings,
-                "session_properties",
-            )
+            self._warn_init_param_moved_to_settings("session_properties", "session_properties")
             default_settings.session_properties = session_properties
             # Sync instructions from the deprecated SP arg to top-level
             if session_properties.instructions is not None:
@@ -320,7 +309,7 @@ class GrokRealtimeLLMService(LLMService):
         """
         self._audio_input_paused = paused
 
-    def _get_configured_sample_rate(self, direction: str) -> Optional[int]:
+    def _get_configured_sample_rate(self, direction: str) -> int | None:
         """Get manually configured sample rate for input or output.
 
         Args:
@@ -946,26 +935,3 @@ class GrokRealtimeLLMService(LLMService):
             output=json.dumps(result, ensure_ascii=False),
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
-
-    def create_context_aggregator(
-        self,
-        context: OpenAILLMContext,
-        *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> LLMContextAggregatorPair:
-        """Create context aggregators for the Grok Realtime service.
-
-        Args:
-            context: The LLM context.
-            user_params: User aggregator parameters.
-            assistant_params: Assistant aggregator parameters.
-
-        Returns:
-            LLMContextAggregatorPair for user and assistant context aggregation.
-        """
-        context = LLMContext.from_openai_context(context)
-        assistant_params.expect_stripped_words = False
-        return LLMContextAggregatorPair(
-            context, user_params=user_params, assistant_params=assistant_params
-        )

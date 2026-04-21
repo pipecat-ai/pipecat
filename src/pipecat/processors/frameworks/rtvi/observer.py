@@ -7,17 +7,12 @@
 """RTVI observer for converting pipeline frames to outgoing RTVI messages."""
 
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import (
     TYPE_CHECKING,
-    Awaitable,
-    Callable,
-    Dict,
-    List,
     Optional,
-    Set,
-    Tuple,
 )
 
 from loguru import logger
@@ -59,7 +54,6 @@ from pipecat.metrics.metrics import (
     TTSUsageMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIServerMessageFrame,
@@ -72,7 +66,7 @@ if TYPE_CHECKING:
     from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
 
-class RTVIFunctionCallReportLevel(str, Enum):
+class RTVIFunctionCallReportLevel(StrEnum):
     """Level of detail to include in function call RTVI events.
 
     Controls what information is exposed in function call events for security.
@@ -149,18 +143,14 @@ class RTVIObserverParams:
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
-    ignored_sources: List[FrameProcessor] = field(default_factory=list)
-    skip_aggregator_types: Optional[List[AggregationType | str]] = None
-    bot_output_transforms: Optional[
-        List[
-            Tuple[
-                AggregationType | str,
-                Callable[[str, AggregationType | str], Awaitable[str]],
-            ]
-        ]
-    ] = None
+    ignored_sources: list[FrameProcessor] = field(default_factory=list)
+    skip_aggregator_types: list[AggregationType | str] | None = None
+    bot_output_transforms: (
+        list[tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]]
+        | None
+    ) = None
     audio_level_period_secs: float = 0.15
-    function_call_report_level: Dict[str, RTVIFunctionCallReportLevel] = field(
+    function_call_report_level: dict[str, RTVIFunctionCallReportLevel] = field(
         default_factory=lambda: {"*": RTVIFunctionCallReportLevel.NONE}
     )
 
@@ -181,7 +171,7 @@ class RTVIObserver(BaseObserver):
         self,
         rtvi: Optional["RTVIProcessor"] = None,
         *,
-        params: Optional[RTVIObserverParams] = None,
+        params: RTVIObserverParams | None = None,
         **kwargs,
     ):
         """Initialize the RTVI observer.
@@ -195,7 +185,7 @@ class RTVIObserver(BaseObserver):
         self._rtvi = rtvi
         self._params = params or RTVIObserverParams()
 
-        self._ignored_sources: Set[FrameProcessor] = set(self._params.ignored_sources)
+        self._ignored_sources: set[FrameProcessor] = set(self._params.ignored_sources)
         self._frames_seen = set()
 
         self._bot_transcription = ""
@@ -204,13 +194,13 @@ class RTVIObserver(BaseObserver):
 
         # Track bot speaking state for queuing aggregated text frames
         self._bot_is_speaking = False
-        self._queued_aggregated_text_frames: List[AggregatedTextFrame] = []
+        self._queued_aggregated_text_frames: list[AggregatedTextFrame] = []
 
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
 
-        self._aggregation_transforms: List[
-            Tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
+        self._aggregation_transforms: list[
+            tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
         ] = self._params.bot_output_transforms or []
 
     def add_bot_output_transformer(
@@ -358,10 +348,7 @@ class RTVIObserver(BaseObserver):
             and self._params.user_transcription_enabled
         ):
             await self._handle_user_transcriptions(frame)
-        elif (
-            isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame))
-            and self._params.user_llm_enabled
-        ):
+        elif isinstance(frame, LLMContextFrame) and self._params.user_llm_enabled:
             await self._handle_context(frame)
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
             await self.send_rtvi_message(RTVI.BotLLMStartedMessage())
@@ -575,13 +562,10 @@ class RTVIObserver(BaseObserver):
         if message:
             await self.send_rtvi_message(message)
 
-    async def _handle_context(self, frame: OpenAILLMContextFrame | LLMContextFrame):
+    async def _handle_context(self, frame: LLMContextFrame):
         """Process LLM context frames to extract user messages for the RTVI client."""
         try:
-            if isinstance(frame, OpenAILLMContextFrame):
-                messages = frame.context.messages
-            else:
-                messages = frame.context.get_messages()
+            messages = frame.context.get_messages()
             if not messages:
                 return
 

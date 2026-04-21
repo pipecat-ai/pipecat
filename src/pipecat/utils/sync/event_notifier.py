@@ -14,9 +14,12 @@ from pipecat.utils.sync.base_notifier import BaseNotifier
 class EventNotifier(BaseNotifier):
     """Event-based notifier using asyncio.Event for task synchronization.
 
-    Provides a simple notification mechanism where one task can signal
-    an event and other tasks can wait for that event to occur. The event
-    is automatically cleared after each wait operation.
+    Provides a simple single-consumer notification mechanism where one task
+    can signal an event and one other task can wait for that event to occur.
+    The event is automatically cleared after each wait operation.
+
+    Note: This notifier supports only a single waiter at a time. If multiple
+    tasks wait concurrently, notifications may be lost.
     """
 
     def __init__(self):

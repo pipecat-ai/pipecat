@@ -8,7 +8,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 from loguru import logger
 from openai import AsyncStream
@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -52,10 +51,10 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         self,
         *,
         api_key: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         base_url: str = "https://api.sambanova.ai/v1",
-        settings: Optional[Settings] = None,
-        **kwargs: Dict[Any, Any],
+        settings: Settings | None = None,
+        **kwargs: dict[Any, Any],
     ) -> None:
         """Initialize SambaNova LLM service.
 
@@ -89,9 +88,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
     def create_client(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        **kwargs: Dict[Any, Any],
+        api_key: str | None = None,
+        base_url: str | None = None,
+        **kwargs: dict[Any, Any],
     ) -> Any:
         """Create OpenAI-compatible client for SambaNova API endpoint.
 
@@ -138,9 +137,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         return params
 
     @traced_llm  # type: ignore
-    async def _process_context(
-        self, context: OpenAILLMContext | LLMContext
-    ) -> AsyncStream[ChatCompletionChunk]:
+    async def _process_context(self, context: LLMContext) -> AsyncStream[ChatCompletionChunk]:
         """Process OpenAI LLM context and stream chat completion chunks.
 
         This method handles the streaming response from SambaNova API, including
@@ -163,11 +160,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
         await self.start_ttfb_metrics()
 
-        chunk_stream = await (
-            self._stream_chat_completions_specific_context(context)
-            if isinstance(context, OpenAILLMContext)
-            else self._stream_chat_completions_universal_context(context)
-        )
+        chunk_stream = await self.get_chat_completions(context)
 
         # Use context manager to ensure stream is closed on cancellation/exception.
         # Without this, CancelledError during iteration leaves the underlying socket open.
@@ -245,7 +238,11 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
                 if len(arguments) < 1:
                     continue
 
-                arguments = json.loads(arguments)
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    logger.warning(f"{self}: Failed to parse function call arguments: {arguments}")
+                    continue
                 function_calls.append(
                     FunctionCallFromLLM(
                         context=context,

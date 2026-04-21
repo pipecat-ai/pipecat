@@ -6,8 +6,6 @@
 
 """Langchain integration processor for Pipecat."""
 
-from typing import Optional, Union
-
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -17,7 +15,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     TextFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
@@ -46,7 +43,7 @@ class LangchainProcessor(FrameProcessor):
         super().__init__()
         self._chain = chain
         self._transcript_key = transcript_key
-        self._participant_id: Optional[str] = None
+        self._participant_id: str | None = None
 
     def set_participant_id(self, participant_id: str):
         """Set the participant ID for session tracking.
@@ -65,15 +62,11 @@ class LangchainProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+        if isinstance(frame, LLMContextFrame):
             # Messages are accumulated on the context as a list of messages.
             # The last one by the human is the one we want to send to the LLM.
             logger.debug(f"Got transcription frame {frame}")
-            messages = (
-                frame.context.messages
-                if isinstance(frame, OpenAILLMContextFrame)
-                else frame.context.get_messages()
-            )
+            messages = frame.context.get_messages()
             text: str = messages[-1]["content"]
 
             await self._ainvoke(text.strip())
@@ -81,7 +74,7 @@ class LangchainProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     @staticmethod
-    def __get_token_value(text: Union[str, AIMessageChunk]) -> str:
+    def __get_token_value(text: str | AIMessageChunk) -> str:
         """Extract token value from various text types.
 
         Args:

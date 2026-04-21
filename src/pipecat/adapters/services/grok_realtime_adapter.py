@@ -13,13 +13,13 @@ Grok's Voice Agent API.
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.services.xai.realtime import events
 
@@ -27,15 +27,15 @@ from pipecat.services.xai.realtime import events
 class GrokRealtimeLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Grok Realtime API.
 
-    Attributes:
+    Parameters:
         system_instruction: System prompt/instructions for the session.
         messages: List of conversation items formatted for Grok Realtime.
         tools: List of tool definitions (function, web_search, x_search, file_search).
     """
 
-    system_instruction: Optional[str]
-    messages: List[events.ConversationItem]
-    tools: List[Dict[str, Any]]
+    system_instruction: str | None
+    messages: list[events.ConversationItem]
+    tools: list[dict[str, Any]]
 
 
 class GrokRealtimeLLMAdapter(BaseLLMAdapter):
@@ -51,7 +51,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         return "grok-realtime"
 
     def get_llm_invocation_params(
-        self, context: LLMContext, *, system_instruction: Optional[str] = None
+        self, context: LLMContext, *, system_instruction: str | None = None
     ) -> GrokRealtimeLLMInvocationParams:
         """Get Grok Realtime-specific LLM invocation parameters from a universal LLM context.
 
@@ -74,10 +74,10 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
             "tools": self.from_standard_tools(context.tools) or [],
         }
 
-    def get_messages_for_logging(self, context) -> List[Dict[str, Any]]:
+    def get_messages_for_logging(self, context) -> list[dict[str, Any]]:
         """Get messages from context in a format safe for logging.
 
-        Removes or truncates sensitive data like audio content.
+        Binary data (images, audio) is replaced with short placeholders.
 
         Args:
             context: The LLM context containing messages.
@@ -85,28 +85,17 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             List of messages with sensitive data redacted.
         """
-        msgs = []
-        for message in self.get_messages(context):
-            msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    for item in msg["content"]:
-                        if item.get("type") == "input_audio":
-                            item["audio"] = "..."
-                        if item.get("type") == "audio":
-                            item["audio"] = "..."
-            msgs.append(msg)
-        return msgs
+        return self.get_messages(context, truncate_large_values=True)
 
     @dataclass
     class ConvertedMessages:
         """Container for Grok-formatted messages converted from universal context."""
 
-        messages: List[events.ConversationItem]
-        system_instruction: Optional[str] = None
+        messages: list[events.ConversationItem]
+        system_instruction: str | None = None
 
     def _from_universal_context_messages(
-        self, universal_context_messages: List[LLMContextMessage]
+        self, universal_context_messages: list[LLMContextMessage]
     ) -> ConvertedMessages:
         """Convert universal context messages to Grok Realtime format.
 
@@ -222,7 +211,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         logger.error(f"Unhandled message type in _from_universal_context_message: {message}")
 
     @staticmethod
-    def _to_grok_function_format(function: FunctionSchema) -> Dict[str, Any]:
+    def _to_grok_function_format(function: FunctionSchema) -> dict[str, Any]:
         """Convert a function schema to Grok Realtime function format.
 
         Args:
@@ -242,7 +231,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
             },
         }
 
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Dict[str, Any]]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
         """Convert tool schemas to Grok Realtime format.
 
         Supports both standard function tools and Grok-specific tools
@@ -256,11 +245,4 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         """
         # Convert standard function tools
         functions_schema = tools_schema.standard_tools
-        standard_tools = [self._to_grok_function_format(func) for func in functions_schema]
-
-        # Support shimmed custom tools for backward compatibility
-        shimmed_tools = []
-        if tools_schema.custom_tools:
-            shimmed_tools = tools_schema.custom_tools.get(AdapterType.SHIM, [])
-
-        return standard_tools + shimmed_tools
+        return [self._to_grok_function_format(func) for func in functions_schema]

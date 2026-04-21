@@ -28,7 +28,6 @@ the messages are sent to Perplexity's API.
 """
 
 import copy
-from typing import List, Optional
 
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -53,7 +52,7 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
         self,
         context: LLMContext,
         *,
-        system_instruction: Optional[str] = None,
+        system_instruction: str | None = None,
         convert_developer_to_user: bool,
     ) -> OpenAILLMInvocationParams:
         """Get OpenAI-compatible invocation parameters with Perplexity message fixes applied.
@@ -78,8 +77,8 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
         return params
 
     def _transform_messages(
-        self, messages: List[ChatCompletionMessageParam]
-    ) -> List[ChatCompletionMessageParam]:
+        self, messages: list[ChatCompletionMessageParam]
+    ) -> list[ChatCompletionMessageParam]:
         """Transform messages to satisfy Perplexity's API constraints.
 
         Applies three transformation steps in order:

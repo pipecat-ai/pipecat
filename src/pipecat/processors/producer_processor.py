@@ -7,7 +7,7 @@
 """Producer processor for frame filtering and distribution."""
 
 import asyncio
-from typing import Awaitable, Callable, List
+from collections.abc import Awaitable, Callable
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -55,7 +55,7 @@ class ProducerProcessor(FrameProcessor):
         self._filter = filter
         self._transformer = transformer
         self._passthrough = passthrough
-        self._consumers: List[asyncio.Queue] = []
+        self._consumers: list[asyncio.Queue] = []
 
     def add_consumer(self):
         """Add a new consumer and return its associated queue.

@@ -13,7 +13,6 @@ PyAudio for audio I/O, suitable for desktop applications and testing.
 import asyncio
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -53,8 +52,8 @@ class TkTransportParams(TransportParams):
         audio_output_device_index: PyAudio device index for audio output. If None, uses default.
     """
 
-    audio_input_device_index: Optional[int] = None
-    audio_output_device_index: Optional[int] = None
+    audio_input_device_index: int | None = None
+    audio_output_device_index: int | None = None
 
 
 class TkInputTransport(BaseInputTransport):
@@ -251,8 +250,8 @@ class TkLocalTransport(BaseTransport):
         self._params = params
         self._pyaudio = pyaudio.PyAudio()
 
-        self._input: Optional[TkInputTransport] = None
-        self._output: Optional[TkOutputTransport] = None
+        self._input: TkInputTransport | None = None
+        self._output: TkOutputTransport | None = None
 
     #
     # BaseTransport

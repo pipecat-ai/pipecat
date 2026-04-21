@@ -6,8 +6,9 @@
 
 """Sarvam LLM service implementation using OpenAI-compatible interface."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal, Mapping, Optional
+from typing import Literal
 
 from loguru import logger
 from openai import NOT_GIVEN
@@ -57,8 +58,8 @@ class SarvamLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.sarvam.ai/v1",
-        settings: Optional[Settings] = None,
-        default_headers: Optional[Mapping[str, str]] = None,
+        settings: Settings | None = None,
+        default_headers: Mapping[str, str] | None = None,
         **kwargs,
     ):
         """Initialize Sarvam LLM service.

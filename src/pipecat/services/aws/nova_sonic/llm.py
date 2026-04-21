@@ -19,7 +19,7 @@ import wave
 from dataclasses import dataclass, field
 from enum import Enum
 from importlib.resources import files
-from typing import Any, List, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -49,15 +49,6 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
@@ -172,22 +163,22 @@ class Params(BaseModel):
     """
 
     # Audio input
-    input_sample_rate: Optional[int] = Field(default=16000)
-    input_sample_size: Optional[int] = Field(default=16)
-    input_channel_count: Optional[int] = Field(default=1)
+    input_sample_rate: int | None = Field(default=16000)
+    input_sample_size: int | None = Field(default=16)
+    input_channel_count: int | None = Field(default=1)
 
     # Audio output
-    output_sample_rate: Optional[int] = Field(default=24000)
-    output_sample_size: Optional[int] = Field(default=16)
-    output_channel_count: Optional[int] = Field(default=1)
+    output_sample_rate: int | None = Field(default=24000)
+    output_sample_size: int | None = Field(default=16)
+    output_channel_count: int | None = Field(default=1)
 
     # Inference
-    max_tokens: Optional[int] = Field(default=1024)
-    top_p: Optional[float] = Field(default=0.9)
-    temperature: Optional[float] = Field(default=0.7)
+    max_tokens: int | None = Field(default=1024)
+    top_p: float | None = Field(default=0.9)
+    temperature: float | None = Field(default=0.7)
 
     # Turn-taking
-    endpointing_sensitivity: Optional[str] = Field(default=None)
+    endpointing_sensitivity: str | None = Field(default=None)
 
     @property
     def audio_config(self) -> "AudioConfig":
@@ -215,14 +206,14 @@ class AudioConfig(BaseModel):
     """
 
     # Input
-    input_sample_rate: Optional[int] = Field(default=16000)
-    input_sample_size: Optional[int] = Field(default=16)
-    input_channel_count: Optional[int] = Field(default=1)
+    input_sample_rate: int | None = Field(default=16000)
+    input_sample_size: int | None = Field(default=16)
+    input_channel_count: int | None = Field(default=1)
 
     # Output
-    output_sample_rate: Optional[int] = Field(default=24000)
-    output_sample_size: Optional[int] = Field(default=16)
-    output_channel_count: Optional[int] = Field(default=1)
+    output_sample_rate: int | None = Field(default=24000)
+    output_sample_size: int | None = Field(default=16)
+    output_channel_count: int | None = Field(default=1)
 
 
 @dataclass
@@ -257,16 +248,15 @@ class AWSNovaSonicLLMService(LLMService):
         *,
         secret_access_key: str,
         access_key_id: str,
-        session_token: Optional[str] = None,
+        session_token: str | None = None,
         region: str,
         model: str = "amazon.nova-2-sonic-v1:0",
         voice_id: str = "matthew",
-        params: Optional[Params] = None,
-        audio_config: Optional[AudioConfig] = None,
-        settings: Optional[Settings] = None,
-        system_instruction: Optional[str] = None,
-        tools: Optional[ToolsSchema] = None,
-        send_transcription_frames: bool = True,
+        params: Params | None = None,
+        audio_config: AudioConfig | None = None,
+        settings: Settings | None = None,
+        system_instruction: str | None = None,
+        tools: ToolsSchema | None = None,
         **kwargs,
     ):
         """Initializes the AWS Nova Sonic LLM service.
@@ -310,12 +300,6 @@ class AWSNovaSonicLLMService(LLMService):
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSNovaSonicLLMService.Settings(system_instruction=...)`` instead.
             tools: Available tools/functions for the model to use.
-            send_transcription_frames: Whether to emit transcription frames.
-
-                .. deprecated:: 0.0.91
-                    This parameter is deprecated and will be removed in a future version.
-                    Transcription frames are always sent.
-
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -379,7 +363,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._access_key_id = access_key_id
         self._session_token = session_token
         self._region = region
-        self._client: Optional[BedrockRuntimeClient] = None
+        self._client: BedrockRuntimeClient | None = None
 
         # Audio I/O config (hardware settings, not runtime-tunable)
         # Priority: audio_config > params (deprecated) > defaults
@@ -399,41 +383,30 @@ class AWSNovaSonicLLMService(LLMService):
             )
             self._settings.endpointing_sensitivity = None
 
-        if not send_transcription_frames:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`send_transcription_frames` is deprecated and will be removed in a future version. "
-                    "Transcription frames are always sent.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
-        self._context: Optional[LLMContext] = None
-        self._stream: Optional[
+        self._context: LLMContext | None = None
+        self._stream: (
             DuplexEventStream[
                 InvokeModelWithBidirectionalStreamInput,
                 InvokeModelWithBidirectionalStreamOutput,
                 InvokeModelWithBidirectionalStreamOperationOutput,
             ]
-        ] = None
-        self._receive_task: Optional[asyncio.Task] = None
-        self._prompt_name: Optional[str] = None
-        self._input_audio_content_name: Optional[str] = None
-        self._content_being_received: Optional[CurrentContent] = None
+            | None
+        ) = None
+        self._receive_task: asyncio.Task | None = None
+        self._prompt_name: str | None = None
+        self._input_audio_content_name: str | None = None
+        self._content_being_received: CurrentContent | None = None
         self._assistant_is_responding = False
         self._ready_to_send_context = False
         self._triggering_assistant_response = False
         self._waiting_for_trigger_transcription = False
         self._disconnecting = False
-        self._connected_time: Optional[float] = None
+        self._connected_time: float | None = None
         self._wants_connection = False
         self._user_text_buffer = ""
         self._completed_tool_calls = set()
         self._audio_input_started = False
-        self._pending_speculative_text: Optional[str] = None
+        self._pending_speculative_text: str | None = None
 
         file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
@@ -531,13 +504,8 @@ class AWSNovaSonicLLMService(LLMService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
-            context = (
-                frame.context
-                if isinstance(frame, LLMContextFrame)
-                else LLMContext.from_openai_context(frame.context)
-            )
-            await self._handle_context(context)
+        if isinstance(frame, LLMContextFrame):
+            await self._handle_context(frame.context)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, InterruptionFrame):
@@ -795,7 +763,7 @@ class AWSNovaSonicLLMService(LLMService):
         """
         await self._send_client_event(session_start)
 
-    async def _send_prompt_start_event(self, tools: List[Any]):
+    async def _send_prompt_start_event(self, tools: list[Any]):
         if not self._prompt_name:
             return
 
@@ -1313,18 +1281,8 @@ class AWSNovaSonicLLMService(LLMService):
         # HACK: Check if this transcription was triggered by our own
         # assistant response trigger. If so, we need to wrap it with
         # UserStarted/StoppedSpeakingFrames; otherwise the user aggregator
-        # would fire an EmulatedUserStartedSpeakingFrame, which would
-        # trigger an interruption, which would prevent us from writing the
-        # assistant response to context.
-        #
-        # Sending an EmulateUserStartedSpeakingFrame ourselves doesn't
-        # work: it just causes the interruption we're trying to avoid.
-        #
-        # Setting enable_emulated_vad_interruptions also doesn't work: at
-        # the time the user aggregator receives the TranscriptionFrame, it
-        # doesn't yet know the assistant has started responding, so it
-        # doesn't know that emulating the user starting to speak would
-        # cause an interruption.
+        # would trigger an interruption, which would prevent us from
+        # writing the assistant response to context.
         should_wrap_in_user_started_stopped_speaking_frames = (
             self._waiting_for_trigger_transcription
             and self._user_text_buffer.strip().lower() == "ready"
@@ -1352,44 +1310,6 @@ class AWSNovaSonicLLMService(LLMService):
 
         # We're no longer waiting for a trigger transcription
         self._waiting_for_trigger_transcription = False
-
-    #
-    # context
-    #
-
-    def create_context_aggregator(
-        self,
-        context: OpenAILLMContext,
-        *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> LLMContextAggregatorPair:
-        """Create context aggregator pair for managing conversation context.
-
-        NOTE: this method exists only for backward compatibility. New code
-        should instead do::
-
-            context = LLMContext(...)
-            context_aggregator = LLMContextAggregatorPair(context)
-
-        Args:
-            context: The OpenAI LLM context.
-            user_params: Parameters for the user context aggregator.
-            assistant_params: Parameters for the assistant context aggregator.
-
-        Returns:
-            A pair of user and assistant context aggregators.
-
-        .. deprecated:: 0.0.99
-            `create_context_aggregator()` is deprecated and will be removed in a future version.
-            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-            See `OpenAILLMContext` docstring for migration guide.
-        """
-        # from_openai_context handles deprecation warning
-        context = LLMContext.from_openai_context(context)
-        return LLMContextAggregatorPair(
-            context, user_params=user_params, assistant_params=assistant_params
-        )
 
     #
     # assistant response trigger

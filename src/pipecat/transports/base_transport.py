@@ -12,14 +12,12 @@ functionality.
 """
 
 from abc import abstractmethod
-from typing import List, Mapping, Optional
+from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
-from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.utils.base_object import BaseObject
 
@@ -54,35 +52,23 @@ class TransportParams(BaseModel):
         video_out_color_format: Video output color format string.
         video_out_codec: Preferred video codec for output (e.g., 'VP8', 'H264', 'H265').
         video_out_destinations: List of video output destination identifiers.
-        vad_analyzer: Voice Activity Detection analyzer instance.
-
-            .. deprecated:: 0.0.101
-                The `vad_analyzer` parameter is deprecated. Use `LLMUserAggregator`'s
-                `vad_analyzer` parameter, or `VADProcessor` if no `LLMUserAggregator`
-                is needed.
-
-        turn_analyzer: Turn-taking analyzer instance for conversation management.
-
-            .. deprecated:: 0.0.99
-                The `turn_analyzer` parameter is deprecated, use `LLMUSerAggregator`'s
-                new `user_turn_strategies` parameter instead.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     audio_out_enabled: bool = False
-    audio_out_sample_rate: Optional[int] = None
+    audio_out_sample_rate: int | None = None
     audio_out_channels: int = 1
     audio_out_bitrate: int = 96000
     audio_out_10ms_chunks: int = 4
-    audio_out_mixer: Optional[BaseAudioMixer | Mapping[Optional[str], BaseAudioMixer]] = None
-    audio_out_destinations: List[str] = Field(default_factory=list)
+    audio_out_mixer: BaseAudioMixer | Mapping[str | None, BaseAudioMixer] | None = None
+    audio_out_destinations: list[str] = Field(default_factory=list)
     audio_out_end_silence_secs: int = 2
     audio_out_auto_silence: bool = True
     audio_in_enabled: bool = False
-    audio_in_sample_rate: Optional[int] = None
+    audio_in_sample_rate: int | None = None
     audio_in_channels: int = 1
-    audio_in_filter: Optional[BaseAudioFilter] = None
+    audio_in_filter: BaseAudioFilter | None = None
     audio_in_stream_on_start: bool = True
     audio_in_passthrough: bool = True
     video_in_enabled: bool = False
@@ -93,10 +79,8 @@ class TransportParams(BaseModel):
     video_out_bitrate: int = 800000
     video_out_framerate: int = 30
     video_out_color_format: str = "RGB"
-    video_out_codec: Optional[str] = None
-    video_out_destinations: List[str] = Field(default_factory=list)
-    vad_analyzer: Optional[VADAnalyzer] = None
-    turn_analyzer: Optional[BaseTurnAnalyzer] = None
+    video_out_codec: str | None = None
+    video_out_destinations: list[str] = Field(default_factory=list)
 
 
 class BaseTransport(BaseObject):
@@ -109,9 +93,9 @@ class BaseTransport(BaseObject):
     def __init__(
         self,
         *,
-        name: Optional[str] = None,
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        name: str | None = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the base transport.
 

@@ -11,7 +11,7 @@ local end-of-turn detection without requiring network connectivity.
 """
 
 import warnings
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -76,7 +76,7 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
         self._turn_model = ct.models.MLModel(core_ml_model_path)
         logger.debug("Loaded Local Smart Turn")
 
-    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    async def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using local CoreML model."""
         inputs = self._turn_processor(
             audio_array,

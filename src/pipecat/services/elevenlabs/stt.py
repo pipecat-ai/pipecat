@@ -15,9 +15,10 @@ import asyncio
 import base64
 import io
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, AsyncGenerator, Optional
+from enum import StrEnum
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -53,7 +54,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_elevenlabs_language(language: Language) -> Optional[str]:
+def language_to_elevenlabs_language(language: Language) -> str | None:
     """Convert a Language enum to ElevenLabs language code.
 
     Source:
@@ -170,7 +171,7 @@ def language_to_elevenlabs_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
-class CommitStrategy(str, Enum):
+class CommitStrategy(StrEnum):
     """Commit strategies for transcript segmentation."""
 
     MANUAL = "manual"
@@ -230,7 +231,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             tag_audio_events: Whether to include audio events like (laughter), (coughing), in the transcription.
         """
 
-        language: Optional[Language] = None
+        language: Language | None = None
         tag_audio_events: bool = True
 
     def __init__(
@@ -239,11 +240,11 @@ class ElevenLabsSTTService(SegmentedSTTService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         base_url: str = "https://api.elevenlabs.io",
-        model: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = ELEVENLABS_TTFS_P99,
+        model: str | None = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = ELEVENLABS_TTFS_P99,
         **kwargs,
     ):
         """Initialize the ElevenLabs STT service.
@@ -312,7 +313,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to ElevenLabs service-specific language code.
 
         Args:
@@ -364,7 +365,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
+        self, transcript: str, is_final: bool, language: str | None = None
     ):
         """Handle a transcription result with tracing."""
         await self.stop_processing_metrics()
@@ -474,12 +475,12 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             include_language_detection: Whether to include language detection in transcripts.
         """
 
-        language_code: Optional[str] = None
+        language_code: str | None = None
         commit_strategy: CommitStrategy = CommitStrategy.MANUAL
-        vad_silence_threshold_secs: Optional[float] = None
-        vad_threshold: Optional[float] = None
-        min_speech_duration_ms: Optional[int] = None
-        min_silence_duration_ms: Optional[int] = None
+        vad_silence_threshold_secs: float | None = None
+        vad_threshold: float | None = None
+        min_speech_duration_ms: int | None = None
+        min_silence_duration_ms: int | None = None
         include_timestamps: bool = False
         enable_logging: bool = False
         include_language_detection: bool = False
@@ -490,14 +491,14 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         api_key: str,
         base_url: str = "api.elevenlabs.io",
         commit_strategy: CommitStrategy = CommitStrategy.MANUAL,
-        model: Optional[str] = None,
-        sample_rate: Optional[int] = None,
+        model: str | None = None,
+        sample_rate: int | None = None,
         include_timestamps: bool = False,
         enable_logging: bool = False,
         include_language_detection: bool = False,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = ELEVENLABS_REALTIME_TTFS_P99,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = ELEVENLABS_REALTIME_TTFS_P99,
         **kwargs,
     ):
         """Initialize the ElevenLabs Realtime STT service.
@@ -908,7 +909,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None
+        self, transcript: str, is_final: bool, language: str | None = None
     ):
         """Handle a transcription result with tracing."""
         pass

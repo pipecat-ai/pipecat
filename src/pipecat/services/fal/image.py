@@ -13,8 +13,9 @@ for creating images from text prompts using various AI models.
 import asyncio
 import io
 import os
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, Optional, Union
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -44,14 +45,14 @@ class FalImageGenSettings(ImageGenSettings):
     seed: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     num_inference_steps: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     num_images: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    image_size: str | Dict[str, int] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    image_size: str | dict[str, int] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     expand_prompt: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_safety_checker: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
-    def to_api_arguments(self) -> Dict[str, Any]:
+    def to_api_arguments(self) -> dict[str, Any]:
         """Build the Fal API arguments dict from settings, excluding None values."""
-        args: Dict[str, Any] = {}
+        args: dict[str, Any] = {}
         if self.seed is not None:
             args["seed"] = self.seed
         args["num_inference_steps"] = self.num_inference_steps
@@ -89,10 +90,10 @@ class FalImageGenService(ImageGenService):
             format: Output image format. Defaults to "png".
         """
 
-        seed: Optional[int] = None
+        seed: int | None = None
         num_inference_steps: int = 8
         num_images: int = 1
-        image_size: Union[str, Dict[str, int]] = "square_hd"
+        image_size: str | dict[str, int] = "square_hd"
         expand_prompt: bool = False
         enable_safety_checker: bool = True
         format: str = "png"
@@ -102,11 +103,11 @@ class FalImageGenService(ImageGenService):
     def __init__(
         self,
         *,
-        params: Optional[InputParams] = None,
+        params: InputParams | None = None,
         aiohttp_session: aiohttp.ClientSession,
-        model: Optional[str] = None,
-        key: Optional[str] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        key: str | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the FalImageGenService.

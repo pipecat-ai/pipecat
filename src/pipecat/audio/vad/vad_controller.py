@@ -10,8 +10,10 @@ This module provides a controller that wraps a VADAnalyzer to track speech state
 and emit events when speech starts, stops, or is actively detected.
 """
 
+import asyncio
 import time
-from typing import Type
+
+from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
@@ -22,6 +24,7 @@ from pipecat.frames.frames import (
     VADParamsUpdateFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -35,7 +38,8 @@ class VADController(BaseObject):
     Event handlers available:
 
     - on_speech_started: Called when speech begins.
-    - on_speech_stopped: Called when speech ends.
+    - on_speech_stopped: Called when speech ends, including forced stop when
+      the audio stream goes idle (no frames received while speaking).
     - on_speech_activity: Called periodically while speech is detected.
     - on_push_frame: Called when the controller wants to push a frame.
     - on_broadcast_frame: Called when the controller wants to broadcast a frame.
@@ -63,17 +67,29 @@ class VADController(BaseObject):
             ...
     """
 
-    def __init__(self, vad_analyzer: VADAnalyzer, *, speech_activity_period: float = 0.2):
+    def __init__(
+        self,
+        vad_analyzer: VADAnalyzer,
+        *,
+        speech_activity_period: float = 0.2,
+        audio_idle_timeout: float = 1.0,
+    ):
         """Initialize the VAD controller.
 
         Args:
             vad_analyzer: The `VADAnalyzer` instance for processing audio.
             speech_activity_period: Minimum interval in seconds between
                 `on_speech_activity` events. Defaults to 0.2.
+            audio_idle_timeout: Timeout in seconds to force speech stop
+                when no audio frames are received while in SPEAKING state.
+                This handles cases like mic mute mid-speech.
+                Set to 0 to disable. Defaults to 1.0.
         """
         super().__init__()
         self._vad_analyzer = vad_analyzer
         self._vad_state: VADState = VADState.QUIET
+
+        self._task_manager: BaseTaskManager | None = None
 
         # Last time a on_speech_activity was triggered.
         self._speech_activity_time = 0
@@ -81,11 +97,31 @@ class VADController(BaseObject):
         # be greater than the audio chunks to have any effect).
         self._speech_activity_period = speech_activity_period
 
+        # Audio idle detection: force speech stop when no audio arrives
+        # while in SPEAKING state (e.g. user mutes mic mid-speech).
+        self._last_audio_time: float = 0.0
+        self._audio_idle_timeout = audio_idle_timeout
+        self._audio_idle_task: asyncio.Task | None = None
+
         self._register_event_handler("on_speech_started", sync=True)
         self._register_event_handler("on_speech_stopped", sync=True)
         self._register_event_handler("on_speech_activity", sync=True)
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
+
+    async def setup(self, task_manager: BaseTaskManager):
+        """Initialize the controller with the given task manager.
+
+        Args:
+            task_manager: The task manager to be associated with this instance.
+        """
+        self._task_manager = task_manager
+        self._last_audio_time = time.monotonic()
+        if self._audio_idle_timeout > 0 and not self._audio_idle_task:
+            self._audio_idle_task = self._task_manager.create_task(
+                self._audio_idle_handler(),
+                f"{self}::_audio_idle_handler",
+            )
 
     async def process_frame(self, frame: Frame):
         """Process a frame and handle VAD-related events.
@@ -116,6 +152,10 @@ class VADController(BaseObject):
         It waits for all currently executing event handler tasks to finish
         before returning.
         """
+        await super().cleanup()
+        if self._audio_idle_task and self._task_manager:
+            await self._task_manager.cancel_task(self._audio_idle_task)
+            self._audio_idle_task = None
         if self._vad_analyzer:
             await self._vad_analyzer.cleanup()
 
@@ -128,6 +168,8 @@ class VADController(BaseObject):
         Args:
             frame: Audio frame to process.
         """
+        self._last_audio_time = time.monotonic()
+
         self._vad_state = await self._handle_vad(frame.audio, self._vad_state)
 
         if self._vad_state == VADState.SPEAKING:
@@ -149,6 +191,29 @@ class VADController(BaseObject):
             vad_state = new_vad_state
         return vad_state
 
+    async def _audio_idle_handler(self):
+        """Monitor for an idle audio stream while in SPEAKING state.
+
+        When no audio frames arrive for `audio_idle_timeout` seconds
+        (e.g. user mutes mic mid-speech), forces a transition to QUIET and
+        emits `on_speech_stopped`.
+        """
+        while True:
+            deadline = self._last_audio_time + self._audio_idle_timeout
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                # Audio is still recent; sleep only for the remaining window.
+                await asyncio.sleep(remaining)
+                continue
+
+            if self._vad_state == VADState.SPEAKING:
+                logger.warning(f"{self}: no audio received while speaking, forcing speech stop")
+                self._vad_state = VADState.QUIET
+                await self._call_event_handler("on_speech_stopped")
+
+            # Wait for the next potential idle window.
+            await asyncio.sleep(self._audio_idle_timeout)
+
     async def _maybe_speech_activity(self):
         """Handle user speaking frame."""
         diff_time = time.time() - self._speech_activity_time
@@ -168,7 +233,7 @@ class VADController(BaseObject):
         """
         await self._call_event_handler("on_push_frame", frame, direction)
 
-    async def broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
+    async def broadcast_frame(self, frame_cls: type[Frame], **kwargs):
         """Request a frame to be broadcast upstream and downstream.
 
         This emits an on_broadcast_frame event that must be handled by a processor

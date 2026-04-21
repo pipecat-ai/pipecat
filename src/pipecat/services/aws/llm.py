@@ -12,17 +12,13 @@ function calling.
 """
 
 import asyncio
-import base64
-import copy
-import io
 import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
-from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.bedrock_adapter import (
@@ -31,28 +27,14 @@ from pipecat.adapters.services.bedrock_adapter import (
 )
 from pipecat.frames.frames import (
     Frame,
-    FunctionCallCancelFrame,
     FunctionCallFromLLM,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     LLMContextFrame,
+    LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesFrame,
-    UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMAssistantContextAggregator,
-    LLMUserAggregatorParams,
-    LLMUserContextAggregator,
-)
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
@@ -77,665 +59,19 @@ class AWSBedrockLLMSettings(LLMSettings):
     Parameters:
         stop_sequences: List of strings that stop generation.
         latency: Performance mode - "standard" or "optimized".
+        enable_prompt_caching: Whether to enable prompt caching by adding cachePoint
+            markers to system prompts and tool definitions. Can reduce TTFT by up to
+            85% for multi-turn conversations. See:
+            https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html
         additional_model_request_fields: Additional model-specific parameters.
     """
 
-    stop_sequences: List[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stop_sequences: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     latency: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    additional_model_request_fields: Dict[str, Any] | _NotGiven = field(
+    enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    additional_model_request_fields: dict[str, Any] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-
-
-@dataclass
-class AWSBedrockContextAggregatorPair:
-    """Container for AWS Bedrock context aggregators.
-
-    Provides convenient access to both user and assistant context aggregators
-    for AWS Bedrock LLM operations.
-
-    .. deprecated:: 0.0.99
-        `AWSBedrockContextAggregatorPair` is deprecated and will be removed in a future version.
-        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-        See `OpenAILLMContext` docstring for migration guide.
-
-    Parameters:
-        _user: The user context aggregator instance.
-        _assistant: The assistant context aggregator instance.
-    """
-
-    # Aggregators handle deprecation warnings
-    _user: "AWSBedrockUserContextAggregator"
-    _assistant: "AWSBedrockAssistantContextAggregator"
-
-    def user(self) -> "AWSBedrockUserContextAggregator":
-        """Get the user context aggregator.
-
-        Returns:
-            The user context aggregator instance.
-        """
-        return self._user
-
-    def assistant(self) -> "AWSBedrockAssistantContextAggregator":
-        """Get the assistant context aggregator.
-
-        Returns:
-            The assistant context aggregator instance.
-        """
-        return self._assistant
-
-
-class AWSBedrockLLMContext(OpenAILLMContext):
-    """AWS Bedrock-specific LLM context implementation.
-
-    Extends OpenAI LLM context to handle AWS Bedrock's specific message format
-    and system message handling. Manages conversion between OpenAI and Bedrock
-    message formats.
-
-    .. deprecated:: 0.0.99
-        `AWSBedrockLLMContext` is deprecated and will be removed in a future version.
-        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-        See `OpenAILLMContext` docstring for migration guide.
-    """
-
-    def __init__(
-        self,
-        messages: Optional[List[dict]] = None,
-        tools: Optional[List[dict]] = None,
-        tool_choice: Optional[dict] = None,
-        *,
-        system: Optional[str] = None,
-    ):
-        """Initialize AWS Bedrock LLM context.
-
-        Args:
-            messages: List of conversation messages in OpenAI format.
-            tools: List of available function calling tools.
-            tool_choice: Tool selection strategy or specific tool choice.
-            system: System message content for AWS Bedrock.
-        """
-        # Super handles deprecation warning
-        super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
-        self.system = system
-
-    @staticmethod
-    def upgrade_to_bedrock(obj: OpenAILLMContext) -> "AWSBedrockLLMContext":
-        """Upgrade an OpenAI LLM context to AWS Bedrock format.
-
-        Args:
-            obj: The OpenAI LLM context to upgrade.
-
-        Returns:
-            The upgraded AWS Bedrock LLM context.
-        """
-        logger.debug(f"Upgrading to AWS Bedrock: {obj}")
-        if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AWSBedrockLLMContext):
-            obj.__class__ = AWSBedrockLLMContext
-            obj._restructure_from_openai_messages()
-        else:
-            obj._restructure_from_bedrock_messages()
-        return obj
-
-    @classmethod
-    def from_openai_context(cls, openai_context: OpenAILLMContext):
-        """Create AWS Bedrock context from OpenAI context.
-
-        Args:
-            openai_context: The OpenAI LLM context to convert.
-
-        Returns:
-            New AWS Bedrock LLM context instance.
-        """
-        self = cls(
-            messages=openai_context.messages,
-            tools=openai_context.tools,
-            tool_choice=openai_context.tool_choice,
-        )
-        self.set_llm_adapter(openai_context.get_llm_adapter())
-        self._restructure_from_openai_messages()
-        return self
-
-    @classmethod
-    def from_messages(cls, messages: List[dict]) -> "AWSBedrockLLMContext":
-        """Create AWS Bedrock context from message list.
-
-        Args:
-            messages: List of messages in OpenAI format.
-
-        Returns:
-            New AWS Bedrock LLM context instance.
-        """
-        self = cls(messages=messages)
-        self._restructure_from_openai_messages()
-        return self
-
-    def set_messages(self, messages: List):
-        """Set the messages list and restructure for Bedrock format.
-
-        Args:
-            messages: List of messages to set.
-        """
-        self._messages[:] = messages
-        self._restructure_from_openai_messages()
-
-    def to_standard_messages(self, obj):
-        """Convert AWS Bedrock message format to standard structured format.
-
-        Handles text content and function calls for both user and assistant messages.
-
-        Args:
-            obj: Message in AWS Bedrock format.
-
-        Returns:
-            List of messages in standard format.
-
-        Examples:
-            AWS Bedrock format input::
-
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"text": "Hello"},
-                        {"toolUse": {"toolUseId": "123", "name": "search", "input": {"q": "test"}}}
-                    ]
-                }
-
-            Standard format output::
-
-                [
-                    {"role": "assistant", "content": [{"type": "text", "text": "Hello"}]},
-                    {
-                        "role": "assistant",
-                        "tool_calls": [
-                            {
-                                "type": "function",
-                                "id": "123",
-                                "function": {"name": "search", "arguments": '{"q": "test"}'}
-                            }
-                        ]
-                    }
-                ]
-        """
-        role = obj.get("role")
-        content = obj.get("content")
-
-        if role == "assistant":
-            if isinstance(content, str):
-                return [{"role": role, "content": [{"type": "text", "text": content}]}]
-            elif isinstance(content, list):
-                text_items = []
-                tool_items = []
-                for item in content:
-                    if "text" in item:
-                        text_items.append({"type": "text", "text": item["text"]})
-                    elif "toolUse" in item:
-                        tool_use = item["toolUse"]
-                        tool_items.append(
-                            {
-                                "type": "function",
-                                "id": tool_use["toolUseId"],
-                                "function": {
-                                    "name": tool_use["name"],
-                                    "arguments": json.dumps(tool_use["input"]),
-                                },
-                            }
-                        )
-                messages = []
-                if text_items:
-                    messages.append({"role": role, "content": text_items})
-                if tool_items:
-                    messages.append({"role": role, "tool_calls": tool_items})
-                return messages
-        elif role == "user":
-            if isinstance(content, str):
-                return [{"role": role, "content": [{"type": "text", "text": content}]}]
-            elif isinstance(content, list):
-                text_items = []
-                tool_items = []
-                for item in content:
-                    if "text" in item:
-                        text_items.append({"type": "text", "text": item["text"]})
-                    elif "toolResult" in item:
-                        tool_result = item["toolResult"]
-                        # Extract content from toolResult
-                        result_content = ""
-                        if isinstance(tool_result["content"], list):
-                            for content_item in tool_result["content"]:
-                                if "text" in content_item:
-                                    result_content = content_item["text"]
-                                elif "json" in content_item:
-                                    result_content = json.dumps(content_item["json"])
-                        else:
-                            result_content = tool_result["content"]
-
-                        tool_items.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tool_result["toolUseId"],
-                                "content": result_content,
-                            }
-                        )
-                messages = []
-                if text_items:
-                    messages.append({"role": role, "content": text_items})
-                messages.extend(tool_items)
-                return messages
-
-    def from_standard_message(self, message):
-        """Convert standard format message to AWS Bedrock format.
-
-        Handles conversion of text content, tool calls, and tool results.
-        Empty text content is converted to "(empty)".
-
-        Args:
-            message: Message in standard format.
-
-        Returns:
-            Message in AWS Bedrock format.
-
-        Examples:
-            Standard format input::
-
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": "123",
-                            "function": {"name": "search", "arguments": '{"q": "test"}'}
-                        }
-                    ]
-                }
-
-            AWS Bedrock format output::
-
-                {
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "toolUse": {
-                                "toolUseId": "123",
-                                "name": "search",
-                                "input": {"q": "test"}
-                            }
-                        }
-                    ]
-                }
-        """
-        if message["role"] == "tool":
-            # Try to parse the content as JSON if it looks like JSON
-            try:
-                if message["content"].strip().startswith("{") and message[
-                    "content"
-                ].strip().endswith("}"):
-                    content_json = json.loads(message["content"])
-                    tool_result_content = [{"json": content_json}]
-                else:
-                    tool_result_content = [{"text": message["content"]}]
-            except (json.JSONDecodeError, ValueError, AttributeError):
-                tool_result_content = [{"text": message["content"]}]
-
-            return {
-                "role": "user",
-                "content": [
-                    {
-                        "toolResult": {
-                            "toolUseId": message["tool_call_id"],
-                            "content": tool_result_content,
-                        },
-                    },
-                ],
-            }
-
-        if message.get("tool_calls"):
-            tc = message["tool_calls"]
-            ret = {"role": "assistant", "content": []}
-            for tool_call in tc:
-                function = tool_call["function"]
-                arguments = json.loads(function["arguments"])
-                new_tool_use = {
-                    "toolUse": {
-                        "toolUseId": tool_call["id"],
-                        "name": function["name"],
-                        "input": arguments,
-                    }
-                }
-                ret["content"].append(new_tool_use)
-            return ret
-
-        # Handle text content
-        content = message.get("content")
-        if isinstance(content, str):
-            if content == "":
-                return {"role": message["role"], "content": [{"text": "(empty)"}]}
-            else:
-                return {"role": message["role"], "content": [{"text": content}]}
-        elif isinstance(content, list):
-            new_content = []
-            for item in content:
-                # fix empty text
-                if item.get("type", "") == "text":
-                    text_content = item["text"] if item["text"] != "" else "(empty)"
-                    new_content.append({"text": text_content})
-                # handle image_url -> image conversion
-                if item["type"] == "image_url":
-                    new_item = {
-                        "image": {
-                            "format": "jpeg",
-                            "source": {
-                                "bytes": base64.b64decode(item["image_url"]["url"].split(",")[1])
-                            },
-                        }
-                    }
-                    new_content.append(new_item)
-            # In the case where there's a single image in the list (like what
-            # would result from a UserImageRawFrame), ensure that the image
-            # comes before text
-            image_indices = [i for i, item in enumerate(new_content) if "image" in item]
-            text_indices = [i for i, item in enumerate(new_content) if "text" in item]
-            if len(image_indices) == 1 and text_indices:
-                img_idx = image_indices[0]
-                first_txt_idx = text_indices[0]
-                if img_idx > first_txt_idx:
-                    # Move image before the first text
-                    image_item = new_content.pop(img_idx)
-                new_content.insert(first_txt_idx, image_item)
-            return {"role": message["role"], "content": new_content}
-
-        return message
-
-    def add_image_frame_message(
-        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
-    ):
-        """Add an image message to the context.
-
-        Args:
-            format: The image format (e.g., 'RGB', 'RGBA').
-            size: The image dimensions as (width, height).
-            image: The raw image data as bytes.
-            text: Optional text to accompany the image.
-        """
-        buffer = io.BytesIO()
-        Image.frombytes(format, size, image).save(buffer, format="JPEG")
-        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-        # Image should be the first content block in the message
-        content = [{"type": "image", "format": "jpeg", "source": {"bytes": encoded_image}}]
-        if text:
-            content.append({"text": text})
-        self.add_message({"role": "user", "content": content})
-
-    def add_message(self, message):
-        """Add a message to the context, merging with previous message if same role.
-
-        AWS Bedrock requires alternating roles, so consecutive messages from the
-        same role are merged together.
-
-        Args:
-            message: The message to add to the context.
-        """
-        try:
-            if self.messages:
-                # AWS Bedrock requires that roles alternate. If this message's
-                # role is the same as the last message, we should add this
-                # message's content to the last message.
-                if self.messages[-1]["role"] == message["role"]:
-                    # if the last message has just a content string, convert it to a list
-                    # in the proper format
-                    if isinstance(self.messages[-1]["content"], str):
-                        self.messages[-1]["content"] = [{"text": self.messages[-1]["content"]}]
-                    # if this message has just a content string, convert it to a list
-                    # in the proper format
-                    if isinstance(message["content"], str):
-                        message["content"] = [{"text": message["content"]}]
-                    # append the content of this message to the last message
-                    self.messages[-1]["content"].extend(message["content"])
-                else:
-                    self.messages.append(message)
-            else:
-                self.messages.append(message)
-        except Exception as e:
-            logger.error(f"Error adding message: {e}")
-
-    def _restructure_from_bedrock_messages(self):
-        """Restructure messages in AWS Bedrock format.
-
-        Handles system messages, merging consecutive messages with the same role,
-        and ensuring proper content formatting.
-        """
-        # Handle system message if present at the beginning
-        if self.messages and self.messages[0]["role"] == "system":
-            if len(self.messages) == 1:
-                self.messages[0]["role"] = "user"
-            else:
-                system_content = self.messages.pop(0)["content"]
-                if isinstance(system_content, str):
-                    system_content = [{"text": system_content}]
-
-                if self.system:
-                    if isinstance(self.system, str):
-                        self.system = [{"text": self.system}]
-                    self.system.extend(system_content)
-                else:
-                    self.system = system_content
-
-        # Ensure content is properly formatted
-        for msg in self.messages:
-            if isinstance(msg["content"], str):
-                msg["content"] = [{"text": msg["content"]}]
-            elif not msg["content"]:
-                msg["content"] = [{"text": "(empty)"}]
-            elif isinstance(msg["content"], list):
-                for idx, item in enumerate(msg["content"]):
-                    if isinstance(item, dict) and "text" in item and item["text"] == "":
-                        item["text"] = "(empty)"
-                    elif isinstance(item, str) and item == "":
-                        msg["content"][idx] = {"text": "(empty)"}
-
-        # Merge consecutive messages with the same role
-        merged_messages = []
-        for msg in self.messages:
-            if merged_messages and merged_messages[-1]["role"] == msg["role"]:
-                merged_messages[-1]["content"].extend(msg["content"])
-            else:
-                merged_messages.append(msg)
-
-        self.messages.clear()
-        self.messages.extend(merged_messages)
-
-    def _restructure_from_openai_messages(self):
-        # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
-        try:
-            self._messages[:] = [self.from_standard_message(m) for m in self._messages]
-        except Exception as e:
-            logger.error(f"Error mapping messages: {e}")
-
-        # See if we should pull the system message out of our context.messages list. (For
-        # compatibility with Open AI messages format.)
-        if self.messages and self.messages[0]["role"] == "system":
-            self.system = self.messages[0]["content"]
-            self.messages.pop(0)
-
-        # Merge consecutive messages with the same role.
-        i = 0
-        while i < len(self.messages) - 1:
-            current_message = self.messages[i]
-            next_message = self.messages[i + 1]
-            if current_message["role"] == next_message["role"]:
-                # Convert content to list of dictionaries if it's a string
-                if isinstance(current_message["content"], str):
-                    current_message["content"] = [
-                        {"type": "text", "text": current_message["content"]}
-                    ]
-                if isinstance(next_message["content"], str):
-                    next_message["content"] = [{"type": "text", "text": next_message["content"]}]
-                # Concatenate the content
-                current_message["content"].extend(next_message["content"])
-                # Remove the next message from the list
-                self.messages.pop(i + 1)
-            else:
-                i += 1
-
-        # Avoid empty content in messages
-        for message in self.messages:
-            if isinstance(message["content"], str) and message["content"] == "":
-                message["content"] = "(empty)"
-            elif isinstance(message["content"], list) and len(message["content"]) == 0:
-                message["content"] = [{"type": "text", "text": "(empty)"}]
-
-    def get_messages_for_persistent_storage(self):
-        """Get messages formatted for persistent storage.
-
-        Returns:
-            List of messages including system message if present.
-        """
-        messages = super().get_messages_for_persistent_storage()
-        if self.system:
-            messages.insert(0, {"role": "system", "content": self.system})
-        return messages
-
-    def get_messages_for_logging(self) -> List[Dict[str, Any]]:
-        """Get messages formatted for logging with sensitive data redacted.
-
-        Returns:
-            List of messages in a format ready for logging.
-        """
-        msgs = []
-        for message in self.messages:
-            msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    for item in msg["content"]:
-                        if item.get("image"):
-                            item["image"]["source"]["bytes"] = "..."
-            msgs.append(msg)
-        return msgs
-
-
-class AWSBedrockUserContextAggregator(LLMUserContextAggregator):
-    """User context aggregator for AWS Bedrock LLM service.
-
-    Handles aggregation of user messages and frames for AWS Bedrock format.
-    Inherits all functionality from the base LLM user context aggregator.
-
-    .. deprecated:: 0.0.99
-        `AWSBedrockUserContextAggregator` is deprecated and will be removed in a future version.
-        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-        See `OpenAILLMContext` docstring for migration guide.
-
-    Args:
-        context: The LLM context to aggregate messages into.
-        params: Configuration parameters for the aggregator.
-    """
-
-    # Super handles deprecation warning
-    pass
-
-
-class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
-    """Assistant context aggregator for AWS Bedrock LLM service.
-
-    Handles aggregation of assistant responses and function calls for AWS Bedrock
-    format, including tool use and tool result handling.
-
-    .. deprecated:: 0.0.99
-        `AWSBedrockAssistantContextAggregator` is deprecated and will be removed in a future version.
-        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-        See `OpenAILLMContext` docstring for migration guide.
-
-    Args:
-        context: The LLM context to aggregate messages into.
-        params: Configuration parameters for the aggregator.
-    """
-
-    # Super handles deprecation warning
-
-    async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
-        """Handle function call in progress frame.
-
-        Args:
-            frame: The function call in progress frame to handle.
-        """
-        # Format tool use according to AWS Bedrock API
-        self._context.add_message(
-            {
-                "role": "assistant",
-                "content": [
-                    {
-                        "toolUse": {
-                            "toolUseId": frame.tool_call_id,
-                            "name": frame.function_name,
-                            "input": frame.arguments if frame.arguments else {},
-                        }
-                    }
-                ],
-            }
-        )
-        self._context.add_message(
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "toolResult": {
-                            "toolUseId": frame.tool_call_id,
-                            "content": [{"text": "IN_PROGRESS"}],
-                        }
-                    }
-                ],
-            }
-        )
-
-    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
-        """Handle function call result frame.
-
-        Args:
-            frame: The function call result frame to handle.
-        """
-        if frame.result:
-            result = json.dumps(frame.result, ensure_ascii=False)
-            await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
-        else:
-            await self._update_function_call_result(
-                frame.function_name, frame.tool_call_id, "COMPLETED"
-            )
-
-    async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
-        """Handle function call cancel frame.
-
-        Args:
-            frame: The function call cancel frame to handle.
-        """
-        await self._update_function_call_result(
-            frame.function_name, frame.tool_call_id, "CANCELLED"
-        )
-
-    async def _update_function_call_result(
-        self, function_name: str, tool_call_id: str, result: Any
-    ):
-        for message in self._context.messages:
-            if message["role"] == "user":
-                for content in message["content"]:
-                    if (
-                        isinstance(content, dict)
-                        and content.get("toolResult")
-                        and content["toolResult"]["toolUseId"] == tool_call_id
-                    ):
-                        content["toolResult"]["content"] = [{"text": result}]
-
-    async def handle_user_image_frame(self, frame: UserImageRawFrame):
-        """Handle user image frame.
-
-        Args:
-            frame: The user image frame to handle.
-        """
-        await self._update_function_call_result(
-            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
-        )
-        self._context.add_image_frame_message(
-            format=frame.format,
-            size=frame.size,
-            image=frame.image,
-            text=frame.request.context,
-        )
 
 
 class AWSBedrockLLMService(LLMService):
@@ -768,27 +104,27 @@ class AWSBedrockLLMService(LLMService):
             additional_model_request_fields: Additional model-specific parameters.
         """
 
-        max_tokens: Optional[int] = Field(default=None, ge=1)
-        temperature: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-        top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-        stop_sequences: Optional[List[str]] = Field(default_factory=lambda: [])
-        latency: Optional[str] = Field(default=None)
-        additional_model_request_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
+        max_tokens: int | None = Field(default=None, ge=1)
+        temperature: float | None = Field(default=None, ge=0.0, le=1.0)
+        top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+        stop_sequences: list[str] | None = Field(default_factory=lambda: [])
+        latency: str | None = Field(default=None)
+        additional_model_request_fields: dict[str, Any] | None = Field(default_factory=dict)
 
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
-        aws_access_key: Optional[str] = None,
-        aws_secret_key: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
-        aws_region: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        stop_sequences: Optional[List[str]] = None,
-        client_config: Optional[Config] = None,
-        retry_timeout_secs: Optional[float] = 5.0,
-        retry_on_timeout: Optional[bool] = False,
+        model: str | None = None,
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
+        aws_session_token: str | None = None,
+        aws_region: str | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        stop_sequences: list[str] | None = None,
+        client_config: Config | None = None,
+        retry_timeout_secs: float | None = 5.0,
+        retry_on_timeout: bool | None = False,
         **kwargs,
     ):
         """Initialize the AWS Bedrock LLM service.
@@ -836,6 +172,7 @@ class AWSBedrockLLMService(LLMService):
             user_turn_completion_config=None,
             stop_sequences=None,
             latency=None,
+            enable_prompt_caching=False,
             additional_model_request_fields={},
         )
 
@@ -902,7 +239,7 @@ class AWSBedrockLLMService(LLMService):
         """
         return True
 
-    def _build_inference_config(self) -> Dict[str, Any]:
+    def _build_inference_config(self) -> dict[str, Any]:
         """Build inference config with only the parameters that are set.
 
         This prevents conflicts with models (e.g., Claude Sonnet 4.5) that don't
@@ -924,10 +261,10 @@ class AWSBedrockLLMService(LLMService):
 
     async def run_inference(
         self,
-        context: LLMContext | OpenAILLMContext,
-        max_tokens: Optional[int] = None,
-        system_instruction: Optional[str] = None,
-    ) -> Optional[str]:
+        context: LLMContext,
+        max_tokens: int | None = None,
+        system_instruction: str | None = None,
+    ) -> str | None:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
@@ -943,17 +280,12 @@ class AWSBedrockLLMService(LLMService):
         messages = []
         system = []
         effective_instruction = system_instruction or self._settings.system_instruction
-        if isinstance(context, LLMContext):
-            adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
-            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
-                context, system_instruction=effective_instruction
-            )
-            messages = params["messages"]
-            system = params["system"]  # [{"text": "system message"}] or None
-        else:
-            context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
-            messages = context.messages
-            system = getattr(context, "system", None)  # [{"text": "system message"}]
+        adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
+        params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
+            context, system_instruction=effective_instruction
+        )
+        messages = params["messages"]
+        system = params["system"]  # [{"text": "system message"}] or None
 
         # Prepare request parameters using the same method as streaming
         inference_config = self._build_inference_config()
@@ -1012,7 +344,7 @@ class AWSBedrockLLMService(LLMService):
                     client.converse_stream(**request_params), timeout=self._retry_timeout_secs
                 )
                 return response
-            except (ReadTimeoutError, asyncio.TimeoutError) as e:
+            except (TimeoutError, ReadTimeoutError) as e:
                 # Retry, this time without a timeout so we get a response
                 logger.debug(f"{self}: Retrying converse_stream due to timeout")
                 response = await client.converse_stream(**request_params)
@@ -1020,44 +352,6 @@ class AWSBedrockLLMService(LLMService):
         else:
             response = await client.converse_stream(**request_params)
             return response
-
-    def create_context_aggregator(
-        self,
-        context: OpenAILLMContext,
-        *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> AWSBedrockContextAggregatorPair:
-        """Create AWS Bedrock-specific context aggregators.
-
-        Creates a pair of context aggregators optimized for AWS Bedrocks's message
-        format, including support for function calls, tool usage, and image handling.
-
-        Args:
-            context: The LLM context to create aggregators for.
-            user_params: Parameters for user message aggregation.
-            assistant_params: Parameters for assistant message aggregation.
-
-        Returns:
-            AWSBedrockContextAggregatorPair: A pair of context aggregators, one for
-            the user and one for the assistant, encapsulated in an
-            AWSBedrockContextAggregatorPair.
-
-        .. deprecated:: 0.0.99
-            `create_context_aggregator()` is deprecated and will be removed in a future version.
-            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
-            See `OpenAILLMContext` docstring for migration guide.
-        """
-        context.set_llm_adapter(self.get_llm_adapter())
-
-        if isinstance(context, OpenAILLMContext):
-            context = AWSBedrockLLMContext.from_openai_context(context)
-
-        # Aggregators handle deprecation warnings
-        user = AWSBedrockUserContextAggregator(context, params=user_params)
-        assistant = AWSBedrockAssistantContextAggregator(context, params=assistant_params)
-
-        return AWSBedrockContextAggregatorPair(_user=user, _assistant=assistant)
 
     def _create_no_op_tool(self):
         """Create a no-operation tool for AWS Bedrock when tool content exists but no tools are defined.
@@ -1074,27 +368,15 @@ class AWSBedrockLLMService(LLMService):
             }
         }
 
-    def _get_llm_invocation_params(
-        self, context: OpenAILLMContext | LLMContext
-    ) -> AWSBedrockLLMInvocationParams:
-        # Universal LLMContext
-        if isinstance(context, LLMContext):
-            adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
-            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
-                context, system_instruction=self._settings.system_instruction
-            )
-            return params
-
-        # AWS Bedrock-specific context
-        return AWSBedrockLLMInvocationParams(
-            system=getattr(context, "system", None),
-            messages=context.messages,
-            tools=context.tools or [],
-            tool_choice=context.tool_choice,
+    def _get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
+        adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
+        params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
+            context, system_instruction=self._settings.system_instruction
         )
+        return params
 
     @traced_llm
-    async def _process_context(self, context: AWSBedrockLLMContext | LLMContext):
+    async def _process_context(self, context: LLMContext):
         # Usage tracking
         prompt_tokens = 0
         completion_tokens = 0
@@ -1172,17 +454,28 @@ class AWSBedrockLLMService(LLMService):
             if self._settings.latency in ["standard", "optimized"]:
                 request_params["performanceConfig"] = {"latency": self._settings.latency}
 
+            # Add cache checkpoints to system prompts and tool definitions.
+            # This enables prompt caching for providers that support it (e.g.
+            # Anthropic Claude on Bedrock), reducing TTFT by up to 85% on
+            # multi-turn conversations where the system prompt stays constant.
+            if self._settings.enable_prompt_caching:
+                if "system" in request_params and request_params["system"]:
+                    system_list = request_params["system"]
+                    if not any("cachePoint" in item for item in system_list):
+                        system_list.append({"cachePoint": {"type": "default"}})
+                if (
+                    "toolConfig" in request_params
+                    and "tools" in request_params["toolConfig"]
+                    and request_params["toolConfig"]["tools"]
+                ):
+                    tools_list = request_params["toolConfig"]["tools"]
+                    if not any("cachePoint" in t for t in tools_list):
+                        tools_list.append({"cachePoint": {"type": "default"}})
+
             # Log request params with messages redacted for logging
-            if isinstance(context, LLMContext):
-                adapter = self.get_llm_adapter()
-                context_type_for_logging = "universal"
-                messages_for_logging = adapter.get_messages_for_logging(context)
-            else:
-                context_type_for_logging = "LLM-specific"
-                messages_for_logging = context.get_messages_for_logging()
-            logger.debug(
-                f"{self}: Generating chat from {context_type_for_logging} context [{system}] | {messages_for_logging}"
-            )
+            adapter = self.get_llm_adapter()
+            messages_for_logging = adapter.get_messages_for_logging(context)
+            logger.debug(f"{self}: Generating chat from context {messages_for_logging}")
 
             async with self._aws_session.client(
                 service_name="bedrock-runtime", **self._aws_params
@@ -1258,7 +551,7 @@ class AWSBedrockLLMService(LLMService):
             # also get cancelled.
             use_completion_tokens_estimate = True
             raise
-        except (ReadTimeoutError, asyncio.TimeoutError):
+        except (TimeoutError, ReadTimeoutError):
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -1286,20 +579,13 @@ class AWSBedrockLLMService(LLMService):
         """
         await super().process_frame(frame, direction)
 
-        context = None
-        if isinstance(frame, OpenAILLMContextFrame):
-            context = AWSBedrockLLMContext.upgrade_to_bedrock(frame.context)
         if isinstance(frame, LLMContextFrame):
-            context = frame.context
-        elif isinstance(frame, LLMMessagesFrame):
-            # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
-            # LLMContext with it
-            context = AWSBedrockLLMContext.from_messages(frame.messages)
+            await self._process_context(frame.context)
+        elif isinstance(frame, LLMEnablePromptCachingFrame):
+            logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
+            self._settings.enable_prompt_caching = frame.enable
         else:
             await self.push_frame(frame, direction)
-
-        if context:
-            await self._process_context(context)
 
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r"[^\w]+", text)) * 1.3)

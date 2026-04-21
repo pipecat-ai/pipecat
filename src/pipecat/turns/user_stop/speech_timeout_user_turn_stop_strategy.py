@@ -8,7 +8,6 @@
 
 import asyncio
 import time
-from typing import Optional
 
 from loguru import logger
 
@@ -59,8 +58,9 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text = ""
         self._vad_user_speaking = False
         self._transcript_finalized = False
-        self._vad_stopped_time: Optional[float] = None
-        self._timeout_task: Optional[asyncio.Task] = None
+        self._vad_stopped_time: float | None = None
+        self._timeout_task: asyncio.Task | None = None
+        self._timeout_expired: bool = False
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -69,6 +69,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = False
         self._transcript_finalized = False
         self._vad_stopped_time = None
+        self._timeout_expired = False
         if self._timeout_task:
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
@@ -117,6 +118,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = True
         self._transcript_finalized = False
         self._vad_stopped_time = None
+        self._timeout_expired = False
         # Cancel any pending timeout
         if self._timeout_task:
             await self.task_manager.cancel_task(self._timeout_task)
@@ -163,6 +165,11 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._transcript_finalized = True
             # For finalized transcripts, check if we can trigger early
             await self._maybe_trigger_user_turn_stopped()
+        elif self._timeout_expired:
+            # The p99 timeout already elapsed without a transcript. Now that
+            # we have one, trigger the turn stop immediately.
+            await self.trigger_user_turn_stopped()
+            return
 
         # Fallback: handle transcripts when no VAD stop was received.
         # This handles edge cases where transcripts arrive without VAD firing.
@@ -207,6 +214,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         finally:
             self._timeout_task = None
 
+        self._timeout_expired = True
         await self._maybe_trigger_user_turn_stopped()
 
     async def _maybe_trigger_user_turn_stopped(self):

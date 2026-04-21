@@ -14,11 +14,9 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesFrame,
     LLMTextFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 
@@ -32,8 +30,6 @@ class LLMLogObserver(BaseObserver):
     - LLMFullResponseEndFrame
     - LLMTextFrame
     - FunctionCallInProgressFrame
-    - LLMMessagesFrame
-    - OpenAILLMContextFrame
 
     This allows you to track when the LLM starts responding, what it generates,
     and when it finishes.
@@ -74,18 +70,9 @@ class LLMLogObserver(BaseObserver):
             logger.debug(
                 f"🧠 {src} {arrow} LLM FUNCTION CALL ({frame.tool_call_id}): {frame.function_name!r}({frame.arguments}) at {time_sec:.2f}s"
             )
-        # Log LLMMessagesFrame (input)
-        elif isinstance(frame, LLMMessagesFrame):
-            logger.debug(
-                f"🧠 {arrow} {dst} LLM MESSAGES FRAME: {frame.messages} at {time_sec:.2f}s"
-            )
-        # Log OpenAILLMContextFrame (input)
-        elif isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
-            messages = (
-                frame.context.messages
-                if isinstance(frame, OpenAILLMContextFrame)
-                else frame.context.get_messages()
-            )
+        # Log LLMContextFrame (input)
+        elif isinstance(frame, LLMContextFrame):
+            messages = frame.context.get_messages()
             logger.debug(f"🧠 {arrow} {dst} LLM CONTEXT FRAME: {messages} at {time_sec:.2f}s")
         # Log function call result (input)
         elif isinstance(frame, FunctionCallResultFrame):

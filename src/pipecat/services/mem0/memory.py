@@ -12,17 +12,13 @@ historical information.
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.frames.frames import Frame, LLMContextFrame, LLMMessagesFrame
+from pipecat.frames.frames import Frame, LLMContextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
@@ -65,13 +61,13 @@ class Mem0MemoryService(FrameProcessor):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        local_config: Optional[Dict[str, Any]] = None,
-        user_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        params: Optional[InputParams] = None,
-        host: Optional[str] = None,
+        api_key: str | None = None,
+        local_config: dict[str, Any] | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        params: InputParams | None = None,
+        host: str | None = None,
     ):
         """Initialize the Mem0 memory service.
 
@@ -113,7 +109,7 @@ class Mem0MemoryService(FrameProcessor):
         self.last_query = None
         logger.info(f"Initialized Mem0MemoryService with {user_id=}, {agent_id=}, {run_id=}")
 
-    async def get_memories(self) -> List[Dict[str, Any]]:
+    async def get_memories(self) -> list[dict[str, Any]]:
         """Retrieve all stored memories for the configured user/agent/run IDs.
 
         This is a convenience method for accessing memories outside the pipeline,
@@ -152,7 +148,7 @@ class Mem0MemoryService(FrameProcessor):
             logger.error(f"Error retrieving memories from Mem0: {e}")
             return []
 
-    async def _store_messages(self, messages: List[Dict[str, Any]]):
+    async def _store_messages(self, messages: list[dict[str, Any]]):
         """Store messages in Mem0.
 
         Runs the blocking Mem0 API call in a background thread to avoid
@@ -178,7 +174,7 @@ class Mem0MemoryService(FrameProcessor):
         except Exception as e:
             logger.error(f"Error storing messages in Mem0: {e}")
 
-    async def _retrieve_memories(self, query: str) -> List[Dict[str, Any]]:
+    async def _retrieve_memories(self, query: str) -> list[dict[str, Any]]:
         """Retrieve relevant memories from Mem0.
 
         Runs the blocking Mem0 API call in a background thread to avoid
@@ -227,9 +223,7 @@ class Mem0MemoryService(FrameProcessor):
             logger.error(f"Error retrieving memories from Mem0: {e}")
             return []
 
-    async def _enhance_context_with_memories(
-        self, context: LLMContext | OpenAILLMContext, query: str
-    ):
+    async def _enhance_context_with_memories(self, context: LLMContext, query: str):
         """Enhance the LLM context with relevant memories.
 
         Args:
@@ -271,16 +265,8 @@ class Mem0MemoryService(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        context = None
-        messages = None
-
-        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+        if isinstance(frame, LLMContextFrame):
             context = frame.context
-        elif isinstance(frame, LLMMessagesFrame):
-            messages = frame.messages
-            context = LLMContext(messages)
-
-        if context:
             try:
                 # Get the latest user message to use as a query for memory retrieval
                 context_messages = context.get_messages()
@@ -302,17 +288,12 @@ class Mem0MemoryService(FrameProcessor):
                     # Store the conversation in Mem0 as a background task
                     self.create_task(self._store_messages(messages_to_store), name="mem0_store")
 
-                # If we received an LLMMessagesFrame, create a new one with the enhanced messages
-                if messages is not None:
-                    await self.push_frame(LLMMessagesFrame(context.get_messages()))
-                else:
-                    # Otherwise, pass the enhanced context frame downstream
-                    await self.push_frame(frame)
+                # Pass the enhanced context frame downstream
+                await self.push_frame(frame)
             except Exception as e:
                 await self.push_error(
                     error_msg=f"Error processing with Mem0: {str(e)}", exception=e
                 )
                 await self.push_frame(frame)  # Still pass the original frame through
         else:
-            # For non-context frames, just pass them through
             await self.push_frame(frame, direction)

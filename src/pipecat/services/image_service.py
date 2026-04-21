@@ -11,7 +11,7 @@ text prompts into images.
 """
 
 from abc import abstractmethod
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 from pipecat.frames.frames import Frame, TextFrame
 from pipecat.processors.frame_processor import FrameDirection
@@ -27,7 +27,7 @@ class ImageGenService(AIService):
     generation functionality using their specific AI service.
     """
 
-    def __init__(self, *, settings: Optional[ImageGenSettings] = None, **kwargs):
+    def __init__(self, *, settings: ImageGenSettings | None = None, **kwargs):
         """Initialize the image generation service.
 
         Args:

@@ -1,0 +1,36 @@
+{
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "All",
+  "include": [
+    "src/pipecat/clocks",
+    "src/pipecat/metrics",
+    "src/pipecat/transcriptions",
+    "src/pipecat/frames",
+    "src/pipecat/observers",
+    "src/pipecat/extensions",
+    "src/pipecat/turns",
+    "src/pipecat/pipeline",
+    "src/pipecat/runner"
+  ],
+  "exclude": [
+    "**/*_pb2.py",
+    "**/__pycache__"
+  ],
+  "ignore": [
+    "src/pipecat/adapters",
+    "src/pipecat/audio",
+    "src/pipecat/processors",
+    "src/pipecat/serializers",
+    "src/pipecat/services",
+    "src/pipecat/sync",
+    "src/pipecat/tests",
+    "src/pipecat/transports",
+    "src/pipecat/utils",
+    "tests",
+    "examples",
+    "scripts",
+    "docs"
+  ],
+  "reportMissingImports": false
+}

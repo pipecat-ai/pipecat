@@ -14,7 +14,6 @@ is measured. Optionally collects per-service latency breakdown metrics
 
 import time
 from collections import deque
-from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -48,7 +47,7 @@ class TTFBBreakdownMetrics(BaseModel):
     """
 
     processor: str
-    model: Optional[str] = None
+    model: str | None = None
     start_time: float
     duration_secs: float
 
@@ -105,13 +104,13 @@ class LatencyBreakdown(BaseModel):
             this cycle. Empty if no function calls occurred.
     """
 
-    ttfb: List[TTFBBreakdownMetrics] = Field(default_factory=list)
-    text_aggregation: Optional[TextAggregationBreakdownMetrics] = None
-    user_turn_start_time: Optional[float] = None
-    user_turn_secs: Optional[float] = None
-    function_calls: List[FunctionCallMetrics] = Field(default_factory=list)
+    ttfb: list[TTFBBreakdownMetrics] = Field(default_factory=list)
+    text_aggregation: TextAggregationBreakdownMetrics | None = None
+    user_turn_start_time: float | None = None
+    user_turn_secs: float | None = None
+    function_calls: list[FunctionCallMetrics] = Field(default_factory=list)
 
-    def chronological_events(self) -> List[str]:
+    def chronological_events(self) -> list[str]:
         """Return human-readable event labels sorted by start time.
 
         Collects all sub-metrics into a flat list, sorts by ``start_time``,
@@ -120,7 +119,7 @@ class LatencyBreakdown(BaseModel):
         Returns:
             List of formatted strings, one per event, in chronological order.
         """
-        events: List[tuple] = []
+        events: list[tuple] = []
 
         if self.user_turn_start_time is not None and self.user_turn_secs is not None:
             events.append((self.user_turn_start_time, f"User turn: {self.user_turn_secs:.3f}s"))
@@ -181,12 +180,12 @@ class UserBotLatencyObserver(BaseObserver):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._user_stopped_time: Optional[float] = None
-        self._user_turn_start_time: Optional[float] = None
-        self._user_turn: Optional[float] = None
+        self._user_stopped_time: float | None = None
+        self._user_turn_start_time: float | None = None
+        self._user_turn: float | None = None
 
         # First bot speech tracking
-        self._client_connected_time: Optional[float] = None
+        self._client_connected_time: float | None = None
         self._first_bot_speech_measured: bool = False
 
         # Frame deduplication (bounded deque + set pattern)
@@ -194,10 +193,10 @@ class UserBotLatencyObserver(BaseObserver):
         self._frame_history: deque = deque(maxlen=max_frames)
 
         # Per-cycle metric accumulators
-        self._ttfb: List[TTFBBreakdownMetrics] = []
-        self._text_aggregation: Optional[TextAggregationBreakdownMetrics] = None
-        self._function_call_starts: Dict[str, tuple[str, float]] = {}
-        self._function_call_metrics: List[FunctionCallMetrics] = []
+        self._ttfb: list[TTFBBreakdownMetrics] = []
+        self._text_aggregation: TextAggregationBreakdownMetrics | None = None
+        self._function_call_starts: dict[str, tuple[str, float]] = {}
+        self._function_call_metrics: list[FunctionCallMetrics] = []
 
         self._register_event_handler("on_latency_measured")
         self._register_event_handler("on_latency_breakdown")

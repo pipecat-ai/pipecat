@@ -15,7 +15,8 @@ import asyncio
 import fractions
 import time
 from collections import deque
-from typing import Any, Awaitable, Callable, List, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -235,9 +236,9 @@ class SmallWebRTCClient:
 
         self._audio_output_track = None
         self._video_output_track = None
-        self._audio_input_track: Optional[AudioStreamTrack] = None
-        self._video_input_track: Optional[VideoStreamTrack] = None
-        self._screen_video_track: Optional[VideoStreamTrack] = None
+        self._audio_input_track: AudioStreamTrack | None = None
+        self._video_input_track: VideoStreamTrack | None = None
+        self._screen_video_track: VideoStreamTrack | None = None
 
         self._params = None
         self._audio_in_channels = None
@@ -314,7 +315,7 @@ class SmallWebRTCClient:
 
             try:
                 frame = await asyncio.wait_for(video_track.recv(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if (
                     self._webrtc_connection.is_connected()
                     and video_track
@@ -369,7 +370,7 @@ class SmallWebRTCClient:
 
             try:
                 frame = await asyncio.wait_for(self._audio_input_track.recv(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if (
                     self._webrtc_connection.is_connected()
                     and self._audio_input_track
@@ -583,7 +584,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_audio_task = None
         self._receive_video_task = None
         self._receive_screen_video_task = None
-        self._image_requests: List[UserImageRequestFrame] = []
+        self._image_requests: list[UserImageRequestFrame] = []
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
@@ -897,8 +898,8 @@ class SmallWebRTCTransport(BaseTransport):
         self,
         webrtc_connection: SmallWebRTCConnection,
         params: TransportParams,
-        input_name: Optional[str] = None,
-        output_name: Optional[str] = None,
+        input_name: str | None = None,
+        output_name: str | None = None,
     ):
         """Initialize the WebRTC transport.
 
@@ -919,8 +920,8 @@ class SmallWebRTCTransport(BaseTransport):
 
         self._client = SmallWebRTCClient(webrtc_connection, self._callbacks)
 
-        self._input: Optional[SmallWebRTCInputTransport] = None
-        self._output: Optional[SmallWebRTCOutputTransport] = None
+        self._input: SmallWebRTCInputTransport | None = None
+        self._output: SmallWebRTCOutputTransport | None = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.

@@ -494,6 +494,41 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         # Finalized transcript received after timeout, triggers immediately
         self.assertTrue(should_start)
 
+    async def test_sie_delay_t(self):
+        """Non-finalized transcript arriving after timeout triggers immediately."""
+        strategy = await self._create_strategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # I
+        await strategy.process_frame(
+            InterimTranscriptionFrame(text="Hello!", user_id="cat", timestamp="")
+        )
+
+        # E
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # Delay - timeout expires but no transcript yet
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        # Still no trigger because no finalized transcript received
+        self.assertIsNone(should_start)
+
+        # T (non-finalized) - triggers immediately since timeout already elapsed
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+
+        # Non-finalized transcript received after timeout, triggers immediately
+        self.assertTrue(should_start)
+
     async def test_reset_clears_stale_text_no_premature_stop(self):
         """Test that reset() clears stale text and cancels timeout, preventing premature stop.
 

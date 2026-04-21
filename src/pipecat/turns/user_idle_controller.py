@@ -7,7 +7,6 @@
 """This module defines a controller for managing user idle detection."""
 
 import asyncio
-from typing import Optional
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -64,11 +63,11 @@ class UserIdleController(BaseObject):
 
         self._user_idle_timeout = user_idle_timeout
 
-        self._task_manager: Optional[BaseTaskManager] = None
+        self._task_manager: BaseTaskManager | None = None
 
         self._user_turn_in_progress: bool = False
         self._function_calls_in_progress: int = 0
-        self._idle_timer_task: Optional[asyncio.Task] = None
+        self._idle_timer_task: asyncio.Task | None = None
 
         self._register_event_handler("on_user_turn_idle", sync=True)
 

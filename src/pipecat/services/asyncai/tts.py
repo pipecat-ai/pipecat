@@ -9,8 +9,9 @@
 import asyncio
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -41,7 +42,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_async_language(language: Language) -> Optional[str]:
+def language_to_async_language(language: Language) -> str | None:
     """Convert a Language enum to Async language code.
 
     Args:
@@ -98,23 +99,23 @@ class AsyncAITTSService(WebsocketTTSService):
             language: Language to use for synthesis.
         """
 
-        language: Optional[Language] = None
+        language: Language | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         version: str = "v1",
         url: str = "wss://api.async.com/text_to_speech/websocket/ws",
-        model: Optional[str] = None,
-        sample_rate: Optional[int] = None,
+        model: str | None = None,
+        sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        aggregate_sentences: Optional[bool] = None,
-        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        aggregate_sentences: bool | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
         **kwargs,
     ):
         """Initialize the Async TTS service.
@@ -222,7 +223,7 @@ class AsyncAITTSService(WebsocketTTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Async language format.
 
         Args:
@@ -339,7 +340,7 @@ class AsyncAITTSService(WebsocketTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio.
 
         Args:
@@ -499,22 +500,22 @@ class AsyncAIHttpTTSService(TTSService):
             language: Language to use for synthesis.
         """
 
-        language: Optional[Language] = None
+        language: Language | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
-        model: Optional[str] = None,
+        model: str | None = None,
         url: str = "https://api.async.com",
         version: str = "v1",
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Async TTS service.
@@ -598,7 +599,7 @@ class AsyncAIHttpTTSService(TTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Async language format.
 
         Args:

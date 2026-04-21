@@ -4,8 +4,6 @@ This module provides integration with Strands Agents for handling conversational
 interactions. It supports both single agent and multi-agent graphs.
 """
 
-from typing import Optional
-
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -16,7 +14,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
@@ -39,9 +36,9 @@ class StrandsAgentsProcessor(FrameProcessor):
 
     def __init__(
         self,
-        agent: Optional[Agent] = None,
-        graph: Optional[Graph] = None,
-        graph_exit_node: Optional[str] = None,
+        agent: Agent | None = None,
+        graph: Graph | None = None,
+        graph_exit_node: str | None = None,
     ):
         """Initialize the Strands Agents processor.
 
@@ -72,7 +69,7 @@ class StrandsAgentsProcessor(FrameProcessor):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+        if isinstance(frame, LLMContextFrame):
             messages = frame.context.get_messages()
             if messages:
                 last_message = messages[-1]

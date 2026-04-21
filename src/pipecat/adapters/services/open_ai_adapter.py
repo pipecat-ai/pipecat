@@ -6,8 +6,7 @@
 
 """OpenAI LLM adapter for Pipecat."""
 
-import copy
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
@@ -17,7 +16,7 @@ from openai.types.chat import (
 )
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -30,8 +29,8 @@ from pipecat.processors.aggregators.llm_context import (
 class OpenAILLMInvocationParams(TypedDict):
     """Context-based parameters for invoking OpenAI ChatCompletion API."""
 
-    messages: List[ChatCompletionMessageParam]
-    tools: List[ChatCompletionToolParam] | OpenAINotGiven
+    messages: list[ChatCompletionMessageParam]
+    tools: list[ChatCompletionToolParam] | OpenAINotGiven
     tool_choice: ChatCompletionToolChoiceOptionParam | OpenAINotGiven
 
 
@@ -55,7 +54,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         self,
         context: LLMContext,
         *,
-        system_instruction: Optional[str] = None,
+        system_instruction: str | None = None,
         convert_developer_to_user: bool,
     ) -> OpenAILLMInvocationParams:
         """Get OpenAI-specific LLM invocation parameters from a universal LLM context.
@@ -96,7 +95,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             "tool_choice": context.tool_choice,
         }
 
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[ChatCompletionToolParam]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[ChatCompletionToolParam]:
         """Convert function schemas to OpenAI's function-calling format.
 
         Args:
@@ -107,15 +106,19 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             with ChatCompletion API.
         """
         functions_schema = tools_schema.standard_tools
-        return [
+        formatted_standard_tools = [
             ChatCompletionToolParam(type="function", function=func.to_default_dict())
             for func in functions_schema
         ]
+        custom_openai_tools = []
+        if tools_schema.custom_tools:
+            custom_openai_tools = tools_schema.custom_tools.get(AdapterType.OPENAI, [])
+        return formatted_standard_tools + custom_openai_tools
 
-    def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
+    def get_messages_for_logging(self, context: LLMContext) -> list[dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about OpenAI.
 
-        Removes or truncates sensitive data like image content for safe logging.
+        Binary data (images, audio) is replaced with short placeholders.
 
         Args:
             context: The LLM context containing messages.
@@ -123,28 +126,14 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         Returns:
             List of messages in a format ready for logging about OpenAI.
         """
-        msgs = []
-        for message in self.get_messages(context):
-            msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    for item in msg["content"]:
-                        if item["type"] == "image_url":
-                            if item["image_url"]["url"].startswith("data:image/"):
-                                item["image_url"]["url"] = "data:image/..."
-                        if item["type"] == "input_audio":
-                            item["input_audio"]["data"] = "..."
-            if "mime_type" in msg and msg["mime_type"].startswith("image/"):
-                msg["data"] = "..."
-            msgs.append(msg)
-        return msgs
+        return self.get_messages(context, truncate_large_values=True)
 
     def _from_universal_context_messages(
         self,
-        messages: List[LLMContextMessage],
+        messages: list[LLMContextMessage],
         *,
         convert_developer_to_user: bool,
-    ) -> List[ChatCompletionMessageParam]:
+    ) -> list[ChatCompletionMessageParam]:
         result = []
         for message in messages:
             if isinstance(message, LLMSpecificMessage):

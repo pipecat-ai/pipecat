@@ -6,7 +6,7 @@
 
 """Wake notifier filter for conditional frame-based notifications."""
 
-from typing import Awaitable, Callable, Tuple, Type
+from collections.abc import Awaitable, Callable
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -25,7 +25,7 @@ class WakeNotifierFilter(FrameProcessor):
         self,
         notifier: BaseNotifier,
         *,
-        types: Tuple[Type[Frame], ...],
+        types: tuple[type[Frame], ...],
         filter: Callable[[Frame], Awaitable[bool]],
         **kwargs,
     ):

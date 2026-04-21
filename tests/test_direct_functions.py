@@ -52,7 +52,7 @@ class TestDirectFunction(unittest.TestCase):
         self.assertEqual(func.properties, {})
 
         async def my_function_simple_params(
-            params: FunctionCallParams, name: str, age: int, height: Union[float, None]
+            params: FunctionCallParams, name: str, age: int, height: float | None
         ):
             return {"status": "success"}, None
 
@@ -70,7 +70,7 @@ class TestDirectFunction(unittest.TestCase):
             params: FunctionCallParams,
             address_lines: list[str],
             nickname: str | int | float,
-            extra: Optional[dict[str, str]],
+            extra: dict[str, str] | None,
         ):
             return {"status": "success"}, None
 
@@ -134,7 +134,7 @@ class TestDirectFunction(unittest.TestCase):
         self.assertEqual(func.required, [])
 
         async def my_function_simple_params(
-            params: FunctionCallParams, name: str, age: int, height: Union[float, None] = None
+            params: FunctionCallParams, name: str, age: int, height: float | None = None
         ):
             return {"status": "success"}, None
 
@@ -143,9 +143,9 @@ class TestDirectFunction(unittest.TestCase):
 
         async def my_function_complex_params(
             params: FunctionCallParams,
-            address_lines: Optional[list[str]],
+            address_lines: list[str] | None,
             nickname: str | int = "Bud",
-            extra: Optional[dict[str, str]] = None,
+            extra: dict[str, str] | None = None,
         ):
             return {"status": "success"}, None
 
@@ -154,7 +154,7 @@ class TestDirectFunction(unittest.TestCase):
 
     def test_property_descriptions_are_set_from_function(self):
         async def my_function(
-            params: FunctionCallParams, name: str, age: int, height: Union[float, None]
+            params: FunctionCallParams, name: str, age: int, height: float | None
         ):
             """
             This is a test function.

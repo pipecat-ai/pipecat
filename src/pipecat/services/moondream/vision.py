@@ -11,8 +11,8 @@ for image analysis and description generation.
 """
 
 import asyncio
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from PIL import Image
@@ -85,10 +85,10 @@ class MoondreamService(VisionService):
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
+        model: str | None = None,
         revision="2025-01-09",
         use_cpu=False,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Moondream service.
@@ -149,7 +149,7 @@ class MoondreamService(VisionService):
 
         logger.debug(f"Analyzing image (bytes length: {len(frame.image)})")
 
-        def get_image_description(image_bytes: bytes, text: Optional[str]) -> str:
+        def get_image_description(image_bytes: bytes, text: str | None) -> str:
             image = Image.frombytes(frame.format, frame.size, image_bytes)
             image_embeds = self._model.encode_image(image)
             description = self._model.query(image_embeds, text)["answer"]

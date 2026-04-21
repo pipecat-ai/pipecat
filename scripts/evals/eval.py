@@ -13,7 +13,7 @@ import wave
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 import aiofiles
 from loguru import logger
@@ -60,7 +60,7 @@ PIPELINE_IDLE_TIMEOUT_SECS = 60
 EVAL_TIMEOUT_SECS = 120
 EVAL_RESULT_TIMEOUT_SECS = 10
 
-EvalPrompt = str | Tuple[str, ImageFile]
+EvalPrompt = str | tuple[str, ImageFile]
 
 
 @dataclass
@@ -68,7 +68,7 @@ class EvalConfig:
     prompt: EvalPrompt
     eval: str
     eval_speaks_first: bool = False
-    runner_args_body: Optional[Any] = None
+    runner_args_body: Any | None = None
 
 
 class EvalRunner:
@@ -78,7 +78,7 @@ class EvalRunner:
         examples_dir: Path,
         pattern: str = "",
         record_audio: bool = False,
-        name: Optional[str] = None,
+        name: str | None = None,
         log_level: str = "DEBUG",
     ):
         self._examples_dir = examples_dir
@@ -86,8 +86,8 @@ class EvalRunner:
         self._record_audio = record_audio
         self._log_level = log_level
         self._total_success = 0
-        self._tests: List[EvalResult] = []
-        self._result_future: Optional[asyncio.Future[bool]] = None
+        self._tests: list[EvalResult] = []
+        self._result_future: asyncio.Future[bool] | None = None
 
         # We to save runner files.
         name = name or f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -150,7 +150,7 @@ class EvalRunner:
         try:
             # Wait for the future to resolve.
             result = await asyncio.wait_for(self._result_future, timeout=EVAL_RESULT_TIMEOUT_SECS)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(f"ERROR: Timeout waiting for eval result.")
             result = False
 
@@ -171,6 +171,7 @@ class EvalRunner:
     async def save_audio(self, name: str, audio: bytes, sample_rate: int, num_channels: int):
         if len(audio) > 0:
             filename = self._recording_file_name(name)
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
             logger.debug(f"Saving {name} audio to {filename}")
             with io.BytesIO() as buffer:
                 with wave.open(buffer, "wb") as wf:
@@ -281,7 +282,7 @@ async def run_eval_pipeline(
 
     # Load example prompt depending on image.
     example_prompt = ""
-    example_image: Optional[ImageFile] = None
+    example_image: ImageFile | None = None
     if isinstance(eval_config.prompt, str):
         example_prompt = eval_config.prompt
     elif isinstance(eval_config.prompt, tuple):

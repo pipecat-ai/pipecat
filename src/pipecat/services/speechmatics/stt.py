@@ -9,9 +9,10 @@
 import asyncio
 import os
 import warnings
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, AsyncGenerator, ClassVar
+from enum import StrEnum
+from typing import Any, ClassVar
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -66,7 +67,7 @@ except ModuleNotFoundError as e:
 load_dotenv()
 
 
-class TurnDetectionMode(str, Enum):
+class TurnDetectionMode(StrEnum):
     """Endpoint and turn detection handling mode.
 
     How the STT engine handles the endpointing of speech. If using Pipecat's built-in endpointing,
@@ -680,7 +681,7 @@ class SpeechmaticsSTTService(STTService):
         try:
             if self._client:
                 await self._client.disconnect()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"{self} timeout while closing Speechmatics client connection")
         except Exception as e:
             await self.push_error(error_msg=f"Error closing Speechmatics client: {e}", exception=e)

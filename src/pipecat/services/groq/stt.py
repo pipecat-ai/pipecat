@@ -7,7 +7,6 @@
 """Groq speech-to-text service implementation using Whisper models."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from pipecat.services.stt_latency import GROQ_TTFS_P99
 from pipecat.services.whisper.base_stt import (
@@ -41,14 +40,14 @@ class GroqSTTService(BaseWhisperSTTService):
     def __init__(
         self,
         *,
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
+        model: str | None = None,
+        api_key: str | None = None,
         base_url: str = "https://api.groq.com/openai/v1",
-        language: Optional[Language] = None,
-        prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = GROQ_TTFS_P99,
+        language: Language | None = None,
+        prompt: str | None = None,
+        temperature: float | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = GROQ_TTFS_P99,
         **kwargs,
     ):
         """Initialize Groq STT service.

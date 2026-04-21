@@ -12,8 +12,9 @@ using Rime's API for streaming and batch audio synthesis.
 
 import base64
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, ClassVar, Dict, Optional
+from typing import Any, ClassVar
 
 import aiohttp
 from loguru import logger
@@ -37,7 +38,6 @@ from pipecat.services.tts_service import (
     WebsocketTTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -99,7 +99,7 @@ class RimeTTSSettings(TTSSettings):
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
-    _aliases: ClassVar[Dict[str, str]] = {"speaker": "voice"}
+    _aliases: ClassVar[dict[str, str]] = {"speaker": "voice"}
 
 
 @dataclass
@@ -118,7 +118,7 @@ class RimeNonJsonTTSSettings(TTSSettings):
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
-    _aliases: ClassVar[Dict[str, str]] = {"speaker": "voice"}
+    _aliases: ClassVar[dict[str, str]] = {"speaker": "voice"}
 
 
 class RimeTTSService(WebsocketTTSService):
@@ -152,33 +152,32 @@ class RimeTTSService(WebsocketTTSService):
             save_oovs: Whether to save out-of-vocabulary words (mistv2 only).
         """
 
-        language: Optional[Language] = Language.EN
-        segment: Optional[str] = None
-        speed_alpha: Optional[float] = None
+        language: Language | None = Language.EN
+        segment: str | None = None
+        speed_alpha: float | None = None
         # Arcana params
-        repetition_penalty: Optional[float] = None
-        temperature: Optional[float] = None
-        top_p: Optional[float] = None
+        repetition_penalty: float | None = None
+        temperature: float | None = None
+        top_p: float | None = None
         # Mistv2 params
-        reduce_latency: Optional[bool] = None
-        pause_between_brackets: Optional[bool] = None
-        phonemize_between_brackets: Optional[bool] = None
-        no_text_normalization: Optional[bool] = None
-        save_oovs: Optional[bool] = None
+        reduce_latency: bool | None = None
+        pause_between_brackets: bool | None = None
+        phonemize_between_brackets: bool | None = None
+        no_text_normalization: bool | None = None
+        save_oovs: bool | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         url: str = "wss://users-ws.rime.ai/ws3",
-        model: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        text_aggregator: Optional[BaseTextAggregator] = None,
-        text_aggregation_mode: Optional[TextAggregationMode] = None,
-        aggregate_sentences: Optional[bool] = None,
+        model: str | None = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
+        aggregate_sentences: bool | None = None,
         **kwargs,
     ):
         """Initialize Rime TTS service.
@@ -204,11 +203,6 @@ class RimeTTSService(WebsocketTTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
-            text_aggregator: Custom text aggregator for processing input text.
-
-                .. deprecated:: 0.0.95
-                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
-
             text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
@@ -282,15 +276,14 @@ class RimeTTSService(WebsocketTTSService):
         self._audio_format = "pcm"
         self._sampling_rate = 0  # updated in start()
 
-        if not text_aggregator:
-            # Always skip tags added for spelled-out text
-            # Note: This is primarily to support backwards compatibility.
-            #    The preferred way of taking advantage of Rime spelling is
-            #    to use an LLMTextProcessor and/or a text_transformer to identify
-            #    and insert these tags for the purpose of the TTS service alone.
-            self._text_aggregator = SkipTagsAggregator(
-                [("spell(", ")")], aggregation_type=self._text_aggregation_mode
-            )
+        # Always skip tags added for spelled-out text
+        # Note: This is primarily to support backwards compatibility.
+        #    The preferred way of taking advantage of Rime spelling is
+        #    to use an LLMTextProcessor and/or a text_transformer to identify
+        #    and insert these tags for the purpose of the TTS service alone.
+        self._text_aggregator = SkipTagsAggregator(
+            [("spell(", ")")], aggregation_type=self._text_aggregation_mode
+        )
 
         # Store service configuration
         self._api_key = api_key
@@ -553,7 +546,7 @@ class RimeTTSService(WebsocketTTSService):
 
         return word_pairs
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis."""
         flush_id = context_id or self.get_active_audio_context_id()
         if not flush_id or not self._websocket:
@@ -671,23 +664,23 @@ class RimeHttpTTSService(TTSService):
             reduce_latency: Whether to reduce latency at potential quality cost.
         """
 
-        language: Optional[Language] = Language.EN
-        pause_between_brackets: Optional[bool] = False
-        phonemize_between_brackets: Optional[bool] = False
-        inline_speed_alpha: Optional[str] = None
-        speed_alpha: Optional[float] = 1.0
-        reduce_latency: Optional[bool] = False
+        language: Language | None = Language.EN
+        pause_between_brackets: bool | None = False
+        phonemize_between_brackets: bool | None = False
+        inline_speed_alpha: str | None = None
+        speed_alpha: float | None = 1.0
+        reduce_latency: bool | None = False
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
-        model: Optional[str] = None,
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize Rime HTTP TTS service.
@@ -894,26 +887,26 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             extra: Additional parameters to pass to the API (for future compatibility).
         """
 
-        language: Optional[Language] = None
-        segment: Optional[str] = None
-        repetition_penalty: Optional[float] = None
-        temperature: Optional[float] = None
-        top_p: Optional[float] = None
-        extra: Optional[dict[str, Any]] = None
+        language: Language | None = None
+        segment: str | None = None
+        repetition_penalty: float | None = None
+        temperature: float | None = None
+        top_p: float | None = None
+        extra: dict[str, Any] | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
+        voice_id: str | None = None,
         url: str = "wss://users.rime.ai/ws",
-        model: Optional[str] = None,
+        model: str | None = None,
         audio_format: str = "pcm",
-        sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        aggregate_sentences: Optional[bool] = None,
-        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        sample_rate: int | None = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        aggregate_sentences: bool | None = None,
+        text_aggregation_mode: TextAggregationMode | None = None,
         **kwargs,
     ):
         """Initialize Rime Non-JSON WebSocket TTS service.
@@ -1121,7 +1114,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis."""
         if not self._websocket:
             return

@@ -14,7 +14,6 @@ management.
 import asyncio
 import gc
 import signal
-from typing import Optional
 
 from loguru import logger
 
@@ -34,11 +33,11 @@ class PipelineRunner(BaseObject):
     def __init__(
         self,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         handle_sigint: bool = True,
         handle_sigterm: bool = False,
         force_gc: bool = False,
-        loop: Optional[asyncio.AbstractEventLoop] = None,
+        loop: asyncio.AbstractEventLoop | None = None,
     ):
         """Initialize the pipeline runner.
 
@@ -90,7 +89,7 @@ class PipelineRunner(BaseObject):
             await self._sig_task
 
         if self._force_gc:
-            self._gc_collect()
+            await self._gc_collect()
 
         logger.debug(f"Runner {self} finished running {task}")
 
@@ -136,8 +135,8 @@ class PipelineRunner(BaseObject):
         logger.warning(f"Interruption detected. Cancelling runner {self}")
         await self.cancel()
 
-    def _gc_collect(self):
+    async def _gc_collect(self):
         """Force garbage collection and log results."""
-        collected = gc.collect()
+        collected = await asyncio.to_thread(gc.collect)
         logger.debug(f"Garbage collector: collected {collected} objects.")
         logger.debug(f"Garbage collector: uncollectable objects {gc.garbage}")

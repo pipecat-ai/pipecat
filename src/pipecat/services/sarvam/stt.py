@@ -12,8 +12,9 @@ can handle multiple audio formats for Indian language speech recognition.
 """
 
 import base64
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, Literal, Optional
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import BaseModel
@@ -86,10 +87,11 @@ def language_to_sarvam_language(language: Language) -> str:
 class ModelConfig:
     """Immutable configuration for a Sarvam STT model.
 
-    Attributes:
+    Parameters:
         supports_prompt: Whether the model accepts prompt parameter.
         supports_mode: Whether the model accepts mode parameter.
         supports_language: Whether the model accepts language parameter.
+        supports_vad_params: Whether the model accepts fine-grained VAD parameters.
         default_language: Default language code (None = auto-detect).
         default_mode: Default mode (None = not applicable).
         use_translate_endpoint: Whether to use speech_to_text_translate_streaming endpoint.
@@ -99,17 +101,19 @@ class ModelConfig:
     supports_prompt: bool
     supports_mode: bool
     supports_language: bool
-    default_language: Optional[str]
-    default_mode: Optional[str]
+    supports_vad_params: bool
+    default_language: str | None
+    default_mode: str | None
     use_translate_endpoint: bool
     use_translate_method: bool
 
 
-MODEL_CONFIGS: Dict[str, ModelConfig] = {
+MODEL_CONFIGS: dict[str, ModelConfig] = {
     "saarika:v2.5": ModelConfig(
         supports_prompt=False,
         supports_mode=False,
         supports_language=True,
+        supports_vad_params=False,
         default_language="unknown",
         default_mode=None,
         use_translate_endpoint=False,
@@ -119,6 +123,7 @@ MODEL_CONFIGS: Dict[str, ModelConfig] = {
         supports_prompt=True,
         supports_mode=False,
         supports_language=False,
+        supports_vad_params=False,
         default_language=None,  # Auto-detects language
         default_mode=None,
         use_translate_endpoint=True,
@@ -128,6 +133,7 @@ MODEL_CONFIGS: Dict[str, ModelConfig] = {
         supports_prompt=False,
         supports_mode=True,
         supports_language=True,
+        supports_vad_params=True,
         default_language="unknown",
         default_mode="transcribe",
         use_translate_endpoint=False,
@@ -145,11 +151,43 @@ class SarvamSTTSettings(STTSettings):
             Only applicable to models that support prompts (e.g., saaras:v2.5).
         vad_signals: Enable VAD signals in response.
         high_vad_sensitivity: Enable high VAD sensitivity.
+        positive_speech_threshold: VAD probability threshold (0.0-1.0) above which
+            a frame is considered speech. Only for saaras:v3.
+        negative_speech_threshold: VAD probability threshold (0.0-1.0) below which
+            a frame is considered silence. Only for saaras:v3.
+        min_speech_frames: Minimum consecutive speech frames to start a speech
+            segment. Only for saaras:v3.
+        first_turn_min_speech_frames: Minimum speech frames for the first user
+            turn. Only for saaras:v3.
+        negative_frames_count: Number of silence frames within the window to end
+            a speech segment. Only for saaras:v3.
+        negative_frames_window: Sliding window size (in frames) for counting
+            negative frames. Only for saaras:v3.
+        start_speech_volume_threshold: Volume level (dB) below which audio is
+            too quiet to be speech. Only for saaras:v3.
+        interrupt_min_speech_frames: Minimum speech frames to register a
+            barge-in/interruption. Only for saaras:v3.
+        pre_speech_pad_frames: Number of audio frames to prepend before detected
+            speech onset. Only for saaras:v3.
+        num_initial_ignored_frames: Number of leading audio frames to skip at
+            connection start. Only for saaras:v3.
     """
 
     prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_signals: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     high_vad_sensitivity: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    positive_speech_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_speech_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    first_turn_min_speech_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_frames_count: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    negative_frames_window: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    start_speech_volume_threshold: float | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    interrupt_min_speech_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pre_speech_pad_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    num_initial_ignored_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamSTTService(STTService):
@@ -189,29 +227,27 @@ class SarvamSTTService(STTService):
             mode: Mode of operation for saaras:v3 models only. Options: transcribe, translate,
                 verbatim, translit, codemix. Defaults to "transcribe" for saaras:v3.
             vad_signals: Enable VAD signals in response. Defaults to None.
-            high_vad_sensitivity: Enable high VAD (Voice Activity Detection) sensitivity. Defaults to None.
+            high_vad_sensitivity: Enable high VAD sensitivity. Defaults to None.
         """
 
-        language: Optional[Language] = None
-        prompt: Optional[str] = None
-        mode: Optional[Literal["transcribe", "translate", "verbatim", "translit", "codemix"]] = None
-        vad_signals: Optional[bool] = None
-        high_vad_sensitivity: Optional[bool] = None
+        language: Language | None = None
+        prompt: str | None = None
+        mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | None = None
+        vad_signals: bool | None = None
+        high_vad_sensitivity: bool | None = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: Optional[str] = None,
-        mode: Optional[
-            Literal["transcribe", "translate", "verbatim", "translit", "codemix"]
-        ] = None,
-        sample_rate: Optional[int] = None,
+        model: str | None = None,
+        mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] | None = None,
+        sample_rate: int | None = None,
         input_audio_codec: str = "wav",
-        params: Optional[InputParams] = None,
-        settings: Optional[Settings] = None,
-        ttfs_p99_latency: Optional[float] = SARVAM_TTFS_P99,
-        keepalive_timeout: Optional[float] = None,
+        params: InputParams | None = None,
+        settings: Settings | None = None,
+        ttfs_p99_latency: float | None = SARVAM_TTFS_P99,
+        keepalive_timeout: float | None = None,
         keepalive_interval: float = 5.0,
         **kwargs,
     ):
@@ -245,11 +281,21 @@ class SarvamSTTService(STTService):
         """
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model="saarika:v2.5",
+            model="saaras:v3",
             language=None,
             prompt=None,
             vad_signals=None,
             high_vad_sensitivity=None,
+            positive_speech_threshold=None,
+            negative_speech_threshold=None,
+            min_speech_frames=None,
+            first_turn_min_speech_frames=None,
+            negative_frames_count=None,
+            negative_frames_window=None,
+            start_speech_volume_threshold=None,
+            interrupt_min_speech_frames=None,
+            pre_speech_pad_frames=None,
+            num_initial_ignored_frames=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -289,6 +335,26 @@ class SarvamSTTService(STTService):
             raise ValueError(
                 f"Model '{resolved_model}' does not support language parameter (auto-detects language)."
             )
+
+        if not self._config.supports_vad_params:
+            vad_param_names = [
+                "positive_speech_threshold",
+                "negative_speech_threshold",
+                "min_speech_frames",
+                "first_turn_min_speech_frames",
+                "negative_frames_count",
+                "negative_frames_window",
+                "start_speech_volume_threshold",
+                "interrupt_min_speech_frames",
+                "pre_speech_pad_frames",
+                "num_initial_ignored_frames",
+            ]
+            for param_name in vad_param_names:
+                if getattr(default_settings, param_name) is not None:
+                    raise ValueError(
+                        f"Model '{resolved_model}' does not support {param_name} parameter. "
+                        f"Fine-grained VAD parameters are only supported by saaras:v3."
+                    )
 
         # Resolve mode default from model config
         if mode is None:
@@ -339,7 +405,7 @@ class SarvamSTTService(STTService):
         """
         return language_to_sarvam_language(language)
 
-    def _get_language_string(self) -> Optional[str]:
+    def _get_language_string(self) -> str | None:
         """Resolve the current language setting to a Sarvam language code string."""
         if self._settings.language:
             return language_to_sarvam_language(self._settings.language)
@@ -394,10 +460,44 @@ class SarvamSTTService(STTService):
                     f"Model '{self._settings.model}' does not support prompt parameter."
                 )
 
+        if isinstance(delta, self.Settings) and not self._config.supports_vad_params:
+            vad_param_names = [
+                "positive_speech_threshold",
+                "negative_speech_threshold",
+                "min_speech_frames",
+                "first_turn_min_speech_frames",
+                "negative_frames_count",
+                "negative_frames_window",
+                "start_speech_volume_threshold",
+                "interrupt_min_speech_frames",
+                "pre_speech_pad_frames",
+                "num_initial_ignored_frames",
+            ]
+            for param_name in vad_param_names:
+                val = getattr(delta, param_name, NOT_GIVEN)
+                if is_given(val) and val is not None:
+                    raise ValueError(
+                        f"Model '{self._settings.model}' does not support {param_name} "
+                        f"parameter. Fine-grained VAD parameters are only supported by saaras:v3."
+                    )
+
         changed = await super()._update_settings(delta)
 
-        # Language and prompt are WebSocket connect-time parameters; reconnect to apply.
-        reconnect_fields = {"language", "prompt"}
+        # These are all WebSocket connect-time parameters; reconnect to apply.
+        reconnect_fields = {
+            "language",
+            "prompt",
+            "positive_speech_threshold",
+            "negative_speech_threshold",
+            "min_speech_frames",
+            "first_turn_min_speech_frames",
+            "negative_frames_count",
+            "negative_frames_window",
+            "start_speech_volume_threshold",
+            "interrupt_min_speech_frames",
+            "pre_speech_pad_frames",
+            "num_initial_ignored_frames",
+        }
         if changed.keys() & reconnect_fields:
             await self._disconnect()
             await self._connect()
@@ -408,7 +508,7 @@ class SarvamSTTService(STTService):
 
         return changed
 
-    async def set_prompt(self, prompt: Optional[str]):
+    async def set_prompt(self, prompt: str | None):
         """Set the transcription/translation prompt and reconnect.
 
         .. deprecated:: 0.0.104
@@ -535,6 +635,24 @@ class SarvamSTTService(STTService):
                 connect_kwargs["high_vad_sensitivity"] = (
                     "true" if self._settings.high_vad_sensitivity else "false"
                 )
+
+            # Fine-grained VAD parameters (saaras:v3 only, sent as strings per SDK spec)
+            if self._config.supports_vad_params:
+                _vad_params = {
+                    "positive_speech_threshold": self._settings.positive_speech_threshold,
+                    "negative_speech_threshold": self._settings.negative_speech_threshold,
+                    "min_speech_frames": self._settings.min_speech_frames,
+                    "first_turn_min_speech_frames": self._settings.first_turn_min_speech_frames,
+                    "negative_frames_count": self._settings.negative_frames_count,
+                    "negative_frames_window": self._settings.negative_frames_window,
+                    "start_speech_volume_threshold": self._settings.start_speech_volume_threshold,
+                    "interrupt_min_speech_frames": self._settings.interrupt_min_speech_frames,
+                    "pre_speech_pad_frames": self._settings.pre_speech_pad_frames,
+                    "num_initial_ignored_frames": self._settings.num_initial_ignored_frames,
+                }
+                for k, v in _vad_params.items():
+                    if v is not None:
+                        connect_kwargs[k] = str(v)
 
             # Add language_code for models that support it
             language_string = self._get_language_string()
@@ -731,7 +849,7 @@ class SarvamSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing.
 

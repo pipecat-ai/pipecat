@@ -17,7 +17,6 @@ from dataclasses import dataclass
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
-from typing import Optional
 
 from loguru import logger
 
@@ -61,64 +60,20 @@ class GoogleVertexLLMService(GoogleLLMService):
     Settings = GoogleVertexLLMSettings
     _settings: Settings
 
-    class InputParams(GoogleLLMService.InputParams):
-        """Input parameters specific to Vertex AI.
-
-        Parameters:
-            location: GCP region for Vertex AI endpoint (e.g., "us-east4").
-
-                .. deprecated:: 0.0.90
-                    Use `location` as a direct argument to
-                    `GoogleVertexLLMService.__init__()` instead.
-
-            project_id: Google Cloud project ID.
-
-                .. deprecated:: 0.0.90
-                    Use `project_id` as a direct argument to
-                    `GoogleVertexLLMService.__init__()` instead.
-        """
-
-        # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations
-        location: Optional[str] = None
-        project_id: Optional[str] = None
-
-        def __init__(self, **kwargs):
-            """Initializes the InputParams."""
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                if "location" in kwargs and kwargs["location"] is not None:
-                    warnings.warn(
-                        "GoogleVertexLLMService.InputParams.location is deprecated. "
-                        "Please provide 'location' as a direct argument to GoogleVertexLLMService.__init__() instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
-
-                if "project_id" in kwargs and kwargs["project_id"] is not None:
-                    warnings.warn(
-                        "GoogleVertexLLMService.InputParams.project_id is deprecated. "
-                        "Please provide 'project_id' as a direct argument to GoogleVertexLLMService.__init__() instead.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
-            super().__init__(**kwargs)
-
     def __init__(
         self,
         *,
-        credentials: Optional[str] = None,
-        credentials_path: Optional[str] = None,
-        model: Optional[str] = None,
-        location: Optional[str] = None,
-        project_id: Optional[str] = None,
-        params: Optional[GoogleLLMService.InputParams] = None,
-        settings: Optional[Settings] = None,
-        system_instruction: Optional[str] = None,
-        tools: Optional[list] = None,
-        tool_config: Optional[dict] = None,
-        http_options: Optional[HttpOptions] = None,
+        credentials: str | None = None,
+        credentials_path: str | None = None,
+        model: str | None = None,
+        location: str = "us-east4",
+        project_id: str,
+        params: GoogleLLMService.InputParams | None = None,
+        settings: Settings | None = None,
+        system_instruction: str | None = None,
+        tools: list | None = None,
+        tool_config: dict | None = None,
+        http_options: HttpOptions | None = None,
         **kwargs,
     ):
         """Initializes the VertexLLMService.
@@ -131,7 +86,7 @@ class GoogleVertexLLMService(GoogleLLMService):
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleVertexLLMService.Settings(model=...)`` instead.
 
-            location: GCP region for Vertex AI endpoint (e.g., "us-east4").
+            location: GCP region for Vertex AI endpoint. Defaults to "us-east4".
             project_id: Google Cloud project ID.
             params: Input parameters for the model.
 
@@ -160,34 +115,6 @@ class GoogleVertexLLMService(GoogleLLMService):
             raise ValueError(
                 "Invalid parameter 'api_key'. Use 'credentials' or 'credentials_path' for Vertex AI authentication."
             )
-
-        # Handle deprecated InputParams fields (location/project_id extraction
-        # must happen before validation, regardless of settings)
-        if params and isinstance(params, GoogleVertexLLMService.InputParams):
-            if project_id is None:
-                project_id = params.project_id
-            if location is None:
-                location = params.location
-            # Convert to base InputParams
-            params = GoogleLLMService.InputParams(
-                **params.model_dump(exclude={"location", "project_id"}, exclude_unset=True)
-            )
-
-        # Validate project_id and location parameters
-        # NOTE: once we remove Vertex-specific InputParams class, we can update
-        #       __init__() signature as follows:
-        #       - location: str = "us-east4",
-        #       - project_id: str,
-        #       But for now, we need them as-is to maintain proper backward
-        #       compatibility.
-        if project_id is None:
-            raise ValueError("project_id is required")
-        if location is None:
-            # If location is not provided, default to "us-east4".
-            # Note: this is legacy behavior; ideally location would be
-            # required.
-            logger.warning("location is not provided. Defaulting to 'us-east4'.")
-            location = "us-east4"  # Default location if not provided
 
         # These need to be set before calling super().__init__() because
         # super().__init__() invokes _create_client(), which needs these.
@@ -258,7 +185,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         )
 
     @staticmethod
-    def _get_credentials(credentials: Optional[str], credentials_path: Optional[str]):
+    def _get_credentials(credentials: str | None, credentials_path: str | None):
         """Retrieve Credentials using Google service account credentials.
 
         Supports multiple authentication methods:
@@ -276,7 +203,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         Raises:
             ValueError: If no valid credentials are provided or found.
         """
-        creds: Optional[service_account.Credentials] = None
+        creds: service_account.Credentials | None = None
 
         if credentials:
             # Parse and load credentials from JSON string

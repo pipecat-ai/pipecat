@@ -7,8 +7,9 @@
 """LMNT text-to-speech service implementation."""
 
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -36,7 +37,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_lmnt_language(language: Language) -> Optional[str]:
+def language_to_lmnt_language(language: Language) -> str | None:
     """Convert a Language enum to LMNT language code.
 
     Args:
@@ -94,12 +95,12 @@ class LmntTTSService(InterruptibleTTSService):
         self,
         *,
         api_key: str,
-        voice_id: Optional[str] = None,
-        sample_rate: Optional[int] = None,
+        voice_id: str | None = None,
+        sample_rate: int | None = None,
         language: Language = Language.EN,
         output_format: str = "pcm_s16le",
-        model: Optional[str] = None,
-        settings: Optional[Settings] = None,
+        model: str | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the LMNT TTS service.
@@ -173,7 +174,7 @@ class LmntTTSService(InterruptibleTTSService):
         """
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to LMNT service language format.
 
         Args:
@@ -300,7 +301,7 @@ class LmntTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self, context_id: Optional[str] = None):
+    async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis."""
         if not self._websocket or self._websocket.state is State.CLOSED:
             return

@@ -9,8 +9,8 @@
 import asyncio
 import json
 import time
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -23,7 +23,6 @@ from pipecat.services.deepgram.flux.base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
 )
-from pipecat.transcriptions.language import Language
 
 
 @dataclass
@@ -86,11 +85,11 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         endpoint_name: str,
         region: str,
         encoding: str = "linear16",
-        sample_rate: Optional[int] = None,
-        mip_opt_out: Optional[bool] = None,
-        tag: Optional[list] = None,
+        sample_rate: int | None = None,
+        mip_opt_out: bool | None = None,
+        tag: list | None = None,
         should_interrupt: bool = True,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the Deepgram Flux SageMaker STT service.
@@ -112,12 +111,13 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         # Initialize default settings
         default_settings = self.Settings(
             model="flux-general-en",
-            language=Language.EN,
+            language=None,
             eager_eot_threshold=None,
             eot_threshold=None,
             eot_timeout_ms=None,
             keyterm=[],
             min_confidence=None,
+            language_hints=None,
         )
 
         # Apply settings delta
@@ -137,8 +137,8 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         self._endpoint_name = endpoint_name
         self._region = region
 
-        self._client: Optional[SageMakerBidiClient] = None
-        self._response_task: Optional[asyncio.Task] = None
+        self._client: SageMakerBidiClient | None = None
+        self._response_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Transport interface implementation

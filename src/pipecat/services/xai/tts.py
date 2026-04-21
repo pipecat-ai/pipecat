@@ -10,8 +10,8 @@ Uses xAI's HTTP TTS endpoint documented at:
 https://docs.x.ai/developers/model-capabilities/audio/text-to-speech
 """
 
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -23,7 +23,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
-def language_to_xai_language(language: Language) -> Optional[str]:
+def language_to_xai_language(language: Language) -> str | None:
     """Convert a Language enum to xAI language code.
 
     Args:
@@ -83,10 +83,10 @@ class XAIHttpTTSService(TTSService):
         *,
         api_key: str,
         base_url: str = "https://api.x.ai/v1/tts",
-        sample_rate: Optional[int] = None,
-        encoding: Optional[str] = "pcm",
-        aiohttp_session: Optional[aiohttp.ClientSession] = None,
-        settings: Optional[Settings] = None,
+        sample_rate: int | None = None,
+        encoding: str | None = "pcm",
+        aiohttp_session: aiohttp.ClientSession | None = None,
+        settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize the xAI TTS service.
@@ -127,7 +127,7 @@ class XAIHttpTTSService(TTSService):
         """Check if this service can generate processing metrics."""
         return True
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
+    def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to xAI language format.
 
         Args:
