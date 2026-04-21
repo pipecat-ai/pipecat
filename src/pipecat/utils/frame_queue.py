@@ -58,7 +58,7 @@ class FrameQueue(asyncio.Queue):
         Returns:
             True if at least one enqueued frame is an instance of ``frame_type``.
         """
-        for item in self._queue:
+        for item in self._queue:  # pyright: ignore[reportAttributeAccessIssue]
             if isinstance(self._frame_getter(item), frame_type):
                 return True
         return False

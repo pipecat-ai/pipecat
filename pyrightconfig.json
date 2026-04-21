@@ -3,15 +3,18 @@
   "pythonVersion": "3.11",
   "pythonPlatform": "All",
   "include": [
+    "scripts",
     "src/pipecat/clocks",
-    "src/pipecat/metrics",
-    "src/pipecat/transcriptions",
-    "src/pipecat/frames",
-    "src/pipecat/observers",
     "src/pipecat/extensions",
-    "src/pipecat/turns",
+    "src/pipecat/frames",
+    "src/pipecat/metrics",
+    "src/pipecat/observers",
     "src/pipecat/pipeline",
-    "src/pipecat/runner"
+    "src/pipecat/runner",
+    "src/pipecat/tests",
+    "src/pipecat/transcriptions",
+    "src/pipecat/turns",
+    "src/pipecat/utils"
   ],
   "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
@@ -20,13 +23,8 @@
     "src/pipecat/processors",
     "src/pipecat/serializers",
     "src/pipecat/services",
-    "src/pipecat/sync",
-    "src/pipecat/tests",
     "src/pipecat/transports",
-    "src/pipecat/utils",
-    "tests",
-    "scripts",
-    "docs"
+    "tests"
   ],
   "reportMissingImports": false
 }

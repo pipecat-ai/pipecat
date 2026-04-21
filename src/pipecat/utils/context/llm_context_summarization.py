@@ -20,7 +20,11 @@ if TYPE_CHECKING:
 
 from loguru import logger
 
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+)
 
 # Fallback timeout (seconds) used when summarization_timeout is None.
 DEFAULT_SUMMARIZATION_TIMEOUT = 120.0
@@ -269,7 +273,7 @@ class LLMMessagesToSummarize:
         last_summarized_index: Index of the last message being summarized
     """
 
-    messages: list[dict]
+    messages: list[LLMContextMessage]
     last_summarized_index: int
 
 
@@ -415,7 +419,7 @@ class LLMContextSummarizationUtil:
 
     @staticmethod
     def _get_earliest_function_call_not_resolved_in_range(
-        messages: list[dict], start_idx: int, summary_end: int
+        messages: list[LLMContextMessage], start_idx: int, summary_end: int
     ) -> int:
         """Find the earliest message index with incomplete function calls.
 
@@ -470,9 +474,10 @@ class LLMContextSummarizationUtil:
             if role == "tool":
                 tool_call_id = msg.get("tool_call_id")
                 if tool_call_id and tool_call_id in pending_tool_calls:
-                    if not LLMContextSummarizationUtil._is_tool_message_pending(
-                        msg.get("content", "")
-                    ):
+                    content = msg.get("content", "")
+                    if not isinstance(content, str):
+                        content = ""
+                    if not LLMContextSummarizationUtil._is_tool_message_pending(content):
                         pending_tool_calls.pop(tool_call_id)
 
             # Check for async tool completion — a developer message with
@@ -480,7 +485,10 @@ class LLMContextSummarizationUtil:
             # async result has arrived and the call is now resolved.
             if role == "developer":
                 try:
-                    parsed = json.loads(msg.get("content", ""))
+                    content = msg.get("content", "")
+                    if not isinstance(content, str):
+                        continue
+                    parsed = json.loads(content)
                     if (
                         isinstance(parsed, dict)
                         and parsed.get("type") == "async_tool"

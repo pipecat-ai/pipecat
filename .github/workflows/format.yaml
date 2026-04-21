@@ -32,7 +32,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install development dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --extra daily --extra tracing
 
       - name: Ruff formatter
         id: ruff-format

@@ -79,6 +79,8 @@ def load_module_from_path(path: str | Path):
     module_name = path.stem
 
     spec = importlib.util.spec_from_file_location(module_name, str(path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module spec from {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

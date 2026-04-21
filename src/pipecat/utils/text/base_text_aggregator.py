@@ -125,7 +125,7 @@ class BaseTextAggregator(ABC):
         """
         pass
         # Make this a generator to satisfy type checker
-        yield  # pragma: no cover
+        yield  # pyright: ignore[reportReturnType]  # pragma: no cover
 
     @abstractmethod
     async def flush(self) -> Aggregation | None:
