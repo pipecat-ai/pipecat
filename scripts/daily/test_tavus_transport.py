@@ -2,7 +2,14 @@ import asyncio
 import os
 import signal
 
-from daily import *
+from daily import (
+    AudioData,
+    CallClient,
+    CustomAudioSource,
+    CustomAudioTrack,
+    Daily,
+    EventHandler,
+)
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -33,8 +40,8 @@ class DailyProxyApp(EventHandler):
     def __init__(self, sample_rate: int):
         super().__init__()
         self._sample_rate = sample_rate
-        self._loop = None
-        self._audio_queue: asyncio.Queue | None = None
+        self._loop = asyncio.new_event_loop()
+        self._audio_queue: asyncio.Queue = asyncio.Queue()
         self._audio_task: asyncio.Task | None = None
 
         self._client: CallClient = CallClient(event_handler=self)
@@ -52,7 +59,6 @@ class DailyProxyApp(EventHandler):
             self._loop.call_soon_threadsafe(self._loop.stop)
 
     def run(self, meeting_url: str):
-        self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._create_audio_task()
 
@@ -101,7 +107,6 @@ class DailyProxyApp(EventHandler):
 
     def _create_audio_task(self):
         if not self._audio_task:
-            self._audio_queue = asyncio.Queue()
             self._audio_task = self._loop.create_task(self._audio_task_handler())
 
     async def _cancel_audio_task(self):
@@ -113,7 +118,6 @@ class DailyProxyApp(EventHandler):
             except asyncio.CancelledError:
                 pass
             self._audio_task = None
-            self._audio_queue = None
 
     async def capture_participant_audio(self, participant_id: str):
         logger.info(f"Capturing participant audio: {participant_id}")
@@ -168,7 +172,7 @@ class DailyProxyApp(EventHandler):
 
 def main():
     Daily.init()
-    room_url = os.getenv("TAVUS_SAMPLE_ROOM_URL")
+    room_url = os.environ["TAVUS_SAMPLE_ROOM_URL"]
     app = DailyProxyApp(sample_rate=24000)
     app.run(room_url)
 

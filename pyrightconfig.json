@@ -11,7 +11,8 @@
     "src/pipecat/extensions",
     "src/pipecat/turns",
     "src/pipecat/pipeline",
-    "src/pipecat/runner"
+    "src/pipecat/runner",
+    "scripts"
   ],
   "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
@@ -24,9 +25,7 @@
     "src/pipecat/tests",
     "src/pipecat/transports",
     "src/pipecat/utils",
-    "tests",
-    "scripts",
-    "docs"
+    "tests"
   ],
   "reportMissingImports": false
 }

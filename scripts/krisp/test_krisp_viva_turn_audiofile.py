@@ -71,7 +71,7 @@ async def analyze_audio_file(
     frame_duration_ms: int = 20,
     chunk_duration_ms: int = 20,
     verbose: bool = False,
-    output_file: str = None,
+    output_file: str | None = None,
 ) -> None:
     """Analyze an audio file for turn detection using Krisp VIVA turn analyzer.
 

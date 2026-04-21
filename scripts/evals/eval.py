@@ -198,7 +198,7 @@ class EvalRunner:
 
 
 async def run_example_pipeline(script_path: Path, eval_config: EvalConfig):
-    room_url = os.getenv("DAILY_ROOM_URL")
+    room_url = os.environ["DAILY_ROOM_URL"]
 
     module = load_module_from_path(script_path)
 
@@ -227,7 +227,7 @@ async def run_eval_pipeline(
 ):
     logger.info(f"Starting eval bot")
 
-    room_url = os.getenv("DAILY_ROOM_URL")
+    room_url = os.environ["DAILY_ROOM_URL"]
 
     transport = DailyTransport(
         room_url,
@@ -243,7 +243,7 @@ async def run_eval_pipeline(
     # We disable smart formatting because some times if the user says "3 + 2 is
     # 5" (in audio) this can be converted to "32 is 5".
     stt = DeepgramSTTService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        api_key=os.environ["DEEPGRAM_API_KEY"],
         settings=DeepgramSTTService.Settings(
             language="multi",
             smart_format=False,
@@ -251,7 +251,7 @@ async def run_eval_pipeline(
     )
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
         ),
@@ -375,7 +375,7 @@ async def run_eval_pipeline(
     @task.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(task, frame):
         if isinstance(frame, EndFrame):
-            await eval_runner.assert_eval(frame.reason)
+            await eval_runner.assert_eval(bool(frame.reason))
         elif isinstance(frame, CancelFrame):
             await eval_runner.assert_eval(False)
 
