@@ -21,7 +21,6 @@
     "src/pipecat/processors",
     "src/pipecat/serializers",
     "src/pipecat/services",
-    "src/pipecat/sync",
     "src/pipecat/tests",
     "src/pipecat/transports",
     "src/pipecat/utils",
