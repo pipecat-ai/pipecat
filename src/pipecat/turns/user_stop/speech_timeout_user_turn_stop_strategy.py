@@ -66,7 +66,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # VAD-driven timers and completion flags.
         self._user_speech_timeout_task: asyncio.Task | None = None
         self._stt_timeout_task: asyncio.Task | None = None
-        self._user_speech_expired: bool = False
+        self._user_speech_wait_done: bool = False
         self._stt_wait_done: bool = False
 
         # Fallback timer (transcript arrived without VAD stop).
@@ -80,7 +80,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = False
         self._transcript_finalized = False
         self._vad_stopped_time = None
-        self._user_speech_expired = False
+        self._user_speech_wait_done = False
         self._stt_wait_done = False
         self._fallback_expired = False
         await self._cancel_all_tasks()
@@ -129,7 +129,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._vad_user_speaking = True
         self._transcript_finalized = False
         self._vad_stopped_time = None
-        self._user_speech_expired = False
+        self._user_speech_wait_done = False
         self._stt_wait_done = False
         self._fallback_expired = False
         await self._cancel_all_tasks()
@@ -202,7 +202,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         # If both VAD-path timers are done (or the fallback timer already
         # expired), the turn was waiting on text — trigger now.
-        if self._fallback_expired or (self._user_speech_expired and self._stt_wait_done):
+        if self._fallback_expired or (self._user_speech_wait_done and self._stt_wait_done):
             await self._maybe_trigger_user_turn_stopped()
             return
 
@@ -231,7 +231,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         finally:
             self._user_speech_timeout_task = None
 
-        self._user_speech_expired = True
+        self._user_speech_wait_done = True
         await self._maybe_trigger_user_turn_stopped()
 
     async def _stt_timeout_handler(self, timeout: float):
@@ -280,7 +280,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             return
 
         if self._vad_stopped_time is not None:
-            if self._user_speech_expired and self._stt_wait_done:
+            if self._user_speech_wait_done and self._stt_wait_done:
                 await self.trigger_user_turn_stopped()
             return
 
