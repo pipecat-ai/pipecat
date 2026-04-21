@@ -97,12 +97,19 @@ class SentryMetrics(FrameProcessorMetrics):
 
         Args:
             end_time: Optional end timestamp override.
+
+        Returns:
+            MetricsFrame produced by the base class, or None if not measuring.
+            Returning the frame is required so ``FrameProcessor.stop_ttfb_metrics``
+            can push it downstream to observers.
         """
-        await super().stop_ttfb_metrics(end_time=end_time)
+        frame = await super().stop_ttfb_metrics(end_time=end_time)
 
         if self._sentry_available and self._ttfb_metrics_tx:
             await self._sentry_queue.put(self._ttfb_metrics_tx)
             self._ttfb_metrics_tx = None
+
+        return frame
 
     async def start_processing_metrics(self, *, start_time: float | None = None):
         """Start tracking frame processing metrics.
@@ -126,12 +133,19 @@ class SentryMetrics(FrameProcessorMetrics):
 
         Args:
             end_time: Optional end timestamp override.
+
+        Returns:
+            MetricsFrame produced by the base class, or None if not measuring.
+            Returning the frame is required so ``FrameProcessor.stop_processing_metrics``
+            can push it downstream to observers.
         """
-        await super().stop_processing_metrics(end_time=end_time)
+        frame = await super().stop_processing_metrics(end_time=end_time)
 
         if self._sentry_available and self._processing_metrics_tx:
             await self._sentry_queue.put(self._processing_metrics_tx)
             self._processing_metrics_tx = None
+
+        return frame
 
     async def _sentry_task_handler(self):
         """Background task handler for completing Sentry transactions."""
