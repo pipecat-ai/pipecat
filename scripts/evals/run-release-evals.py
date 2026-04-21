@@ -108,6 +108,7 @@ TESTS_VOICE = [
     ("voice/voice-elevenlabs.py", EVAL_SIMPLE_MATH),
     ("voice/voice-elevenlabs-http.py", EVAL_SIMPLE_MATH),
     ("voice/voice-xai.py", EVAL_SIMPLE_MATH),
+    ("voice/voice-xai-http.py", EVAL_SIMPLE_MATH),
     ("voice/voice-azure.py", EVAL_SIMPLE_MATH),
     ("voice/voice-azure-http.py", EVAL_SIMPLE_MATH),
     ("voice/voice-openai.py", EVAL_SIMPLE_MATH),
