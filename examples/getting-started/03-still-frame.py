@@ -42,7 +42,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     imagegen = GoogleImageGenService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
     )
 
     task = PipelineTask(

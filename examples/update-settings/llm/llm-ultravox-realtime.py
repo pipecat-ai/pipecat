@@ -11,6 +11,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.base_llm_adapter import LLMContextMessage
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
@@ -55,7 +56,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = UltravoxRealtimeLLMService(
         params=OneShotInputParams(
-            api_key=os.getenv("ULTRAVOX_API_KEY"),
+            api_key=os.environ["ULTRAVOX_API_KEY"],
             system_prompt=system_prompt,
             temperature=0.3,
             max_duration=datetime.timedelta(minutes=3),
@@ -63,7 +64,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         one_shot_selected_tools=ToolsSchema(standard_tools=[]),
     )
 
-    messages = [
+    messages: list[LLMContextMessage] = [
         {
             "role": "system",
             "content": system_prompt,

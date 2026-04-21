@@ -58,14 +58,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
         stt = SarvamSTTService(
-            api_key=os.getenv("SARVAM_API_KEY"),
+            api_key=os.environ["SARVAM_API_KEY"],
             settings=SarvamSTTService.Settings(
                 model="saarika:v2.5",
             ),
         )
 
         tts = SarvamHttpTTSService(
-            api_key=os.getenv("SARVAM_API_KEY"),
+            api_key=os.environ["SARVAM_API_KEY"],
             aiohttp_session=session,
             settings=SarvamHttpTTSService.Settings(
                 language=Language.EN_IN,
@@ -73,7 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         llm = SarvamLLMService(
-            api_key=os.getenv("SARVAM_API_KEY"),
+            api_key=os.environ["SARVAM_API_KEY"],
             settings=SarvamLLMService.Settings(
                 system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
             ),

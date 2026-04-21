@@ -56,10 +56,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
         tts = NeuphonicHttpTTSService(
-            api_key=os.getenv("NEUPHONIC_API_KEY"),
+            api_key=os.environ["NEUPHONIC_API_KEY"],
             settings=NeuphonicHttpTTSService.Settings(
                 voice="fc854436-2dac-4d21-aa69-ae17b54e98eb",  # Emily
             ),
@@ -67,7 +67,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
+            api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAILLMService.Settings(
                 system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
             ),

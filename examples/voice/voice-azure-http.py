@@ -53,18 +53,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = AzureSTTService(
-        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+        api_key=os.environ["AZURE_SPEECH_API_KEY"],
         region=os.getenv("AZURE_SPEECH_REGION"),
     )
 
     tts = AzureHttpTTSService(
-        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-        region=os.getenv("AZURE_SPEECH_REGION"),
+        api_key=os.environ["AZURE_SPEECH_API_KEY"],
+        region=os.environ["AZURE_SPEECH_REGION"],
     )
 
     llm = AzureLLMService(
-        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
-        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+        api_key=os.environ["AZURE_CHATGPT_API_KEY"],
+        endpoint=os.environ["AZURE_CHATGPT_ENDPOINT"],
         settings=AzureLLMService.Settings(
             model=os.getenv("AZURE_CHATGPT_MODEL"),
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",

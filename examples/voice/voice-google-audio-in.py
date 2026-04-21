@@ -215,7 +215,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     llm = GoogleLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
         settings=GoogleLLMService.Settings(
             model="gemini-2.5-flash",
             system_instruction=system_message,
@@ -230,7 +230,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             language=Language.EN_US,
         ),
         params=GoogleTTSService.InputParams(language=Language.EN_US),
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+        credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
     )
 
     context = LLMContext()

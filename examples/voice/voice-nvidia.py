@@ -52,17 +52,17 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = NvidiaSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
+    stt = NvidiaSTTService(api_key=os.environ["NVIDIA_API_KEY"])
 
     llm = NvidiaLLMService(
-        api_key=os.getenv("NVIDIA_API_KEY"),
+        api_key=os.environ["NVIDIA_API_KEY"],
         settings=NvidiaLLMService.Settings(
             model="meta/llama-3.3-70b-instruct",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
 
-    tts = NvidiaTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
+    tts = NvidiaTTSService(api_key=os.environ["NVIDIA_API_KEY"])
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(

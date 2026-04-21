@@ -67,14 +67,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = GoogleSTTService(
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+        credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
         settings=GoogleSTTService.Settings(
             languages=[Language.EN_US],
         ),
     )
 
     tts = GoogleTTSService(
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+        credentials=os.environ["GOOGLE_TEST_CREDENTIALS"],
         settings=GoogleTTSService.Settings(
             voice="en-US-Chirp3-HD-Charon",
             language=Language.EN_US,
@@ -82,7 +82,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     llm = GoogleLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
         settings=GoogleLLMService.Settings(
             model="gemini-2.5-flash-image",
             # model="gemini-3-pro-image-preview", # A more powerful model, but slower,

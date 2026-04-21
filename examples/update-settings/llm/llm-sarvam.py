@@ -47,31 +47,26 @@ transport_params = {
 }
 
 
-def _require_env(name: str) -> str:
-    value = os.getenv(name)
-    if not value:
-        raise ValueError(f"Environment variable `{name}` is required.")
-    return value
-
-
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
     stt = SarvamSTTService(
         settings=SarvamSTTService.Settings(model="saaras:v3"),
-        api_key=_require_env("SARVAM_API_KEY"),
+        api_key=os.environ["SARVAM_API_KEY"],
     )
 
     tts = SarvamTTSService(
         settings=SarvamTTSService.Settings(model="bulbul:v3"),
-        api_key=_require_env("SARVAM_API_KEY"),
+        api_key=os.environ["SARVAM_API_KEY"],
     )
 
     llm = SarvamLLMService(
-        api_key=_require_env("SARVAM_API_KEY"),
-        settings=SarvamLLMService.Settings(model="sarvam-30b"),
-        system_instruction=(
-            "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
+        api_key=os.environ["SARVAM_API_KEY"],
+        settings=SarvamLLMService.Settings(
+            model="sarvam-30b",
+            system_instruction=(
+                "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
+            ),
         ),
     )
 

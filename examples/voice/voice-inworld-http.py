@@ -53,7 +53,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
     async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
         tts = InworldHttpTTSService(
             api_key=os.getenv("INWORLD_API_KEY", ""),
@@ -66,7 +66,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
+            api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAILLMService.Settings(
                 system_instruction="You are a helpful AI demonstrating Inworld AI's TTS. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
             ),

@@ -96,10 +96,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
@@ -125,7 +125,7 @@ indicate you should use the get_image tool are:
 """
 
     llm = GoogleLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
         settings=GoogleLLMService.Settings(
             system_instruction=system_prompt,
         ),

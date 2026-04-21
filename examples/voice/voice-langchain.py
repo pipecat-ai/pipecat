@@ -16,7 +16,7 @@ from langchain_openai import ChatOpenAI
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesUpdateFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -67,10 +67,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
@@ -129,8 +129,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # An `LLMContextFrame` will be picked up by the LangchainProcessor using
         # only the content of the last message to inject it in the prompt defined
         # above. So no role is required here.
-        messages = [({"content": "Please briefly introduce yourself to the user."})]
-        await task.queue_frames([LLMMessagesUpdateFrame(messages, run_llm=True)])
+        context.add_message(
+            {"role": "developer", "content": "Please briefly introduce yourself to the user."}
+        )
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

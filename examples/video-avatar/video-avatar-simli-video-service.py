@@ -56,22 +56,22 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",
         ),
     )
 
     simli_ai = SimliVideoService(
-        api_key=os.getenv("SIMLI_API_KEY"),
+        api_key=os.environ["SIMLI_API_KEY"],
         face_id="cace3ef7-a4c4-425d-a8cf-a5358eb0c427",
     )
 
     llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),

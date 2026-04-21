@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = MistralSTTService(
-        api_key=os.getenv("MISTRAL_API_KEY"),
+        api_key=os.environ["MISTRAL_API_KEY"],
     )
 
     tl = TranscriptionLogger()

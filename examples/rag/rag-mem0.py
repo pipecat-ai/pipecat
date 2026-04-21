@@ -133,11 +133,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     # Initialize text-to-speech service
     tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY"),
+        api_key=os.environ["ELEVENLABS_API_KEY"],
         settings=ElevenLabsTTSService.Settings(
             voice="pNInz6obpgDQGcFmaJgB",
         ),
@@ -196,7 +196,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Initialize LLM service
     llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             system_instruction="""You are a personal assistant. You can remember things about the person you are talking to.
                         Some Guidelines:

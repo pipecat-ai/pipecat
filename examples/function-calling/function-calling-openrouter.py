@@ -60,11 +60,11 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = AzureTTSService(
-        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-        region=os.getenv("AZURE_SPEECH_REGION"),
+        api_key=os.environ["AZURE_SPEECH_API_KEY"],
+        region=os.environ["AZURE_SPEECH_REGION"],
         settings=AzureTTSService.Settings(
             voice="en-US-JennyNeural",
             language="en-US",
@@ -74,7 +74,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     llm = OpenRouterLLMService(
-        api_key=os.getenv("OPENROUTER_API_KEY"),
+        api_key=os.environ["OPENROUTER_API_KEY"],
         settings=OpenRouterLLMService.Settings(
             model="openai/gpt-4o-2024-11-20",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",

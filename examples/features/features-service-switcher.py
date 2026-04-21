@@ -94,19 +94,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         required=["location", "format"],
     )
 
-    stt_cartesia = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
-    stt_deepgram = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt_cartesia = CartesiaSTTService(api_key=os.environ["CARTESIA_API_KEY"])
+    stt_deepgram = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     # Uses ServiceSwitcherStrategyManual by default
     stt_switcher = ServiceSwitcher(services=[stt_cartesia, stt_deepgram])
 
     tts_cartesia = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
     )
     tts_deepgram = DeepgramTTSService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        api_key=os.environ["DEEPGRAM_API_KEY"],
         settings=DeepgramTTSService.Settings(
             voice="aura-2-helena-en",
         ),
@@ -117,11 +117,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     system_prompt = "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way."
 
     llm_openai = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(system_instruction=system_prompt),
     )
     llm_google = GoogleLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
         settings=GoogleLLMService.Settings(system_instruction=system_prompt),
     )
     # Uses ServiceSwitcherStrategyManual by default

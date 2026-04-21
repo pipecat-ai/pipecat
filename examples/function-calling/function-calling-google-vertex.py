@@ -60,19 +60,19 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+        api_key=os.environ["ELEVENLABS_API_KEY"],
         settings=ElevenLabsTTSService.Settings(
-            voice=os.getenv("ELEVENLABS_VOICE_ID", ""),
+            voice=os.getenv("ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2"),
         ),
     )
 
     llm = GoogleVertexLLMService(
-        credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
-        project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
-        location=os.getenv("GOOGLE_CLOUD_LOCATION"),
+        credentials=os.environ["GOOGLE_VERTEX_TEST_CREDENTIALS"],
+        project_id=os.environ["GOOGLE_CLOUD_PROJECT_ID"],
+        location=os.environ["GOOGLE_CLOUD_LOCATION"],
         settings=GoogleVertexLLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
@@ -103,14 +103,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     tools = ToolsSchema(standard_tools=[weather_function])
 
-    messages = [
-        {
-            "role": "developer",
-            "content": "Start a conversation with 'Hey there' to get the current weather.",
-        },
-    ]
-
-    context = LLMContext(messages, tools)
+    context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -141,6 +134,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message(
+            {
+                "role": "developer",
+                "content": "Please introduce yourself to the user.",
+            }
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

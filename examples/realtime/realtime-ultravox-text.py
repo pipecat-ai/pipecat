@@ -168,7 +168,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
 
     llm = UltravoxRealtimeLLMService(
         params=OneShotInputParams(
-            api_key=os.getenv("ULTRAVOX_API_KEY"),
+            api_key=os.environ["ULTRAVOX_API_KEY"],
             system_prompt=system_prompt,
             temperature=0.3,
             max_duration=datetime.timedelta(minutes=3),

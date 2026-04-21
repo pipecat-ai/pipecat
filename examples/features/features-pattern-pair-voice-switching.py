@@ -126,14 +126,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm_text_aggregator.on_pattern_match("voice", on_voice_tag)
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     # Process LLM text through the pattern aggregator before TTS
     llm_text_processor = LLMTextProcessor(text_aggregator=llm_text_aggregator)
 
     # Initialize TTS with narrator voice as default
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice=VOICE_IDS["narrator"],
         ),
@@ -190,7 +190,7 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
 
     # Initialize LLM
     llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             system_instruction=system_prompt,
         ),

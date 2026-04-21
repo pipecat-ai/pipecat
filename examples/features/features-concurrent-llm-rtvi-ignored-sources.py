@@ -63,10 +63,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
@@ -74,7 +74,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Main LLM — drives the conversation. Its RTVI events reach the client.
     main_llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
@@ -83,7 +83,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Evaluator LLM — silently grades the user's message in the background.
     # Its RTVI events will be suppressed so the client is unaware of this branch.
     evaluator_llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         name="EvaluatorLLM",
         settings=OpenAILLMService.Settings(
             system_instruction="You are a silent quality evaluator. When given a user message, respond with a single JSON object: {'score': <1-5>, 'reason': '<brief reason>'}. Do not respond conversationally.",

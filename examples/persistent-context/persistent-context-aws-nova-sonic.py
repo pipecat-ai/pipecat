@@ -87,7 +87,9 @@ async def save_conversation(params: FunctionCallParams):
             # the simplest thing to do is to pop messages until the last one is an assistant
             # response
             while messages and not (
-                messages[-1].get("role") == "assistant" and "content" in messages[-1]
+                isinstance(messages[-1], dict)
+                and messages[-1].get("role") == "assistant"
+                and "content" in messages[-1]
             ):
                 messages.pop()
             if messages:  # we never expect this to be empty
@@ -125,6 +127,7 @@ async def load_conversation(params: FunctionCallParams):
                         }
                     )
                 params.context.set_messages(messages)
+                assert isinstance(params.llm, AWSNovaSonicLLMService)
                 await params.llm.reset_conversation()
                 # await params.llm.trigger_assistant_response()
         except Exception as e:
@@ -219,9 +222,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     llm = AWSNovaSonicLLMService(
-        secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        region=os.getenv("AWS_REGION"),  # as of 2025-05-06, us-east-1 is the only supported region
+        secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        region=os.environ["AWS_REGION"],  # as of 2025-05-06, us-east-1 is the only supported region
         settings=AWSNovaSonicLLMService.Settings(
             voice="tiffany",  # matthew, tiffany, amy
             system_instruction=system_instruction,
