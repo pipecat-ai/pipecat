@@ -96,7 +96,7 @@ class _WordTimestampEntry:
     word: str
     timestamp: float
     context_id: str
-    includes_inter_frame_spaces: bool = False
+    includes_inter_frame_spaces: bool | None = None
 
 
 class TTSService(AIService):
@@ -1066,7 +1066,7 @@ class TTSService(AIService):
         self,
         word_times: list[tuple[str, float]],
         context_id: str | None = None,
-        includes_inter_frame_spaces: bool = False,
+        includes_inter_frame_spaces: bool | None = None,
     ):
         """Add word timestamps for processing.
 
@@ -1080,7 +1080,8 @@ class TTSService(AIService):
             context_id: Unique identifier for the TTS context.
             includes_inter_frame_spaces: When True, the tokens already embed inter-word
                 spacing (spaces and punctuation are part of the token text). Downstream
-                consumers must not inject additional spaces between tokens.
+                consumers must not inject additional spaces between tokens. None leaves
+                the frame's own default unchanged.
         """
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
@@ -1104,7 +1105,7 @@ class TTSService(AIService):
         self,
         word_times: list[tuple[str, float]],
         context_id: str | None = None,
-        includes_inter_frame_spaces: bool = False,
+        includes_inter_frame_spaces: bool | None = None,
     ):
         """Process word timestamps directly, building and pushing TTSTextFrames inline.
 
@@ -1125,7 +1126,8 @@ class TTSService(AIService):
                 )
             else:
                 frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
-                frame.includes_inter_frame_spaces = includes_inter_frame_spaces
+                if includes_inter_frame_spaces is not None:
+                    frame.includes_inter_frame_spaces = includes_inter_frame_spaces
                 frame.pts = self._initial_word_timestamp + ts_ns
                 frame.context_id = context_id
                 if context_id in self._tts_contexts:
