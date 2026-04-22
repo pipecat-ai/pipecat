@@ -10,6 +10,7 @@ This module provides schemas for managing both standardized function tools
 and custom adapter-specific tools in the Pipecat framework.
 """
 
+from collections.abc import Sequence
 from enum import Enum
 from typing import Any
 
@@ -39,7 +40,7 @@ class ToolsSchema:
 
     def __init__(
         self,
-        standard_tools: list[FunctionSchema | DirectFunction],
+        standard_tools: Sequence[FunctionSchema | DirectFunction],
         custom_tools: dict[AdapterType, list[dict[str, Any]]] | None = None,
     ) -> None:
         """Initialize the tools schema.
@@ -75,7 +76,7 @@ class ToolsSchema:
         return self._standard_tools
 
     @property
-    def custom_tools(self) -> dict[AdapterType, list[dict[str, Any]]]:
+    def custom_tools(self) -> dict[AdapterType, list[dict[str, Any]]] | None:
         """Get the custom tools dictionary.
 
         Returns:

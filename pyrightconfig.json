@@ -6,9 +6,7 @@
   "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
     "tests",
-    "src/pipecat/adapters/base_llm_adapter.py",
     "src/pipecat/adapters/schemas/direct_function.py",
-    "src/pipecat/adapters/schemas/tools_schema.py",
     "src/pipecat/adapters/services/anthropic_adapter.py",
     "src/pipecat/adapters/services/aws_nova_sonic_adapter.py",
     "src/pipecat/adapters/services/bedrock_adapter.py",
@@ -78,7 +76,6 @@
     "src/pipecat/services/kokoro/tts.py",
     "src/pipecat/services/llm_service.py",
     "src/pipecat/services/lmnt/tts.py",
-    "src/pipecat/services/mcp_service.py",
     "src/pipecat/services/mem0/memory.py",
     "src/pipecat/services/mistral/llm.py",
     "src/pipecat/services/mistral/stt.py",
