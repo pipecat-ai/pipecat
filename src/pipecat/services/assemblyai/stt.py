@@ -433,7 +433,11 @@ class AssemblyAISTTService(WebsocketSTTService):
             while len(self._audio_buffer) >= self._chunk_size_bytes:
                 chunk = bytes(self._audio_buffer[: self._chunk_size_bytes])
                 self._audio_buffer = self._audio_buffer[self._chunk_size_bytes :]
-                await self._websocket.send(chunk)
+                try:
+                    await self._websocket.send(chunk)
+                except Exception as e:
+                    logger.warning(f"{self}: send failed: {e}")
+                    break
 
         yield None
 

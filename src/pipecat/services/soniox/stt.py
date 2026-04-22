@@ -412,7 +412,10 @@ class SonioxSTTService(WebsocketSTTService):
             Frame: None (transcription results come via WebSocket callbacks).
         """
         if self._websocket and self._websocket.state is State.OPEN:
-            await self._websocket.send(audio)
+            try:
+                await self._websocket.send(audio)
+            except Exception as e:
+                logger.warning(f"{self}: send failed: {e}")
 
         yield None
 

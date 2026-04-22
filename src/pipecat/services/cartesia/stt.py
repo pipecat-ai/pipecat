@@ -290,7 +290,10 @@ class CartesiaSTTService(WebsocketSTTService):
         if not self._websocket or self._websocket.state is not State.OPEN:
             await self._connect()
 
-        await self._websocket.send(audio)
+        try:
+            await self._websocket.send(audio)
+        except Exception as e:
+            logger.warning(f"{self}: send failed: {e}")
         yield None
 
     async def _connect(self):

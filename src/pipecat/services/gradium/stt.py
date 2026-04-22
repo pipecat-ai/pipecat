@@ -350,7 +350,11 @@ class GradiumSTTService(WebsocketSTTService):
             chunk = base64.b64encode(chunk).decode("utf-8")
             msg = {"type": "audio", "audio": chunk}
             if self._websocket and self._websocket.state is State.OPEN:
-                await self._websocket.send(json.dumps(msg))
+                try:
+                    await self._websocket.send(json.dumps(msg))
+                except Exception as e:
+                    logger.warning(f"{self}: send failed: {e}")
+                    break
 
         yield None
 
