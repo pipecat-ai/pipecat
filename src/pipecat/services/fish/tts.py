@@ -373,7 +373,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Fish Audio's streaming API.
 
         Args:

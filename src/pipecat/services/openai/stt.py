@@ -415,7 +415,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio data to the transcription session.
 
         Audio is streamed over the WebSocket. Transcription results arrive

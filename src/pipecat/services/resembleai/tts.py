@@ -431,7 +431,7 @@ class ResembleAITTSService(WebsocketTTSService):
                 await self._connect_websocket()
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Resemble AI's streaming API.
 
         Args:

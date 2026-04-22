@@ -209,7 +209,7 @@ class XAISTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Forward raw audio bytes to the xAI STT WebSocket.
 
         Transcription frames are pushed from the receive task, not yielded

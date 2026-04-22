@@ -660,7 +660,7 @@ class CartesiaTTSService(WebsocketTTSService):
             await self._connect_websocket()
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Cartesia's streaming API.
 
         Args:
@@ -873,7 +873,7 @@ class CartesiaHttpTTSService(TTSService):
         await self._close_session()
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Cartesia's HTTP API.
 
         Args:

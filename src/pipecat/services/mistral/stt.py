@@ -185,7 +185,7 @@ class MistralSTTService(STTService):
             if self._connection and not self._connection.is_closed:
                 await self._connection.flush_audio()
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio data to Mistral for transcription.
 
         Args:

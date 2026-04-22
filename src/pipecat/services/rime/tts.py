@@ -603,7 +603,7 @@ class RimeTTSService(WebsocketTTSService):
                 self.reset_active_audio_context()
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Rime's streaming API.
 
         Args:
@@ -786,7 +786,7 @@ class RimeHttpTTSService(TTSService):
         return language_to_rime_language(language)
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Rime's HTTP API.
 
         Args:
@@ -1142,7 +1142,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                 await self.push_error(error_msg=f"Error: {e}", exception=e)
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Rime's streaming API.
 
         Args:

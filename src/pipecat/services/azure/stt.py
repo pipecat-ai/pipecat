@@ -191,7 +191,7 @@ class AzureSTTService(STTService):
 
         return changed
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text conversion.
 
         Feeds audio data to the Azure speech recognizer for processing.

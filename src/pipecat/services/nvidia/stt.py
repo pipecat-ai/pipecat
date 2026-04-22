@@ -395,7 +395,7 @@ class NvidiaSTTService(STTService):
                         )
                     )
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text transcription.
 
         Args:
@@ -661,7 +661,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         """Handle a transcription result with tracing."""
         pass
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Transcribe an audio segment.
 
         Args:

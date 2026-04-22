@@ -188,7 +188,7 @@ class XAIHttpTTSService(TTSService):
             self._session = None
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using xAI's TTS API."""
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -466,7 +466,7 @@ class XAITTSService(InterruptibleTTSService):
                 logger.debug(f"{self}: unhandled xAI message type: {msg_type}")
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate TTS audio from text using xAI's streaming WebSocket API."""
         logger.debug(f"{self}: Generating TTS [{text}]")
 

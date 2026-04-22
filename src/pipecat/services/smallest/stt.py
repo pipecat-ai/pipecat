@@ -247,7 +247,7 @@ class SmallestSTTService(WebsocketSTTService):
                 except Exception as e:
                     logger.warning(f"{self} failed to send finalize: {e}")
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio to the Smallest Pulse WebSocket for transcription.
 
         Args:
