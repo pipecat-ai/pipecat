@@ -1265,11 +1265,8 @@ class GeminiLiveLLMService(LLMService):
     async def _create_initial_response(self, reconnect: bool = False):
         """Create initial response based on context history.
 
-        When reconnect=True, history is re-seeded into the new session but the
-        bot will not speak first. Bot-speaks-first involves additional state
-        (_inference_on_context_initialization, Gemini 3 realtime input nudge,
-        _needs_initial_turn_complete_message) that does not apply cleanly in
-        the reconnect path, so the user should initiate instead.
+        When reconnect=True, seeds history into a fresh session without the
+        bot speaking first. The user should initiate.
         """
         if self._disconnecting:
             return
@@ -1291,15 +1288,26 @@ class GeminiLiveLLMService(LLMService):
             await self.start_ttfb_metrics()
 
         try:
-            # On reconnect, always use turn_complete=False: we're seeding history
-            # only, not triggering a bot response.
-            infer = self._inference_on_context_initialization and not reconnect
-            await self._session.send_client_content(
-                turns=messages, turn_complete=infer
-            )
-            # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
-            if self._is_gemini_3 and self._inference_on_context_initialization and not reconnect:
-                await self._session.send_realtime_input(text=" ")
+            if reconnect:
+                # initial_history_in_client_content mode (set in HistoryConfig)
+                # commits history only when turn_complete=True, but the server
+                # rejects turn_complete=True on a trailing model turn, so drop
+                # any trailing model turns. The final user turn triggers a
+                # model response that resumes the conversation.
+                seed = list(messages)
+                while seed and getattr(seed[-1], "role", None) == "model":
+                    seed.pop()
+                if seed:
+                    await self._session.send_client_content(turns=seed, turn_complete=True)
+                    if self._is_gemini_3:
+                        await self._session.send_realtime_input(text=" ")
+            else:
+                await self._session.send_client_content(
+                    turns=messages, turn_complete=self._inference_on_context_initialization
+                )
+                # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
+                if self._is_gemini_3 and self._inference_on_context_initialization:
+                    await self._session.send_realtime_input(text=" ")
         except Exception as e:
             await self._handle_send_error(e)
 
@@ -1307,7 +1315,11 @@ class GeminiLiveLLMService(LLMService):
         # conversation history, set a flag saying that we'll need a turn
         # complete message when the user stops speaking.
         # This is a quirky workaround, and not one that Gemini 3 needs.
-        if not reconnect and not self._inference_on_context_initialization and not self._is_gemini_3:
+        if (
+            not reconnect
+            and not self._inference_on_context_initialization
+            and not self._is_gemini_3
+        ):
             self._needs_initial_turn_complete_message = True
 
         self._ready_for_realtime_input = True
@@ -1373,9 +1385,8 @@ class GeminiLiveLLMService(LLMService):
             # session state, so we can accept realtime input right away.
             self._ready_for_realtime_input = True
         elif self._context:
-            # Reconnect without session resumption (e.g. error occurred
-            # before server sent a resumption handle): re-seed conversation
-            # history. Bot won't speak first -- the user should initiate.
+            # Reconnect without session resumption: re-seed conversation
+            # history. User should initiate after this.
             await self._create_initial_response(reconnect=True)
         else:
             # Initial connection: session is ready before context has
