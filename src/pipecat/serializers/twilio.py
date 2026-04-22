@@ -8,6 +8,7 @@
 
 import base64
 import json
+from typing import cast
 
 from loguru import logger
 
@@ -75,7 +76,9 @@ class TwilioFrameSerializer(FrameSerializer):
             edge: Twilio edge location (e.g., "sydney", "dublin"). Must be specified with region.
             params: Configuration parameters.
         """
-        super().__init__(params or TwilioFrameSerializer.InputParams())
+        params = params or TwilioFrameSerializer.InputParams()
+        super().__init__(params)
+        self._params: TwilioFrameSerializer.InputParams = params
 
         # Validate hangup-related parameters if auto_hang_up is enabled
         if self._params.auto_hang_up:
@@ -178,9 +181,11 @@ class TwilioFrameSerializer(FrameSerializer):
         try:
             import aiohttp
 
-            account_sid = self._account_sid
-            auth_token = self._auth_token
-            call_sid = self._call_sid
+            # __init__ guarantees these are non-None whenever auto_hang_up is True,
+            # which is the only path that reaches this method.
+            account_sid = cast(str, self._account_sid)
+            auth_token = cast(str, self._auth_token)
+            call_sid = cast(str, self._call_sid)
             region = self._region
             edge = self._edge
 

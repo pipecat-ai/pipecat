@@ -10,6 +10,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.base_llm_adapter import LLMContextMessage
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -51,11 +52,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     llm = AzureRealtimeLLMService(
-        api_key=os.getenv("AZURE_REALTIME_API_KEY"),
-        base_url=os.getenv("AZURE_REALTIME_BASE_URL"),
+        api_key=os.environ["AZURE_REALTIME_API_KEY"],
+        base_url=os.environ["AZURE_REALTIME_BASE_URL"],
     )
 
-    messages = [
+    messages: list[LLMContextMessage] = [
         {
             "role": "system",
             "content": "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",

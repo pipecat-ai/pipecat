@@ -52,17 +52,17 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = GroqSTTService(api_key=os.getenv("GROQ_API_KEY"))
+    stt = GroqSTTService(api_key=os.environ["GROQ_API_KEY"])
 
     llm = GroqLLMService(
-        api_key=os.getenv("GROQ_API_KEY"),
+        api_key=os.environ["GROQ_API_KEY"],
         settings=GroqLLMService.Settings(
             model="llama-3.1-8b-instant",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
 
-    tts = GroqTTSService(api_key=os.getenv("GROQ_API_KEY"))
+    tts = GroqTTSService(api_key=os.environ["GROQ_API_KEY"])
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(

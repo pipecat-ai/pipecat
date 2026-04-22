@@ -58,8 +58,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # - AWS credentials configured (via environment variables or AWS CLI)
     # - A deployed SageMaker endpoint with Deepgram model
     stt = DeepgramSageMakerSTTService(
-        endpoint_name=os.getenv("SAGEMAKER_STT_ENDPOINT_NAME"),
-        region=os.getenv("AWS_REGION"),
+        endpoint_name=os.environ["SAGEMAKER_STT_ENDPOINT_NAME"],
+        region=os.environ["AWS_REGION"],
     )
 
     # Initialize Deepgram SageMaker TTS Service
@@ -67,8 +67,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # - AWS credentials configured (via environment variables or AWS CLI)
     # - A deployed SageMaker endpoint with Deepgram TTS model
     tts = DeepgramSageMakerTTSService(
-        endpoint_name=os.getenv("SAGEMAKER_TTS_ENDPOINT_NAME"),
-        region=os.getenv("AWS_REGION"),
+        endpoint_name=os.environ["SAGEMAKER_TTS_ENDPOINT_NAME"],
+        region=os.environ["AWS_REGION"],
         settings=DeepgramSageMakerTTSService.Settings(
             voice="aura-2-andromeda-en",
         ),

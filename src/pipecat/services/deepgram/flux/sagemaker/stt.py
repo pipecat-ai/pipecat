@@ -23,7 +23,6 @@ from pipecat.services.deepgram.flux.base import (
     DeepgramFluxSTTBase,
     DeepgramFluxSTTSettings,
 )
-from pipecat.transcriptions.language import Language
 
 
 @dataclass
@@ -112,12 +111,13 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         # Initialize default settings
         default_settings = self.Settings(
             model="flux-general-en",
-            language=Language.EN,
+            language=None,
             eager_eot_threshold=None,
             eot_threshold=None,
             eot_timeout_ms=None,
             keyterm=[],
             min_confidence=None,
+            language_hints=None,
         )
 
         # Apply settings delta

@@ -49,9 +49,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     llm = GeminiLiveVertexLLMService(
-        credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
-        project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
-        location=os.getenv("GOOGLE_CLOUD_LOCATION"),
+        credentials=os.environ["GOOGLE_VERTEX_TEST_CREDENTIALS"],
+        project_id=os.environ["GOOGLE_CLOUD_PROJECT_ID"],
+        location=os.environ["GOOGLE_CLOUD_LOCATION"],
         settings=GeminiLiveVertexLLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),

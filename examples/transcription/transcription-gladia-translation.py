@@ -55,9 +55,12 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
+    region = os.getenv("GLADIA_REGION", "us-west")
+    assert region in ("us-west", "eu-west"), f"Invalid GLADIA_REGION: {region}"
+
     stt = GladiaSTTService(
-        api_key=os.getenv("GLADIA_API_KEY"),
-        region=os.getenv("GLADIA_REGION"),
+        api_key=os.environ["GLADIA_API_KEY"],
+        region=region,
         settings=GladiaSTTService.Settings(
             language_config=LanguageConfig(
                 languages=[Language.EN],

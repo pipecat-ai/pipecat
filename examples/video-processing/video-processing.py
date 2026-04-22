@@ -96,20 +96,13 @@ Respond to what the user said in a creative and helpful way. Keep your responses
 
 async def run_bot(pipecat_transport):
     llm = GeminiLiveLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
         voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
         transcribe_user_audio=True,
         system_instruction=SYSTEM_INSTRUCTION,
     )
 
-    messages = [
-        {
-            "role": "developer",
-            "content": "Start by greeting the user warmly and introducing yourself.",
-        }
-    ]
-
-    context = LLMContext(messages)
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -141,6 +134,12 @@ async def run_bot(pipecat_transport):
     async def on_client_ready(rtvi):
         logger.info("Pipecat client ready.")
         # Kick off the conversation.
+        context.add_message(
+            {
+                "role": "developer",
+                "content": "Start by greeting the user warmly and introducing yourself.",
+            }
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @pipecat_transport.event_handler("on_client_connected")

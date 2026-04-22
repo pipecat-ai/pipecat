@@ -29,6 +29,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -51,17 +52,26 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramFluxSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # Start with the multilingual model and broad hints so Flux can auto-detect
+    # across English and Spanish. TranscriptionFrame.language will reflect
+    # whichever language Flux detected for each turn.
+    stt = DeepgramFluxSTTService(
+        api_key=os.environ["DEEPGRAM_API_KEY"],
+        settings=DeepgramFluxSTTService.Settings(
+            model="flux-general-multi",
+            language_hints=[Language.EN, Language.ES],
+        ),
+    )
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
     )
 
     llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
@@ -70,7 +80,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
     )
 
     pipeline = Pipeline(
@@ -108,17 +121,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating Deepgram Flux STT settings: eot_threshold, keyterm")
         await task.queue_frame(
             STTUpdateSettingsFrame(
-                delta=DeepgramFluxSTTSettings(
+                delta=DeepgramFluxSTTService.Settings(
                     eot_threshold=0.8,
                     keyterm=["Pipecat", "Deepgram"],
                 )
             )
         )
 
+        # Detect-then-lock: narrow the hints to a single language mid-stream.
+        # Sent as a Configure message — no reconnect needed.
         await asyncio.sleep(10)
-        logger.info("Updating Deepgram Flux STT settings: language=es")
+        logger.info("Updating Deepgram Flux STT settings: language_hints=[es]")
         await task.queue_frame(
-            STTUpdateSettingsFrame(delta=DeepgramFluxSTTService.Settings(language=Language.ES))
+            STTUpdateSettingsFrame(
+                delta=DeepgramFluxSTTService.Settings(language_hints=[Language.ES])
+            )
         )
 
     @transport.event_handler("on_client_disconnected")

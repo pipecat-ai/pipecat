@@ -125,7 +125,7 @@ class SmallestTTSService(InterruptibleTTSService):
         self,
         *,
         api_key: str,
-        base_url: str = "wss://waves-api.smallest.ai",
+        base_url: str = "wss://api.smallest.ai",
         sample_rate: int | None = None,
         settings: Settings | None = None,
         **kwargs,
@@ -174,6 +174,10 @@ class SmallestTTSService(InterruptibleTTSService):
         """
         return True
 
+    async def flush_audio(self, context_id: str | None = None):
+        """Flush any pending audio data."""
+        logger.trace(f"{self}: flushing audio")
+
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Smallest service language format.
 
@@ -217,7 +221,7 @@ class SmallestTTSService(InterruptibleTTSService):
 
     def _build_websocket_url(self) -> str:
         """Build the WebSocket URL from base URL and model."""
-        return f"{self._base_url}/api/v1/{self._settings.model}/get_speech/stream"
+        return f"{self._base_url}/waves/v1/{self._settings.model}/get_speech/stream"
 
     async def start(self, frame: StartFrame):
         """Start the Smallest TTS service.
@@ -350,16 +354,14 @@ class SmallestTTSService(InterruptibleTTSService):
             await self._send_keepalive()
 
     async def _send_keepalive(self):
-        """Send a flush message to keep the connection alive."""
+        """Send a silent message to keep the WebSocket connection alive."""
         if self._websocket and self._websocket.state is State.OPEN:
-            msg = {"flush": True}
+            msg = {
+                "text": " ",
+                "voice_id": self._settings.voice,
+                "language": self._settings.language,
+            }
             await self._websocket.send(json.dumps(msg))
-
-    async def flush_audio(self, context_id: str | None = None):
-        """Flush any pending audio synthesis."""
-        if not self._websocket or self._websocket.state is State.CLOSED:
-            return
-        await self._get_websocket().send(json.dumps({"flush": True}))
 
     async def _receive_messages(self):
         """Receive and process messages from the Smallest WebSocket API."""

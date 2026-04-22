@@ -83,23 +83,24 @@ class ProtobufFrameSerializer(FrameSerializer):
             Serialized frame as bytes, or None if frame type is not serializable.
         """
         # Wrapping this messages as a JSONFrame to send
+        serializable: Frame | MessageFrame = frame
         if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             if self.should_ignore_frame(frame):
                 return None
-            frame = MessageFrame(
+            serializable = MessageFrame(
                 data=json.dumps(frame.message),
             )
 
-        proto_frame = frame_protos.Frame()
-        if type(frame) not in self.SERIALIZABLE_TYPES:
-            logger.warning(f"Frame type {type(frame)} is not serializable")
+        proto_frame = frame_protos.Frame()  # type: ignore[attr-defined]
+        if type(serializable) not in self.SERIALIZABLE_TYPES:
+            logger.warning(f"Frame type {type(serializable)} is not serializable")
             return None
 
         # ignoring linter errors; we check that type(frame) is in this dict above
-        proto_optional_name = self.SERIALIZABLE_TYPES[type(frame)]  # type: ignore
+        proto_optional_name = self.SERIALIZABLE_TYPES[type(serializable)]  # type: ignore
         proto_attr = getattr(proto_frame, proto_optional_name)
-        for field in dataclasses.fields(frame):  # type: ignore
-            value = getattr(frame, field.name)
+        for field in dataclasses.fields(serializable):  # type: ignore
+            value = getattr(serializable, field.name)
             if value and hasattr(proto_attr, field.name):
                 setattr(proto_attr, field.name, value)
 
@@ -114,7 +115,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         Returns:
             Deserialized frame instance, or None if deserialization fails.
         """
-        proto = frame_protos.Frame.FromString(data)
+        proto = frame_protos.Frame.FromString(data)  # type: ignore[attr-defined]
         which = proto.WhichOneof("frame")
         if which not in self.DESERIALIZABLE_FIELDS:
             logger.error("Unable to deserialize a valid frame")

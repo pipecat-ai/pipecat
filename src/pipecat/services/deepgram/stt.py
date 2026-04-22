@@ -621,6 +621,7 @@ class DeepgramSTTService(STTService):
         """
         while True:
             connect_kwargs = self._build_connect_kwargs()
+            keepalive_task = None
             try:
                 async with self._client.listen.v1.connect(**connect_kwargs) as connection:
                     self._connection = connection
@@ -639,7 +640,8 @@ class DeepgramSTTService(STTService):
             finally:
                 self._connection_ready.clear()
                 self._connection = None
-                await self.cancel_task(keepalive_task)
+                if keepalive_task:
+                    await self.cancel_task(keepalive_task)
 
     async def _keepalive_handler(self):
         """Periodically send KeepAlive frames to prevent server-side timeout.

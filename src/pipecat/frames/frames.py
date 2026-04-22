@@ -20,7 +20,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
-    Optional,
 )
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -559,11 +558,11 @@ class LLMMessagesAppendFrame(DataFrame):
     current context.
 
     Parameters:
-        messages: List of message dictionaries to append.
+        messages: List of context messages to append.
         run_llm: Whether the context update should be sent to the LLM.
     """
 
-    messages: list[dict]
+    messages: list[LLMContextMessage]
     run_llm: bool | None = None
 
 
@@ -575,11 +574,11 @@ class LLMMessagesUpdateFrame(DataFrame):
     context LLM messages.
 
     Parameters:
-        messages: List of message dictionaries to replace current context.
+        messages: List of context messages to replace current context.
         run_llm: Whether the context update should be sent to the LLM.
     """
 
-    messages: list[dict]
+    messages: list[LLMContextMessage]
     run_llm: bool | None = None
 
 

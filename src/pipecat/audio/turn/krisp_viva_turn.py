@@ -7,7 +7,9 @@
 """Krisp turn analyzer for end-of-turn detection using Krisp VIVA SDK.
 
 This module provides a turn analyzer implementation using Krisp's turn detection
-(Tt) API to determine when a user has finished speaking in a conversation.
+v3 (Tt) API to determine when a user has finished speaking in a conversation.
+The Tt API accepts an external VAD flag alongside audio frames, allowing the
+model to leverage voice activity information for more accurate turn detection.
 
 Note: This analyzer uses a different model than KrispVivaFilter. The model path
 can be specified via the KRISP_VIVA_TURN_MODEL_PATH environment variable or
@@ -33,7 +35,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use KrispVivaTurn, you need to install krisp_audio.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class KrispTurnParams(BaseTurnParams):
@@ -53,8 +55,10 @@ class KrispTurnParams(BaseTurnParams):
 class KrispVivaTurn(BaseTurnAnalyzer):
     """Turn analyzer using Krisp VIVA SDK for end-of-turn detection.
 
-    Uses Krisp's turn detection (Tt) API to determine when a user has finished
-    speaking. This analyzer requires a valid Krisp model file to operate.
+    Uses Krisp's turn detection v3 (Tt) API to determine when a user has
+    finished speaking. The Tt API receives an external VAD flag with each
+    audio frame, which the ``is_speech`` parameter of ``append_audio``
+    provides. This analyzer requires a valid Krisp model file to operate.
     """
 
     def __init__(
@@ -158,14 +162,14 @@ class KrispVivaTurn(BaseTurnAnalyzer):
         """Create a turn detection session with the specified sample rate.
 
         Args:
-            sample_rate: Sample rate for the session
+            sample_rate: Sample rate for the session.
 
         Returns:
-            krisp_audio.TtFloat instance
+            krisp_audio.TtFloat instance.
 
         Raises:
-            ValueError: If sample rate or frame duration is not supported
-            RuntimeError: If session creation fails
+            ValueError: If sample rate or frame duration is not supported.
+            RuntimeError: If session creation fails.
         """
         try:
             model_info = krisp_audio.ModelInfo()
@@ -306,12 +310,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 # Instead, we wait for the model's probability check below to confirm
                 # end-of-turn based on the threshold.
 
-                prob = self._tt_session.process(frame.tolist())
-
-                # Negative values indicate the model is not ready yet (working with 100ms data)
-                # Skip processing until we get positive probabilities
-                if prob < 0:
-                    continue
+                prob = self._tt_session.process(frame.tolist(), is_speech, False)
 
                 # Store the probability for external access
                 self._last_probability = prob

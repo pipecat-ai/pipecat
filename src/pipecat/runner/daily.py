@@ -228,7 +228,7 @@ async def configure(
             room_properties.enable_dialout = True
 
         # Add SIP configuration if enabled
-        if sip_enabled:
+        if sip_enabled and sip_caller_phone:
             sip_params = DailyRoomSipParams(
                 display_name=sip_caller_phone,
                 video=sip_enable_video,

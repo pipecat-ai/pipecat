@@ -11,7 +11,7 @@ in sequence and manages frame flow between them, along with helper classes
 for pipeline source and sink operations.
 """
 
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 
 from pipecat.frames.frames import Frame
 from pipecat.pipeline.base_pipeline import BasePipeline
@@ -98,7 +98,7 @@ class Pipeline(BasePipeline):
 
     def __init__(
         self,
-        processors: list[FrameProcessor],
+        processors: Sequence[FrameProcessor],
         *,
         source: FrameProcessor | None = None,
         sink: FrameProcessor | None = None,
@@ -106,7 +106,7 @@ class Pipeline(BasePipeline):
         """Initialize the pipeline with a list of processors.
 
         Args:
-            processors: List of frame processors to connect in sequence.
+            processors: Sequence of frame processors to connect in sequence.
             source: An optional pipeline source processor.
             sink: An optional pipeline sink processor.
         """
@@ -116,7 +116,7 @@ class Pipeline(BasePipeline):
         # downstream outside of the pipeline.
         self._source = source or PipelineSource(self.push_frame, name=f"{self}::Source")
         self._sink = sink or PipelineSink(self.push_frame, name=f"{self}::Sink")
-        self._processors: list[FrameProcessor] = [self._source] + processors + [self._sink]
+        self._processors: list[FrameProcessor] = [self._source, *processors, self._sink]
 
         self._link_processors()
 

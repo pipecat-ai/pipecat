@@ -173,6 +173,8 @@ class TaskObserver(BaseObserver):
         return proxies
 
     async def _send_to_proxy(self, data: Any):
+        if not self._proxies:
+            return
         for proxy in self._proxies.values():
             await proxy.queue.put(data)
 

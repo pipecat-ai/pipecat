@@ -75,7 +75,8 @@ class GroundingMetadataProcessor(FrameProcessor):
         if isinstance(frame, LLMSearchResponseFrame):
             self._grounding_count += 1
             logger.info(f"\n\n🔍 GROUNDING METADATA RECEIVED #{self._grounding_count}\n")
-            logger.info(f"📝 Search Result Text: {frame.search_result[:200]}...")
+            if frame.search_result:
+                logger.info(f"📝 Search Result Text: {frame.search_result[:200]}...")
 
             if frame.rendered_content:
                 logger.info(f"🔗 Rendered Content: {frame.rendered_content}")
@@ -101,7 +102,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     llm = GeminiLiveLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
         settings=GeminiLiveLLMService.Settings(
             system_instruction=SYSTEM_INSTRUCTION,
             voice="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
@@ -111,16 +112,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Create a processor to capture grounding metadata
     grounding_processor = GroundingMetadataProcessor()
-
-    messages = [
-        {
-            "role": "user",
-            "content": "Please introduce yourself and let me know that you can help with current information by searching the web. Ask me what current information I'd like to know about.",
-        },
-    ]
-
     # Set up conversation context and management
-    context = LLMContext(messages)
+    context = LLMContext()
     # Server-side VAD is enabled by default; no local VAD is added.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
@@ -144,6 +137,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message(
+            {
+                "role": "developer",
+                "content": "Please introduce yourself and let me know that you can help with current information by searching the web. Ask me what current information I'd like to know about.",
+            }
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

@@ -10,6 +10,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.base_llm_adapter import LLMContextMessage
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -50,9 +51,9 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    llm = OpenAIRealtimeLLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAIRealtimeLLMService(api_key=os.environ["OPENAI_API_KEY"])
 
-    messages = [
+    messages: list[LLMContextMessage] = [
         {
             "role": "system",
             "content": "You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",

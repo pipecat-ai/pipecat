@@ -8,10 +8,10 @@
 
 import base64
 import json
+from typing import cast
 
 import aiohttp
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import (
@@ -46,7 +46,7 @@ class TelnyxFrameSerializer(FrameSerializer):
     credentials to be provided.
     """
 
-    class InputParams(BaseModel):
+    class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for TelnyxFrameSerializer.
 
         Parameters:
@@ -82,10 +82,26 @@ class TelnyxFrameSerializer(FrameSerializer):
             api_key: Your Telnyx API key (required for auto hang-up).
             params: Configuration parameters.
         """
+        params = params or TelnyxFrameSerializer.InputParams()
+        super().__init__(params)
+        self._params: TelnyxFrameSerializer.InputParams = params
+
+        # Validate hangup-related parameters if auto_hang_up is enabled
+        if self._params.auto_hang_up:
+            missing_credentials = []
+            if not call_control_id:
+                missing_credentials.append("call_control_id")
+            if not api_key:
+                missing_credentials.append("api_key")
+
+            if missing_credentials:
+                raise ValueError(
+                    f"auto_hang_up is enabled but missing required parameters: {', '.join(missing_credentials)}"
+                )
+
         self._stream_id = stream_id
         self._call_control_id = call_control_id
         self._api_key = api_key
-        self._params = params or TelnyxFrameSerializer.InputParams()
         self._params.outbound_encoding = outbound_encoding
         self._params.inbound_encoding = inbound_encoding
 
@@ -163,14 +179,10 @@ class TelnyxFrameSerializer(FrameSerializer):
     async def _hang_up_call(self):
         """Hang up the Telnyx call using Telnyx's REST API."""
         try:
-            call_control_id = self._call_control_id
-            api_key = self._api_key
-
-            if not call_control_id or not api_key:
-                logger.warning(
-                    "Cannot hang up Telnyx call: call_control_id and api_key must be provided"
-                )
-                return
+            # __init__ guarantees these are non-None whenever auto_hang_up is True,
+            # which is the only path that reaches this method.
+            call_control_id = cast(str, self._call_control_id)
+            api_key = cast(str, self._api_key)
 
             # Telnyx API endpoint for hanging up a call
             endpoint = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/hangup"

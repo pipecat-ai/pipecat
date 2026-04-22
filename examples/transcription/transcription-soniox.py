@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = SonioxSTTService(
-        api_key=os.getenv("SONIOX_API_KEY"),
+        api_key=os.environ["SONIOX_API_KEY"],
     )
 
     tl = TranscriptionLogger()

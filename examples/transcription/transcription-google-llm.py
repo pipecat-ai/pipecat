@@ -289,7 +289,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
+        api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(
             voice="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         ),
@@ -301,7 +301,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             model="gemini-2.5-flash",
             system_instruction=conversation_system_message,
         ),
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
         # we can give the GoogleLLMService a system instruction to use directly
         # in the GenerativeModel constructor. Let's do that rather than put
         # our system message in the messages list.
@@ -313,7 +313,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             model="gemini-2.5-flash",
             system_instruction=transcriber_system_message,
         ),
-        api_key=os.getenv("GOOGLE_API_KEY"),
+        api_key=os.environ["GOOGLE_API_KEY"],
     )
 
     messages = [

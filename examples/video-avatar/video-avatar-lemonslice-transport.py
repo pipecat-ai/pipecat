@@ -41,7 +41,7 @@ async def main():
     async with aiohttp.ClientSession() as session:
         transport = LemonSliceTransport(
             bot_name="Pipecat",
-            api_key=os.getenv("LEMONSLICE_API_KEY"),
+            api_key=os.environ["LEMONSLICE_API_KEY"],
             session=session,
             session_request=LemonSliceNewSessionRequest(
                 agent_id=os.getenv("LEMONSLICE_AGENT_ID"),
@@ -53,10 +53,10 @@ async def main():
             ),
         )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
         llm = GroqLLMService(
-            api_key=os.getenv("GROQ_API_KEY"),
+            api_key=os.environ["GROQ_API_KEY"],
             settings=GroqLLMService.Settings(
                 system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
             ),

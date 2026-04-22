@@ -59,7 +59,9 @@ class ExotelFrameSerializer(FrameSerializer):
             call_sid: The associated Exotel Call SID (optional, not used in this implementation).
             params: Configuration parameters.
         """
-        super().__init__(params or ExotelFrameSerializer.InputParams())
+        params = params or ExotelFrameSerializer.InputParams()
+        super().__init__(params)
+        self._params: ExotelFrameSerializer.InputParams = params
 
         self._stream_sid = stream_sid
         self._call_sid = call_sid

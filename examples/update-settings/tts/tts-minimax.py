@@ -52,16 +52,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
         tts = MiniMaxHttpTTSService(
-            api_key=os.getenv("MINIMAX_API_KEY", ""),
-            group_id=os.getenv("MINIMAX_GROUP_ID", ""),
+            api_key=os.environ["MINIMAX_API_KEY"],
+            group_id=os.environ["MINIMAX_GROUP_ID"],
             aiohttp_session=session,
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
+            api_key=os.environ["OPENAI_API_KEY"],
             settings=OpenAILLMService.Settings(
                 system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
             ),
