@@ -1262,8 +1262,15 @@ class GeminiLiveLLMService(LLMService):
         except Exception as e:
             await self._handle_send_error(e)
 
-    async def _create_initial_response(self):
-        """Create initial response based on context history."""
+    async def _create_initial_response(self, reconnect: bool = False):
+        """Create initial response based on context history.
+
+        When reconnect=True, history is re-seeded into the new session but the
+        bot will not speak first. Bot-speaks-first involves additional state
+        (_inference_on_context_initialization, Gemini 3 realtime input nudge,
+        _needs_initial_turn_complete_message) that does not apply cleanly in
+        the reconnect path, so the user should initiate instead.
+        """
         if self._disconnecting:
             return
 
@@ -1280,14 +1287,18 @@ class GeminiLiveLLMService(LLMService):
 
         logger.debug(f"Creating initial response: {messages}")
 
-        await self.start_ttfb_metrics()
+        if not reconnect:
+            await self.start_ttfb_metrics()
 
         try:
+            # On reconnect, always use turn_complete=False: we're seeding history
+            # only, not triggering a bot response.
+            infer = self._inference_on_context_initialization and not reconnect
             await self._session.send_client_content(
-                turns=messages, turn_complete=self._inference_on_context_initialization
+                turns=messages, turn_complete=infer
             )
             # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
-            if self._is_gemini_3 and self._inference_on_context_initialization:
+            if self._is_gemini_3 and self._inference_on_context_initialization and not reconnect:
                 await self._session.send_realtime_input(text=" ")
         except Exception as e:
             await self._handle_send_error(e)
@@ -1296,7 +1307,7 @@ class GeminiLiveLLMService(LLMService):
         # conversation history, set a flag saying that we'll need a turn
         # complete message when the user stops speaking.
         # This is a quirky workaround, and not one that Gemini 3 needs.
-        if not self._inference_on_context_initialization and not self._is_gemini_3:
+        if not reconnect and not self._inference_on_context_initialization and not self._is_gemini_3:
             self._needs_initial_turn_complete_message = True
 
         self._ready_for_realtime_input = True
@@ -1364,21 +1375,8 @@ class GeminiLiveLLMService(LLMService):
         elif self._context:
             # Reconnect without session resumption (e.g. error occurred
             # before server sent a resumption handle): re-seed conversation
-            # history so the new session retains full context before
-            # accepting input.
-            try:
-                adapter = self.get_llm_adapter()
-                messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
-                if messages:
-                    logger.info(
-                        f"Re-seeding {len(messages)} conversation turns after reconnect"
-                    )
-                    await self._session.send_client_content(
-                        turns=messages, turn_complete=False
-                    )
-            except Exception as e:
-                logger.error(f"Failed to re-seed conversation on reconnect: {e}")
-            self._ready_for_realtime_input = True
+            # history. Bot won't speak first -- the user should initiate.
+            await self._create_initial_response(reconnect=True)
         else:
             # Initial connection: session is ready before context has
             # arrived. Nothing to do — _handle_context will call
