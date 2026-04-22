@@ -109,7 +109,6 @@
     "src/pipecat/services/ultravox/llm.py",
     "src/pipecat/services/websocket_service.py",
     "src/pipecat/services/whisper/stt.py",
-    "src/pipecat/services/xai/realtime/events.py",
     "src/pipecat/services/xai/realtime/llm.py",
     "src/pipecat/services/xtts/tts.py",
     "src/pipecat/transports/base_output.py",
