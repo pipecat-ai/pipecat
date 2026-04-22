@@ -30,12 +30,14 @@ class _PassthroughResampler:
         return audio
 
 
-async def _make_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
-    """Create and start a processor ready to record.
+async def _setup_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
+    """Create and initialise a processor without starting recording.
 
     Calls setup() and sends a StartFrame through the public process_frame path so that
     the processor is fully initialised (task manager set, sample rate configured,
-    __started flag set) without needing a full pipeline.
+    __started flag set) without needing a full pipeline. The clock is explicitly
+    started so tests exercising pipeline-clock values (e.g. ``recording_start_time``)
+    observe realistic non-zero timestamps.
     """
     processor = AudioBufferProcessor(sample_rate=16000, num_channels=2, buffer_size=buffer_size)
     processor._input_resampler = _PassthroughResampler()
@@ -44,11 +46,22 @@ async def _make_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
     loop = asyncio.get_event_loop()
     task_manager = TaskManager()
     task_manager.setup(TaskManagerParams(loop=loop))
-    await processor.setup(FrameProcessorSetup(clock=SystemClock(), task_manager=task_manager))
+    clock = SystemClock()
+    clock.start()
+    await processor.setup(FrameProcessorSetup(clock=clock, task_manager=task_manager))
 
     await processor.process_frame(
         StartFrame(audio_out_sample_rate=16000), FrameDirection.DOWNSTREAM
     )
+    # Yield once so the processor's input-frame task actually starts running before
+    # any test tears it down; avoids spurious "coroutine was never awaited" warnings.
+    await asyncio.sleep(0)
+    return processor
+
+
+async def _make_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
+    """Create a processor and start recording, ready for audio frames."""
+    processor = await _setup_processor(buffer_size=buffer_size)
     await processor.start_recording()
     return processor
 
@@ -322,6 +335,69 @@ class TestSilenceInjectionGuards(unittest.IsolatedAsyncioTestCase):
         await p.cleanup()
 
         self.assertEqual(user_track[:8], b"\x00" * 8)
+
+
+class TestRecordingStartTime(unittest.IsolatedAsyncioTestCase):
+    """Tests for the ``recording_start_time`` property.
+
+    The property exposes the pipeline-clock time (in nanoseconds) at which the
+    current recording started, letting downstream consumers align pipeline-clock
+    events to the recorded audio's t=0.
+    """
+
+    async def test_recording_start_time_is_none_before_start(self):
+        """Before ``start_recording()`` is ever called, the property is ``None``."""
+        p = await _setup_processor()
+        try:
+            self.assertIsNone(p.recording_start_time)
+        finally:
+            await p.cleanup()
+
+    async def test_recording_start_time_captured_on_start(self):
+        """``start_recording()`` captures the current pipeline-clock time."""
+        p = await _setup_processor()
+        try:
+            self.assertIsNone(p.recording_start_time)
+            await p.start_recording()
+            anchor = p.recording_start_time
+            self.assertIsNotNone(anchor)
+            self.assertIsInstance(anchor, int)
+            self.assertGreater(anchor, 0)
+        finally:
+            await p.stop_recording()
+            await p.cleanup()
+
+    async def test_recording_start_time_cleared_on_stop(self):
+        """``stop_recording()`` clears the anchor back to ``None``."""
+        p = await _setup_processor()
+        try:
+            await p.start_recording()
+            self.assertIsNotNone(p.recording_start_time)
+            await p.stop_recording()
+            self.assertIsNone(p.recording_start_time)
+        finally:
+            await p.cleanup()
+
+    async def test_recording_start_time_refreshed_on_restart(self):
+        """A second ``start_recording()`` captures a fresh, later anchor."""
+        p = await _setup_processor()
+        try:
+            await p.start_recording()
+            first = p.recording_start_time
+            self.assertIsNotNone(first)
+
+            await p.stop_recording()
+            # Allow the monotonic clock to advance so the second anchor is strictly
+            # greater than the first; ~1 ms is plenty for nanosecond resolution.
+            await asyncio.sleep(0.001)
+
+            await p.start_recording()
+            second = p.recording_start_time
+            self.assertIsNotNone(second)
+            self.assertGreater(second, first)
+        finally:
+            await p.stop_recording()
+            await p.cleanup()
 
 
 if __name__ == "__main__":
