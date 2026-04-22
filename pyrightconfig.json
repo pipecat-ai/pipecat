@@ -2,14 +2,8 @@
   "typeCheckingMode": "basic",
   "pythonVersion": "3.11",
   "pythonPlatform": "All",
-  "include": [
-    "scripts",
-    "src/pipecat"
-  ],
-  "exclude": [
-    "**/*_pb2.py",
-    "**/__pycache__"
-  ],
+  "include": ["scripts", "src/pipecat"],
+  "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
     "tests",
     "src/pipecat/adapters/services/anthropic_adapter.py",
@@ -82,7 +76,6 @@
     "src/pipecat/services/llm_service.py",
     "src/pipecat/services/lmnt/tts.py",
     "src/pipecat/services/mem0/memory.py",
-    "src/pipecat/services/mistral/llm.py",
     "src/pipecat/services/mistral/stt.py",
     "src/pipecat/services/mistral/tts.py",
     "src/pipecat/services/moondream/vision.py",
