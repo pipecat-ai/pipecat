@@ -101,7 +101,7 @@ class DailyRunnerArguments(RunnerArguments):
 
 @dataclass
 class VonageRunnerArguments(RunnerArguments):
-    """Daily transport session arguments for the runner.
+    """Vonage transport session arguments for the runner.
 
     Parameters:
         application_id: Vonage application ID
