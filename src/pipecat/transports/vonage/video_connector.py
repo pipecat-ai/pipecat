@@ -360,8 +360,8 @@ class VonageVideoConnectorTransport(BaseTransport):
             )
         )
 
-        self._input: Optional[VonageVideoConnectorInputTransport] = None
-        self._output: Optional[VonageVideoConnectorOutputTransport] = None
+        self._input: VonageVideoConnectorInputTransport | None = None
+        self._output: VonageVideoConnectorOutputTransport | None = None
         self._one_stream_received: bool = False
 
     def input(self) -> FrameProcessor:

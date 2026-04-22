@@ -8,10 +8,11 @@ import asyncio
 import inspect
 import sys
 import threading
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Optional
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 
 import numpy as np
@@ -76,7 +77,7 @@ class MockPublisher:
 
 @dataclass(eq=True, frozen=True)
 class MockSubscriber:
-    stream: Optional[MockStream] = None
+    stream: MockStream | None = None
 
 
 @dataclass(eq=True, frozen=True)
@@ -100,9 +101,9 @@ class MockSessionVideoPublisherSettings:
 
 @dataclass(eq=True, frozen=True)
 class MockSessionAVSettings:
-    audio_publisher: Optional[MockSessionAudioSettings] = None
-    audio_subscribers_mix: Optional[MockSessionAudioSettings] = None
-    video_publisher: Optional[MockSessionVideoPublisherSettings] = None
+    audio_publisher: MockSessionAudioSettings | None = None
+    audio_subscribers_mix: MockSessionAudioSettings | None = None
+    video_publisher: MockSessionVideoPublisherSettings | None = None
 
 
 @dataclass(eq=True, frozen=True)
@@ -113,8 +114,8 @@ class MockLoggingSettings:
 @dataclass(eq=True, frozen=True)
 class MockSessionSettings:
     enable_migration: bool = False
-    av: Optional[MockSessionAVSettings] = None
-    logging: Optional[MockLoggingSettings] = None
+    av: MockSessionAVSettings | None = None
+    logging: MockLoggingSettings | None = None
 
 
 @dataclass(eq=True, frozen=True)
@@ -128,7 +129,7 @@ class MockPublisherSettings:
     name: str
     has_audio: bool
     has_video: bool
-    audio_settings: Optional[MockPublisherAudioSettings] = None
+    audio_settings: MockPublisherAudioSettings | None = None
 
 
 @dataclass(eq=True, frozen=True)
@@ -140,15 +141,15 @@ class MockVideoFrame:
 
 @dataclass(eq=True, frozen=True)
 class MockSubscriberVideoSettings:
-    preferred_resolution: Optional[MockVideoResolution] = None
-    preferred_framerate: Optional[int] = None
+    preferred_resolution: MockVideoResolution | None = None
+    preferred_framerate: int | None = None
 
 
 @dataclass(eq=True, frozen=True)
 class MockSubscriberSettings:
     subscribe_to_audio: bool = True
     subscribe_to_video: bool = True
-    video_settings: Optional[MockSubscriberVideoSettings] = None
+    video_settings: MockSubscriberVideoSettings | None = None
 
 
 # Set up the mock module structure
@@ -232,11 +233,11 @@ class TestVonageVideoConnectorTransport:
         self.application_id = "test-app-id"
         self.session_id = "test-session-id"
         self.token = "test-token"
-        self._frame_processor_setup: Optional[FrameProcessorSetup] = None
+        self._frame_processor_setup: FrameProcessorSetup | None = None
         self._executor = ThreadPoolExecutor(max_workers=1)
 
         # subscriber state
-        self._connect_callbacks: Optional[ConnectCallbacks] = None
+        self._connect_callbacks: ConnectCallbacks | None = None
         self._subscriber_callbacks: dict[str, SubscriberCallbacks] = {}
 
     def _get_frame_processor_setup(self) -> FrameProcessorSetup:
@@ -271,7 +272,7 @@ class TestVonageVideoConnectorTransport:
 
         while not condition():
             if asyncio.get_event_loop().time() - start_time > timeout_seconds:
-                raise asyncio.TimeoutError(f"Condition not met within {timeout}")
+                raise TimeoutError(f"Condition not met within {timeout}")
             await asyncio.sleep(check_interval_seconds)
 
     def test_vonage_client_listener_defaults(self) -> None:
@@ -399,7 +400,7 @@ class TestVonageVideoConnectorTransport:
 
     async def _create_client(
         self,
-        params: Optional[VonageVideoConnectorTransportParams] = None,
+        params: VonageVideoConnectorTransportParams | None = None,
         setup_connect_mock: bool = True,
     ) -> VonageClient:
         params = params or VonageVideoConnectorTransportParams()
@@ -788,7 +789,7 @@ class TestVonageVideoConnectorTransport:
         )
 
         def connect_side_effect(
-            *_: Any, on_ready_for_audio_cb: Optional[Callable[[Any], None]] = None, **__: Any
+            *_: Any, on_ready_for_audio_cb: Callable[[Any], None] | None = None, **__: Any
         ) -> bool:
             assert on_ready_for_audio_cb is not None
             connecting_future.set_result(on_ready_for_audio_cb)
