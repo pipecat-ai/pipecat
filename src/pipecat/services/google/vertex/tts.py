@@ -35,7 +35,6 @@ from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
-from pipecat.utils.tracing.service_decorators import traced_tts
 
 from pipecat.frames.frames import (
     Frame,
@@ -54,6 +53,7 @@ from pipecat.services.settings import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     from google.api_core.client_options import ClientOptions
@@ -265,11 +265,7 @@ class VertexTTSService(GoogleVertexBaseTTSService):
     _settings: Settings
 
     class InputParams(BaseModel):
-        """Input parameters for Vertex TTS configuration.
-
-        .. deprecated:: 0.0.105
-            Use ``VertexTTSService.Settings`` directly via the ``settings`` parameter instead.
-        """
+        """Legacy input parameters. Prefer ``VertexTTSService.Settings`` via the ``settings`` parameter."""
 
         language: Language | None = Language.EN
         speaking_rate: float | None = None
@@ -426,11 +422,7 @@ class VertexGeminiTTSService(TTSService):
     ]
 
     class InputParams(BaseModel):
-        """Input parameters for Vertex Gemini TTS configuration.
-
-        .. deprecated:: 0.0.105
-            Use ``VertexGeminiTTSService.Settings`` directly via the ``settings`` parameter instead.
-        """
+        """Legacy input parameters. Prefer ``VertexGeminiTTSService.Settings`` via the ``settings`` parameter."""
 
         language: Language | None = Language.EN
         prompt: str | None = None
