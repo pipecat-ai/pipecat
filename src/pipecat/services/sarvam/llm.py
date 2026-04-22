@@ -83,7 +83,10 @@ class SarvamLLMService(OpenAILLMService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        self._validate_model(default_settings.model)
+        model = default_settings.model
+        if not isinstance(model, str):
+            raise ValueError("Sarvam LLM requires a non-empty model string.")
+        self._validate_model(model)
 
         super().__init__(
             api_key=api_key,

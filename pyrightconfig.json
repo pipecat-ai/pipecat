@@ -2,14 +2,8 @@
   "typeCheckingMode": "basic",
   "pythonVersion": "3.11",
   "pythonPlatform": "All",
-  "include": [
-    "scripts",
-    "src/pipecat"
-  ],
-  "exclude": [
-    "**/*_pb2.py",
-    "**/__pycache__"
-  ],
+  "include": ["scripts", "src/pipecat"],
+  "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
     "tests",
     "src/pipecat/adapters/base_llm_adapter.py",
@@ -40,7 +34,6 @@
     "src/pipecat/processors/frameworks/rtvi/processor.py",
     "src/pipecat/processors/frameworks/strands_agents.py",
     "src/pipecat/processors/gstreamer/pipeline_source.py",
-    "src/pipecat/services/ai_service.py",
     "src/pipecat/services/anthropic/llm.py",
     "src/pipecat/services/assemblyai/stt.py",
     "src/pipecat/services/asyncai/tts.py",
@@ -106,7 +99,6 @@
     "src/pipecat/services/resembleai/tts.py",
     "src/pipecat/services/rime/tts.py",
     "src/pipecat/services/sambanova/llm.py",
-    "src/pipecat/services/sarvam/llm.py",
     "src/pipecat/services/sarvam/stt.py",
     "src/pipecat/services/sarvam/tts.py",
     "src/pipecat/services/simli/video.py",

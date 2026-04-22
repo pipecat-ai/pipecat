@@ -66,8 +66,9 @@ class AIService(FrameProcessor):
         Args:
             model: The name of the AI model to use.
         """
+        model = self._settings.model
         self.set_core_metrics_data(
-            MetricsData(processor=self.name, model=self._settings.model or "")
+            MetricsData(processor=self.name, model=model if isinstance(model, str) else "")
         )
 
     async def start(self, frame: StartFrame):
