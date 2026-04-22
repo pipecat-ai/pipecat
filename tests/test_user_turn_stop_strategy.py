@@ -529,6 +529,107 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         # Non-finalized transcript received after timeout, triggers immediately
         self.assertTrue(should_start)
 
+    async def test_finalized_short_circuits_stt_wait(self):
+        """Finalized transcript cancels the stt_timeout safety net.
+
+        user_speech_timeout still runs to completion as a policy floor,
+        but stt_timeout is skipped once STT says it's done. Net effect:
+        the turn stops at user_speech_timeout, not stt_timeout.
+        """
+        stt_timeout = AGGREGATION_TIMEOUT * 4
+        strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=AGGREGATION_TIMEOUT)
+        await strategy.setup(self.task_manager)
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
+        )
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S → E: starts user_speech_timeout (short) and stt_timeout (long).
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        # Finalized transcript arrives before user_speech_timeout elapses.
+        await strategy.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="cat", timestamp="", finalized=True)
+        )
+        # user_speech_timeout is still running, so no trigger yet.
+        self.assertIsNone(should_start)
+
+        # user_speech_timeout elapses — stt_timeout was short-circuited,
+        # so the turn stops now rather than waiting for stt_timeout.
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertTrue(should_start)
+
+    async def test_non_finalized_waits_full_stt_timeout(self):
+        """Non-finalized transcript does not short-circuit stt_timeout.
+
+        When STT never signals finalization, the stt_timeout safety net
+        must run its full course — the turn should not stop until the
+        longer of the two timers has elapsed.
+        """
+        stt_timeout = AGGREGATION_TIMEOUT * 4
+        strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=AGGREGATION_TIMEOUT)
+        await strategy.setup(self.task_manager)
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
+        )
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S → E: both timers start.
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        # Non-finalized transcript during the wait.
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+
+        # user_speech_timeout elapses but stt_timeout has not — no trigger.
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertIsNone(should_start)
+
+        # Wait for the remainder of stt_timeout.
+        await asyncio.sleep(stt_timeout - AGGREGATION_TIMEOUT + 0.1)
+        self.assertTrue(should_start)
+
+    async def test_fallback_uses_only_user_speech_timeout(self):
+        """Fallback path (no VAD) ignores stt_timeout and uses only user_speech_timeout.
+
+        stt_timeout is defined as "p99 after VAD stop" — without a VAD
+        reference point it has no meaning. The fallback measures
+        inactivity since the last transcript, which is user_speech_timeout.
+        """
+        stt_timeout = AGGREGATION_TIMEOUT * 4
+        strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=AGGREGATION_TIMEOUT)
+        await strategy.setup(self.task_manager)
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
+        )
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # Transcript arrives without any VAD frame — fallback path.
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+
+        # The fallback timer is user_speech_timeout, not stt_timeout.
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertTrue(should_start)
+
     async def test_reset_clears_stale_text_no_premature_stop(self):
         """Test that reset() clears stale text and cancels timeout, preventing premature stop.
 
