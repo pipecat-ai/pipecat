@@ -114,7 +114,6 @@
     "src/pipecat/transports/heygen/transport.py",
     "src/pipecat/transports/lemonslice/transport.py",
     "src/pipecat/transports/livekit/transport.py",
-    "src/pipecat/transports/local/tk.py",
     "src/pipecat/transports/smallwebrtc/connection.py",
     "src/pipecat/transports/smallwebrtc/request_handler.py",
     "src/pipecat/transports/smallwebrtc/transport.py",
