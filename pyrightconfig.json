@@ -2,8 +2,14 @@
   "typeCheckingMode": "basic",
   "pythonVersion": "3.11",
   "pythonPlatform": "All",
-  "include": ["scripts", "src/pipecat"],
-  "exclude": ["**/*_pb2.py", "**/__pycache__"],
+  "include": [
+    "scripts",
+    "src/pipecat"
+  ],
+  "exclude": [
+    "**/*_pb2.py",
+    "**/__pycache__"
+  ],
   "ignore": [
     "tests",
     "src/pipecat/adapters/base_llm_adapter.py",
@@ -23,7 +29,6 @@
     "src/pipecat/audio/filters/aic_filter.py",
     "src/pipecat/audio/filters/krisp_viva_filter.py",
     "src/pipecat/audio/filters/rnnoise_filter.py",
-    "src/pipecat/audio/resamplers/soxr_stream_resampler.py",
     "src/pipecat/audio/turn/smart_turn/local_smart_turn_v2.py",
     "src/pipecat/audio/turn/smart_turn/local_smart_turn_v3.py",
     "src/pipecat/audio/vad/silero.py",
@@ -35,7 +40,6 @@
     "src/pipecat/processors/frameworks/rtvi/processor.py",
     "src/pipecat/processors/frameworks/strands_agents.py",
     "src/pipecat/processors/gstreamer/pipeline_source.py",
-    "src/pipecat/processors/metrics/frame_processor_metrics.py",
     "src/pipecat/services/ai_service.py",
     "src/pipecat/services/anthropic/llm.py",
     "src/pipecat/services/assemblyai/stt.py",
@@ -130,7 +134,6 @@
     "src/pipecat/transports/smallwebrtc/transport.py",
     "src/pipecat/transports/tavus/transport.py",
     "src/pipecat/transports/websocket/client.py",
-    "src/pipecat/transports/websocket/fastapi.py",
     "src/pipecat/transports/websocket/server.py",
     "src/pipecat/transports/whatsapp/client.py"
   ],

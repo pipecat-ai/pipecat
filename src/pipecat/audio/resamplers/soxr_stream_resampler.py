@@ -68,7 +68,7 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
                 self._soxr_stream.clear()
         self._last_resample_time = current_time
 
-    def _maybe_initialize_sox_stream(self, in_rate: int, out_rate: int):
+    def _maybe_initialize_sox_stream(self, in_rate: int, out_rate: int) -> "soxr.ResampleStream":
         if self._soxr_stream is None:
             self._initialize(in_rate, out_rate)
         else:
@@ -79,6 +79,9 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
                 f"SOXRStreamAudioResampler cannot be reused with different sample rates: "
                 f"expected {self._in_rate}->{self._out_rate}, got {in_rate}->{out_rate}"
             )
+
+        assert self._soxr_stream is not None
+        return self._soxr_stream
 
     async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
         """Resample audio data using soxr.ResampleStream resampler library.
@@ -94,8 +97,8 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
         if in_rate == out_rate:
             return audio
 
-        self._maybe_initialize_sox_stream(in_rate, out_rate)
+        stream = self._maybe_initialize_sox_stream(in_rate, out_rate)
         audio_data = np.frombuffer(audio, dtype=np.int16)
-        resampled_audio = self._soxr_stream.resample_chunk(audio_data)
+        resampled_audio = stream.resample_chunk(audio_data)
         result = resampled_audio.astype(np.int16).tobytes()
         return result
