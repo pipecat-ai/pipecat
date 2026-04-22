@@ -292,6 +292,7 @@ class TTSService(AIService):
         self._processing_text: bool = False
         self._tts_contexts: dict[str, TTSContext] = {}
         self._streamed_text: str = ""
+        self._sent_non_whitespace_in_context: bool = False
         self._text_aggregation_metrics_started: bool = False
 
         # Word timestamp state
@@ -683,6 +684,7 @@ class TTSService(AIService):
 
             # Reset aggregator state
             self._processing_text = False
+            self._sent_non_whitespace_in_context = False
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
                     # Route through the serialization queue so the frame is
@@ -697,6 +699,8 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
+            saved_sent_non_whitespace = self._sent_non_whitespace_in_context
+            self._sent_non_whitespace_in_context = False
             # TTSSpeakFrame is independent — temporarily clear the turn context
             # so create_context_id() generates a fresh UUID for this utterance.
             saved_turn_context_id = self._turn_context_id
@@ -717,6 +721,7 @@ class TTSService(AIService):
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
             self._turn_context_id = saved_turn_context_id
+            self._sent_non_whitespace_in_context = saved_sent_non_whitespace
             self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
             if frame.service is not None and frame.service is not self:
@@ -843,6 +848,7 @@ class TTSService(AIService):
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._processing_text = False
+        self._sent_non_whitespace_in_context = False
         await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
             await filter.handle_interruption()
@@ -900,13 +906,22 @@ class TTSService(AIService):
             await self.push_frame(src_frame)
             return
 
-        # Remove leading newlines only
-        text = text.lstrip("\n")
-
-        # Don't send only whitespace. This causes problems for some TTS models. But also don't
-        # strip all whitespace, as whitespace can influence prosody.
-        if not text.strip():
-            return
+        # Whitespace gating depends on aggregation mode:
+        # - Token streaming: drop all leading whitespace at the start of a context, as
+        #   nothing substantive has been sent yet for it to attach to. Once a non-whitespace
+        #   token has been sent, send whitespace as-is since it can influence prosody between
+        #   non-whitespace tokens.
+        #
+        # - Sentence aggregation: strip leading newlines only and drop pure-whitespace frames.
+        if self._is_streaming_tokens:
+            if not self._sent_non_whitespace_in_context:
+                text = text.lstrip()
+            if not text:
+                return
+        else:
+            text = text.lstrip("\n")
+            if not text.strip():
+                return
 
         # This is just a flag that indicates if we sent something to the TTS
         # service. It will be cleared if we sent text because of a TTSSpeakFrame
@@ -928,9 +943,15 @@ class TTSService(AIService):
             await filter.reset_interruption()
             text = await filter.filter(text)
 
-        if not text.strip():
-            if not self._is_streaming_tokens:
-                await self.stop_processing_metrics()
+        # Post-filter whitespace gate. Mirrors the pre-filter logic so filter
+        # output that collapses to whitespace-only is handled consistently.
+        if self._is_streaming_tokens:
+            # If empty, or only-whitespace and we haven't sent any non-whitespace, skip.
+            if not text or (not text.strip() and not self._sent_non_whitespace_in_context):
+                return
+            self._sent_non_whitespace_in_context = True
+        elif not text.strip():
+            await self.stop_processing_metrics()
             return
 
         # Create context ID and store metadata
