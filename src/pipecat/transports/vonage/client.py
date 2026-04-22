@@ -8,12 +8,12 @@
 import asyncio
 import itertools
 import threading
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Any, Awaitable, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 
 import numpy as np
 from loguru import logger
@@ -96,8 +96,8 @@ class VonageVideoConnectorTransportParams(TransportParams):
     audio_in_auto_subscribe: bool = True
     video_in_auto_subscribe: bool = False
     video_connector_log_level: str = "INFO"
-    video_in_preferred_resolution: Optional[tuple[int, int]] = None
-    video_in_preferred_framerate: Optional[int] = None
+    video_in_preferred_resolution: tuple[int, int] | None = None
+    video_in_preferred_framerate: int | None = None
     clear_buffers_on_interruption: bool = True
 
 
@@ -114,8 +114,8 @@ class SubscribeSettings:
 
     subscribe_to_audio: bool = True
     subscribe_to_video: bool = False
-    preferred_resolution: Optional[tuple[int, int]] = None
-    preferred_framerate: Optional[int] = None
+    preferred_resolution: tuple[int, int] | None = None
+    preferred_framerate: int | None = None
 
 
 class VonageException(Exception):
@@ -211,7 +211,7 @@ SimpleCoroutine = Coroutine[Any, Any, None]
 DUMMY_CONNECTION = Connection(id="", creation_time=datetime.min)
 
 
-def _to_enum(value: Optional[str], enum_cls: type[TE]) -> Optional[TE]:
+def _to_enum(value: str | None, enum_cls: type[TE]) -> TE | None:
     """Convert a string value to the specified StrEnum type, returning None if invalid."""
     try:
         return enum_cls(value or "")
@@ -259,25 +259,25 @@ class VonageClient:
 
         self._connected: bool = False
         self._connection_counter: int = 0
-        self._connecting_future: Optional[asyncio.Future[None]] = None
-        self._disconnecting_future: Optional[asyncio.Future[None]] = None
+        self._connecting_future: asyncio.Future[None] | None = None
+        self._disconnecting_future: asyncio.Future[None] | None = None
 
         self._listener_id_gen: itertools.count[int] = itertools.count()
         self._listeners: dict[int, VonageClientListener] = {}
 
-        self._publisher: Optional[Publisher] = None
+        self._publisher: Publisher | None = None
         self._session = Session(id=session_id)
 
         self._resampler = create_stream_resampler()
 
-        self._task_manager: Optional[BaseTaskManager] = None
+        self._task_manager: BaseTaskManager | None = None
         self._loop_thread_id = threading.get_ident()
-        self._event_queue: Optional[asyncio.Queue[SimpleCoroutine]] = None
-        self._event_task: Optional[asyncio.Task[None]] = None
-        self._audio_queue: Optional[asyncio.Queue[SimpleCoroutine]] = None
-        self._audio_task: Optional[asyncio.Task[None]] = None
-        self._video_queue: Optional[asyncio.Queue[SimpleCoroutine]] = None
-        self._video_task: Optional[asyncio.Task[None]] = None
+        self._event_queue: asyncio.Queue[SimpleCoroutine] | None = None
+        self._event_task: asyncio.Task[None] | None = None
+        self._audio_queue: asyncio.Queue[SimpleCoroutine] | None = None
+        self._audio_task: asyncio.Task[None] | None = None
+        self._video_queue: asyncio.Queue[SimpleCoroutine] | None = None
+        self._video_task: asyncio.Task[None] | None = None
 
         # used for blocking calls to connect and disconnect
         self._executor = ThreadPoolExecutor(max_workers=1)
@@ -366,7 +366,7 @@ class VonageClient:
         """
         self._listeners.pop(listener_id, None)
 
-    async def connect(self, frame: Optional[StartFrame] = None) -> None:
+    async def connect(self, frame: StartFrame | None = None) -> None:
         """Connect to the Vonage session.
 
         Args:
@@ -698,7 +698,7 @@ class VonageClient:
 
         try:
             await asyncio.wait_for(async_proc(), timeout=VIDEO_CONNECTOR_TIMEOUT.total_seconds())
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             logger.error(f"Timeout connecting to Vonage session {self._session_id}")
 
             raise exc
@@ -715,7 +715,7 @@ class VonageClient:
                 self._get_event_loop().run_in_executor(self._executor, disconnect_proc),
                 timeout=VIDEO_CONNECTOR_TIMEOUT.total_seconds(),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(f"Timeout disconnecting from Vonage session {self._session_id}")
             raise
 
@@ -800,7 +800,7 @@ class VonageClient:
 
         try:
             await asyncio.wait_for(process(), timeout=VIDEO_CONNECTOR_TIMEOUT.total_seconds())
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(f"Timeout subscribing to Vonage stream {stream.id}")
             self._session_subscriptions.pop(stream.id, None)
             raise
@@ -856,7 +856,7 @@ class VonageClient:
         self._loop_thread_id = threading.get_ident()
         # if we allow concurrent tasks, process them as they come in
         if allow_concurrent:
-            active_tasks = set()
+            active_tasks: set[asyncio.Task[Any]] = set()
 
             async def wrapped_task(coroutine: SimpleCoroutine) -> None:
                 try:
@@ -907,7 +907,7 @@ class VonageClient:
     def _sdk_cb_to_loop(
         self,
         queue_type_name: str,
-        queue: Optional[asyncio.Queue[SimpleCoroutine]],
+        queue: asyncio.Queue[SimpleCoroutine] | None,
         async_task: SimpleCoroutine,
     ) -> None:
         """From an SDK thread queue a coroutine to be asynchronously executed in the task manager event loop.
