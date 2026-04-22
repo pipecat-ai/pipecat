@@ -24,9 +24,9 @@ Both services require a GCP project ID, a region, and service-account credential
 import json
 import os
 
-from pipecat.utils.tracing.service_decorators import traced_tts
-
-# Suppress gRPC fork warnings on forked processes
+# Must be set before any gRPC import — suppresses fork-safety warnings emitted
+# by grpc when the process is forked (e.g. under uvicorn workers).  Only affects
+# VertexTTSService (texttospeech_v1 / gRPC); harmless for VertexGeminiTTSService.
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from collections.abc import AsyncGenerator
@@ -35,6 +35,7 @@ from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 from pipecat.frames.frames import (
     Frame,
@@ -139,13 +140,19 @@ class GoogleVertexBaseTTSService(TTSService):
     def _create_client(
         self, credentials: str | None, credentials_path: str | None
     ) -> texttospeech_v1.TextToSpeechAsyncClient:
-        creds = self._get_credentials(credentials, credentials_path)
+        self._creds = self._get_credentials(credentials, credentials_path)
         client_options = ClientOptions(
             api_endpoint=f"{self._location}-texttospeech.googleapis.com"
         )
         return texttospeech_v1.TextToSpeechAsyncClient(
-            credentials=creds, client_options=client_options
+            credentials=self._creds, client_options=client_options
         )
+
+    def _ensure_credentials_fresh(self) -> None:
+        """Refresh the service-account token if it has expired or is about to."""
+        if not self._creds.valid:
+            logger.debug(f"{self.__class__.__name__}: refreshing expired credentials")
+            self._creds.refresh(Request())
 
     @staticmethod
     def _get_credentials(
@@ -200,6 +207,7 @@ class GoogleVertexBaseTTSService(TTSService):
                 input=texttospeech_v1.StreamingSynthesisInput(**synthesis_input_params)
             )
 
+        self._ensure_credentials_fresh()
         streaming_responses = await self._client.streaming_synthesize(request_generator())
         await self.start_tts_usage_metrics(text)
 
@@ -350,12 +358,17 @@ class VertexTTSService(GoogleVertexBaseTTSService):
                     language_code=self._settings.language, name=self._settings.voice
                 )
 
+            speaking_rate = (
+                self._settings.speaking_rate
+                if is_given(self._settings.speaking_rate)
+                else None
+            )
             streaming_config = texttospeech_v1.StreamingSynthesizeConfig(
                 voice=voice,
                 streaming_audio_config=texttospeech_v1.StreamingAudioConfig(
                     audio_encoding=texttospeech_v1.AudioEncoding.PCM,
                     sample_rate_hertz=self.sample_rate,
-                    speaking_rate=self._settings.speaking_rate,
+                    speaking_rate=speaking_rate,
                 ),
             )
 
@@ -445,22 +458,11 @@ class VertexGeminiTTSService(TTSService):
             credentials_path: Path to a service-account JSON file.
             project_id: GCP project ID (required for Vertex AI).
             location: GCP region, e.g. ``"us-central1"``.
-            model: Gemini TTS model name.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=VertexGeminiTTSService.Settings(model=...)`` instead.
-
-            voice_id: Voice name from ``AVAILABLE_VOICES``.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=VertexGeminiTTSService.Settings(voice=...)`` instead.
-
+            model: Gemini TTS model name. Prefer ``settings=Settings(model=...)`` instead.
+            voice_id: Voice name from ``AVAILABLE_VOICES``. Prefer ``settings=Settings(voice=...)`` instead.
             sample_rate: Output sample rate in Hz. Gemini TTS outputs 24 kHz;
                 passing a different value will trigger a warning.
-            params: Deprecated configuration object.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=VertexGeminiTTSService.Settings(...)`` instead.
+            params: Legacy configuration object. Prefer ``settings=Settings(...)`` instead.
 
             settings: Runtime-updatable settings delta.
             **kwargs: Forwarded to ``TTSService``.
@@ -489,12 +491,6 @@ class VertexGeminiTTSService(TTSService):
             self._warn_init_param_moved_to_settings("voice_id", "voice")
             default_settings.voice = voice_id
 
-        if default_settings.voice not in self.AVAILABLE_VOICES:
-            logger.warning(
-                f"VertexGeminiTTSService: voice '{default_settings.voice}' not in known list — "
-                "using anyway, but verify it is available on Vertex AI."
-            )
-
         # 3. Deprecated params overrides (only if settings not provided)
         if params is not None:
             self._warn_init_param_moved_to_settings("params")
@@ -511,6 +507,12 @@ class VertexGeminiTTSService(TTSService):
         # 4. Settings delta (always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        if default_settings.voice not in self.AVAILABLE_VOICES:
+            logger.warning(
+                f"VertexGeminiTTSService: voice '{default_settings.voice}' not in known list — "
+                "using anyway, but verify it is available on Vertex AI."
+            )
 
         # Store Vertex AI coordinates before creating the client, as _create_genai_client needs them.
         self._project_id = project_id
@@ -539,17 +541,23 @@ class VertexGeminiTTSService(TTSService):
         self, credentials: str | None, credentials_path: str | None
     ) -> GenAIClient:
         """Create a google.genai Client routed to the Vertex AI aiplatform endpoint."""
-        creds = self._get_credentials(credentials, credentials_path)
+        self._creds = self._get_credentials(credentials, credentials_path)
         logger.debug(
             f"VertexGeminiTTSService: creating GenAI client — "
             f"project={self._project_id}, location={self._location}"
         )
         return GenAIClient(
             vertexai=True,
-            credentials=creds,
+            credentials=self._creds,
             project=self._project_id,
             location=self._location,
         )
+
+    def _ensure_credentials_fresh(self) -> None:
+        """Refresh the service-account token if it has expired or is about to expire."""
+        if not self._creds.valid:
+            logger.debug("VertexGeminiTTSService: refreshing expired credentials")
+            self._creds.refresh(Request())
 
     @staticmethod
     def _get_credentials(
@@ -643,6 +651,8 @@ class VertexGeminiTTSService(TTSService):
         )
 
         try:
+            self._ensure_credentials_fresh()
+
             # Build speech config — single-speaker or multi-speaker
             if self._settings.multi_speaker and self._settings.speaker_configs:
                 logger.debug(
@@ -680,7 +690,7 @@ class VertexGeminiTTSService(TTSService):
             genai_config = genai_types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
                 speech_config=speech_config,
-                system_instruction=self._settings.prompt or None,
+                system_instruction=self._settings.prompt if self._settings.prompt else None,
             )
 
             logger.debug(

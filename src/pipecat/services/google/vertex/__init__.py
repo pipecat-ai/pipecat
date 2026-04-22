@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from pipecat.services.google.vertex.llm import GoogleVertexLLMService, GoogleVertexLLMSettings
 from pipecat.services.google.vertex.tts import (
     VertexGeminiTTSService,
     VertexGeminiTTSSettings,
