@@ -59,7 +59,8 @@ class VisionService(AIService):
             Frame: Frames containing the vision analysis results, typically TextFrame
             objects with descriptions or answers.
         """
-        pass
+        raise NotImplementedError
+        yield  # pragma: no cover
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, handling vision image frames for analysis.
