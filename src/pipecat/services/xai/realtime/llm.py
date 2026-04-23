@@ -53,6 +53,7 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
     _NotGiven,
+    assert_given,
     is_given,
 )
 from pipecat.utils.time import time_now_iso8601
@@ -319,13 +320,14 @@ class GrokRealtimeLLMService(LLMService):
             Configured sample rate or None if not manually configured.
             For PCMU/PCMA formats, returns 8000 Hz (G.711 standard).
         """
-        if not self._settings.session_properties.audio:
+        session_properties = assert_given(self._settings.session_properties)
+        if not session_properties.audio:
             return None
 
         audio_config = (
-            self._settings.session_properties.audio.input
+            session_properties.audio.input
             if direction == "input"
-            else self._settings.session_properties.audio.output
+            else session_properties.audio.output
         )
 
         if audio_config and audio_config.format:
@@ -355,8 +357,9 @@ class GrokRealtimeLLMService(LLMService):
 
     def _is_turn_detection_enabled(self) -> bool:
         """Check if server-side VAD is enabled."""
-        if self._settings.session_properties.turn_detection:
-            return self._settings.session_properties.turn_detection.type == "server_vad"
+        session_properties = assert_given(self._settings.session_properties)
+        if session_properties.turn_detection:
+            return session_properties.turn_detection.type == "server_vad"
         return False
 
     async def _handle_interruption(self):
@@ -423,7 +426,7 @@ class GrokRealtimeLLMService(LLMService):
             input_sample_rate: Sample rate for audio input (Hz).
             output_sample_rate: Sample rate for audio output (Hz).
         """
-        props = self._settings.session_properties
+        props = assert_given(self._settings.session_properties)
         if not props.audio:
             props.audio = events.AudioConfiguration()
         if not props.audio.input:
@@ -592,12 +595,13 @@ class GrokRealtimeLLMService(LLMService):
 
     async def _send_session_update(self):
         """Update session settings on the server."""
-        settings = self._settings.session_properties
+        settings = assert_given(self._settings.session_properties)
         adapter: GrokRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:
             llm_invocation_params = adapter.get_llm_invocation_params(
-                self._context, system_instruction=self._settings.system_instruction
+                self._context,
+                system_instruction=assert_given(self._settings.system_instruction),
             )
 
             if llm_invocation_params["tools"]:

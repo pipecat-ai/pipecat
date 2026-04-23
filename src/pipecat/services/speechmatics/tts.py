@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -183,7 +183,9 @@ class SpeechmaticsTTSService(TTSService):
         }
 
         # Complete HTTP URL
-        url = _get_endpoint_url(self._base_url, self._settings.voice, self.sample_rate)
+        url = _get_endpoint_url(
+            self._base_url, assert_given(self._settings.voice), self.sample_rate
+        )
 
         try:
             # Track attempt
@@ -208,7 +210,8 @@ class SpeechmaticsTTSService(TTSService):
                             attempt += 1
 
                             # Check if we've exceeded the maximum number of attempts
-                            if attempt >= self._settings.max_retries:
+                            max_retries = assert_given(self._settings.max_retries)
+                            if max_retries is not None and attempt >= max_retries:
                                 raise ValueError()
 
                             # Report error frame

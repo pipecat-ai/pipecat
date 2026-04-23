@@ -39,7 +39,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven, is_given
+from pipecat.services.settings import LLMSettings, _NotGiven, assert_given, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -281,11 +281,13 @@ class AnthropicLLMService(LLMService):
         messages = []
         system = NOT_GIVEN
         tools = []
-        effective_instruction = system_instruction or self._settings.system_instruction
+        effective_instruction = system_instruction or assert_given(
+            self._settings.system_instruction
+        )
         adapter: AnthropicLLMAdapter = self.get_llm_adapter()
         invocation_params = adapter.get_llm_invocation_params(
             context,
-            enable_prompt_caching=self._settings.enable_prompt_caching,
+            enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=effective_instruction,
         )
         messages = invocation_params["messages"]
@@ -305,8 +307,9 @@ class AnthropicLLMService(LLMService):
             "tools": tools,
             "betas": ["interleaved-thinking-2025-05-14"],
         }
-        if self._settings.thinking:
-            params["thinking"] = self._settings.thinking.model_dump(exclude_unset=True)
+        thinking = assert_given(self._settings.thinking)
+        if thinking:
+            params["thinking"] = thinking.model_dump(exclude_unset=True)
 
         params.update(self._settings.extra)
 
@@ -319,8 +322,8 @@ class AnthropicLLMService(LLMService):
         adapter: AnthropicLLMAdapter = self.get_llm_adapter()
         params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(
             context,
-            enable_prompt_caching=self._settings.enable_prompt_caching,
-            system_instruction=self._settings.system_instruction,
+            enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
+            system_instruction=assert_given(self._settings.system_instruction),
         )
         return params
 
@@ -359,8 +362,9 @@ class AnthropicLLMService(LLMService):
             }
 
             # Add thinking parameter if set
-            if self._settings.thinking:
-                params["thinking"] = self._settings.thinking.model_dump(exclude_unset=True)
+            thinking = assert_given(self._settings.thinking)
+            if thinking:
+                params["thinking"] = thinking.model_dump(exclude_unset=True)
 
             # Messages, system, tools
             params.update(params_from_context)

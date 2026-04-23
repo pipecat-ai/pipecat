@@ -55,6 +55,7 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
     _NotGiven,
+    assert_given,
     is_given,
 )
 from pipecat.transcriptions.language import Language
@@ -359,12 +360,18 @@ class OpenAIRealtimeLLMService(LLMService):
 
     def _is_modality_enabled(self, modality: str) -> bool:
         """Check if a specific modality is enabled, "text" or "audio"."""
-        modalities = self._settings.session_properties.output_modalities or ["audio", "text"]
+        modalities = assert_given(self._settings.session_properties).output_modalities or [
+            "audio",
+            "text",
+        ]
         return modality in modalities
 
     def _get_enabled_modalities(self) -> list[str]:
         """Get the list of enabled modalities."""
-        modalities = self._settings.session_properties.output_modalities or ["audio", "text"]
+        modalities = assert_given(self._settings.session_properties).output_modalities or [
+            "audio",
+            "text",
+        ]
         # API only supports single modality responses: either ["text"] or ["audio"]
         if "audio" in modalities:
             return ["audio"]
@@ -436,10 +443,11 @@ class OpenAIRealtimeLLMService(LLMService):
     async def _handle_interruption(self):
         # None and False are different. Check for False. None means we're using OpenAI's
         # built-in turn detection defaults.
+        session_properties = assert_given(self._settings.session_properties)
         turn_detection_disabled = (
-            self._settings.session_properties.audio
-            and self._settings.session_properties.audio.input
-            and self._settings.session_properties.audio.input.turn_detection is False
+            session_properties.audio
+            and session_properties.audio.input
+            and session_properties.audio.input.turn_detection is False
         )
         if turn_detection_disabled:
             await self.send_client_event(events.InputAudioBufferClearEvent())
@@ -458,10 +466,11 @@ class OpenAIRealtimeLLMService(LLMService):
     async def _handle_user_stopped_speaking(self, frame):
         # None and False are different. Check for False. None means we're using OpenAI's
         # built-in turn detection defaults.
+        session_properties = assert_given(self._settings.session_properties)
         turn_detection_disabled = (
-            self._settings.session_properties.audio
-            and self._settings.session_properties.audio.input
-            and self._settings.session_properties.audio.input.turn_detection is False
+            session_properties.audio
+            and session_properties.audio.input
+            and session_properties.audio.input.turn_detection is False
         )
         if turn_detection_disabled:
             await self.send_client_event(events.InputAudioBufferCommitEvent())
@@ -647,12 +656,13 @@ class OpenAIRealtimeLLMService(LLMService):
         return changed
 
     async def _send_session_update(self):
-        settings = self._settings.session_properties
+        settings = assert_given(self._settings.session_properties)
         adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:
             llm_invocation_params = adapter.get_llm_invocation_params(
-                self._context, system_instruction=self._settings.system_instruction
+                self._context,
+                system_instruction=assert_given(self._settings.system_instruction),
             )
 
             # tools given in the context override the tools in the session properties

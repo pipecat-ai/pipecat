@@ -49,7 +49,7 @@ from pipecat.services.llm_service import (
     WebsocketReconnectedError,
 )
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven
+from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -285,7 +285,9 @@ class _BaseOpenAIResponsesLLMService(LLMService):
             The LLM's response as a string, or None if no response is generated.
         """
         adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
-        effective_instruction = system_instruction or self._settings.system_instruction
+        effective_instruction = system_instruction or assert_given(
+            self._settings.system_instruction
+        )
         invocation_params = adapter.get_llm_invocation_params(
             context, system_instruction=effective_instruction
         )
@@ -742,7 +744,7 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
         )
 
         invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=self._settings.system_instruction
+            context, system_instruction=assert_given(self._settings.system_instruction)
         )
 
         full_input = invocation_params["input"]
@@ -982,7 +984,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
         )
 
         invocation_params = adapter.get_llm_invocation_params(
-            context, system_instruction=self._settings.system_instruction
+            context, system_instruction=assert_given(self._settings.system_instruction)
         )
 
         params = self._build_response_params(invocation_params)

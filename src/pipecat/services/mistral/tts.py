@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import TTSSettings, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -137,8 +137,8 @@ class MistralTTSService(TTSService):
 
             async with await self._client.audio.speech.complete_async(
                 input=text,
-                model=self._settings.model,
-                voice_id=self._settings.voice,
+                model=assert_given(self._settings.model),
+                voice_id=assert_given(self._settings.voice),
                 response_format="pcm",
                 stream=True,
             ) as event_stream:

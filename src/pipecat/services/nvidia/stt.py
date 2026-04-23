@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -307,8 +307,11 @@ class NvidiaSTTService(STTService):
             interim_results=s.interim_results,
         )
 
-        if s.boosted_lm_words:
-            riva.client.add_word_boosting_to_config(config, s.boosted_lm_words, s.boosted_lm_score)
+        boosted_lm_words = assert_given(s.boosted_lm_words)
+        if boosted_lm_words:
+            riva.client.add_word_boosting_to_config(
+                config, boosted_lm_words, assert_given(s.boosted_lm_score)
+            )
 
         riva.client.add_endpoint_parameters_to_config(
             config,
@@ -323,9 +326,10 @@ class NvidiaSTTService(STTService):
         if self._custom_configuration:
             riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
 
-        if s.speaker_diarization:
+        speaker_diarization = assert_given(s.speaker_diarization)
+        if speaker_diarization:
             riva.client.add_speaker_diarization_to_config(
-                config, s.speaker_diarization, s.diarization_max_speakers
+                config, speaker_diarization, assert_given(s.diarization_max_speakers)
             )
 
         return config
@@ -468,6 +472,7 @@ class NvidiaSTTService(STTService):
 
             transcript = result.alternatives[0].transcript
             if transcript and len(transcript) > 0:
+                language = assert_given(self._settings.language)
                 if result.is_final:
                     await self.stop_processing_metrics()
                     logger.debug(f"Transcription: [{transcript}]")
@@ -476,7 +481,7 @@ class NvidiaSTTService(STTService):
                             transcript,
                             self._user_id,
                             time_now_iso8601(),
-                            self._settings.language,
+                            language,
                             result=result,
                             finalized=True,
                         )
@@ -484,7 +489,7 @@ class NvidiaSTTService(STTService):
                     await self._handle_transcription(
                         transcript=transcript,
                         is_final=result.is_final,
-                        language=self._settings.language,
+                        language=language,
                     )
                 else:
                     await self.push_frame(
@@ -492,7 +497,7 @@ class NvidiaSTTService(STTService):
                             transcript,
                             self._user_id,
                             time_now_iso8601(),
-                            self._settings.language,
+                            language,
                             result=result,
                         )
                     )
@@ -689,7 +694,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
     def _get_language_code(self) -> str:
         """Get the current NVIDIA Nemotron Speech language code string."""
-        return self._settings.language or "en-US"
+        return assert_given(self._settings.language) or "en-US"
 
     def _create_recognition_config(self):
         """Create the NVIDIA Nemotron Speech ASR recognition configuration."""
@@ -705,8 +710,11 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         )
 
         # Add word boosting if specified
-        if s.boosted_lm_words:
-            riva.client.add_word_boosting_to_config(config, s.boosted_lm_words, s.boosted_lm_score)
+        boosted_lm_words = assert_given(s.boosted_lm_words)
+        if boosted_lm_words:
+            riva.client.add_word_boosting_to_config(
+                config, boosted_lm_words, assert_given(s.boosted_lm_score)
+            )
 
         # Add any custom configuration
         if self._custom_configuration:
@@ -796,15 +804,16 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                     text = alternatives[0].transcript.strip()
                     if text:
                         logger.debug(f"Transcription: [{text}]")
+                        language = assert_given(self._settings.language)
                         yield TranscriptionFrame(
                             text,
                             self._user_id,
                             time_now_iso8601(),
-                            self._settings.language,
+                            language,
                         )
                         transcription_found = True
 
-                        await self._handle_transcription(text, True, self._settings.language)
+                        await self._handle_transcription(text, True, language)
 
             if not transcription_found:
                 logger.debug(

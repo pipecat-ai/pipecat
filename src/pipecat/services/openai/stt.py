@@ -36,7 +36,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.services.whisper.base_stt import (
@@ -534,9 +534,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """Send ``session.update`` to configure the transcription session."""
         transcription: dict = {"model": self._settings.model}
 
-        language_code = (
-            self._language_to_code(self._settings.language) if self._settings.language else None
-        )
+        language = assert_given(self._settings.language)
+        language_code = self._language_to_code(language) if language else None
         if language_code:
             transcription["language"] = language_code
 

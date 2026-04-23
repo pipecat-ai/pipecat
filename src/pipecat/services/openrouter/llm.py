@@ -17,6 +17,7 @@ from loguru import logger
 
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import assert_given
 
 
 @dataclass
@@ -105,7 +106,8 @@ class OpenRouterLLMService(OpenAILLMService):
             Transformed parameters ready for the API call.
         """
         params = super().build_chat_completion_params(params_from_context)
-        if "gemini" in self._settings.model.lower():
+        model = assert_given(self._settings.model)
+        if model is not None and "gemini" in model.lower():
             messages = params.get("messages", [])
             if not messages:
                 return params

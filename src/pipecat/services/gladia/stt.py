@@ -39,7 +39,7 @@ from pipecat.services.gladia.config import (
     PreProcessingConfig,
     RealtimeProcessingConfig,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_latency import GLADIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -377,7 +377,7 @@ class GladiaSTTService(WebsocketSTTService):
         }
 
         # Add custom_metadata if provided
-        settings["custom_metadata"] = dict(s.custom_metadata or {})
+        settings["custom_metadata"] = dict(assert_given(s.custom_metadata) or {})
         settings["custom_metadata"]["pipecat"] = pipecat_version()
 
         # Add endpointing parameters if provided
@@ -389,20 +389,24 @@ class GladiaSTTService(WebsocketSTTService):
             )
 
         # Add language configuration
-        if s.language_config:
-            settings["language_config"] = s.language_config.model_dump(exclude_none=True)
+        language_config = assert_given(s.language_config)
+        if language_config:
+            settings["language_config"] = language_config.model_dump(exclude_none=True)
 
         # Add pre_processing configuration if provided
-        if s.pre_processing:
-            settings["pre_processing"] = s.pre_processing.model_dump(exclude_none=True)
+        pre_processing = assert_given(s.pre_processing)
+        if pre_processing:
+            settings["pre_processing"] = pre_processing.model_dump(exclude_none=True)
 
         # Add realtime_processing configuration if provided
-        if s.realtime_processing:
-            settings["realtime_processing"] = s.realtime_processing.model_dump(exclude_none=True)
+        realtime_processing = assert_given(s.realtime_processing)
+        if realtime_processing:
+            settings["realtime_processing"] = realtime_processing.model_dump(exclude_none=True)
 
         # Add messages_config if provided
-        if s.messages_config:
-            settings["messages_config"] = s.messages_config.model_dump(exclude_none=True)
+        messages_config = assert_given(s.messages_config)
+        if messages_config:
+            settings["messages_config"] = messages_config.model_dump(exclude_none=True)
 
         return settings
 

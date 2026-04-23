@@ -48,7 +48,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -377,7 +377,7 @@ class UltravoxRealtimeLLMService(LLMService):
     async def _update_settings(self, delta: Settings):
         changed = await super()._update_settings(delta)
         if "output_medium" in changed:
-            await self._update_output_medium(self._settings.output_medium)
+            await self._update_output_medium(assert_given(self._settings.output_medium))
         self._warn_unhandled_updated_settings(changed.keys() - {"output_medium"})
         return changed
 

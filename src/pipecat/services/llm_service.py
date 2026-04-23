@@ -53,7 +53,7 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, assert_given
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.async_tool_cancellation import (
@@ -378,7 +378,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 self._base_system_instruction = None
 
         if "user_turn_completion_config" in changed and self._filter_incomplete_user_turns:
-            self.set_user_turn_completion_config(self._settings.user_turn_completion_config)
+            self.set_user_turn_completion_config(
+                assert_given(self._settings.user_turn_completion_config)
+            )
             self._compose_system_instruction()
 
         if (

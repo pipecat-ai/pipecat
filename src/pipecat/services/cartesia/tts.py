@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -427,7 +427,7 @@ class CartesiaTTSService(WebsocketTTSService):
         Returns:
             List of (word, start_time) tuples processed for the language.
         """
-        current_language = self._settings.language
+        current_language = assert_given(self._settings.language)
 
         # Check if this is a CJK language (if language is None, treat as non-CJK)
         if current_language and self._is_cjk_language(current_language):
@@ -472,10 +472,9 @@ class CartesiaTTSService(WebsocketTTSService):
         if self._settings.language:
             msg["language"] = self._settings.language
 
-        if self._settings.generation_config:
-            msg["generation_config"] = self._settings.generation_config.model_dump(
-                exclude_none=True
-            )
+        generation_config = assert_given(self._settings.generation_config)
+        if generation_config:
+            msg["generation_config"] = generation_config.model_dump(exclude_none=True)
 
         if self._settings.pronunciation_dict_id:
             msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
@@ -904,10 +903,9 @@ class CartesiaHttpTTSService(TTSService):
             if self._settings.language:
                 payload["language"] = self._settings.language
 
-            if self._settings.generation_config:
-                payload["generation_config"] = self._settings.generation_config.model_dump(
-                    exclude_none=True
-                )
+            generation_config = assert_given(self._settings.generation_config)
+            if generation_config:
+                payload["generation_config"] = generation_config.model_dump(exclude_none=True)
 
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id

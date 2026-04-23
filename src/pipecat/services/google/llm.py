@@ -43,6 +43,7 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
     _NotGiven,
+    assert_given,
     is_given,
 )
 from pipecat.utils.tracing.service_decorators import traced_llm
@@ -356,10 +357,9 @@ class GoogleLLMService(LLMService):
         }
 
         # Add thinking parameters if configured
-        if self._settings.thinking:
-            generation_params["thinking_config"] = self._settings.thinking.model_dump(
-                exclude_unset=True
-            )
+        thinking = assert_given(self._settings.thinking)
+        if thinking:
+            generation_params["thinking_config"] = thinking.model_dump(exclude_unset=True)
 
         if self._settings.extra:
             generation_params.update(self._settings.extra)
@@ -368,8 +368,9 @@ class GoogleLLMService(LLMService):
 
     def _maybe_unset_thinking_budget(self, generation_params: dict[str, Any]):
         try:
+            model = assert_given(self._settings.model)
             # If we have an image model, we don't apply a thinking default.
-            if "image" in self._settings.model:
+            if model is None or "image" in model:
                 return
             # If thinking_config is already set, don't override it.
             if "thinking_config" in generation_params:
@@ -377,7 +378,6 @@ class GoogleLLMService(LLMService):
             # Apply model-aware low-latency thinking defaults.
             # Gemini 2.5 Flash: disable thinking via thinking_budget.
             # Gemini 3+ Flash: use minimal thinking via thinking_level.
-            model = self._settings.model
             if model.startswith("gemini-2.5-flash"):
                 generation_params["thinking_config"] = {"thinking_budget": 0}
             elif model.startswith("gemini-3") and "flash" in model:
@@ -388,7 +388,7 @@ class GoogleLLMService(LLMService):
     async def _stream_content(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
         params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
-            context, system_instruction=self._settings.system_instruction
+            context, system_instruction=assert_given(self._settings.system_instruction)
         )
 
         logger.debug(

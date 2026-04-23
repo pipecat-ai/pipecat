@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -292,7 +292,7 @@ class HumeTTSService(TTSService):
         # Build the request payload
         utterance_kwargs: dict[str, Any] = {
             "text": text,
-            "voice": PostedUtteranceVoiceWithId(id=self._settings.voice),
+            "voice": PostedUtteranceVoiceWithId(id=assert_given(self._settings.voice)),
         }
         if self._settings.description is not None:
             utterance_kwargs["description"] = self._settings.description

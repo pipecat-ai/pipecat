@@ -34,7 +34,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -719,22 +719,26 @@ class SpeechmaticsSTTService(STTService):
         s = settings
 
         # Preset from turn detection mode
-        config = VoiceAgentConfigPreset.load(s.turn_detection_mode.value)
+        turn_detection_mode = assert_given(s.turn_detection_mode)
+        config = VoiceAgentConfigPreset.load(turn_detection_mode.value)
 
         # Audio encoding (init-only, stored as instance attribute)
         config.audio_encoding = self._audio_encoding
 
         # Language + domain
-        language = s.language
+        language = assert_given(s.language)
         config.language = self._language_to_speechmatics_language(language)
         config.domain = s.domain if s.domain is not None else None
         config.output_locale = self._locale_to_speechmatics_locale(config.language, language)
 
         # Speaker config
+        focus_speakers = assert_given(s.focus_speakers)
+        ignore_speakers = assert_given(s.ignore_speakers)
+        focus_mode = assert_given(s.focus_mode)
         config.speaker_config = SpeakerFocusConfig(
-            focus_speakers=s.focus_speakers if s.focus_speakers is not None else [],
-            ignore_speakers=s.ignore_speakers if s.ignore_speakers is not None else [],
-            focus_mode=s.focus_mode if s.focus_mode is not None else SpeakerFocusMode.RETAIN,
+            focus_speakers=focus_speakers if focus_speakers is not None else [],
+            ignore_speakers=ignore_speakers if ignore_speakers is not None else [],
+            focus_mode=focus_mode if focus_mode is not None else SpeakerFocusMode.RETAIN,
         )
         config.known_speakers = s.known_speakers if s.known_speakers is not None else []
 
@@ -766,7 +770,8 @@ class SpeechmaticsSTTService(STTService):
                     setattr(config, key, value)
 
         # Enable sentences
-        split = s.split_sentences if s.split_sentences is not None else False
+        split_sentences = assert_given(s.split_sentences)
+        split = split_sentences if split_sentences is not None else False
         config.speech_segment_config = SpeechSegmentConfig(emit_sentences=split or False)
 
         return config
@@ -962,11 +967,9 @@ class SpeechmaticsSTTService(STTService):
         # Create frame from segment
         def attr_from_segment(segment: dict[str, Any]) -> dict[str, Any]:
             # Formats the output text based on the speaker and defined formats from the config.
-            text = (
-                self._settings.speaker_active_format
-                if segment.get("is_active", True)
-                else self._settings.speaker_passive_format
-            ).format(
+            active_format = assert_given(self._settings.speaker_active_format)
+            passive_format = assert_given(self._settings.speaker_passive_format)
+            text = (active_format if segment.get("is_active", True) else passive_format).format(
                 **{
                     "speaker_id": segment.get("speaker_id", "UU"),
                     "text": segment.get("text", ""),
