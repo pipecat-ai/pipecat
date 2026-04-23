@@ -22,6 +22,7 @@ from openai import (
     AsyncStream,
     DefaultAsyncHttpxClient,
 )
+from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
@@ -50,7 +51,24 @@ class OpenAILLMSettings(LLMSettings):
         max_completion_tokens: Maximum completion tokens to generate.
     """
 
-    max_completion_tokens: int | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    # Override inherited LLMSettings fields to also accept openai's NotGiven
+    # sentinel. The service stores openai's NOT_GIVEN in these fields so they
+    # can be passed through unchanged to the AsyncOpenAI client.
+    frequency_penalty: float | None | _NotGiven | OpenAINotGiven = field(
+        default_factory=lambda: _NOT_GIVEN
+    )
+    presence_penalty: float | None | _NotGiven | OpenAINotGiven = field(
+        default_factory=lambda: _NOT_GIVEN
+    )
+    seed: int | None | _NotGiven | OpenAINotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    temperature: float | None | _NotGiven | OpenAINotGiven = field(
+        default_factory=lambda: _NOT_GIVEN
+    )
+    top_p: float | None | _NotGiven | OpenAINotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    max_tokens: int | None | _NotGiven | OpenAINotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    max_completion_tokens: int | _NotGiven | OpenAINotGiven = field(
+        default_factory=lambda: _NOT_GIVEN
+    )
 
 
 class BaseOpenAILLMService(LLMService):

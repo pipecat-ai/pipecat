@@ -44,6 +44,7 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
     from anthropic import NOT_GIVEN, APITimeoutError, AsyncAnthropic
+    from anthropic import NotGiven as AnthropicNotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`.")
@@ -79,7 +80,15 @@ class AnthropicLLMSettings(LLMSettings):
     """
 
     enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    thinking: Union["AnthropicLLMService.ThinkingConfig", _NotGiven] = field(
+    # Override inherited LLMSettings fields to also accept anthropic's NotGiven
+    # sentinel. The service stores anthropic's NOT_GIVEN in these fields so
+    # they can be passed through unchanged to the AsyncAnthropic client.
+    temperature: float | None | _NotGiven | AnthropicNotGiven = field(
+        default_factory=lambda: _NOT_GIVEN
+    )
+    top_k: int | None | _NotGiven | AnthropicNotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    top_p: float | None | _NotGiven | AnthropicNotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    thinking: Union["AnthropicLLMService.ThinkingConfig", _NotGiven, AnthropicNotGiven] = field(
         default_factory=lambda: _NOT_GIVEN
     )
 
