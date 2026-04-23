@@ -276,7 +276,6 @@ class NvidiaSTTService(STTService):
         self._queue = None
         self._config = None
         self._thread_task = None
-        self._audio_duration_counter = 0.0
 
     def _initialize_client(self):
         """Initialize the NVIDIA Nemotron Speech ASR client with authentication metadata."""
@@ -449,7 +448,6 @@ class NvidiaSTTService(STTService):
 
     async def _thread_task_handler(self):
         try:
-            self._audio_duration_counter = 0.0
             self._thread_running = True
             await asyncio.to_thread(self._response_handler)
         except asyncio.CancelledError:
@@ -472,25 +470,21 @@ class NvidiaSTTService(STTService):
             if transcript and len(transcript) > 0:
                 if result.is_final:
                     await self.stop_processing_metrics()
-                    if hasattr(result, "audio_processed") and result.audio_processed:
-                        server_lag = self._audio_duration_counter - result.audio_processed
-                        logger.debug(
-                            f"{self} ASR server-side lag: {server_lag:.3f}s "
-                            f"(audio sent: {self._audio_duration_counter:.3f}s, "
-                            f"audio processed: {result.audio_processed:.3f}s)"
-                        )
                     logger.debug(f"Transcription: [{transcript}]")
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
                             self._user_id,
                             time_now_iso8601(),
+                            self._settings.language,
                             result=result,
+                            finalized=True,
                         )
                     )
                     await self._handle_transcription(
                         transcript=transcript,
                         is_final=result.is_final,
+                        language=self._settings.language,
                     )
                 else:
                     await self.push_frame(
@@ -498,6 +492,7 @@ class NvidiaSTTService(STTService):
                             transcript,
                             self._user_id,
                             time_now_iso8601(),
+                            self._settings.language,
                             result=result,
                         )
                     )
@@ -531,8 +526,6 @@ class NvidiaSTTService(STTService):
         try:
             future = asyncio.run_coroutine_threadsafe(self._queue.get(), self.get_event_loop())
             audio = future.result()
-            samples = len(audio) // (2 * self._audio_channel_count)
-            self._audio_duration_counter += samples / self.sample_rate
             return audio
         except FuturesCancelledError:
             raise StopIteration
@@ -807,10 +800,11 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                             text,
                             self._user_id,
                             time_now_iso8601(),
+                            self._settings.language,
                         )
                         transcription_found = True
 
-                        await self._handle_transcription(text, True)
+                        await self._handle_transcription(text, True, self._settings.language)
 
             if not transcription_found:
                 logger.debug(
