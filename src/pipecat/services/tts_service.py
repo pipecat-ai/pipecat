@@ -96,6 +96,7 @@ class _WordTimestampEntry:
     word: str
     timestamp: float
     context_id: str
+    includes_inter_frame_spaces: bool | None = None
 
 
 class TTSService(AIService):
@@ -1070,8 +1071,10 @@ class TTSService(AIService):
             if self._initial_word_times:
                 cached = self._initial_word_times.copy()
                 self._initial_word_times = []
-                for word, timestamp_seconds, ctx_id in cached:
-                    await self._add_word_timestamps([(word, timestamp_seconds)], ctx_id)
+                for word, timestamp_seconds, ctx_id, ifs in cached:
+                    await self._add_word_timestamps(
+                        [(word, timestamp_seconds)], ctx_id, includes_inter_frame_spaces=ifs
+                    )
 
     async def reset_word_timestamps(self):
         """Reset word timestamp tracking."""
@@ -1081,7 +1084,10 @@ class TTSService(AIService):
         self._initial_word_times = []
 
     async def add_word_timestamps(
-        self, word_times: list[tuple[str, float]], context_id: str | None = None
+        self,
+        word_times: list[tuple[str, float]],
+        context_id: str | None = None,
+        includes_inter_frame_spaces: bool | None = None,
     ):
         """Add word timestamps for processing.
 
@@ -1093,6 +1099,10 @@ class TTSService(AIService):
         Args:
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
             context_id: Unique identifier for the TTS context.
+            includes_inter_frame_spaces: When True, the tokens already embed inter-word
+                spacing (spaces and punctuation are part of the token text). Downstream
+                consumers must not inject additional spaces between tokens. None leaves
+                the frame's own default unchanged.
         """
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
@@ -1102,13 +1112,21 @@ class TTSService(AIService):
                         word=word,
                         timestamp=timestamp,
                         context_id=context_id,
+                        includes_inter_frame_spaces=includes_inter_frame_spaces,
                     ),
                 )
         else:
-            await self._add_word_timestamps(word_times=word_times, context_id=context_id)
+            await self._add_word_timestamps(
+                word_times=word_times,
+                context_id=context_id,
+                includes_inter_frame_spaces=includes_inter_frame_spaces,
+            )
 
     async def _add_word_timestamps(
-        self, word_times: list[tuple[str, float]], context_id: str | None = None
+        self,
+        word_times: list[tuple[str, float]],
+        context_id: str | None = None,
+        includes_inter_frame_spaces: bool | None = None,
     ):
         """Process word timestamps directly, building and pushing TTSTextFrames inline.
 
@@ -1124,11 +1142,13 @@ class TTSService(AIService):
             ts_ns = seconds_to_nanoseconds(timestamp)
             if self._initial_word_timestamp == -1:
                 # Cache until we have audio and can compute PTS.
-                self._initial_word_times.append((word, timestamp, context_id))
+                self._initial_word_times.append(
+                    (word, timestamp, context_id, includes_inter_frame_spaces)
+                )
             else:
-                # Assumption: word-by-word text frames don't include spaces, so
-                # we can rely on the default includes_inter_frame_spaces=False
                 frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
+                if includes_inter_frame_spaces is not None:
+                    frame.includes_inter_frame_spaces = includes_inter_frame_spaces
                 frame.pts = self._initial_word_timestamp + ts_ns
                 frame.context_id = context_id
                 if context_id in self._tts_contexts:
@@ -1331,7 +1351,9 @@ class TTSService(AIService):
                     # Route word timestamps through _add_word_timestamps so they are
                     # processed in playback order alongside audio frames.
                     await self._add_word_timestamps(
-                        [(frame.word, frame.timestamp)], frame.context_id
+                        [(frame.word, frame.timestamp)],
+                        frame.context_id,
+                        includes_inter_frame_spaces=frame.includes_inter_frame_spaces,
                     )
                     continue
                 elif isinstance(frame, TTSAudioRawFrame):
