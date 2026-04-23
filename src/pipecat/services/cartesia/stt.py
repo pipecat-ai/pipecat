@@ -277,7 +277,7 @@ class CartesiaSTTService(WebsocketSTTService):
             if self._websocket and self._websocket.state is State.OPEN:
                 await self._websocket.send("finalize")
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text transcription.
 
         Args:
@@ -290,7 +290,10 @@ class CartesiaSTTService(WebsocketSTTService):
         if not self._websocket or self._websocket.state is not State.OPEN:
             await self._connect()
 
-        await self._websocket.send(audio)
+        try:
+            await self._websocket.send(audio)
+        except Exception as e:
+            logger.warning(f"{self}: send failed: {e}")
         yield None
 
     async def _connect(self):

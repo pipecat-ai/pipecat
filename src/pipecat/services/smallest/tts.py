@@ -390,7 +390,7 @@ class SmallestTTSService(InterruptibleTTSService):
                 logger.warning(f"{self} unknown message status: {msg}")
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Smallest's WebSocket streaming API.
 
         Args:

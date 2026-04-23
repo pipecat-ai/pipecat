@@ -354,7 +354,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     # Audio sending and receiving
     # ------------------------------------------------------------------
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio data to Deepgram Flux for transcription.
 
         Transmits raw audio bytes to the Deepgram Flux API for real-time speech

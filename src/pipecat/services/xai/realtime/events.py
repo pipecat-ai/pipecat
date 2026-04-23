@@ -541,18 +541,6 @@ class InputAudioBufferCleared(ServerEvent):
     type: Literal["input_audio_buffer.cleared"]
 
 
-class ResponseCreated(ServerEvent):
-    """Event indicating an assistant response has been created.
-
-    Parameters:
-        type: Event type, always "response.created".
-        response: The created response object.
-    """
-
-    type: Literal["response.created"]
-    response: "Response"
-
-
 class ResponseOutputItemAdded(ServerEvent):
     """Event indicating an output item has been added to a response.
 

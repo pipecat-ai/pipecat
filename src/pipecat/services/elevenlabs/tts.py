@@ -889,7 +889,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
             await self._websocket.send(json.dumps(msg))
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using ElevenLabs' streaming WebSocket API.
 
         Args:
@@ -1240,7 +1240,7 @@ class ElevenLabsHttpTTSService(TTSService):
         return word_times
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using ElevenLabs streaming API with timestamps.
 
         Makes a request to the ElevenLabs API to generate audio and timing data.

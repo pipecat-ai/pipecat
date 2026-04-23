@@ -569,7 +569,7 @@ class SarvamHttpTTSService(TTSService):
         await super().start(frame)
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Sarvam AI's API.
 
         Args:
@@ -1192,7 +1192,7 @@ class SarvamTTSService(InterruptibleTTSService):
             logger.warning("WebSocket not ready, cannot send text")
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech audio frames from input text using Sarvam TTS.
 
         Sends text over WebSocket for synthesis and yields corresponding audio or status frames.

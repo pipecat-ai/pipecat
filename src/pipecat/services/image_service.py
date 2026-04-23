@@ -57,7 +57,8 @@ class ImageGenService(AIService):
             Frame: Frames containing the generated image (typically ImageRawFrame
                 or URLImageRawFrame).
         """
-        pass
+        raise NotImplementedError
+        yield  # pragma: no cover
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for image generation.

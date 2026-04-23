@@ -526,7 +526,7 @@ class NvidiaTTSService(TTSService):
         )
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using NVIDIA Nemotron Speech TTS.
 
         On the first call for a turn, starts a persistent ``synthesize_online``

@@ -127,7 +127,7 @@ class BaseDirectFunctionWrapper:
         self.name = self.function.__name__
 
         # Parse docstring for description and parameters
-        docstring = docstring_parser.parse(inspect.getdoc(self.function))
+        docstring = docstring_parser.parse(inspect.getdoc(self.function) or "")
 
         # Get function description
         self.description = (docstring.description or "").strip()

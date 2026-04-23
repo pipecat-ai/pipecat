@@ -418,7 +418,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text conversion.
 
         Args:
@@ -433,7 +433,11 @@ class AssemblyAISTTService(WebsocketSTTService):
             while len(self._audio_buffer) >= self._chunk_size_bytes:
                 chunk = bytes(self._audio_buffer[: self._chunk_size_bytes])
                 self._audio_buffer = self._audio_buffer[self._chunk_size_bytes :]
-                await self._websocket.send(chunk)
+                try:
+                    await self._websocket.send(chunk)
+                except Exception as e:
+                    logger.warning(f"{self}: send failed: {e}")
+                    break
 
         yield None
 

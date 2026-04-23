@@ -222,7 +222,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
     # Audio sending and response receiving
     # ------------------------------------------------------------------
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Send audio data to Deepgram Flux for transcription.
 
         Args:

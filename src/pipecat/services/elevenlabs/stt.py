@@ -370,7 +370,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
         """Handle a transcription result with tracing."""
         await self.stop_processing_metrics()
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Transcribe an audio segment using ElevenLabs' STT API.
 
         Args:
@@ -674,7 +674,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                     except Exception as e:
                         logger.warning(f"Failed to send commit: {e}")
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text transcription.
 
         Args:

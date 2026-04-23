@@ -356,7 +356,7 @@ class GradiumTTSService(WebsocketTTSService):
                 await self.push_error(error_msg=f"Error: {msg.get('message', msg)}")
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Gradium's streaming API.
 
         Args:

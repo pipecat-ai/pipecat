@@ -333,7 +333,7 @@ class GradiumSTTService(WebsocketSTTService):
         except Exception as e:
             logger.warning(f"Failed to send flush: {e}")
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text conversion.
 
         Args:
@@ -350,7 +350,11 @@ class GradiumSTTService(WebsocketSTTService):
             chunk = base64.b64encode(chunk).decode("utf-8")
             msg = {"type": "audio", "audio": chunk}
             if self._websocket and self._websocket.state is State.OPEN:
-                await self._websocket.send(json.dumps(msg))
+                try:
+                    await self._websocket.send(json.dumps(msg))
+                except Exception as e:
+                    logger.warning(f"{self}: send failed: {e}")
+                    break
 
         yield None
 

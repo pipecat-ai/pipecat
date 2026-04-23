@@ -274,7 +274,7 @@ class STTService(AIService):
         return Language(language)
 
     @abstractmethod
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Run speech-to-text on the provided audio data.
 
         This method must be implemented by subclasses to provide actual speech

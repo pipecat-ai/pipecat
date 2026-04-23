@@ -66,6 +66,8 @@ class FrameProcessorMetrics(BaseObject):
         Returns:
             The task manager instance for async operations.
         """
+        if self._task_manager is None:
+            raise RuntimeError("task_manager not set; call setup() first")
         return self._task_manager
 
     @property

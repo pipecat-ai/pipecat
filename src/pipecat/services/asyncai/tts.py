@@ -449,7 +449,7 @@ class AsyncAITTSService(WebsocketTTSService):
         await super().on_audio_context_completed(context_id)
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Async API websocket endpoint.
 
         Args:
@@ -620,7 +620,7 @@ class AsyncAIHttpTTSService(TTSService):
         self._output_sample_rate = self.sample_rate
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using Async's HTTP streaming API.
 
         Args:

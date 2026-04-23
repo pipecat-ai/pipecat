@@ -336,7 +336,7 @@ class LmntTTSService(InterruptibleTTSService):
                     logger.error(f"Invalid JSON message: {message}")
 
     @traced_tts
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate TTS audio from text using LMNT's streaming API.
 
         Args:
