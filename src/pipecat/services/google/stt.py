@@ -385,7 +385,7 @@ class GoogleSTTSettings(STTSettings):
     """
 
     languages: list[Language] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_codes: list[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_codes: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     use_separate_recognition_per_channel: bool | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )

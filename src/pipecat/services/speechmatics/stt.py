@@ -114,7 +114,7 @@ class SpeechmaticsSTTSettings(STTSettings):
         extra_params: Extra parameters for the STT engine.
     """
 
-    domain: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     turn_detection_mode: TurnDetectionMode | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_active_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_passive_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -125,18 +125,22 @@ class SpeechmaticsSTTSettings(STTSettings):
     additional_vocab: list[AdditionalVocabEntry] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
-    operating_point: OperatingPoint | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_delay: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    end_of_utterance_silence_trigger: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    end_of_utterance_max_delay: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    punctuation_overrides: dict[str, Any] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    include_partials: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    split_sentences: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enable_diarization: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker_sensitivity: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    max_speakers: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    prefer_current_speaker: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    extra_params: dict[str, Any] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    operating_point: OperatingPoint | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_delay: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    end_of_utterance_silence_trigger: float | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    end_of_utterance_max_delay: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    punctuation_overrides: dict[str, Any] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    include_partials: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    split_sentences: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_diarization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_sensitivity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_speakers: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prefer_current_speaker: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    extra_params: dict[str, Any] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields that can be updated on a live connection via the Speechmatics
     #: diarization-config API — no reconnect needed.

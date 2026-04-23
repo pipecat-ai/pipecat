@@ -67,7 +67,7 @@ class UltravoxRealtimeLLMSettings(LLMSettings):
         output_medium: The output medium for the model ("voice" or "text").
     """
 
-    output_medium: str | _NotGiven = field(default=NOT_GIVEN)
+    output_medium: str | None | _NotGiven = field(default=NOT_GIVEN)
 
 
 class AgentInputParams(BaseModel):

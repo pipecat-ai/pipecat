@@ -107,7 +107,7 @@ class GoogleLLMSettings(LLMSettings):
         thinking: Thinking configuration.
     """
 
-    thinking: Union["GoogleLLMService.ThinkingConfig", _NotGiven] = field(
+    thinking: Union["GoogleLLMService.ThinkingConfig", None, _NotGiven] = field(
         default_factory=lambda: NOT_GIVEN
     )
 

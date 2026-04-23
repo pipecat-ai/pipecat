@@ -80,13 +80,13 @@ class AzureTTSSettings(TTSSettings):
         volume: Volume level (e.g., "+20%", "loud", "x-soft").
     """
 
-    emphasis: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    role: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style_degree: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emphasis: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    role: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style_degree: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureBaseTTSService:

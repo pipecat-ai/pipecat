@@ -342,7 +342,7 @@ class GeminiLiveLLMSettings(LLMSettings):
     modalities: GeminiModalities | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language: Language | str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     media_resolution: GeminiMediaResolution | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    vad: GeminiVADParams | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad: GeminiVADParams | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     context_window_compression: ContextWindowCompressionParams | dict | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )

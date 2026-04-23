@@ -70,8 +70,8 @@ class OpenAITTSSettings(TTSSettings):
         speed: Voice speed control (0.25 to 4.0, default 1.0).
     """
 
-    instructions: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    instructions: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAITTSService(TTSService):

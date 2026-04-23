@@ -67,7 +67,7 @@ class AWSBedrockLLMSettings(LLMSettings):
     """
 
     stop_sequences: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    latency: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latency: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     additional_model_request_fields: dict[str, Any] | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN

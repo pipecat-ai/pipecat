@@ -440,7 +440,7 @@ class TTSSettings(ServiceSettings):
             ``__init__`` methods do the same at construction time.
     """
 
-    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language: Language | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {"voice_id": "voice"}

@@ -72,8 +72,8 @@ class InworldTTSSettings(TTSSettings):
         temperature: Temperature for speech synthesis.
     """
 
-    speaking_rate: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {
         "voiceId": "voice",
