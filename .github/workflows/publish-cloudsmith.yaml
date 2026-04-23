@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 env:
-  TONE_BASE_VERSION: '0.0.74'
+  TONE_BASE_VERSION: '0.0.75'
 
 jobs:
   build-and-publish:

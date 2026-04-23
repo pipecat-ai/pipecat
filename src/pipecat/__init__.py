@@ -9,7 +9,10 @@ from importlib.metadata import version as lib_version
 
 from loguru import logger
 
-__version__ = lib_version("tone-pipecat")
+try:
+    __version__ = lib_version("tone-pipecat")
+except Exception:
+    __version__ = lib_version("pipecat-ai")
 
 logger.info(f"ᓚᘏᗢ Pipecat {__version__} (Python {sys.version}) ᓚᘏᗢ")
 
