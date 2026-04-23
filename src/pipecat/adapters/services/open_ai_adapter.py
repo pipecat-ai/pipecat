@@ -6,7 +6,7 @@
 
 """OpenAI LLM adapter for Pipecat."""
 
-from typing import Any, TypedDict
+from typing import Any, TypedDict, TypeGuard, TypeVar
 
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
@@ -24,6 +24,31 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
+
+_T = TypeVar("_T")
+
+
+def is_given(value: _T | OpenAINotGiven) -> TypeGuard[_T]:
+    """Check whether a value was explicitly provided.
+
+    Typically used when checking whether a parameter or field typed with
+    OpenAI's ``NotGiven`` was set::
+
+        if is_given(tool_choice):
+            ...
+
+    Also acts as a type guard: inside a true branch, the value is narrowed
+    to exclude ``OpenAINotGiven`` (e.g.
+    ``ChatCompletionToolChoiceOptionParam | OpenAINotGiven`` becomes
+    ``ChatCompletionToolChoiceOptionParam``).
+
+    Args:
+        value: The value to check.
+
+    Returns:
+        ``True`` if *value* is anything other than ``NOT_GIVEN``.
+    """
+    return not isinstance(value, OpenAINotGiven)
 
 
 class OpenAILLMInvocationParams(TypedDict):

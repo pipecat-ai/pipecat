@@ -39,7 +39,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeGuard, TypeVar
 
 from loguru import logger
 
@@ -88,7 +88,10 @@ Valid only in delta-mode settings objects.  Must never appear in a service's
 """
 
 
-def is_given(value: Any) -> bool:
+_T = TypeVar("_T")
+
+
+def is_given(value: _T | _NotGiven) -> TypeGuard[_T]:
     """Check whether a delta field was explicitly provided.
 
     Typically used when processing a delta to decide whether a field
@@ -97,6 +100,10 @@ def is_given(value: Any) -> bool:
         if is_given(delta.voice):
             # caller wants to change the voice
             ...
+
+    Also acts as a type guard: inside a true branch, the value is narrowed
+    to exclude ``_NotGiven`` (e.g. ``str | None | _NotGiven`` becomes
+    ``str | None``).
 
     For store-mode objects this always returns ``True`` (since
     ``validate_complete`` ensures no ``NOT_GIVEN`` fields remain).
