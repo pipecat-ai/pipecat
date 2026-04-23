@@ -112,6 +112,7 @@
     "src/pipecat/services/smallest/stt.py",
     "src/pipecat/services/smallest/tts.py",
     "src/pipecat/services/soniox/stt.py",
+    "src/pipecat/services/soniox/tts.py",
     "src/pipecat/services/speechmatics/stt.py",
     "src/pipecat/services/speechmatics/tts.py",
     "src/pipecat/services/stt_service.py",
