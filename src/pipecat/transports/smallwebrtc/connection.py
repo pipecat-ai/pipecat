@@ -13,6 +13,7 @@ for real-time communication applications.
 
 import asyncio
 import json
+import os
 import time
 import uuid
 from typing import Any, Literal
@@ -23,6 +24,7 @@ from pydantic import BaseModel, TypeAdapter
 from pipecat.utils.base_object import BaseObject
 
 try:
+    import aiortc.rtcsctptransport as _sctp_transport
     from aiortc import (
         RTCConfiguration,
         RTCIceServer,
@@ -35,6 +37,34 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
     raise Exception(f"Missing module: {e}")
+
+# Clamp aiortc's SCTP DATA-chunk payload size so the on-wire UDP packet fits
+# inside the smallest-MTU path we're likely to see (IPv6 minimum 1280,
+# Tailscale overlays default to 1280, some consumer VPNs are lower).
+#
+# aiortc hardcodes USERDATA_MAX_LENGTH = 1200. After adding SCTP (28) +
+# DTLS/GCM (~29) + UDP (8) + IPv6 (40) headers that produces a ~1305-byte
+# UDP datagram — over the 1280 MTU. The kernel rejects it with EMSGSIZE,
+# SCTP retransmits at the same size, and the data channel silently stalls.
+# aiortc has no PMTU discovery (RFC 8831 §6), so there is no auto-recovery.
+#
+# 1100 brings the worst-case datagram to ~1205 bytes (~75 bytes of slack).
+# Throughput cost is negligible: RTVI control frames fragment across one
+# extra chunk at most, and audio uses RTP (a separate path).
+#
+# There is no public API to set this — RTCConfiguration exposes no MTU knob
+# and all method references are bare module-global lookups, so patching the
+# module attribute before any RTCSctpTransport is instantiated is the only
+# option short of forking aiortc.
+#
+# Remove once aiortc ships DPLPMTUD (RFC 8899) or exposes this as a
+# configurable parameter.
+_SCTP_MAX_CHUNK_SIZE_DEFAULT = 1100
+_sctp_max_chunk_size = int(
+    os.environ.get("PIPECAT_SCTP_MAX_CHUNK_SIZE", _SCTP_MAX_CHUNK_SIZE_DEFAULT)
+)
+_sctp_transport.USERDATA_MAX_LENGTH = _sctp_max_chunk_size
+logger.debug(f"[SCTP] USERDATA_MAX_LENGTH set to {_sctp_max_chunk_size}")
 
 SIGNALLING_TYPE = "signalling"
 AUDIO_TRANSCEIVER_INDEX = 0
