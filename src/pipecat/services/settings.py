@@ -117,6 +117,31 @@ def is_given(value: _T | _NotGiven) -> TypeGuard[_T]:
     return not isinstance(value, _NotGiven)
 
 
+def assert_given(value: _T | _NotGiven) -> _T:
+    """Extract a store-mode settings field, asserting it isn't ``NOT_GIVEN``.
+
+    Intended for reads from a store-mode settings object, where
+    ``_NotGiven`` should never appear (see ``validate_complete``).  Narrows
+    away ``_NotGiven`` at the type level and raises at runtime if the
+    invariant is violated::
+
+        resolved_model = assert_given(self._settings.model)  # narrowed str | None
+
+    Args:
+        value: The store-mode field value to extract.
+
+    Returns:
+        The value, narrowed to exclude ``_NotGiven``.
+
+    Raises:
+        RuntimeError: If *value* is ``NOT_GIVEN`` (a store-mode invariant
+            violation).
+    """
+    if not is_given(value):
+        raise RuntimeError("Store-mode settings field is NOT_GIVEN (invariant violated)")
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Base ServiceSettings
 # ---------------------------------------------------------------------------
