@@ -59,7 +59,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -501,7 +501,7 @@ class SarvamHttpTTSService(TTSService):
             sample_rate = self._config.default_sample_rate
 
         # Set default voice based on model if not specified via any mechanism
-        if voice_id is None and (settings is None or settings.voice is NOT_GIVEN):
+        if voice_id is None and (settings is None or not is_given(settings.voice)):
             default_settings.voice = self._config.default_speaker
 
         # Validate and clamp pace to model's valid range
@@ -919,7 +919,7 @@ class SarvamTTSService(InterruptibleTTSService):
             sample_rate = self._config.default_sample_rate
 
         # Set default voice based on model if not specified via any mechanism
-        if voice_id is None and (settings is None or settings.voice is NOT_GIVEN):
+        if voice_id is None and (settings is None or not is_given(settings.voice)):
             default_settings.voice = self._config.default_speaker
 
         # Validate and clamp pace to model's valid range

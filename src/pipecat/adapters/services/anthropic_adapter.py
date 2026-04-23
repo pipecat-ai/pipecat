@@ -91,7 +91,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             self.get_messages(context), system_instruction=system_instruction
         )
         system = self._resolve_system_instruction(
-            converted.system if converted.system is not NOT_GIVEN else None,
+            converted.system if is_given(converted.system) else None,
             system_instruction,
             discard_context_system=True,
         )
