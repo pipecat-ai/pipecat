@@ -78,6 +78,7 @@ try:
         AudioTranscriptionConfig,
         AutomaticActivityDetection,
         Blob,
+        Content,
         ContextWindowCompressionConfig,
         EndSensitivity,
         FunctionResponse,
@@ -89,6 +90,7 @@ try:
         LiveServerMessage,
         MediaResolution,
         Modality,
+        Part,
         ProactivityConfig,
         RealtimeInputConfig,
         SessionResumptionConfig,
@@ -1262,8 +1264,60 @@ class GeminiLiveLLMService(LLMService):
         except Exception as e:
             await self._handle_send_error(e)
 
-    async def _create_initial_response(self):
-        """Create initial response based on context history."""
+    async def _create_initial_response(self, for_reconnect: bool = False):
+        """Seed conversation history and optionally trigger an initial model response.
+
+        Behavior by case:
+
+        Initial connection, ``_inference_on_context_initialization=True``:
+            Seed with ``turn_complete=True`` so the model generates a first
+            response to the trailing user turn. On Gemini 3.x we also send a
+            realtime-input nudge (the model won't actually run inference
+            without one).
+
+        Initial connection, ``_inference_on_context_initialization=False``:
+            Seed with ``turn_complete=False`` (no response yet). On Gemini 2.5
+            we set ``_needs_initial_turn_complete_message`` so the next
+            ``user_stopped_speaking`` sends an explicit ``turn_complete=True``;
+            otherwise 2.5 ignores the seeded history when the user's first
+            input is audio. Gemini 3.x merges seeded history and audio
+            cleanly and needs no workaround.
+
+            Note: on Gemini 2.5 the first user utterance after this kind of
+            seed still produces one "naive" response (context-ignoring) that
+            is immediately followed by a context-aware response. This is
+            Gemini 2.5's documented audio-input / history-recall limitation
+            (https://discuss.ai.google.dev/t/audio-input-cannot-trigger-history-recall-in-gemini-live-api-only-text-input-works/111617).
+            It's tolerable at the start of a conversation because the first
+            utterance is usually a greeting.
+
+        Reconnect, Gemini 3.x:
+            Seed with ``turn_complete=False`` — no workaround needed, the
+            next user utterance gets a single history-aware response.
+
+        Reconnect, Gemini 2.5:
+            Force ``turn_complete=True`` on the seed so the model generates
+            an inference over the seeded history immediately (typically a
+            recap/continuation of the conversation). This works around the
+            same Gemini 2.5 audio-input / history-recall limitation noted
+            above
+            (https://discuss.ai.google.dev/t/audio-input-cannot-trigger-history-recall-in-gemini-live-api-only-text-input-works/111617):
+            if we seeded without triggering inference, the user's next
+            utterance — mid-conversation — would briefly hear the bot act
+            like it had forgotten everything before recovering on the
+            following turn. Forcing a recap-style response up front avoids
+            that jarring UX.
+
+        Seed shape:
+            Gemini 2.5's ``send_client_content`` requires the seed's final
+            turn to be a user turn. When it isn't (e.g. on reconnect where
+            the bot had finished speaking before the disconnect), we append
+            a blank user turn to satisfy the server. Gemini 3.x has no such
+            requirement.
+
+        Args:
+            for_reconnect: When True, we're re-seeding after a reconnect.
+        """
         if self._disconnecting:
             return
 
@@ -1278,25 +1332,41 @@ class GeminiLiveLLMService(LLMService):
             self._ready_for_realtime_input = True
             return
 
+        # On reconnect, Gemini 2.5 needs us to force an inference so the user
+        # doesn't momentarily experience a "forgotten" assistant (see
+        # docstring). Gemini 3.x doesn't have that limitation. In the
+        # non-reconnect case we honor the configured setting.
+        if for_reconnect:
+            trigger_inference = not self._is_gemini_3
+        else:
+            trigger_inference = self._inference_on_context_initialization
+
         logger.debug(f"Creating initial response: {messages}")
+
+        # Enforce Gemini 2.5's "seed must end with user turn" requirement.
+        seed_messages = messages
+        if not self._is_gemini_3:
+            last_role = getattr(messages[-1], "role", None)
+            if last_role != "user":
+                seed_messages = messages + [Content(role="user", parts=[Part(text=" ")])]
 
         await self.start_ttfb_metrics()
 
         try:
             await self._session.send_client_content(
-                turns=messages, turn_complete=self._inference_on_context_initialization
+                turns=seed_messages,
+                turn_complete=trigger_inference,
             )
             # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
-            if self._is_gemini_3 and self._inference_on_context_initialization:
+            if self._is_gemini_3 and trigger_inference:
                 await self._session.send_realtime_input(text=" ")
         except Exception as e:
             await self._handle_send_error(e)
 
-        # If we're generating a response right away upon initializing
-        # conversation history, set a flag saying that we'll need a turn
-        # complete message when the user stops speaking.
-        # This is a quirky workaround, and not one that Gemini 3 needs.
-        if not self._inference_on_context_initialization and not self._is_gemini_3:
+        # Gemini 2.5-only workaround: when we've seeded without triggering
+        # inference, flag that the next user_stopped_speaking should send
+        # turn_complete=True so 2.5 picks up the seeded history.
+        if not trigger_inference and not self._is_gemini_3:
             self._needs_initial_turn_complete_message = True
 
         self._ready_for_realtime_input = True
@@ -1363,13 +1433,12 @@ class GeminiLiveLLMService(LLMService):
             self._ready_for_realtime_input = True
         elif self._context:
             # Reconnect without session resumption (e.g. error occurred
-            # before server sent a resumption handle).
-            # TODO: ideally we'd re-send conversation history here via
-            # _create_initial_response(), but that currently doesn't handle
-            # the reconnect case properly. This should be very rare — the
-            # connection would have to drop before we've received our first
-            # session_resumption_handle from the server.
-            self._ready_for_realtime_input = True
+            # before server sent a resumption handle): re-seed conversation
+            # history so the new session retains full context before
+            # accepting input. We route through _create_initial_response so
+            # that the seed/commit dance stays in one place. See that
+            # method's docstring for the reconnect-specific behavior.
+            await self._create_initial_response(for_reconnect=True)
         else:
             # Initial connection: session is ready before context has
             # arrived. Nothing to do — _handle_context will call
