@@ -496,7 +496,7 @@ class NvidiaSTTService(STTService):
                             result=result,
                         )
                     )
-                    logger.debug(f"Interim Transcription: [{transcript}]")
+                    logger.trace(f"Interim Transcription: [{transcript}]")
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process audio data for speech-to-text transcription.
