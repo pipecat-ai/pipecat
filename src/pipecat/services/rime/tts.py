@@ -14,7 +14,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, Callable, ClassVar, Union
 
 import aiohttp
 from loguru import logger
@@ -30,6 +30,11 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.rime.custom_pronunciations import (
+    CustomPronunciations,
+    TextRewriter,
+    _rewriter_is_nonempty,
+)
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import (
     InterruptibleTTSService,
@@ -37,6 +42,39 @@ from pipecat.services.tts_service import (
     TTSService,
     WebsocketTTSService,
 )
+
+_ARCANA_SUPPRESSION_WARNING = (
+    "custom_pronunciations are ignored on model='arcana' — Rime's "
+    "{phoneme} bracket syntax is only parsed by Mist models. Switch to a "
+    "Mist model to apply overrides, or construct the service without "
+    "custom_pronunciations=."
+)
+
+
+def _apply_rewriter(
+    rewriter: Union[CustomPronunciations, TextRewriter, None],
+    text: str,
+    model: str | None,
+    arcana_warning_logged: list[bool],
+    service_repr: str,
+) -> str:
+    """Apply a custom-pronunciations rewriter with Arcana warn-and-drop semantics.
+
+    ``arcana_warning_logged`` is a one-element mutable list so callers can
+    observe the flip from ``[False]`` → ``[True]`` after the first warning.
+    """
+    if rewriter is None:
+        return text
+    if model == "arcana" and _rewriter_is_nonempty(rewriter):
+        if not arcana_warning_logged[0]:
+            logger.warning(f"{service_repr}: {_ARCANA_SUPPRESSION_WARNING}")
+            arcana_warning_logged[0] = True
+        return text
+    try:
+        return rewriter(text)
+    except Exception as e:
+        logger.error(f"{service_repr}: custom_pronunciations rewriter raised: {e}")
+        return text
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -178,6 +216,7 @@ class RimeTTSService(WebsocketTTSService):
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
         aggregate_sentences: bool | None = None,
+        custom_pronunciations: Union[CustomPronunciations, TextRewriter, None] = None,
         **kwargs,
     ):
         """Initialize Rime TTS service.
@@ -208,6 +247,13 @@ class RimeTTSService(WebsocketTTSService):
 
                 .. deprecated:: 0.0.104
                     Use ``text_aggregation_mode`` instead.
+
+            custom_pronunciations: Optional rewriter applied to every outgoing
+                TTS request. Accepts a :class:`CustomPronunciations` instance
+                from :func:`load_custom_pronunciations` (managed + refreshable)
+                or any ``Callable[[str], str]`` for local-only rewriting. On
+                Arcana the rewriter is skipped and a one-time warning is
+                logged, since Arcana does not parse ``{phoneme}`` brackets.
 
             **kwargs: Additional arguments passed to parent class.
         """
@@ -293,6 +339,23 @@ class RimeTTSService(WebsocketTTSService):
         self._receive_task = None
         self._cumulative_time = 0  # Accumulates time across messages
         self._extra_msg_fields = {}  # Extra fields for next message
+
+        # Custom-pronunciations state. The Arcana-warning flag is a one-element
+        # list so the module-level _apply_rewriter helper can flip it in place.
+        self._custom_pronunciations = custom_pronunciations
+        self._arcana_warning_logged: list[bool] = [False]
+
+    def set_custom_pronunciations(
+        self, rewriter: Union[CustomPronunciations, TextRewriter, None]
+    ) -> None:
+        """Swap the custom-pronunciations rewriter at runtime.
+
+        The Arcana warn-once flag persists across swaps: once the service has
+        warned about Arcana+rewriter for this instance, it does not warn again.
+        Lifecycle of a :class:`CustomPronunciations` passed here is owned by
+        the caller — the service does not close it.
+        """
+        self._custom_pronunciations = rewriter
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -613,6 +676,13 @@ class RimeTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
+        text = _apply_rewriter(
+            self._custom_pronunciations,
+            text,
+            self._settings.model,
+            self._arcana_warning_logged,
+            str(self),
+        )
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
@@ -681,6 +751,7 @@ class RimeHttpTTSService(TTSService):
         sample_rate: int | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
+        custom_pronunciations: Union[CustomPronunciations, TextRewriter, None] = None,
         **kwargs,
     ):
         """Initialize Rime HTTP TTS service.
@@ -706,6 +777,12 @@ class RimeHttpTTSService(TTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
+            custom_pronunciations: Optional rewriter applied to every outgoing
+                TTS request. Accepts a :class:`CustomPronunciations` instance
+                from :func:`load_custom_pronunciations` (managed + refreshable)
+                or any ``Callable[[str], str]`` for local-only rewriting. On
+                Arcana the rewriter is skipped and a one-time warning is
+                logged, since Arcana does not parse ``{phoneme}`` brackets.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -766,6 +843,21 @@ class RimeHttpTTSService(TTSService):
         # Init-only audio format fields (not runtime-updatable)
         self._audio_format = "pcm"
 
+        self._custom_pronunciations = custom_pronunciations
+        self._arcana_warning_logged: list[bool] = [False]
+
+    def set_custom_pronunciations(
+        self, rewriter: Union[CustomPronunciations, TextRewriter, None]
+    ) -> None:
+        """Swap the custom-pronunciations rewriter at runtime.
+
+        The Arcana warn-once flag persists across swaps: once the service has
+        warned about Arcana+rewriter for this instance, it does not warn again.
+        Lifecycle of a :class:`CustomPronunciations` passed here is owned by
+        the caller — the service does not close it.
+        """
+        self._custom_pronunciations = rewriter
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -796,6 +888,13 @@ class RimeHttpTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
+        text = _apply_rewriter(
+            self._custom_pronunciations,
+            text,
+            self._settings.model,
+            self._arcana_warning_logged,
+            str(self),
+        )
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         headers = {
