@@ -103,8 +103,10 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             api_key="test-key",
         )
 
-    def _audio_frame(self, sample_rate: int = 16000, frame_duration_ms: int = 20):
-        samples = int(sample_rate * frame_duration_ms / 1000)
+    def _audio_frame(
+        self, sample_rate: int = 16000, frame_duration_ms: int = 20, num_samples: int | None = None
+    ):
+        samples = num_samples if num_samples is not None else int(sample_rate * frame_duration_ms / 1000)
         return InputAudioRawFrame(
             audio=_int16_silence(samples),
             sample_rate=sample_rate,
@@ -165,10 +167,10 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             result = await strategy.process_frame(self._audio_frame())
 
             self.assertEqual(result, ProcessFrameResult.CONTINUE)
-            # process() is still called (continuous state), but with vad_flag=False
+            # process() is still called (continuous state), but with speech_active=False
             self.mock_ip_session.process.assert_called()
             args = self.mock_ip_session.process.call_args[0]
-            self.assertFalse(args[1])  # vad_flag should be False
+            self.assertFalse(args[1])  # speech_active should be False
         finally:
             await strategy.cleanup()
 
@@ -185,10 +187,10 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             result = await strategy.process_frame(self._audio_frame())
 
             self.assertEqual(result, ProcessFrameResult.CONTINUE)
-            # process() is still called (continuous state), but with vad_flag=False
+            # process() is still called (continuous state), but with speech_active=False
             self.mock_ip_session.process.assert_called()
             args = self.mock_ip_session.process.call_args[0]
-            self.assertFalse(args[1])  # vad_flag should be False
+            self.assertFalse(args[1])  # speech_active should be False
         finally:
             await strategy.cleanup()
 
@@ -203,7 +205,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             # but _speech_active=False prevents triggering despite high prob
             self.mock_ip_session.process.assert_called()
             args = self.mock_ip_session.process.call_args[0]
-            self.assertFalse(args[1])  # vad_flag should be False
+            self.assertFalse(args[1])  # speech_active should be False
         finally:
             await strategy.cleanup()
 
@@ -229,6 +231,21 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         finally:
             await strategy.cleanup()
 
+    async def test_reset_clears_audio_buffer(self):
+        self.mock_ip_session.process = MagicMock(return_value=0.1)
+
+        strategy = self._make_strategy(threshold=0.5)
+        try:
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            # Feed a partial frame (smaller than samples_per_frame) so it stays in buffer
+            await strategy.process_frame(self._audio_frame(num_samples=10))
+            self.assertGreater(len(strategy._audio_buffer), 0)
+
+            await strategy.process_frame(VADUserStoppedSpeakingFrame())
+            self.assertEqual(len(strategy._audio_buffer), 0)
+        finally:
+            await strategy.cleanup()
+
     async def test_unrelated_frames_continue(self):
         strategy = self._make_strategy()
         try:
@@ -238,6 +255,85 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(r1, ProcessFrameResult.CONTINUE)
             self.assertEqual(r2, ProcessFrameResult.CONTINUE)
+        finally:
+            await strategy.cleanup()
+
+    async def test_reset_method_clears_state(self):
+        self.mock_ip_session.process = MagicMock(return_value=0.1)
+
+        strategy = self._make_strategy(threshold=0.5)
+        try:
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            await strategy.process_frame(self._audio_frame(num_samples=10))
+            self.assertTrue(strategy._speech_active)
+            self.assertGreater(len(strategy._audio_buffer), 0)
+
+            await strategy.reset()
+
+            self.assertFalse(strategy._speech_active)
+            self.assertEqual(len(strategy._audio_buffer), 0)
+            self.assertFalse(strategy._decision_made)
+        finally:
+            await strategy.cleanup()
+
+    async def test_cleanup_releases_sdk(self):
+        strategy = self._make_strategy()
+
+        await strategy.cleanup()
+
+        self.mock_sdk_manager.release.assert_called_once()
+        self.assertIsNone(strategy._ip_session)
+        self.assertFalse(strategy._sdk_acquired)
+
+    def test_init_raises_if_no_model_path(self):
+        with self.assertRaises(ValueError):
+            KrispVivaIPUserTurnStartStrategy(api_key="test-key")
+
+    def test_init_raises_if_wrong_extension(self):
+        with self.assertRaises(ValueError):
+            KrispVivaIPUserTurnStartStrategy(model_path="/some/model.bin", api_key="test-key")
+
+    def test_init_raises_if_file_not_found(self):
+        with self.assertRaises(FileNotFoundError):
+            KrispVivaIPUserTurnStartStrategy(model_path="/nonexistent/model.kef", api_key="test-key")
+
+    def test_init_raises_if_sdk_fails(self):
+        self.mock_sdk_manager.acquire.side_effect = RuntimeError("SDK error")
+        with self.assertRaises(RuntimeError):
+            KrispVivaIPUserTurnStartStrategy(model_path=self.model_path, api_key="test-key")
+
+    def test_init_uses_env_var_for_model_path(self):
+        with patch.dict(os.environ, {"KRISP_VIVA_IP_MODEL_PATH": self.model_path}):
+            strategy = KrispVivaIPUserTurnStartStrategy(api_key="test-key")
+            self.assertEqual(strategy._model_path, self.model_path)
+
+    async def test_vad_stopped_when_speech_inactive_is_no_op(self):
+        strategy = self._make_strategy()
+        try:
+            result = await strategy.process_frame(VADUserStoppedSpeakingFrame())
+            self.assertEqual(result, ProcessFrameResult.CONTINUE)
+            self.assertFalse(strategy._speech_active)
+        finally:
+            await strategy.cleanup()
+
+    async def test_interruption_at_exact_threshold_triggers(self):
+        threshold = 0.5
+        self.mock_ip_session.process = MagicMock(return_value=threshold)
+
+        strategy = self._make_strategy(threshold=threshold)
+        try:
+            fired = False
+
+            @strategy.event_handler("on_user_turn_started")
+            async def on_user_turn_started(strategy, params):
+                nonlocal fired
+                fired = True
+
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            result = await strategy.process_frame(self._audio_frame())
+
+            self.assertTrue(fired)
+            self.assertEqual(result, ProcessFrameResult.STOP)
         finally:
             await strategy.cleanup()
 

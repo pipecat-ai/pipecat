@@ -121,7 +121,6 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         # State tracking
         self._speech_active = False
-        self._vad_flag = False
         self._audio_buffer = bytearray()
         self._decision_made = False
 
@@ -168,7 +167,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
     def _reset_state(self):
         """Reset speech tracking state for the next candidate interruption."""
         self._speech_active = False
-        self._vad_flag = False
+        self._audio_buffer.clear()
         self._decision_made = False
 
     async def reset(self):
@@ -212,7 +211,6 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         logger.trace("Krisp VIVA IP: VAD speech started, collecting audio for classification")
         self._speech_active = True
-        self._vad_flag = True
         self._decision_made = False
         return ProcessFrameResult.CONTINUE
 
@@ -221,13 +219,9 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
         Every frame is passed to the IP model regardless of speech state so
         that the model maintains continuous internal state (matching the
-        standalone Krisp SDK behaviour).  ``_vad_flag`` is forwarded as
-        the per-frame VAD input to the model, while ``_speech_active``
-        gates the threshold evaluation.  This separation is important
-        because the IP model may output a high probability one frame
-        *after* the raw VAD goes silent; ``_speech_active`` (set from
-        the debounced VAD in the pipeline) stays True long enough to
-        catch that trailing output.
+        standalone Krisp SDK behaviour). ``_speech_active`` is forwarded as
+        the per-frame VAD input to the model and also gates the threshold
+        evaluation.
 
         Args:
             frame: Raw audio input frame.
@@ -260,7 +254,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         frames = audio_float32.reshape(-1, self._samples_per_frame)
 
         for ip_frame in frames:
-            ip_prob = self._ip_session.process(ip_frame.tolist(), self._vad_flag)
+            ip_prob = self._ip_session.process(ip_frame.tolist(), self._speech_active)
 
             if self._speech_active and not self._decision_made and ip_prob >= self._threshold:
                 logger.debug(
