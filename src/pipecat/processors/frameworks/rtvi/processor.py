@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
+    InputTextRawFrame,
     InputTransportMessageFrame,
     LLMConfigureOutputFrame,
     LLMMessagesAppendFrame,
@@ -376,6 +377,14 @@ class RTVIProcessor(FrameProcessor):
             run_llm=opts.run_immediately,
         )
         await self.push_frame(text_frame)
+        # Speech-to-speech LLM services (OpenAI Realtime, AWS Nova Sonic,
+        # Gemini Live, etc.) manage their own conversation state on the
+        # provider side and do not act on ``LLMContextFrame`` updates the way
+        # a text LLM does. Emit an ``InputTextRawFrame`` as well so those
+        # services receive the typed user turn and produce a response, matching
+        # the STT-LLM-TTS behavior for ``send-text`` (issue #3829).
+        if opts.run_immediately:
+            await self.push_frame(InputTextRawFrame(text=data.content))
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)

@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    InputTextRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -86,6 +87,28 @@ class CurrentAudioResponse:
     content_index: int
     start_time_ms: int
     total_size: int = 0
+
+
+def _extract_user_text(content: Any) -> str:
+    """Extract a plain text string from a universal-format message ``content``.
+
+    Supports both plain-string and list-of-parts content, concatenating any
+    ``text`` parts encountered. Non-text parts (e.g. image/audio) are ignored.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type in ("text", "input_text") and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return ""
 
 
 @dataclass
@@ -541,6 +564,8 @@ class OpenAIRealtimeLLMService(LLMService):
         elif isinstance(frame, InputImageRawFrame):
             if not self._video_input_paused:
                 await self._send_user_video(frame)
+        elif isinstance(frame, InputTextRawFrame):
+            await self._send_user_text(frame.text)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
         elif isinstance(frame, UserStartedSpeakingFrame):
@@ -572,8 +597,58 @@ class OpenAIRealtimeLLMService(LLMService):
             # Send results for newly-completed function calls, if any.
             await self._process_completed_function_calls(send_new_results=True)
 
-    async def _handle_messages_append(self, frame):
-        logger.error("!!! NEED TO IMPLEMENT MESSAGES APPEND")
+    async def _handle_messages_append(self, frame: LLMMessagesAppendFrame):
+        """Handle a raw ``LLMMessagesAppendFrame`` that reaches the service.
+
+        In typical pipelines the user context aggregator absorbs this frame
+        and pushes a refreshed ``LLMContextFrame``. This handler covers the
+        "no user aggregator" case, or pipelines where the frame is routed
+        around the aggregator, so that appended user text still drives a new
+        model response on the Realtime API (issue #3829).
+        """
+        triggered = False
+        for msg in frame.messages:
+            if msg.get("role") != "user":
+                continue
+            text = _extract_user_text(msg.get("content"))
+            if not text:
+                continue
+            await self._send_user_text(text, trigger_response=False)
+            triggered = True
+        if triggered and frame.run_llm:
+            await self._create_response()
+
+    async def _send_user_text(self, text: str, *, trigger_response: bool = True):
+        """Send a user text message to the Realtime API.
+
+        Creates a ``conversation.item.create`` event for the user text and,
+        by default, kicks off a new model response. This mirrors the path
+        used for audio input so typed text ("send-text") produces a model
+        reply in speech-to-speech pipelines.
+
+        Args:
+            text: Text to send as a user turn.
+            trigger_response: Whether to also emit ``response.create`` after
+                the conversation item. Defaults to True.
+        """
+        if not text:
+            return
+        if self._disconnecting or not self._websocket:
+            return
+
+        item = events.ConversationItem(
+            type="message",
+            role="user",
+            content=[events.ItemContent(type="input_text", text=text)],
+        )
+        evt = events.ConversationItemCreateEvent(item=item)
+        # Track the item id so the server-echo via conversation.item.added /
+        # conversation.item.done does not get re-processed as new user input.
+        self._messages_added_manually[evt.item.id] = True
+        await self.send_client_event(evt)
+
+        if trigger_response:
+            await self._create_response()
 
     #
     # websocket communication

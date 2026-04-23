@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallFromLLM,
     InputAudioRawFrame,
+    InputTextRawFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -508,6 +509,8 @@ class AWSNovaSonicLLMService(LLMService):
             await self._handle_context(frame.context)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
+        elif isinstance(frame, InputTextRawFrame):
+            await self._handle_input_text_frame(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption_frame()
 
@@ -534,6 +537,21 @@ class AWSNovaSonicLLMService(LLMService):
             return
 
         await self._send_user_audio_event(frame.audio)
+
+    async def _handle_input_text_frame(self, frame: InputTextRawFrame):
+        """Forward a user text input to Nova Sonic to trigger a model reply.
+
+        Treats ``InputTextRawFrame`` as a typed user turn (for example, from
+        an RTVI ``send-text`` message) and sends it as an interactive text
+        event so the model produces a response in speech-to-speech pipelines
+        (issue #3829).
+        """
+        if self._disconnecting or not self._stream:
+            return
+        text = frame.text
+        if not text:
+            return
+        await self._send_text_event(text=text, role=Role.USER, interactive=True)
 
     async def _handle_interruption_frame(self):
         pass
