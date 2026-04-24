@@ -1416,6 +1416,9 @@ class GeminiLiveLLMService(LLMService):
 
         try:
             await self._session.send_tool_response(function_responses=response)
+            # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
+            if self._is_gemini_3:
+                await self._session.send_realtime_input(text=" ")
         except Exception as e:
             await self._handle_send_error(e)
 
