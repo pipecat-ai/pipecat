@@ -43,6 +43,9 @@ class SpeechmaticsTTSSettings(TTSSettings):
         max_retries: Maximum number of retries for HTTP requests.
     """
 
+    # Speechmatics requires a voice (the URL path includes it), so narrow
+    # the inherited TTSSettings.voice field to disallow None.
+    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_retries: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
