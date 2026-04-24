@@ -555,6 +555,7 @@ class DailyTransportClient(EventHandler):
         self._camera_track: DailyVideoTrack | None = None
         self._microphone_track: DailyAudioTrack | None = None
         self._custom_audio_tracks: dict[str, DailyAudioTrack] = {}
+        # Custom video tracks will also include `screenVideo`.
         self._custom_video_tracks: dict[str, DailyVideoTrack] = {}
 
     def _speaker_name(self):
@@ -666,19 +667,19 @@ class DailyTransportClient(EventHandler):
         self._client.update_publishing(publishing)
 
     async def register_video_destination(self, destination: str):
-        """Register a custom video destination for multi-track output.
+        """Register a video destination for multi-track output.
+
+        Built-in destination ("camera") is configured at join time so it's
+        skipped here.
 
         Args:
             destination: The destination identifier to register.
+
         """
-        params = (self._params.custom_video_track_params or {}).get(destination)
-        self._custom_video_tracks[destination] = await self.add_custom_video_track(
-            destination, params=params
-        )
-        publishing: dict[str, Any] = {"customVideo": {destination: True}}
-        if params and params.send_settings:
-            publishing["customVideo"][destination] = {"sendSettings": params.send_settings}
-        self._client.update_publishing(publishing)
+        if destination == "screenVideo":
+            await self._register_screen_video_destination()
+        else:
+            await self._register_custom_video_destination(destination)
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the appropriate audio track.
@@ -719,7 +720,7 @@ class DailyTransportClient(EventHandler):
         """
         destination = frame.transport_destination
         video_source: CustomVideoSource | None = None
-        if not destination and self._camera_track:
+        if (not destination or destination == "camera") and self._camera_track:
             video_source = self._camera_track.source
         elif destination and destination in self._custom_video_tracks:
             track = self._custom_video_tracks[destination]
@@ -795,7 +796,11 @@ class DailyTransportClient(EventHandler):
                 self._callback_task_handler(self._video_queue),
                 f"{self}::video_callback_task",
             )
-        if self._params.video_out_enabled and not self._camera_track:
+        if (
+            self._params.video_out_enabled
+            and self._params.camera_out_enabled
+            and not self._camera_track
+        ):
             video_source = CustomVideoSource(
                 self._params.video_out_width,
                 self._params.video_out_height,
@@ -804,7 +809,11 @@ class DailyTransportClient(EventHandler):
             video_track = CustomVideoTrack(video_source)
             self._camera_track = DailyVideoTrack(source=video_source, track=video_track)
 
-        if self._params.audio_out_enabled and not self._microphone_track:
+        if (
+            self._params.audio_out_enabled
+            and self._params.microphone_out_enabled
+            and not self._microphone_track
+        ):
             logger.debug(
                 f"Creating custom audio source, auto silence {self._params.audio_out_auto_silence}"
             )
@@ -899,6 +908,7 @@ class DailyTransportClient(EventHandler):
                 },
                 "publishing": {
                     "camera": {
+                        "isPublishing": camera_enabled,
                         "sendSettings": {
                             "maxQuality": "low",
                             **(
@@ -912,15 +922,16 @@ class DailyTransportClient(EventHandler):
                                     "maxFramerate": self._params.video_out_framerate,
                                 }
                             },
-                        }
+                        },
                     },
                     "microphone": {
+                        "isPublishing": microphone_enabled,
                         "sendSettings": {
                             "channelConfig": "stereo"
                             if self._params.audio_out_channels == 2
                             else "mono",
                             "bitrate": self._params.audio_out_bitrate,
-                        }
+                        },
                     },
                 },
             },
@@ -1317,23 +1328,17 @@ class DailyTransportClient(EventHandler):
         """
         future = self._get_event_loop().create_future()
 
-        width = params.width if params else self._params.video_out_width
-        height = params.height if params else self._params.video_out_height
-        color_format = params.color_format if params else self._params.video_out_color_format
-
-        video_source = CustomVideoSource(width, height, color_format)
-
-        video_track = CustomVideoTrack(video_source)
+        video_track = self._create_video_track(params)
 
         self._client.add_custom_video_track(
             track_name=track_name,
-            video_track=video_track,
+            video_track=video_track.track,
             completion=completion_callback(future),
         )
 
         await future
 
-        return DailyVideoTrack(source=video_source, track=video_track)
+        return video_track
 
     async def remove_custom_video_track(self, track_name: str) -> CallClientError | None:
         """Remove a custom video track.
@@ -1344,6 +1349,8 @@ class DailyTransportClient(EventHandler):
         Returns:
             error: An error description or None.
         """
+        if track_name == "screenVideo":
+            return
         future = self._get_event_loop().create_future()
         self._client.remove_custom_video_track(
             track_name=track_name,
@@ -1423,6 +1430,56 @@ class DailyTransportClient(EventHandler):
             remote_participants=remote_participants, completion=completion_callback(future)
         )
         return await future
+
+    async def _create_video_track(
+        self,
+        params: DailyCustomVideoTrackParams | None = None,
+    ) -> DailyVideoTrack:
+        """Create a video track for the given parameters."""
+        future = self._get_event_loop().create_future()
+
+        width = params.width if params else self._params.video_out_width
+        height = params.height if params else self._params.video_out_height
+        color_format = params.color_format if params else self._params.video_out_color_format
+
+        video_source = CustomVideoSource(width, height, color_format)
+
+        video_track = CustomVideoTrack(video_source)
+
+        return DailyVideoTrack(source=video_source, track=video_track)
+
+    async def _register_screen_video_destination(self):
+        """Register screen video destination track."""
+        params = (self._params.custom_video_track_params or {}).get("screenVideo")
+
+        video_track = await self._create_video_track(params)
+        self._custom_video_tracks["screenVideo"] = video_track
+
+        # screenVideo inpupts settings.
+        inputs: dict[str, Any] = {
+            "screenVideo": {
+                "isEnabled": True,
+                "settings": {"customTrack": {"id": video_track.track.id}},
+            }
+        }
+        self._client.update_inputs(inputs)
+
+        # screenVideo publishing settings.
+        publishing: dict[str, Any] = {"screenVideo": True}
+        if params and params.send_settings:
+            publishing["screenVideo"] = {"sendSettings": params.send_settings}
+        self._client.update_publishing(publishing)
+
+    async def _register_custom_video_destination(self, destination: str):
+        """Register a custom video destination for multi-track output."""
+        params = (self._params.custom_video_track_params or {}).get(destination)
+        self._custom_video_tracks[destination] = await self.add_custom_video_track(
+            destination, params=params
+        )
+        publishing: dict[str, Any] = {"customVideo": {destination: True}}
+        if params and params.send_settings:
+            publishing["customVideo"][destination] = {"sendSettings": params.send_settings}
+        self._client.update_publishing(publishing)
 
     #
     #
