@@ -22,7 +22,11 @@ from PIL import Image
 
 from pipecat.audio.dtmf.utils import load_dtmf_audio
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
-from pipecat.audio.utils import create_stream_resampler, is_silence
+from pipecat.audio.utils import (
+    apply_fade_out_to_pcm16,
+    create_stream_resampler,
+    is_silence,
+)
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     BotSpeakingFrame,
@@ -48,7 +52,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.base_transport import InterruptionReleaseMode, TransportParams
 from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.time import nanoseconds_to_seconds
 
@@ -520,6 +524,47 @@ class BaseOutputTransport(FrameProcessor):
             if self._mixer:
                 await self._mixer.stop()
 
+        def _collect_bounded_drain_pcm(
+            self, old_buffer: bytearray, old_queue: FrameQueue, max_bytes: int
+        ) -> bytes:
+            combined = bytearray()
+            rem = max_bytes
+            take = min(len(old_buffer), rem)
+            combined.extend(old_buffer[:take])
+            rem -= take
+            try:
+                while True:
+                    item = old_queue.get_nowait()
+                    if isinstance(item, OutputAudioRawFrame) and rem > 0:
+                        t = min(len(item.audio), rem)
+                        combined.extend(item.audio[:t])
+                        rem -= t
+                    old_queue.task_done()
+            except asyncio.QueueEmpty:
+                pass
+            return bytes(combined)
+
+        async def _write_interruption_release_tail(self, pcm: bytes) -> None:
+            nch = self._params.audio_out_channels
+            off = 0
+            clen = self._audio_chunk_size
+            while off < len(pcm):
+                take = min(clen, len(pcm) - off)
+                chunk = OutputAudioRawFrame(
+                    bytes(pcm[off : off + take]),
+                    sample_rate=self._sample_rate,
+                    num_channels=nch,
+                )
+                chunk.transport_destination = self._destination
+                try:
+                    push_downstream = await self._transport.write_audio_frame(chunk)
+                except Exception as e:
+                    logger.error(f"{self} Error writing {chunk} to transport: {e}")
+                    push_downstream = False
+                if push_downstream:
+                    await self._transport.push_frame(chunk)
+                off += take
+
         async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
 
@@ -535,8 +580,40 @@ class BaseOutputTransport(FrameProcessor):
                 # so the pending UninterruptibleFrames are still delivered.
                 self._audio_queue.reset()
             else:
-                await self._cancel_audio_task()
-                self._create_audio_task()
+                use_bounded = (
+                    self._params.audio_out_enabled
+                    and not self._mixer
+                    and self._params.interruption_release_mode
+                    == InterruptionReleaseMode.BOUNDED_DRAIN
+                    and self._params.interruption_max_release_drain_ms > 0
+                    and self._sample_rate > 0
+                    and self._audio_task
+                )
+                if use_bounded:
+                    max_bytes = int(
+                        self._sample_rate
+                        * (self._params.interruption_max_release_drain_ms / 1000.0)
+                        * 2
+                        * self._params.audio_out_channels
+                    )
+                    old_buffer = bytearray(self._audio_buffer)
+                    old_queue = self._audio_queue
+                    await self._cancel_audio_task()
+                    tail = self._collect_bounded_drain_pcm(old_buffer, old_queue, max_bytes)
+                    self._audio_buffer = bytearray()
+                    if tail and self._params.interruption_fade_out_ms > 0:
+                        tail = apply_fade_out_to_pcm16(
+                            tail,
+                            sample_rate=self._sample_rate,
+                            num_channels=self._params.audio_out_channels,
+                            fade_out_ms=self._params.interruption_fade_out_ms,
+                        )
+                    if tail:
+                        await self._write_interruption_release_tail(tail)
+                    self._create_audio_task()
+                else:
+                    await self._cancel_audio_task()
+                    self._create_audio_task()
 
             # Create tasks.
             self._create_video_task()

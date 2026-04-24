@@ -38,7 +38,11 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
-from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.base_transport import (
+    BaseTransport,
+    InterruptionReleaseMode,
+    TransportParams,
+)
 
 try:
     from fastapi import WebSocket
@@ -426,11 +430,18 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
+        if (
+            isinstance(frame, InterruptionFrame)
+            and self._params.fixed_audio_packet_size
+            and self._params.interruption_release_mode == InterruptionReleaseMode.BOUNDED_DRAIN
+        ):
+            self._audio_send_buffer.clear()
         await super().process_frame(frame, direction)
 
         if isinstance(frame, InterruptionFrame):
-            # Drop any partially buffered audio to avoid replaying stale PCM
-            if self._params.fixed_audio_packet_size:
+            if self._params.fixed_audio_packet_size and (
+                self._params.interruption_release_mode == InterruptionReleaseMode.IMMEDIATE_CUT
+            ):
                 self._audio_send_buffer.clear()
 
             await self._write_frame(frame)

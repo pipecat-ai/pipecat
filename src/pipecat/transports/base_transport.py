@@ -13,6 +13,7 @@ functionality.
 
 from abc import abstractmethod
 from collections.abc import Mapping
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,6 +21,13 @@ from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.utils.base_object import BaseObject
+
+
+class InterruptionReleaseMode(StrEnum):
+    """How output transports release audio on user interruption."""
+
+    IMMEDIATE_CUT = "immediate_cut"
+    BOUNDED_DRAIN = "bounded_drain"
 
 
 class TransportParams(BaseModel):
@@ -52,6 +60,12 @@ class TransportParams(BaseModel):
         video_out_color_format: Video output color format string.
         video_out_codec: Preferred video codec for output (e.g., 'VP8', 'H264', 'H265').
         video_out_destinations: List of video output destination identifiers.
+        interruption_release_mode: Whether to hard-cut or play a short drained tail
+            of already-buffered output audio.
+        interruption_max_release_drain_ms: Max duration of audio to play after
+            ``BOUNDED_DRAIN`` (at the output sample rate).
+        interruption_fade_out_ms: Linear fade length applied to the end of the
+            drained tail (0 disables fading).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -81,6 +95,9 @@ class TransportParams(BaseModel):
     video_out_color_format: str = "RGB"
     video_out_codec: str | None = None
     video_out_destinations: list[str] = Field(default_factory=list)
+    interruption_release_mode: InterruptionReleaseMode = InterruptionReleaseMode.IMMEDIATE_CUT
+    interruption_max_release_drain_ms: int = 60
+    interruption_fade_out_ms: int = 20
 
 
 class BaseTransport(BaseObject):
