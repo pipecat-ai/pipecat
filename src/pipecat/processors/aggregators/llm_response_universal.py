@@ -859,6 +859,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # arriving in the same speaking window are bundled into a single deferred push.
         self._push_context_on_bot_stopped_speaking: bool = False
 
+        # Mirror of the above for the user-speaking case. A short trigger utterance whose
+        # transcription-driven turn-start races the function-call result can leave us with
+        # `self._user_speaking == True` at result-handling time. Without this flag the push
+        # would be silently dropped; with it, `UserStoppedSpeakingFrame` re-triggers the push.
+        self._push_context_on_user_stopped_speaking: bool = False
+
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
@@ -899,6 +905,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
+        self._push_context_on_user_stopped_speaking = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -970,6 +977,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             await self.push_frame(frame, direction)
+            if self._push_context_on_user_stopped_speaking and not self._bot_speaking:
+                logger.debug(f"{self}: User stopped speaking — pushing deferred context frame!")
+                await self.push_context_frame(FrameDirection.UPSTREAM)
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
             await self.push_frame(frame, direction)
@@ -1017,6 +1027,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         await super().push_context_frame(direction)
         self._push_context_on_bot_stopped_speaking = False
+        self._push_context_on_user_stopped_speaking = False
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -1159,7 +1170,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 else:
                     run_llm = True
 
-        if run_llm and not self._user_speaking:
+        if run_llm:
             if self.has_queued_frame(FunctionCallResultFrame):
                 # Another FunctionCallResultFrame is already queued. Defer the context push
                 # to bundle all results into a single LLM call instead of triggering one
@@ -1168,6 +1179,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 logger.debug(
                     f"{self}: More FunctionCallResultFrames queued — deferring context frame push."
                 )
+            elif self._user_speaking:
+                # Defer the context frame push until the user finishes speaking. Happens when
+                # a short trigger utterance's transcription-driven turn-start races the
+                # function call result. `UserStoppedSpeakingFrame` re-triggers the push.
+                logger.debug(f"{self}: User is speaking — deferring context frame push.")
+                self._push_context_on_user_stopped_speaking = True
             elif self._bot_speaking:
                 # Defer the context frame push until the bot finishes speaking. If multiple
                 # function call results arrive while the bot is speaking, they all accumulate
