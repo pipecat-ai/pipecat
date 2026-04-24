@@ -37,7 +37,12 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
     """
 
     def __init__(
-        self, *, smart_turn_model_path: Optional[str] = None, cpu_count: int = 1, **kwargs
+        self,
+        *,
+        smart_turn_model_path: Optional[str] = None,
+        cpu_count: int = 1,
+        confidence_threshold: float = 0.5,
+        **kwargs,
     ):
         """Initialize the local ONNX smart-turn-v3 analyzer.
 
@@ -45,9 +50,12 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
             smart_turn_model_path: Path to the ONNX model file. If this is not
                 set, the bundled smart-turn-v3.2-cpu model will be used.
             cpu_count: The number of CPUs to use for inference. Defaults to 1.
+            confidence_threshold: Probability threshold for marking turn as
+                complete. Higher values require more confidence. Defaults to 0.5.
             **kwargs: Additional arguments passed to BaseSmartTurn.
         """
         super().__init__(**kwargs)
+        self._confidence_threshold = confidence_threshold
 
         self._log_data = env_truthy("PIPECAT_SMART_TURN_LOG_DATA", default=False)
 
@@ -168,7 +176,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         probability = outputs[0][0].item()
 
         # Make prediction (1 for Complete, 0 for Incomplete)
-        prediction = 1 if probability > 0.5 else 0
+        prediction = 1 if probability > self._confidence_threshold else 0
 
         if self._log_data:
             suffix = "_complete" if prediction == 1 else "_incomplete"
