@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     VisionFullResponseStartFrame,
     VisionTextFrame,
 )
-from pipecat.services.settings import VisionSettings
+from pipecat.services.settings import VisionSettings, assert_given
 from pipecat.services.vision_service import VisionService
 
 try:
@@ -127,8 +127,11 @@ class MoondreamService(VisionService):
 
         logger.debug("Loading Moondream model...")
 
+        model_path = assert_given(self._settings.model)
+        if model_path is None:
+            raise ValueError("Moondream model must be specified")
         self._model = AutoModelForCausalLM.from_pretrained(
-            self._settings.model,
+            model_path,
             trust_remote_code=True,
             revision=revision,
             device_map={"": device},

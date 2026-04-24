@@ -21,7 +21,7 @@ from loguru import logger
 from typing_extensions import override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -315,8 +315,11 @@ class WhisperSTTService(SegmentedSTTService):
             from faster_whisper import WhisperModel
 
             logger.debug("Loading Whisper model...")
+            model_name = assert_given(self._settings.model)
+            if model_name is None:
+                raise ValueError("Whisper model must be specified")
             self._model = WhisperModel(
-                self._settings.model, device=self._device, compute_type=self._compute_type
+                model_name, device=self._device, compute_type=self._compute_type
             )
             logger.debug("Loaded Whisper model")
         except ModuleNotFoundError as e:
@@ -354,24 +357,29 @@ class WhisperSTTService(SegmentedSTTService):
         # Divide by 32768 because we have signed 16-bit data.
         audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
+        language = assert_given(self._settings.language)
         segments, _ = await asyncio.to_thread(
-            self._model.transcribe, audio_float, language=self._settings.language
+            self._model.transcribe, audio_float, language=language
         )
         text: str = ""
+        no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
         for segment in segments:
-            if segment.no_speech_prob < self._settings.no_speech_prob:
+            if (
+                no_speech_prob_threshold is not None
+                and segment.no_speech_prob < no_speech_prob_threshold
+            ):
                 text += f"{segment.text} "
 
         await self.stop_processing_metrics()
 
         if text:
-            await self._handle_transcription(text, True, self._settings.language)
+            await self._handle_transcription(text, True, language)
             logger.debug(f"Transcription: [{text}]")
             yield TranscriptionFrame(
                 text,
                 self._user_id,
                 time_now_iso8601(),
-                self._settings.language,
+                language,
             )
 
 
@@ -494,20 +502,29 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             # Divide by 32768 because we have signed 16-bit data.
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
+            model_path = assert_given(self._settings.model)
+            if model_path is None:
+                raise ValueError("Whisper model must be specified")
+            temperature = assert_given(self._settings.temperature)
+            language = assert_given(self._settings.language)
             chunk = await asyncio.to_thread(
                 mlx_whisper.transcribe,
                 audio_float,
-                path_or_hf_repo=self._settings.model,
-                temperature=self._settings.temperature,
-                language=self._settings.language,
+                path_or_hf_repo=model_path,
+                temperature=temperature,
+                language=language,
             )
             text: str = ""
+            no_speech_prob_threshold = assert_given(self._settings.no_speech_prob)
             for segment in chunk.get("segments", []):
                 # Drop likely hallucinations
                 if segment.get("compression_ratio", None) == 0.5555555555555556:
                     continue
 
-                if segment.get("no_speech_prob", 0.0) < self._settings.no_speech_prob:
+                if (
+                    no_speech_prob_threshold is not None
+                    and segment.get("no_speech_prob", 0.0) < no_speech_prob_threshold
+                ):
                     text += f"{segment.get('text', '')} "
 
             if len(text.strip()) == 0:
@@ -516,13 +533,13 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             await self.stop_processing_metrics()
 
             if text:
-                await self._handle_transcription(text, True, self._settings.language)
+                await self._handle_transcription(text, True, language)
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(
                     text,
                     self._user_id,
                     time_now_iso8601(),
-                    self._settings.language,
+                    language,
                 )
 
         except Exception as e:

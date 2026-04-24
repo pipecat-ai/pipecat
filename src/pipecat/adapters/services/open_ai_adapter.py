@@ -6,7 +6,7 @@
 
 """OpenAI LLM adapter for Pipecat."""
 
-from typing import Any, TypedDict
+from typing import Any, TypedDict, TypeGuard, TypeVar, cast
 
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
@@ -22,8 +22,60 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContextMessage,
     LLMContextToolChoice,
     LLMSpecificMessage,
+    LLMStandardMessage,
     NotGiven,
 )
+
+_T = TypeVar("_T")
+
+
+def _openai_from_llm_context_tool_choice(
+    tool_choice: LLMContextToolChoice | NotGiven,
+) -> ChatCompletionToolChoiceOptionParam | OpenAINotGiven:
+    """Reinterpret an LLMContext ``tool_choice`` as OpenAI's type.
+
+    The underlying types are currently aliased — ``LLMContextToolChoice`` is
+    ``ChatCompletionToolChoiceOptionParam`` and LLMContext's ``NotGiven`` is
+    OpenAI's — so this is a typed no-op today. It's kept as a named boundary
+    so that if the LLMContext side ever diverges from OpenAI's types, every
+    crossing is visible and easy to update.
+    """
+    return cast("ChatCompletionToolChoiceOptionParam | OpenAINotGiven", tool_choice)
+
+
+def _openai_from_llm_standard_message(
+    message: LLMStandardMessage,
+) -> ChatCompletionMessageParam:
+    """Reinterpret an LLMContext standard message as OpenAI's type.
+
+    Same rationale as :func:`_openai_from_llm_context_tool_choice`: the
+    aliased types make this a no-op today, but the boundary is preserved
+    for future divergence.
+    """
+    return cast("ChatCompletionMessageParam", message)
+
+
+def is_given(value: _T | OpenAINotGiven) -> TypeGuard[_T]:
+    """Check whether a value was explicitly provided.
+
+    Typically used when checking whether a parameter or field typed with
+    OpenAI's ``NotGiven`` was set::
+
+        if is_given(tool_choice):
+            ...
+
+    Also acts as a type guard: inside a true branch, the value is narrowed
+    to exclude ``OpenAINotGiven`` (e.g.
+    ``ChatCompletionToolChoiceOptionParam | OpenAINotGiven`` becomes
+    ``ChatCompletionToolChoiceOptionParam``).
+
+    Args:
+        value: The value to check.
+
+    Returns:
+        ``True`` if *value* is anything other than ``NOT_GIVEN``.
+    """
+    return not isinstance(value, OpenAINotGiven)
 
 
 class OpenAILLMInvocationParams(TypedDict):
@@ -92,7 +144,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             "messages": messages,
             # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
-            "tool_choice": context.tool_choice,
+            "tool_choice": _openai_from_llm_context_tool_choice(context.tool_choice),
         }
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[ChatCompletionToolParam]:
@@ -141,7 +193,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                 result.append(message.message)
             else:
                 # Standard message, pass through unchanged
-                result.append(message)
+                result.append(_openai_from_llm_standard_message(message))
 
         if convert_developer_to_user:
             for msg in result:
@@ -153,5 +205,4 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
     def _from_standard_tool_choice(
         self, tool_choice: LLMContextToolChoice | NotGiven
     ) -> ChatCompletionToolChoiceOptionParam | OpenAINotGiven:
-        # Just a pass-through: tool_choice is already the right type
-        return tool_choice
+        return _openai_from_llm_context_tool_choice(tool_choice)

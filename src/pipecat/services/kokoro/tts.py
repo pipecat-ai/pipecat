@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import TTSSettings, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -215,9 +215,11 @@ class KokoroTTSService(TTSService):
         try:
             await self.start_tts_usage_metrics(text)
 
-            stream = self._kokoro.create_stream(
-                text, voice=self._settings.voice, lang=self._settings.language, speed=1.0
-            )
+            voice = assert_given(self._settings.voice)
+            lang = assert_given(self._settings.language)
+            if lang is None:
+                raise ValueError("Kokoro TTS language must be specified")
+            stream = self._kokoro.create_stream(text, voice=voice, lang=lang, speed=1.0)
 
             async for samples, sample_rate in stream:
                 await self.stop_ttfb_metrics()

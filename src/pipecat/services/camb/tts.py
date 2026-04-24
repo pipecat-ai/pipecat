@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -270,8 +270,8 @@ class CambTTSService(TTSService):
             default_settings.apply_update(settings)
 
         # Warn if sample rate doesn't match model's supported rate
-        _model = default_settings.model
-        if sample_rate and sample_rate != MODEL_SAMPLE_RATES.get(_model):
+        _model = assert_given(default_settings.model)
+        if sample_rate and _model is not None and sample_rate != MODEL_SAMPLE_RATES.get(_model):
             logger.warning(
                 f"Camb.ai's {_model} model only supports {MODEL_SAMPLE_RATES.get(_model)}Hz "
                 f"sample rate. Current rate of {sample_rate}Hz may cause issues."
@@ -321,7 +321,8 @@ class CambTTSService(TTSService):
 
         # Use model-specific sample rate if not explicitly specified
         if not self._init_sample_rate:
-            self._sample_rate = MODEL_SAMPLE_RATES.get(self._settings.model, 22050)
+            model = assert_given(self._settings.model)
+            self._sample_rate = MODEL_SAMPLE_RATES.get(model, 22050) if model is not None else 22050
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:

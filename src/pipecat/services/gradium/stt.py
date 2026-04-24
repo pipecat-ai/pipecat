@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -397,8 +397,9 @@ class GradiumSTTService(WebsocketSTTService):
             json_config = {}
             if self._json_config:
                 json_config = json.loads(self._json_config)
-            if self._settings.language:
-                gradium_language = language_to_gradium_language(self._settings.language)
+            language = assert_given(self._settings.language)
+            if language:
+                gradium_language = language_to_gradium_language(language)
                 if gradium_language:
                     json_config["language"] = gradium_language
             if self._settings.delay_in_frames:
@@ -482,7 +483,7 @@ class GradiumSTTService(WebsocketSTTService):
                 text=accumulated,
                 user_id=self._user_id,
                 timestamp=time_now_iso8601(),
-                language=self._settings.language,
+                language=assert_given(self._settings.language),
             )
         )
         await self.stop_processing_metrics()
@@ -514,12 +515,13 @@ class GradiumSTTService(WebsocketSTTService):
         text = " ".join(self._accumulated_text)
         self._accumulated_text.clear()
         logger.debug(f"Final transcription: [{text}]")
+        language = assert_given(self._settings.language)
         await self.push_frame(
             TranscriptionFrame(
                 text,
                 self._user_id,
                 time_now_iso8601(),
-                self._settings.language,
+                language,
             )
         )
-        await self._trace_transcription(text, is_final=True, language=self._settings.language)
+        await self._trace_transcription(text, is_final=True, language=language)

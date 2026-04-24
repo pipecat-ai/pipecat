@@ -39,7 +39,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeGuard, TypeVar
 
 from loguru import logger
 
@@ -88,7 +88,10 @@ Valid only in delta-mode settings objects.  Must never appear in a service's
 """
 
 
-def is_given(value: Any) -> bool:
+_T = TypeVar("_T")
+
+
+def is_given(value: _T | _NotGiven) -> TypeGuard[_T]:
     """Check whether a delta field was explicitly provided.
 
     Typically used when processing a delta to decide whether a field
@@ -97,6 +100,10 @@ def is_given(value: Any) -> bool:
         if is_given(delta.voice):
             # caller wants to change the voice
             ...
+
+    Also acts as a type guard: inside a true branch, the value is narrowed
+    to exclude ``_NotGiven`` (e.g. ``str | None | _NotGiven`` becomes
+    ``str | None``).
 
     For store-mode objects this always returns ``True`` (since
     ``validate_complete`` ensures no ``NOT_GIVEN`` fields remain).
@@ -108,6 +115,31 @@ def is_given(value: Any) -> bool:
         ``True`` if *value* is anything other than ``NOT_GIVEN``.
     """
     return not isinstance(value, _NotGiven)
+
+
+def assert_given(value: _T | _NotGiven) -> _T:
+    """Extract a store-mode settings field, asserting it isn't ``NOT_GIVEN``.
+
+    Intended for reads from a store-mode settings object, where
+    ``_NotGiven`` should never appear (see ``validate_complete``).  Narrows
+    away ``_NotGiven`` at the type level and raises at runtime if the
+    invariant is violated::
+
+        resolved_model = assert_given(self._settings.model)  # narrowed str | None
+
+    Args:
+        value: The store-mode field value to extract.
+
+    Returns:
+        The value, narrowed to exclude ``_NotGiven``.
+
+    Raises:
+        RuntimeError: If *value* is ``NOT_GIVEN`` (a store-mode invariant
+            violation).
+    """
+    if not is_given(value):
+        raise RuntimeError("Store-mode settings field is NOT_GIVEN (invariant violated)")
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -408,7 +440,7 @@ class TTSSettings(ServiceSettings):
             ``__init__`` methods do the same at construction time.
     """
 
-    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language: Language | str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {"voice_id": "voice"}

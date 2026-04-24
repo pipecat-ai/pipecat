@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -80,13 +80,13 @@ class AzureTTSSettings(TTSSettings):
         volume: Volume level (e.g., "+20%", "loud", "x-soft").
     """
 
-    emphasis: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    role: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    style_degree: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emphasis: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    role: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style_degree: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureBaseTTSService:
@@ -428,7 +428,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         Returns:
             True if the language is CJK, False otherwise.
         """
-        language = (self._settings.language if self._settings.language else "").lower()
+        language = (assert_given(self._settings.language) or "").lower()
         # Check if language starts with CJK language codes
         return language.startswith(("zh", "ja", "ko", "cmn", "yue", "wuu"))
 

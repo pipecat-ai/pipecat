@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, assert_given
 
 try:
     from google import genai
@@ -157,8 +157,8 @@ class GoogleImageGenService(ImageGenService):
                 model=self._settings.model,
                 prompt=prompt,
                 config=types.GenerateImagesConfig(
-                    number_of_images=self._settings.number_of_images,
-                    negative_prompt=self._settings.negative_prompt,
+                    number_of_images=assert_given(self._settings.number_of_images),
+                    negative_prompt=assert_given(self._settings.negative_prompt),
                 ),
             )
             await self.stop_ttfb_metrics()

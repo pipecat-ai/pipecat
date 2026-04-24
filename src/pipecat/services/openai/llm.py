@@ -8,6 +8,7 @@
 
 from openai import NOT_GIVEN
 
+from pipecat.adapters.services.open_ai_adapter import is_given
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 
 
@@ -71,7 +72,7 @@ class OpenAILLMService(BaseOpenAILLMService):
             default_settings.model = model
 
         # Handle service_tier from deprecated params
-        if params is not None and not settings and params.service_tier is not NOT_GIVEN:
+        if params is not None and not settings and is_given(params.service_tier):
             service_tier = service_tier or params.service_tier
 
         # 3. Apply params overrides — only if settings not provided

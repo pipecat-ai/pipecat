@@ -9,7 +9,7 @@
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any, TypedDict, TypeGuard, TypeVar
 
 from anthropic import NOT_GIVEN, NotGiven
 from anthropic.types.message_param import MessageParam
@@ -25,6 +25,29 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     LLMStandardMessage,
 )
+
+_T = TypeVar("_T")
+
+
+def is_given(value: _T | NotGiven) -> TypeGuard[_T]:
+    """Check whether a value was explicitly provided.
+
+    Typically used when checking whether a parameter or field typed with
+    Anthropic's ``NotGiven`` was set::
+
+        if is_given(system):
+            ...
+
+    Also acts as a type guard: inside a true branch, the value is narrowed
+    to exclude ``NotGiven`` (e.g. ``str | NotGiven`` becomes ``str``).
+
+    Args:
+        value: The value to check.
+
+    Returns:
+        ``True`` if *value* is anything other than ``NOT_GIVEN``.
+    """
+    return not isinstance(value, NotGiven)
 
 
 class AnthropicLLMInvocationParams(TypedDict):
@@ -68,7 +91,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             self.get_messages(context), system_instruction=system_instruction
         )
         system = self._resolve_system_instruction(
-            converted.system if converted.system is not NOT_GIVEN else None,
+            converted.system if is_given(converted.system) else None,
             system_instruction,
             discard_context_system=True,
         )

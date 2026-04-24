@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -647,7 +647,8 @@ class DeepgramFluxSTTBase(STTService):
         average_confidence = self._calculate_average_confidence(data)
         detected_language = self._primary_detected_language(data)
 
-        if not self._settings.min_confidence or average_confidence > self._settings.min_confidence:
+        min_confidence = assert_given(self._settings.min_confidence)
+        if not min_confidence or average_confidence > min_confidence:
             # EndOfTurn means Flux has determined the turn is complete,
             # so this TranscriptionFrame is always finalized
             await self.push_frame(

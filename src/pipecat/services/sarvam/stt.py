@@ -37,6 +37,7 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     STTSettings,
     _NotGiven,
+    assert_given,
     is_given,
 )
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
@@ -319,8 +320,8 @@ class SarvamSTTService(STTService):
             default_settings.apply_update(settings)
 
         # Resolve model config and validate (after all overrides)
-        resolved_model = default_settings.model
-        if resolved_model not in MODEL_CONFIGS:
+        resolved_model = assert_given(default_settings.model)
+        if resolved_model is None or resolved_model not in MODEL_CONFIGS:
             allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
             raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
@@ -407,8 +408,9 @@ class SarvamSTTService(STTService):
 
     def _get_language_string(self) -> str | None:
         """Resolve the current language setting to a Sarvam language code string."""
-        if self._settings.language:
-            return language_to_sarvam_language(self._settings.language)
+        language = assert_given(self._settings.language)
+        if language:
+            return language_to_sarvam_language(language)
         return self._config.default_language
 
     def can_generate_metrics(self) -> bool:

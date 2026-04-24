@@ -59,7 +59,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given, is_given
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -489,8 +489,8 @@ class SarvamHttpTTSService(TTSService):
             default_settings.apply_update(settings)
 
         # Get model configuration (validates model exists)
-        resolved_model = default_settings.model
-        if resolved_model not in TTS_MODEL_CONFIGS:
+        resolved_model = assert_given(default_settings.model)
+        if resolved_model is None or resolved_model not in TTS_MODEL_CONFIGS:
             allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
             raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
@@ -501,11 +501,11 @@ class SarvamHttpTTSService(TTSService):
             sample_rate = self._config.default_sample_rate
 
         # Set default voice based on model if not specified via any mechanism
-        if voice_id is None and (settings is None or settings.voice is NOT_GIVEN):
+        if voice_id is None and (settings is None or not is_given(settings.voice)):
             default_settings.voice = self._config.default_speaker
 
         # Validate and clamp pace to model's valid range
-        pace = default_settings.pace
+        pace = assert_given(default_settings.pace)
         pace_min, pace_max = self._config.pace_range
         if pace is not None and (pace < pace_min or pace > pace_max):
             logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")
@@ -907,8 +907,8 @@ class SarvamTTSService(InterruptibleTTSService):
             default_settings.apply_update(settings)
 
         # Get model configuration (validates model exists)
-        resolved_model = default_settings.model
-        if resolved_model not in TTS_MODEL_CONFIGS:
+        resolved_model = assert_given(default_settings.model)
+        if resolved_model is None or resolved_model not in TTS_MODEL_CONFIGS:
             allowed = ", ".join(sorted(TTS_MODEL_CONFIGS.keys()))
             raise ValueError(f"Unsupported model '{resolved_model}'. Allowed values: {allowed}.")
 
@@ -919,11 +919,11 @@ class SarvamTTSService(InterruptibleTTSService):
             sample_rate = self._config.default_sample_rate
 
         # Set default voice based on model if not specified via any mechanism
-        if voice_id is None and (settings is None or settings.voice is NOT_GIVEN):
+        if voice_id is None and (settings is None or not is_given(settings.voice)):
             default_settings.voice = self._config.default_speaker
 
         # Validate and clamp pace to model's valid range
-        pace = default_settings.pace
+        pace = assert_given(default_settings.pace)
         pace_min, pace_max = self._config.pace_range
         if pace is not None and (pace < pace_min or pace > pace_max):
             logger.warning(f"Pace {pace} is outside model range ({pace_min}-{pace_max}). Clamping.")

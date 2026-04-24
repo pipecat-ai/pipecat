@@ -55,6 +55,7 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
     _NotGiven,
+    assert_given,
     is_given,
 )
 from pipecat.utils.time import time_now_iso8601
@@ -385,13 +386,14 @@ class InworldRealtimeLLMService(LLMService):
         Returns:
             Configured sample rate or None if not manually configured.
         """
-        if not self._settings.session_properties.audio:
+        session_properties = assert_given(self._settings.session_properties)
+        if not session_properties.audio:
             return None
 
         audio_config = (
-            self._settings.session_properties.audio.input
+            session_properties.audio.input
             if direction == "input"
-            else self._settings.session_properties.audio.output
+            else session_properties.audio.output
         )
 
         if audio_config and audio_config.format:
@@ -463,7 +465,7 @@ class InworldRealtimeLLMService(LLMService):
         """
         self._input_sample_rate = input_sample_rate
         self._output_sample_rate = output_sample_rate
-        props = self._settings.session_properties
+        props = assert_given(self._settings.session_properties)
         if not props.audio:
             props.audio = events.AudioConfiguration()
         if not props.audio.input:
@@ -661,12 +663,13 @@ class InworldRealtimeLLMService(LLMService):
 
     async def _send_session_update(self):
         """Update session settings on the server."""
-        settings = self._settings.session_properties
+        settings = assert_given(self._settings.session_properties)
         adapter: InworldRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:
             llm_invocation_params = adapter.get_llm_invocation_params(
-                self._context, system_instruction=self._settings.system_instruction
+                self._context,
+                system_instruction=assert_given(self._settings.system_instruction),
             )
 
             if llm_invocation_params["tools"]:
@@ -969,7 +972,8 @@ class InworldRealtimeLLMService(LLMService):
             )
 
             llm_invocation_params = adapter.get_llm_invocation_params(
-                self._context, system_instruction=self._settings.system_instruction
+                self._context,
+                system_instruction=assert_given(self._settings.system_instruction),
             )
             messages = llm_invocation_params["messages"]
 
@@ -986,7 +990,10 @@ class InworldRealtimeLLMService(LLMService):
         await self.start_processing_metrics()
         await self.start_ttfb_metrics()
 
-        modalities = self._settings.session_properties.output_modalities or ["text", "audio"]
+        modalities = assert_given(self._settings.session_properties).output_modalities or [
+            "text",
+            "audio",
+        ]
         await self.send_client_event(
             events.ResponseCreateEvent(response=events.ResponseProperties(modalities=modalities))
         )

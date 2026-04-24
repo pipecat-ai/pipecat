@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     URLImageRawFrame,
 )
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, assert_given
 
 
 @dataclass
@@ -117,7 +117,10 @@ class OpenAIImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         image = await self._client.images.generate(
-            prompt=prompt, model=self._settings.model, n=1, size=self._settings.image_size
+            prompt=prompt,
+            model=assert_given(self._settings.model),
+            n=1,
+            size=assert_given(self._settings.image_size),
         )
 
         image_url = image.data[0].url

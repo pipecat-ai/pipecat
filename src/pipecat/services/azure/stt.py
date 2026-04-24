@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import STTSettings
+from pipecat.services.settings import STTSettings, assert_given
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -128,9 +128,9 @@ class AzureSTTService(STTService):
             **kwargs,
         )
 
-        recognition_language = default_settings.language or language_to_azure_language(
-            Language.EN_US
-        )
+        recognition_language = assert_given(
+            default_settings.language
+        ) or language_to_azure_language(Language.EN_US)
 
         if not region and not private_endpoint:
             raise ValueError("Either 'region' or 'private_endpoint' must be provided.")
@@ -280,7 +280,9 @@ class AzureSTTService(STTService):
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or self._settings.language
+            language = getattr(event.result, "language", None) or assert_given(
+                self._settings.language
+            )
             frame = TranscriptionFrame(
                 event.result.text,
                 self._user_id,
@@ -295,7 +297,9 @@ class AzureSTTService(STTService):
 
     def _on_handle_recognizing(self, event):
         if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or self._settings.language
+            language = getattr(event.result, "language", None) or assert_given(
+                self._settings.language
+            )
             frame = InterimTranscriptionFrame(
                 event.result.text,
                 self._user_id,

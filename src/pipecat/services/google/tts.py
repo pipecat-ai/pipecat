@@ -39,6 +39,7 @@ from pipecat.services.settings import (
     NOT_GIVEN,
     TTSSettings,
     _NotGiven,
+    assert_given,
     is_given,
 )
 from pipecat.services.tts_service import TTSService
@@ -815,8 +816,9 @@ class GoogleHttpTTSService(TTSService):
 
         try:
             # Check if the voice is a Chirp voice (including Chirp 3) or Journey voice
-            is_chirp_voice = "chirp" in self._settings.voice.lower()
-            is_journey_voice = "journey" in self._settings.voice.lower()
+            voice_name = assert_given(self._settings.voice)
+            is_chirp_voice = "chirp" in (voice_name or "").lower()
+            is_journey_voice = "journey" in (voice_name or "").lower()
 
             # Create synthesis input based on voice_id
             if is_chirp_voice or is_journey_voice:
@@ -1447,7 +1449,7 @@ class GeminiTTSService(GoogleBaseTTSService):
 
             # Use base class streaming logic with prompt support
             async for frame in self._stream_tts(
-                streaming_config, text, context_id, self._settings.prompt
+                streaming_config, text, context_id, assert_given(self._settings.prompt)
             ):
                 yield frame
 

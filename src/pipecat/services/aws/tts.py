@@ -133,11 +133,11 @@ class AWSPollyTTSSettings(TTSSettings):
         lexicon_names: List of pronunciation lexicons to apply.
     """
 
-    engine: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    pitch: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    volume: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    lexicon_names: list[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    engine: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lexicon_names: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AWSPollyTTSService(TTSService):

@@ -12,6 +12,7 @@ adapters that handle tool format conversion and standardization.
 
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import Any, Generic, TypeVar
 
 from loguru import logger
@@ -26,7 +27,7 @@ from pipecat.processors.aggregators.llm_context import (
 )
 
 # Should be a TypedDict
-TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=dict[str, Any])
+TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=Mapping[str, Any])
 
 
 class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):

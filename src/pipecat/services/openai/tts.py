@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -70,8 +70,8 @@ class OpenAITTSSettings(TTSSettings):
         speed: Voice speed control (0.25 to 4.0, default 1.0).
     """
 
-    instructions: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    instructions: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAITTSService(TTSService):
@@ -240,7 +240,7 @@ class OpenAITTSService(TTSService):
             create_params = {
                 "input": text,
                 "model": self._settings.model,
-                "voice": VALID_VOICES[self._settings.voice],
+                "voice": VALID_VOICES[assert_given(self._settings.voice)],
                 "response_format": "pcm",
             }
 

@@ -37,7 +37,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -385,7 +385,7 @@ class GoogleSTTSettings(STTSettings):
     """
 
     languages: list[Language] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language_codes: list[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_codes: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     use_separate_recognition_per_channel: bool | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
@@ -641,8 +641,9 @@ class GoogleSTTService(STTService):
         """
         if self._settings.languages:
             return [self.language_to_service_language(lang) for lang in self._settings.languages]
-        if self._settings.language_codes:
-            return list(self._settings.language_codes)
+        language_codes = assert_given(self._settings.language_codes)
+        if language_codes:
+            return list(language_codes)
         return ["en-US"]
 
     async def _reconnect_if_needed(self):

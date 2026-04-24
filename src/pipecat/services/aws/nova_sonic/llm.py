@@ -51,7 +51,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -559,7 +559,9 @@ class AWSNovaSonicLLMService(LLMService):
 
             # Start the bidirectional stream
             self._stream = await self._client.invoke_model_with_bidirectional_stream(
-                InvokeModelWithBidirectionalStreamOperationInput(model_id=self._settings.model)
+                InvokeModelWithBidirectionalStreamOperationInput(
+                    model_id=assert_given(self._settings.model)
+                )
             )
 
             # Send session start event
@@ -598,7 +600,7 @@ class AWSNovaSonicLLMService(LLMService):
         # Read context
         adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
         llm_connection_params = adapter.get_llm_invocation_params(
-            self._context, system_instruction=self._settings.system_instruction
+            self._context, system_instruction=assert_given(self._settings.system_instruction)
         )
 
         # Send prompt start event, specifying tools.

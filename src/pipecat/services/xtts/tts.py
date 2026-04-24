@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import TTSSettings, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -211,7 +211,7 @@ class XTTSService(TTSService):
             logger.error(f"{self} no studio speakers available")
             return
 
-        embeddings = self._studio_speakers[self._settings.voice]
+        embeddings = self._studio_speakers[assert_given(self._settings.voice)]
 
         url = self._base_url + "/tts_stream"
 

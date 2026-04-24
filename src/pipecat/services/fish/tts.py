@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -278,7 +278,9 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             logger.debug("Connecting to Fish Audio")
             headers = {"Authorization": f"Bearer {self._api_key}"}
-            headers["model"] = self._settings.model
+            model = assert_given(self._settings.model)
+            if model is not None:
+                headers["model"] = model
             self._websocket = await websocket_connect(self._base_url, additional_headers=headers)
 
             # Send initial start message with ormsgpack
