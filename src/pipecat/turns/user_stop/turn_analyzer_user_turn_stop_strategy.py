@@ -47,6 +47,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._turn_analyzer = turn_analyzer
         self._timeout = timeout
         self._text = ""
+        self._interim_text = ""
         self._turn_complete = False
         self._vad_user_speaking = False
         self._event = asyncio.Event()
@@ -56,6 +57,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Reset the strategy to its initial state."""
         await super().reset()
         self._text = ""
+        self._interim_text = ""
         self._turn_complete = False
         self._vad_user_speaking = False
         self._event.clear()
@@ -154,6 +156,9 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
         """Handle user interim transcription."""
+        # Save interim text as fallback when STT never sends a finalized transcript.
+        if frame.text:
+            self._interim_text = frame.text
         # Reset transcription timeout.
         self._event.set()
 
@@ -178,5 +183,9 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
                 await self._maybe_trigger_user_turn_stopped()
 
     async def _maybe_trigger_user_turn_stopped(self):
-        if self._text and self._turn_complete:
+        # Use finalized text if available, otherwise fall back to interim text
+        # (covers cases where STT never sends a finalized transcript).
+        text = self._text or self._interim_text
+        if text and self._turn_complete:
+            self._text = text
             await self.trigger_user_turn_stopped()

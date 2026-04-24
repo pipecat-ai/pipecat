@@ -357,6 +357,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
+        self._last_interim_text = ""
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -416,6 +417,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            await self._handle_interim_transcription(frame)
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
@@ -445,10 +448,18 @@ class LLMUserAggregator(LLMContextAggregator):
     async def push_aggregation(self) -> str:
         """Push the current aggregation."""
         if len(self._aggregation) == 0:
+            # Fall back to interim text when STT never sent a finalized transcript.
+            if self._last_interim_text:
+                aggregation = self._last_interim_text
+                self._last_interim_text = ""
+                self._context.add_message({"role": self.role, "content": aggregation})
+                await self.push_context_frame()
+                return aggregation
             return ""
 
         aggregation = self.aggregation_string()
         await self.reset()
+        self._last_interim_text = ""
         self._context.add_message({"role": self.role, "content": aggregation})
         await self.push_context_frame()
 
@@ -560,12 +571,20 @@ class LLMUserAggregator(LLMContextAggregator):
         if not text.strip():
             return
 
+        # Clear interim fallback since we have finalized text.
+        self._last_interim_text = ""
+
         # Transcriptions never include inter-part spaces (so far).
         self._aggregation.append(
             TextPartForConcatenation(
                 text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
             )
         )
+
+    async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
+        # Save latest interim text as fallback for when STT never finalizes.
+        if frame.text and frame.text.strip():
+            self._last_interim_text = frame.text
 
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
