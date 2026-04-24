@@ -408,7 +408,7 @@ class STTService(AIService):
             await self._handle_vad_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self._handle_user_stopped_speaking(frame)
+            await self._maybe_reconnect()
             await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
             if frame.service is not None and frame.service is not self:
@@ -508,8 +508,8 @@ class STTService(AIService):
         self._finalize_pending = False
         self._last_transcript_time = 0
 
-    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
-        """Handle user stopped speaking frame.
+    async def _maybe_reconnect(self):
+        """Check if reconnection is needed after user stops speaking.
 
         Called when the user's full turn has ended and the transcription has been
         received. Re-enables reconnection and triggers any deferred reconnect that
