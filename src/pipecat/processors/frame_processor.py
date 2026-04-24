@@ -71,11 +71,14 @@ class FrameProcessorSetup:
         clock: The clock instance for timing operations.
         task_manager: The task manager for handling async operations.
         observer: Optional observer for monitoring frame processing events.
+        tool_resources: Application-defined resources shared with processors
+            for this pipeline run.
     """
 
     clock: BaseClock
     task_manager: BaseTaskManager
     observer: BaseObserver | None = None
+    tool_resources: Any = None
 
 
 class FrameProcessorQueue(asyncio.PriorityQueue):
