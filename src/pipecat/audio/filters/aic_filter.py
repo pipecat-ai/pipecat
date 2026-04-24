@@ -32,7 +32,7 @@ from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.vad.aic_vad import AICVADAnalyzer
-from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
+from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame, FilterUpdateSettingsFrame
 
 
 class AICModelManager:
@@ -446,7 +446,13 @@ class AICFilter(BaseAudioFilter):
                 self._model_cache_key = None
 
     async def process_frame(self, frame: FilterControlFrame):
-        """Process control frames to enable/disable filtering.
+        """Process control frames to enable/disable filtering or update settings.
+
+        Handles ``FilterEnableFrame`` (bypass toggle) and ``FilterUpdateSettingsFrame``
+        with the following keys:
+
+        - ``enhancement_level`` (float, 0.0–1.0): Adjust enhancement strength at runtime.
+        - ``bypass`` (bool): Enable or disable the filter at runtime.
 
         Args:
             frame: The control frame containing filter commands.
@@ -462,6 +468,17 @@ class AICFilter(BaseAudioFilter):
                     self._apply_enhancement_level()
                 except Exception as e:  # noqa: BLE001
                     logger.error(f"AIC set_parameter failed: {e}")
+        elif isinstance(frame, FilterUpdateSettingsFrame):
+            if "enhancement_level" in frame.settings:
+                val = float(frame.settings["enhancement_level"])
+                if 0.0 <= val <= 1.0:
+                    self._enhancement_level = val
+                    self._apply_enhancement_level()
+                else:
+                    logger.warning(f"AIC enhancement_level {val} out of range [0.0, 1.0]; ignored.")
+            if "bypass" in frame.settings:
+                self._bypass = bool(frame.settings["bypass"])
+                self._apply_bypass()
 
     async def filter(self, audio: bytes) -> bytes:
         """Apply AIC enhancement to audio data.
