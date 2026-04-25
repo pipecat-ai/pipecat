@@ -1539,8 +1539,10 @@ class TestVonageVideoConnectorTransport:
 
         # Wait for async processing
         await self._wait_for_condition(
-            lambda: on_stream_received_mock1.await_count > 0
-            and on_stream_received_mock2.await_count > 0
+            lambda: (
+                on_stream_received_mock1.await_count > 0
+                and on_stream_received_mock2.await_count > 0
+            )
         )
 
         # Verify both listeners were called

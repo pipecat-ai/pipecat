@@ -561,7 +561,7 @@ async def create_transport(
                 audio_out_enabled=True,
                 # add_wav_header and serializer will be set automatically
             ),
-            "vonage": lambda: VonageVideoConnectorParams(
+            "vonage": lambda: VonageVideoConnectorTransportParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
