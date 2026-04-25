@@ -36,11 +36,12 @@ load_dotenv(override=True)
 
 
 def _create_aic_filter() -> AICFilter:
-    license_key = os.getenv("AICOUSTICS_LICENSE_KEY", "")
+    license_key = os.getenv("AIC_LICENSE_KEY", "")
 
     return AICFilter(
         license_key=license_key,
-        model_id="quail-vf-2.0-l-16khz",
+        model_id="quail-vf-2.1-l-16khz",
+        enhancement_level=0.8,
     )
 
 
