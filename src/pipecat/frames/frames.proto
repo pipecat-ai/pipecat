@@ -4,8 +4,10 @@
 // SPDX-License-Identifier: BSD 2-Clause License
 //
 
-// Generate frames_pb2.py with:
+// Generate frames_pb2.py with grpcio-tools 1.67.x (ships protoc 5.x, so the
+// gencode runs on both protobuf 5.x and 6.x runtimes):
 //
+//   uv pip install 'grpcio-tools~=1.67.1'
 //   python -m grpc_tools.protoc --proto_path=./ --python_out=./protobufs frames.proto
 
 syntax = "proto3";
