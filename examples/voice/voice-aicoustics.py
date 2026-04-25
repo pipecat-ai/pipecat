@@ -36,7 +36,7 @@ load_dotenv(override=True)
 
 
 def _create_aic_filter() -> AICFilter:
-    license_key = os.getenv("AICOUSTICS_LICENSE_KEY", "")
+    license_key = os.getenv("AIC_LICENSE_KEY", "")
 
     return AICFilter(
         license_key=license_key,

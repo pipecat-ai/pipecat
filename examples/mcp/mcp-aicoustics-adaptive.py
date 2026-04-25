@@ -13,13 +13,13 @@ quality issues. The tool pushes a `FilterUpdateSettingsFrame` into the pipeline,
 which the transport's input stage forwards to the `AICFilter` instance.
 
 Required env vars:
-    AICOUSTICS_LICENSE_KEY  – ai-coustics SDK license key
+    AIC_LICENSE_KEY  – ai-coustics SDK license key
     ANTHROPIC_API_KEY       – Anthropic API key
     DEEPGRAM_API_KEY        – Deepgram STT key
     CARTESIA_API_KEY        – Cartesia TTS key
 
 Optional env vars:
-    AICOUSTICS_MODEL_ID     – Enhancement model ID (default: quail-vf-2.1-l-16khz)
+    AIC_MODEL_ID     – Enhancement model ID (default: quail-vf-2.1-l-16khz)
 """
 
 import os
@@ -52,10 +52,10 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 load_dotenv(override=True)
 
 _DEFAULT_ENHANCEMENT_LEVEL = 0.5
-_MODEL_ID = os.getenv("AICOUSTICS_MODEL_ID", "quail-vf-2.1-l-16khz")
+_MODEL_ID = os.getenv("AIC_MODEL_ID", "quail-vf-2.1-l-16khz")
 
 aic_filter = AICFilter(
-    license_key=os.getenv("AICOUSTICS_LICENSE_KEY", ""),
+    license_key=os.getenv("AIC_LICENSE_KEY", ""),
     model_id=_MODEL_ID,
     enhancement_level=_DEFAULT_ENHANCEMENT_LEVEL,
 )
