@@ -33,7 +33,7 @@ import json
 import os
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from fastapi import WebSocket
 from loguru import logger
@@ -42,9 +42,10 @@ from pipecat.runner.types import (
     DailyRunnerArguments,
     LiveKitRunnerArguments,
     SmallWebRTCRunnerArguments,
+    VonageRunnerArguments,
     WebSocketRunnerArguments,
 )
-from pipecat.transports.base_transport import BaseTransport
+from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 
 def _detect_transport_type_from_message(message_data: dict) -> str:
@@ -271,6 +272,14 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     except ImportError:
         pass
 
+    try:
+        from pipecat.transports.vonage.video_connector import VonageVideoConnectorTransport
+
+        if isinstance(transport, VonageVideoConnectorTransport):
+            return client["streamId"]
+    except ImportError:
+        pass
+
     logger.warning(f"Unable to get client id from unsupported transport {type(transport)}")
     return ""
 
@@ -300,6 +309,24 @@ async def maybe_capture_participant_camera(
 
         if isinstance(transport, SmallWebRTCTransport):
             await transport.capture_participant_video(video_source="camera")
+    except ImportError:
+        pass
+
+    try:
+        from pipecat.transports.vonage.video_connector import (
+            SubscribeSettings,
+            VonageVideoConnectorTransport,
+        )
+
+        if isinstance(transport, VonageVideoConnectorTransport):
+            await transport.subscribe_to_stream(
+                client["streamId"],
+                SubscribeSettings(
+                    subscribe_to_audio=True,
+                    subscribe_to_video=True,
+                    preferred_framerate=framerate if framerate != 0 else None,
+                ),
+            )
     except ImportError:
         pass
 
@@ -540,6 +567,11 @@ async def create_transport(
                 vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
+            "vonage": lambda: VonageVideoConnectorParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         }
 
         transport = await create_transport(runner_args, transport_params)
@@ -587,6 +619,31 @@ async def create_transport(
             runner_args.room_name,
             params=params,
         )
+    elif isinstance(runner_args, VonageRunnerArguments):
+        from pipecat.transports.vonage.video_connector import (
+            VonageVideoConnectorTransport,
+            VonageVideoConnectorTransportParams,
+        )
 
+        try:
+            params = cast(
+                VonageVideoConnectorTransportParams,
+                _get_transport_params("vonage", transport_params),
+            )
+        except ValueError:
+            webrtc_params: TransportParams = cast(
+                TransportParams, _get_transport_params("webrtc", transport_params)
+            )
+            params = VonageVideoConnectorTransportParams(
+                **webrtc_params.model_dump(),
+                video_in_auto_subscribe=True,
+            )
+
+        return VonageVideoConnectorTransport(
+            runner_args.application_id,
+            runner_args.session_id,
+            runner_args.token,
+            params=params,
+        )
     else:
         raise ValueError(f"Unsupported runner arguments type: {type(runner_args)}")
