@@ -70,6 +70,7 @@ import asyncio
 import mimetypes
 import os
 import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
 from http import HTTPMethod
@@ -105,6 +106,9 @@ load_dotenv(override=True)
 os.environ["ENV"] = "local"
 
 TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
+
+# Mirror Pipecat Cloud's 4-hour max session limit so dev rooms get cleaned up.
+PIPECAT_ROOM_EXP_HOURS = 4.0
 
 RUNNER_DOWNLOADS_FOLDER: str | None = None
 RUNNER_HOST: str = "localhost"
@@ -546,7 +550,7 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
         from pipecat.runner.daily import configure
 
         async with aiohttp.ClientSession() as session:
-            room_url, token = await configure(session)
+            room_url, token = await configure(session, room_exp_duration=PIPECAT_ROOM_EXP_HOURS)
 
             # Start the bot in the background with empty body for GET requests
             bot_module = _get_bot_module()
@@ -604,6 +608,11 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
                 # Parse dailyRoomProperties if provided
                 room_properties = None
                 if daily_room_properties_dict:
+                    # Apply Pipecat Cloud's session policy if caller didn't override.
+                    daily_room_properties_dict.setdefault(
+                        "exp", time.time() + PIPECAT_ROOM_EXP_HOURS * 3600
+                    )
+                    daily_room_properties_dict.setdefault("eject_at_room_exp", True)
                     try:
                         room_properties = DailyRoomProperties(**daily_room_properties_dict)
                         logger.debug(f"Using custom room properties: {room_properties}")
@@ -624,7 +633,10 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
                         # Continue without custom properties
 
                 room_url, token = await configure(
-                    session, room_properties=room_properties, token_properties=token_properties
+                    session,
+                    room_exp_duration=PIPECAT_ROOM_EXP_HOURS,
+                    room_properties=room_properties,
+                    token_properties=token_properties,
                 )
                 runner_args = DailyRunnerArguments(room_url=room_url, token=token, body=body)
                 result = {
@@ -699,7 +711,11 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             # Create Daily room with SIP capabilities
             async with aiohttp.ClientSession() as session:
                 try:
-                    room_config = await configure(session, sip_caller_phone=data.get("From"))
+                    room_config = await configure(
+                        session,
+                        sip_caller_phone=data.get("From"),
+                        room_exp_duration=PIPECAT_ROOM_EXP_HOURS,
+                    )
                 except Exception as e:
                     logger.error(f"Failed to create Daily room: {e}")
                     raise HTTPException(
@@ -819,7 +835,7 @@ async def _run_daily_direct(args: argparse.Namespace):
     logger.info("Running with direct Daily connection...")
 
     async with aiohttp.ClientSession() as session:
-        room_url, token = await configure(session)
+        room_url, token = await configure(session, room_exp_duration=PIPECAT_ROOM_EXP_HOURS)
 
         # Direct connections have no request body, so use empty dict
         runner_args = DailyRunnerArguments(room_url=room_url, token=token)
