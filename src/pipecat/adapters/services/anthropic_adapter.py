@@ -384,7 +384,16 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         def add_cache_control_marker(message: MessageParam):
             if isinstance(message["content"], str):
                 message["content"] = [{"type": "text", "text": message["content"]}]
-            message["content"][-1]["cache_control"] = {"type": "ephemeral"}
+            # Assumptions on the next line:
+            #   - content is a list (str case handled above; this codebase only
+            #     ever constructs content as a str or a list)
+            #   - the list is non-empty (guaranteed by the empty-content
+            #     replacement in `_from_universal_context_messages`)
+            #   - the last item is a dict. The standard-message path enforces
+            #     this via TypedDicts (which are dicts at runtime); the
+            #     LLMSpecificMessage passthrough doesn't, but in practice
+            #     callers use dicts.
+            cast(list[Any], message["content"])[-1]["cache_control"] = {"type": "ephemeral"}
 
         try:
             # Add cache control markers to the most recent two user messages.
