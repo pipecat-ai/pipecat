@@ -289,20 +289,26 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     ]
                 }
         """
-        message = copy.deepcopy(message)
-        if message["role"] == "tool":
-            return {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": message["tool_call_id"],
-                        "content": message["content"],
-                    },
-                ],
-            }
-        if message.get("tool_calls"):
-            tc = message["tool_calls"]
+        # ChatCompletionMessageParam (input) and MessageParam (output) are
+        # different TypedDicts — work with the message as a plain dict for the
+        # transformations below and cast back to MessageParam at return sites.
+        msg = cast(dict[str, Any], copy.deepcopy(message))
+        if msg["role"] == "tool":
+            return cast(
+                MessageParam,
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": msg["tool_call_id"],
+                            "content": msg["content"],
+                        },
+                    ],
+                },
+            )
+        if msg.get("tool_calls"):
+            tc = msg["tool_calls"]
             ret = {"role": "assistant", "content": []}
             for tool_call in tc:
                 function = tool_call["function"]
@@ -314,8 +320,8 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     "input": arguments,
                 }
                 ret["content"].append(new_tool_use)
-            return ret
-        content = message.get("content")
+            return cast(MessageParam, ret)
+        content = msg.get("content")
         if isinstance(content, str):
             # fix empty text
             if content == "":
@@ -363,7 +369,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     image_item = content.pop(img_idx)
                     content.insert(first_txt_idx, image_item)
 
-        return message
+        return cast(MessageParam, msg)
 
     def _with_cache_control_markers(self, messages: list[MessageParam]) -> list[MessageParam]:
         """Add cache control markers to messages for prompt caching.
