@@ -325,6 +325,7 @@ class DailyParams(TransportParams):
         api_key: Daily API authentication key.
         audio_in_user_tracks: Receive users' audio in separate tracks
         camera_out_enabled: Whether to enable the main camera output track.
+        camera_out_send_settings: Camera output track publishing settings.
         custom_audio_track_params: Per-destination configuration for custom audio tracks.
         custom_video_track_params: Per-destination configuration for custom video tracks.
         dialin_settings: Optional settings for dial-in functionality.
@@ -337,6 +338,7 @@ class DailyParams(TransportParams):
     api_key: str = ""
     audio_in_user_tracks: bool = True
     camera_out_enabled: bool = True
+    camera_out_send_settings: dict[str, Any] | None = None
     custom_audio_track_params: Mapping[str, DailyCustomAudioTrackParams] | None = None
     custom_video_track_params: Mapping[str, DailyCustomVideoTrackParams] | None = None
     dialin_settings: DailyDialinSettings | None = None
@@ -909,20 +911,9 @@ class DailyTransportClient(EventHandler):
                 "publishing": {
                     "camera": {
                         "isPublishing": camera_enabled,
-                        "sendSettings": {
-                            "maxQuality": "low",
-                            **(
-                                {"preferredCodec": self._params.video_out_codec}
-                                if self._params.video_out_codec
-                                else {}
-                            ),
-                            "encodings": {
-                                "low": {
-                                    "maxBitrate": self._params.video_out_bitrate,
-                                    "maxFramerate": self._params.video_out_framerate,
-                                }
-                            },
-                        },
+                        "sendSettings": self._params.camera_out_send_settings
+                        if self._params.camera_out_send_settings
+                        else {},
                     },
                     "microphone": {
                         "isPublishing": microphone_enabled,
