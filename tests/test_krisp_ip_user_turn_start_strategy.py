@@ -106,7 +106,9 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
     def _audio_frame(
         self, sample_rate: int = 16000, frame_duration_ms: int = 20, num_samples: int | None = None
     ):
-        samples = num_samples if num_samples is not None else int(sample_rate * frame_duration_ms / 1000)
+        samples = (
+            num_samples if num_samples is not None else int(sample_rate * frame_duration_ms / 1000)
+        )
         return InputAudioRawFrame(
             audio=_int16_silence(samples),
             sample_rate=sample_rate,
@@ -295,7 +297,9 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
     def test_init_raises_if_file_not_found(self):
         with self.assertRaises(FileNotFoundError):
-            KrispVivaIPUserTurnStartStrategy(model_path="/nonexistent/model.kef", api_key="test-key")
+            KrispVivaIPUserTurnStartStrategy(
+                model_path="/nonexistent/model.kef", api_key="test-key"
+            )
 
     def test_init_raises_if_sdk_fails(self):
         self.mock_sdk_manager.acquire.side_effect = RuntimeError("SDK error")
