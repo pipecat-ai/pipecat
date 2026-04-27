@@ -43,7 +43,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use KrispVivaIPUserTurnStartStrategy, you need to install krisp_audio."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
@@ -211,12 +211,17 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         logger.trace("Krisp VIVA IP: VAD speech started, collecting audio for classification")
         self._speech_active = True
-        self._audio_buffer.clear()
         self._decision_made = False
         return ProcessFrameResult.CONTINUE
 
     async def _handle_audio(self, frame: InputAudioRawFrame) -> ProcessFrameResult:
         """Feed audio to the IP model and check for genuine interruption.
+
+        Every frame is passed to the IP model regardless of speech state so
+        that the model maintains continuous internal state (matching the
+        standalone Krisp SDK behaviour). ``_speech_active`` is forwarded as
+        the per-frame VAD input to the model and also gates the threshold
+        evaluation.
 
         Args:
             frame: Raw audio input frame.
@@ -224,9 +229,6 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         Returns:
             STOP if the model detects a genuine interruption, CONTINUE otherwise.
         """
-        if not self._speech_active or self._decision_made:
-            return ProcessFrameResult.CONTINUE
-
         self._ensure_session(frame.sample_rate)
 
         if self._ip_session is None or self._samples_per_frame is None:
@@ -254,7 +256,7 @@ class KrispVivaIPUserTurnStartStrategy(BaseUserTurnStartStrategy):
         for ip_frame in frames:
             ip_prob = self._ip_session.process(ip_frame.tolist(), self._speech_active)
 
-            if ip_prob >= self._threshold:
+            if self._speech_active and not self._decision_made and ip_prob >= self._threshold:
                 logger.debug(
                     f"Krisp VIVA IP: genuine interruption detected (prob={ip_prob:.3f}, "
                     f"threshold={self._threshold})"

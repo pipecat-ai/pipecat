@@ -14,7 +14,7 @@ from .wake_phrase_user_turn_start_strategy import WakePhraseUserTurnStartStrateg
 try:
     from .krisp_viva_ip_user_turn_start_strategy import KrispVivaIPUserTurnStartStrategy
 except ImportError:
-    KrispVivaIPUserTurnStartStrategy = None
+    KrispVivaIPUserTurnStartStrategy = None  # krisp_audio not installed
 
 __all__ = [
     "BaseUserTurnStartStrategy",
