@@ -207,6 +207,7 @@ class PipelineTask(BasePipelineTask):
         rtvi_processor: RTVIProcessor | None = None,
         rtvi_observer_params: RTVIObserverParams | None = None,
         task_manager: BaseTaskManager | None = None,
+        tool_resources: Any = None,
     ):
         """Initialize the PipelineTask.
 
@@ -234,6 +235,11 @@ class PipelineTask(BasePipelineTask):
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
             rtvi_processor: The RTVI processor to add if RTVI is enabled.
             task_manager: Optional task manager for handling asyncio tasks.
+            tool_resources: Optional application-defined bag of resources (DB handles,
+                clients, state, etc.) passed by reference to every tool handler via
+                ``FunctionCallParams.tool_resources``. The framework never copies or
+                clears this object; the caller retains their handle and can read any
+                mutations after the task finishes.
         """
         super().__init__()
         self._params = params or PipelineParams()
@@ -246,6 +252,7 @@ class PipelineTask(BasePipelineTask):
         self._enable_tracing = enable_tracing and is_tracing_available()
         self._enable_turn_tracking = enable_turn_tracking
         self._idle_timeout_secs = idle_timeout_secs
+        self._tool_resources = tool_resources
         observers = observers or []
         self._turn_tracking_observer: TurnTrackingObserver | None = None
         self._user_bot_latency_observer: UserBotLatencyObserver | None = None
@@ -723,6 +730,7 @@ class PipelineTask(BasePipelineTask):
             clock=self._clock,
             task_manager=self._task_manager,
             observer=self._observer,
+            tool_resources=self._tool_resources,
         )
         await self._pipeline.setup(setup)
 
