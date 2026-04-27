@@ -501,12 +501,18 @@ class AWSNovaSonicLLMService(LLMService):
         service, and reconnects with the preserved context.
         """
         logger.debug("Resetting conversation")
-        if self._assistant_is_responding:
-            self._assistant_is_responding = False
-            await self._report_assistant_response_ended()
 
         # Grab context to carry through disconnect/reconnect
         context = self._context
+        if context is None:
+            logger.warning(
+                "reset_conversation called before an initial context was received; nothing to reset"
+            )
+            return
+
+        if self._assistant_is_responding:
+            self._assistant_is_responding = False
+            await self._report_assistant_response_ended()
 
         await self._disconnect()
         await self._start_connecting()
