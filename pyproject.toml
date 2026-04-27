@@ -62,7 +62,7 @@ azure = [ "azure-cognitiveservices-speech>=1.47.0,<2"]
 cartesia = [ "pipecat-ai[websockets-base]" ]
 camb = [ "camb-sdk>=1.5.4,<2" ]
 cerebras = []
-daily = [ "daily-python~=0.27.0" ]
+daily = [ "daily-python~=0.28.0" ]
 deepgram = [ "deepgram-sdk>=6.1.1,<7", "pipecat-ai[websockets-base]" ]
 deepseek = []
 elevenlabs = [ "pipecat-ai[websockets-base]" ]
@@ -132,7 +132,7 @@ dev = [
     "grpcio-tools>=1.67.1,<2",
     "pip-tools~=7.5.3",
     "pre-commit~=4.5.1",
-    "pyright>=1.1.404,<1.2",
+    "pyright==1.1.408",
     "pytest>=9.0.0,<10",
     "pytest-asyncio>=1.0.0,<2",
     "pytest-aiohttp>=1.0.0,<2",
