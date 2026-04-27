@@ -49,7 +49,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationHelper,
@@ -612,9 +612,18 @@ class AWSNovaSonicLLMService(LLMService):
             await self._disconnect()
 
     async def _process_completed_function_calls(self, send_new_results: bool):
+        if not self._context:  # should never happen
+            return
         # Check for set of completed function calls in the context
         for message in self._context.get_messages():
-            if message.get("role") and message.get("content") not in ["IN_PROGRESS", "CANCELLED"]:
+            # LLMSpecificMessages are opaque provider-specific payloads, not
+            # standard tool-result messages — skip them.
+            if isinstance(message, LLMSpecificMessage):
+                continue
+            if message.get("role") == "tool" and message.get("content") not in [
+                "IN_PROGRESS",
+                "CANCELLED",
+            ]:
                 tool_call_id = message.get("tool_call_id")
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     # Found a newly-completed function call - send the result to the service
