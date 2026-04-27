@@ -654,7 +654,7 @@ class AWSNovaSonicLLMService(LLMService):
         tools = (
             llm_connection_params["tools"]
             if llm_connection_params["tools"]
-            else adapter.from_standard_tools(self._tools)
+            else (adapter.from_standard_tools(self._tools) or [])
         )
         logger.debug(f"Using tools: {tools}")
         await self._send_prompt_start_event(tools)
