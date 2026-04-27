@@ -792,7 +792,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             item = self._functions[runner_item.function_name]
         elif None in self._functions.keys():
             item = self._functions[None]
-        elif runner_item.registry_item.handler is self._missing_function_call_handler:
+        elif runner_item.registry_item.handler == self._missing_function_call_handler:
             item = runner_item.registry_item
         else:
             logger.warning(

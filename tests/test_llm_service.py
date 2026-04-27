@@ -5,7 +5,7 @@
 #
 
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from pipecat.frames.frames import (
     FunctionCallFromLLM,
@@ -60,16 +60,17 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
 
         service.broadcast_frame = mock_broadcast_frame
 
-        await service.run_function_calls(
-            [
-                FunctionCallFromLLM(
-                    function_name="missing_tool",
-                    tool_call_id="call_1",
-                    arguments={"query": "weather"},
-                    context=LLMContext(),
-                )
-            ]
-        )
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            await service.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name="missing_tool",
+                        tool_call_id="call_1",
+                        arguments={"query": "weather"},
+                        context=LLMContext(),
+                    )
+                ]
+            )
 
         self.assertEqual(
             [type(frame) for frame in recorded_frames],
@@ -84,6 +85,12 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
             recorded_frames[2].result,
             "Error: function 'missing_tool' is not registered.",
         )
+
+        # Only the queue-time warning should fire; the execution-time
+        # "just unregistered" warning must not double-log.
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        self.assertTrue(any("not registered" in w for w in warnings))
+        self.assertFalse(any("just unregistered" in w for w in warnings))
 
     async def test_function_unregistered_between_queue_and_execute(self):
         """Function unregistered between queuing and execution still terminates."""
