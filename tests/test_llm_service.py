@@ -85,6 +85,56 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
             "Error: function 'missing_tool' is not registered.",
         )
 
+    async def test_function_unregistered_between_queue_and_execute(self):
+        """Function unregistered between queuing and execution still terminates."""
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+
+        async def real_handler(params):
+            await params.result_callback("should not be called")
+
+        service.register_function("doomed_tool", real_handler)
+
+        recorded_frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            recorded_frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+
+        async def run_inline(runner_items):
+            # Simulate the function being unregistered after queuing but before execution.
+            service.unregister_function("doomed_tool")
+            for runner_item in runner_items:
+                await service._run_function_call(runner_item)
+
+        service._run_parallel_function_calls = run_inline
+        service._run_sequential_function_calls = run_inline
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name="doomed_tool",
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+
+        self.assertEqual(
+            [type(frame) for frame in recorded_frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+            ],
+        )
+        self.assertEqual(
+            recorded_frames[2].result,
+            "Error: function 'doomed_tool' is not registered.",
+        )
+
     async def test_missing_function_call_allows_user_mute_cleanup(self):
         service = MockLLMService()
         service._call_event_handler = AsyncMock()
