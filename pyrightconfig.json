@@ -6,7 +6,6 @@
   "exclude": ["**/*_pb2.py", "**/__pycache__"],
   "ignore": [
     "tests",
-    "src/pipecat/adapters/services/anthropic_adapter.py",
     "src/pipecat/adapters/services/aws_nova_sonic_adapter.py",
     "src/pipecat/adapters/services/bedrock_adapter.py",
     "src/pipecat/adapters/services/gemini_adapter.py",
