@@ -248,7 +248,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             }
 
         # Fall back to assuming that the message is already in Anthropic format
-        return copy.deepcopy(message.message)
+        return cast(MessageParam, copy.deepcopy(message.message))
 
     def _from_standard_message(self, message: LLMStandardMessage) -> MessageParam:
         """Convert standard universal context message to Anthropic format.
