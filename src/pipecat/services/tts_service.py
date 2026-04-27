@@ -52,6 +52,7 @@ from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.text.base_text_filter import BaseTextFilter
+from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.time import seconds_to_nanoseconds
 
@@ -914,8 +915,10 @@ class TTSService(AIService):
             if aggregate.type != AggregationType.TOKEN:
                 # Stop the aggregation metric on the first sentence only.
                 await self.stop_text_aggregation_metrics()
+            raw_text = aggregate.full_match if isinstance(aggregate, PatternMatch) else None
             await self._push_tts_frames(
-                AggregatedTextFrame(aggregate.text, aggregate.type), includes_inter_frame_spaces
+                AggregatedTextFrame(aggregate.text, aggregate.type, raw_text=raw_text),
+                includes_inter_frame_spaces,
             )
 
     async def _push_frame_respecting_previous_aggregated_frame(
@@ -1262,7 +1265,7 @@ class TTSService(AIService):
                     ),
                     None,
                 )
-                if active and active.tracker.add_word(word):
+                if active and active.tracker.add_word_and_check_complete(word):
                     active.complete = True
                     await self._flush_aggregated_text_frame_sequence()
 

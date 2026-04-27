@@ -19,8 +19,8 @@ class WordCompletionTracker:
     Example::
 
         tracker = WordCompletionTracker("Hello, world!")
-        tracker.add_word("Hello")   # False
-        tracker.add_word("world")   # True  — normalized "helloworld" >= "helloworld"
+        tracker.add_word_and_check_complete("Hello")   # False
+        tracker.add_word_and_check_complete("world")   # True  — normalized "helloworld" >= "helloworld"
     """
 
     def __init__(self, expected_text: str):
@@ -37,7 +37,7 @@ class WordCompletionTracker:
         """Keep only lowercase alphanumeric characters."""
         return re.sub(r"[^a-z0-9]", "", text.lower())
 
-    def add_word(self, word: str) -> bool:
+    def add_word_and_check_complete(self, word: str) -> bool:
         """Record a spoken word from a word-timestamp event.
 
         Args:
