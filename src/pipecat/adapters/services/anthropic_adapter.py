@@ -121,16 +121,20 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         messages = self._from_universal_context_messages(self.get_messages(context)).messages
 
         # Sanitize messages for logging
-        messages_for_logging = []
+        messages_for_logging: list[dict[str, Any]] = []
         for message in messages:
-            msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    for item in msg["content"]:
-                        if item["type"] == "image":
-                            item["source"]["data"] = "..."
-                        if item["type"] == "thinking" and item.get("signature"):
-                            item["signature"] = "..."
+            msg: dict[str, Any] = copy.deepcopy(dict(message))
+            content = msg.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("type") == "image":
+                        source = item.get("source")
+                        if isinstance(source, dict):
+                            source["data"] = "..."
+                    if item.get("type") == "thinking" and item.get("signature"):
+                        item["signature"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 
