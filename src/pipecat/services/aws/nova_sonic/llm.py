@@ -1106,7 +1106,7 @@ class AWSNovaSonicLLMService(LLMService):
         '''
         await self.send_event(event_json, stream)
 
-    def get_setup_params(self):
+    def get_setup_params(self) -> tuple[str | None, list]:
         """Return ``(system_instruction, tools)`` for the next session setup."""
         if not self._context:
             return None, []
@@ -1115,7 +1115,9 @@ class AWSNovaSonicLLMService(LLMService):
             self._context, system_instruction=self._settings.system_instruction
         )
         tools = (
-            llm_params["tools"] if llm_params["tools"] else adapter.from_standard_tools(self._tools)
+            llm_params["tools"]
+            if llm_params["tools"]
+            else (adapter.from_standard_tools(self._tools) or [])
         )
         return llm_params["system_instruction"], tools
 
