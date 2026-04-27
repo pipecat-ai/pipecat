@@ -725,9 +725,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 logger.warning(
                     f"{self} is calling '{function_call.function_name}', but it's not registered."
                 )
-                item = self._build_missing_function_call_registry_item(
-                    function_call.function_name
-                )
+                item = self._build_missing_function_call_registry_item(function_call.function_name)
 
             runner_items.append(
                 FunctionCallRunnerItem(
@@ -917,9 +915,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
     async def _missing_function_call_handler(self, params: FunctionCallParams):
         """Return a terminal tool result when the LLM calls an unknown function."""
-        await params.result_callback(
-            f"Error: function '{params.function_name}' is not registered."
-        )
+        await params.result_callback(f"Error: function '{params.function_name}' is not registered.")
 
     def _has_async_tools(self) -> bool:
         """Return True if at least one non-builtin async tool is registered."""
