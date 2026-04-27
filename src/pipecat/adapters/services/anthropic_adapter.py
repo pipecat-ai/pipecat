@@ -9,7 +9,7 @@
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict, TypeGuard, TypeVar
+from typing import Any, TypedDict, TypeGuard, TypeVar, cast
 
 from anthropic import NOT_GIVEN, NotGiven
 from anthropic.types.message_param import MessageParam
@@ -189,8 +189,13 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     ]
                 if isinstance(next_message["content"], str):
                     next_message["content"] = [{"type": "text", "text": next_message["content"]}]
-                # Concatenate the content
-                current_message["content"].extend(next_message["content"])
+                # Concatenate the content. MessageParam types content as
+                # `str | Iterable[...]`, but this codebase assumes it's
+                # either a str or a list. The str case is handled above, so
+                # we assume that both are lists here.
+                cast(list[Any], current_message["content"]).extend(
+                    cast(list[Any], next_message["content"])
+                )
                 # Remove the next message from the list
                 messages.pop(i + 1)
             else:
