@@ -974,7 +974,9 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     async def open_stream(self, client):
         """Open a bidirectional stream on the given client."""
         return await client.invoke_model_with_bidirectional_stream(
-            InvokeModelWithBidirectionalStreamOperationInput(model_id=self._settings.model)
+            InvokeModelWithBidirectionalStreamOperationInput(
+                model_id=assert_given(self._settings.model)
+            )
         )
 
     async def send_event(self, event_json: str, stream):
@@ -1127,7 +1129,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             return None, []
         adapter = self.get_llm_adapter()
         llm_params = adapter.get_llm_invocation_params(
-            self._context, system_instruction=self._settings.system_instruction
+            self._context, system_instruction=assert_given(self._settings.system_instruction)
         )
         tools = (
             llm_params["tools"]

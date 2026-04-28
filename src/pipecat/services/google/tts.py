@@ -1417,7 +1417,7 @@ class GeminiTTSService(GoogleBaseTTSService):
             if self._settings.multi_speaker and self._settings.speaker_configs:
                 # Multi-speaker mode
                 speaker_voice_configs = []
-                for speaker_config in self._settings.speaker_configs:
+                for speaker_config in assert_given(self._settings.speaker_configs):
                     speaker_voice_configs.append(
                         texttospeech_v1.MultispeakerPrebuiltVoice(
                             speaker_alias=speaker_config["speaker_alias"],

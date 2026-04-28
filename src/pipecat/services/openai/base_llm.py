@@ -39,7 +39,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven
+from pipecat.services.settings import LLMSettings, _NotGiven, assert_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
@@ -299,7 +299,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         params_from_context = adapter.get_llm_invocation_params(
             context,
-            system_instruction=self._settings.system_instruction,
+            system_instruction=assert_given(self._settings.system_instruction),
             convert_developer_to_user=not self.supports_developer_role,
         )
 

@@ -253,7 +253,7 @@ class DeepgramFluxSTTBase(STTService):
             params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
 
         # Add keyterm parameters (can have multiple)
-        for keyterm in self._settings.keyterm:
+        for keyterm in assert_given(self._settings.keyterm):
             params.append(urlencode({"keyterm": keyterm}))
 
         # Add tag parameters (can have multiple)
