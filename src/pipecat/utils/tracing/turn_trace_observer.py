@@ -28,6 +28,8 @@ from pipecat.utils.tracing.tracing_context import TracingContext
 if TYPE_CHECKING:
     from opentelemetry.trace import Span, SpanContext
 
+    from pipecat.observers.user_bot_latency_observer import LatencyBreakdown
+
 if is_tracing_available():
     from opentelemetry import trace
     from opentelemetry.trace import Span, SpanContext
@@ -89,6 +91,10 @@ class TurnTraceObserver(BaseObserver):
         async def on_latency_measured(tracker, latency_seconds):
             await self._handle_latency_measured(latency_seconds)
 
+        @latency_tracker.event_handler("on_latency_breakdown")
+        async def on_latency_breakdown(tracker, breakdown):
+            await self._handle_latency_breakdown(breakdown)
+
     async def _handle_latency_measured(self, latency_seconds: float):
         """Handle latency measurement events.
 
@@ -103,6 +109,25 @@ class TurnTraceObserver(BaseObserver):
             logger.debug(
                 f"Turn {self._current_turn_number} user-bot latency: {latency_seconds:.3f}s"
             )
+
+    async def _handle_latency_breakdown(self, breakdown: "LatencyBreakdown"):
+        """Handle latency breakdown events.
+
+        Adds text aggregation time to the current turn span when available.
+
+        Args:
+            breakdown: The LatencyBreakdown containing per-service metrics.
+        """
+        if not self._current_span or not is_tracing_available():
+            return
+
+        if breakdown.text_aggregation:
+            self._current_span.set_attribute(
+                "turn.text_aggregation_seconds", breakdown.text_aggregation.duration_secs
+            )
+
+        if breakdown.user_turn_secs is not None:
+            self._current_span.set_attribute("turn.user_turn_seconds", breakdown.user_turn_secs)
 
     async def on_push_frame(self, data: FramePushed):
         """Process a frame without modifying it.
