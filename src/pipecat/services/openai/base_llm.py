@@ -26,7 +26,7 @@ from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,
@@ -71,7 +71,7 @@ class OpenAILLMSettings(LLMSettings):
     )
 
 
-class BaseOpenAILLMService(LLMService):
+class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
     """Base class for all services that use the AsyncOpenAI client.
 
     This service consumes LLMContextFrame frames, which contain a reference to

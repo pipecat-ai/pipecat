@@ -194,7 +194,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
         return instance
 
 
-class OpenAIRealtimeLLMService(LLMService):
+class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     """OpenAI Realtime LLM service providing real-time audio and text communication.
 
     Implements the OpenAI Realtime API with WebSocket communication for low-latency
@@ -657,7 +657,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _send_session_update(self):
         settings = assert_given(self._settings.session_properties)
-        adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
 
         if self._context:
             llm_invocation_params = adapter.get_llm_invocation_params(
@@ -1002,7 +1002,7 @@ class OpenAIRealtimeLLMService(LLMService):
             self._run_llm_when_api_session_ready = True
             return
 
-        adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
 
         # Configure the LLM for this session if needed
         if self._llm_needs_conversation_setup:

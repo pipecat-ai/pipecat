@@ -16,7 +16,10 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
     Any,
+    Generic,
     Protocol,
+    TypeVar,
+    cast,
 )
 
 from loguru import logger
@@ -190,7 +193,10 @@ class FunctionCallRunnerItem:
     group_id: str | None = None
 
 
-class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
+TAdapter = TypeVar("TAdapter", bound=BaseLLMAdapter)
+
+
+class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]):
     """Base class for all LLM services.
 
     Handles function calling registration and execution with support for both
@@ -222,6 +228,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     """
 
     _settings: LLMSettings
+    _adapter: TAdapter
 
     # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.
     # However, subclasses should override this with a more specific adapter when necessary.
@@ -269,7 +276,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._filter_incomplete_user_turns: bool = False
         self._async_tool_cancellation_enabled: bool = False
         self._base_system_instruction: str | None = None
-        self._adapter = self.adapter_class()
+        # `adapter_class` is typed as `type[BaseLLMAdapter]` so subclasses
+        # don't need to spell out the generic parameter just to subclass
+        # (backward compatibility for 3rd-party providers outside this repo).
+        # Cast to TAdapter to keep `_adapter` and `get_llm_adapter()` precisely
+        # typed for callers that opt into `LLMService[XAdapter]`.
+        self._adapter = cast(TAdapter, self.adapter_class())
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
         self._function_call_tasks: dict[asyncio.Task | None, FunctionCallRunnerItem] = {}
         self._sequential_runner_task: asyncio.Task | None = None
@@ -280,7 +292,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._register_event_handler("on_function_calls_cancelled")
         self._register_event_handler("on_completion_timeout")
 
-    def get_llm_adapter(self) -> BaseLLMAdapter:
+    def get_llm_adapter(self) -> TAdapter:
         """Get the LLM adapter instance.
 
         Returns:
@@ -1112,7 +1124,7 @@ class WebsocketReconnectedError(Exception):
     pass
 
 
-class WebsocketLLMService(LLMService, WebsocketService):
+class WebsocketLLMService(LLMService[TAdapter], WebsocketService, Generic[TAdapter]):
     """Base class for websocket-based LLM services.
 
     Each LLM inference is a discrete request/response exchange: send one

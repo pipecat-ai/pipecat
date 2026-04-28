@@ -115,7 +115,7 @@ class OpenAIResponsesLLMSettings(LLMSettings):
 # ---------------------------------------------------------------------------
 
 
-class _BaseOpenAIResponsesLLMService(LLMService):
+class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
     """Shared base for HTTP and WebSocket OpenAI Responses API services.
 
     Contains settings, adapter reference, HTTP client creation, parameter
@@ -294,7 +294,7 @@ class _BaseOpenAIResponsesLLMService(LLMService):
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
-        adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         effective_instruction = system_instruction or assert_given(
             self._settings.system_instruction
         )
@@ -353,7 +353,9 @@ class _BaseOpenAIResponsesLLMService(LLMService):
 # ---------------------------------------------------------------------------
 
 
-class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMService):
+class OpenAIResponsesLLMService(
+    _BaseOpenAIResponsesLLMService, WebsocketLLMService[OpenAIResponsesLLMAdapter]
+):
     """OpenAI Responses API LLM service using WebSocket transport.
 
     Maintains a persistent WebSocket connection to ``wss://api.openai.com/v1/responses``
@@ -747,7 +749,7 @@ class OpenAIResponsesLLMService(_BaseOpenAIResponsesLLMService, WebsocketLLMServ
         if self._needs_drain:
             await self._drain_cancelled_response()
 
-        adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         logger.debug(
             f"{self}: Generating response from universal context "
             f"{adapter.get_messages_for_logging(context)}"
@@ -987,7 +989,7 @@ class OpenAIResponsesHttpLLMService(_BaseOpenAIResponsesLLMService):
 
     @traced_llm
     async def _process_context(self, context: LLMContext):
-        adapter: OpenAIResponsesLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         logger.debug(
             f"{self}: Generating response from universal context "
             f"{adapter.get_messages_for_logging(context)}"

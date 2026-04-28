@@ -124,7 +124,7 @@ class GoogleLLMSettings(LLMSettings):
         return instance
 
 
-class GoogleLLMService(LLMService):
+class GoogleLLMService(LLMService[GeminiLLMAdapter]):
     """Google AI (Gemini) LLM service implementation.
 
     This class implements inference with Google's AI models, translating internally

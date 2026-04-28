@@ -74,7 +74,7 @@ class AWSBedrockLLMSettings(LLMSettings):
     )
 
 
-class AWSBedrockLLMService(LLMService):
+class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
     """AWS Bedrock Large Language Model service implementation.
 
     Provides inference capabilities for AWS Bedrock models including Amazon Nova
@@ -282,7 +282,7 @@ class AWSBedrockLLMService(LLMService):
         effective_instruction = system_instruction or assert_given(
             self._settings.system_instruction
         )
-        adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
             context, system_instruction=effective_instruction
         )
@@ -371,7 +371,7 @@ class AWSBedrockLLMService(LLMService):
         }
 
     def _get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
-        adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
             context, system_instruction=assert_given(self._settings.system_instruction)
         )

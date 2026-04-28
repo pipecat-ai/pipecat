@@ -235,7 +235,7 @@ class AWSNovaSonicLLMSettings(LLMSettings):
     endpointing_sensitivity: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class AWSNovaSonicLLMService(LLMService):
+class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     """AWS Nova Sonic speech-to-speech LLM service.
 
     Provides bidirectional audio streaming, real-time transcription, text generation,
@@ -644,7 +644,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self._process_completed_function_calls(send_new_results=False)
 
         # Read context
-        adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         llm_connection_params = adapter.get_llm_invocation_params(
             self._context, system_instruction=assert_given(self._settings.system_instruction)
         )
@@ -1125,7 +1125,7 @@ class AWSNovaSonicLLMService(LLMService):
         """Return ``(system_instruction, tools)`` for the next session setup."""
         if not self._context:
             return None, []
-        adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         llm_params = adapter.get_llm_invocation_params(
             self._context, system_instruction=self._settings.system_instruction
         )

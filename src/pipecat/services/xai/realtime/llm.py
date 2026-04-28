@@ -179,7 +179,7 @@ class GrokRealtimeLLMSettings(LLMSettings):
         return instance
 
 
-class GrokRealtimeLLMService(LLMService):
+class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
     """Grok Realtime Voice Agent LLM service providing real-time audio and text communication.
 
     Implements the Grok Voice Agent API with WebSocket communication for low-latency
@@ -596,7 +596,7 @@ class GrokRealtimeLLMService(LLMService):
     async def _send_session_update(self):
         """Update session settings on the server."""
         settings = assert_given(self._settings.session_properties)
-        adapter: GrokRealtimeLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
 
         if self._context:
             llm_invocation_params = adapter.get_llm_invocation_params(
@@ -871,7 +871,7 @@ class GrokRealtimeLLMService(LLMService):
             self._run_llm_when_api_session_ready = True
             return
 
-        adapter: GrokRealtimeLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
 
         if self._llm_needs_conversation_setup:
             logger.debug(
