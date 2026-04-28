@@ -586,7 +586,7 @@ class CartesiaTTSService(WebsocketTTSService):
         flush_id = context_id or self.get_active_audio_context_id()
         if not flush_id or not self._websocket:
             return
-        logger.trace(f"{self}: flushing audio")
+        logger.info(f"{self}: flushing audio")
         msg = self._build_msg(text="", continue_transcript=False, context_id=flush_id)
         await self._websocket.send(msg)
 

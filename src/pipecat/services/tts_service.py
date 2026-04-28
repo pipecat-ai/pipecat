@@ -998,6 +998,7 @@ class TTSService(AIService):
         # Skip sending to TTS if the aggregation type is in the skip list. Simply
         # push the original frame downstream.
         if type in self._skip_aggregator_types:
+            src_frame.skip_tts = True
             await self._push_frame_respecting_previous_aggregated_frame(src_frame, context_id)
             return
 
@@ -1101,7 +1102,9 @@ class TTSService(AIService):
                 frame=src_frame,
                 context_id=context_id,
                 spoken=True,
-                tracker=WordCompletionTracker(prepared_text) if not self._push_text_frames else None,
+                tracker=WordCompletionTracker(prepared_text)
+                if not self._push_text_frames
+                else None,
             )
         )
 
@@ -1213,7 +1216,6 @@ class TTSService(AIService):
         """
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
-                logger.info(f"Adding word timestamp to context: {word} @ {timestamp}")
                 await self.append_to_audio_context(
                     context_id,
                     _WordTimestampEntry(
@@ -1229,6 +1231,19 @@ class TTSService(AIService):
                 context_id=context_id,
                 includes_inter_frame_spaces=includes_inter_frame_spaces,
             )
+
+    # TODO add docstring
+    def _get_active_aggregated_frame_slot(self) -> _AggregatedFrameSlot | None:
+        # Advance the word completion tracker for the active spoken slot.
+        active = next(
+            (
+                s
+                for s in self._aggregated_text_frame_sequence
+                if s.spoken and not s.complete and s.tracker is not None
+            ),
+            None,
+        )
+        return active
 
     async def _add_word_timestamps(
         self,
@@ -1263,23 +1278,27 @@ class TTSService(AIService):
                     frame.append_to_context = self._tts_contexts[context_id].append_to_context
                 self._word_last_pts = frame.pts
                 await self.push_frame(frame)
-                # Advance the word completion tracker for the active spoken slot.
+
                 # When all expected chars are covered the slot is marked complete and
                 # any skipped frames queued behind it (e.g. code blocks) are flushed.
-                active = next(
-                    (
-                        s
-                        for s in self._aggregated_text_frame_sequence
-                        if s.spoken and not s.complete and s.tracker is not None
-                    ),
-                    None,
-                )
+                active = self._get_active_aggregated_frame_slot()
                 if active and active.tracker.add_word_and_check_complete(word):
                     active.complete = True
                     logger.debug(
                         f"{self} Last word before flushing skipped aggregated frames: {frame.text}"
                     )
                     await self._flush_aggregated_text_frame_sequence(last_word_pts=frame.pts)
+                    # Adding any remaining overflow. Sometimes the TTS service may send as a single word,
+                    # things which should go through more than one AggregatedFrame. For example:
+                    # Generating TTS <spell>1234-5678-9012-3456</spell>
+                    # Generating TTS [And here is a simple Python code that prints "Hello, World!"
+                    # And we receive the word: <spell>1234-5678-9012-3456</spell>And
+                    overflow = active.tracker.get_overflow()
+                    if active.tracker.get_overflow() is not None:
+                        next_active = self._get_active_aggregated_frame_slot()
+                        if next_active:
+                            next_active.tracker.add_word_and_check_complete(overflow)
+
                     # TODO: here now we should emit a new frame, to use the raw_content in the context
                     # We need to also consider the case of interruption, but in this case, we need to be aware
                     # until how far we have spoken, to maybe replace only part of the context.

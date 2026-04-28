@@ -7,6 +7,8 @@
 """Word completion tracker for TTS context ordering."""
 
 import re
+from typing import Optional
+
 from loguru import logger
 
 
@@ -23,6 +25,8 @@ class WordCompletionTracker:
         tracker = WordCompletionTracker("Hello, world!")
         tracker.add_word_and_check_complete("Hello")   # False
         tracker.add_word_and_check_complete("world")   # True  — normalized "helloworld" >= "helloworld"
+    Additionally, captures overflow when extra content is spoken beyond the expected
+    text. Assumes overflow can only occur in the most recently added word.
     """
 
     def __init__(self, expected_text: str):
@@ -33,6 +37,7 @@ class WordCompletionTracker:
         """
         self._expected = self._normalize(expected_text)
         self._received = ""
+        self._overflow: str | None = None
         logger.info(f"WordCompletionTracker: {self._expected}")
 
     @staticmethod
@@ -51,8 +56,25 @@ class WordCompletionTracker:
             True when all expected content has been covered.
         """
         logger.info(f"WordCompletionTracker add_word_and_check_complete: {word}")
-        self._received += self._normalize(word)
+
+        normalized = self._normalize(word)
+
+        prev_len = len(self._received)
+        self._received += normalized
+
+        expected_len = len(self._expected)
+        self._overflow = None  # reset for this call
+
+        if prev_len < expected_len < len(self._received):
+            # Overflow starts within this word
+            cut_index = expected_len - prev_len
+            self._overflow = normalized[cut_index:]
+
         return self.is_complete
+
+    def get_overflow(self) -> str | None:
+        """Return overflow from the last added word, if any."""
+        return self._overflow
 
     @property
     def is_complete(self) -> bool:
@@ -62,3 +84,4 @@ class WordCompletionTracker:
     def reset(self):
         """Reset received word accumulation without changing the expected text."""
         self._received = ""
+        self._overflow = None
