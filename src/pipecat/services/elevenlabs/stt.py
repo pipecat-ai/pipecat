@@ -739,6 +739,10 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Args:
             silence: Silent 16-bit mono PCM audio bytes.
         """
+        if (
+            self._websocket is None
+        ):  # should never happen — caller should gate on _is_keepalive_ready()
+            return
         audio_base64 = base64.b64encode(silence).decode("utf-8")
         message = {
             "message_type": "input_audio_chunk",

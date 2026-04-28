@@ -312,6 +312,9 @@ class LemonSliceTransportClient:
         Args:
             frame: The message frame to send.
         """
+        if self._daily_transport_client is None:
+            return
+
         await self._daily_transport_client.send_message(frame)
 
     @property

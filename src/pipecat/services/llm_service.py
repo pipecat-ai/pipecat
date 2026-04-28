@@ -1265,6 +1265,11 @@ class WebsocketLLMService(LLMService[TAdapter], WebsocketService, Generic[TAdapt
         Returns:
             The parsed JSON message as a dict.
         """
+        # Should never happen — `_ensure_connected` (which callers must invoke
+        # first) raises ConnectionError if it can't establish a websocket.
+        # Match that contract here.
+        if self._websocket is None:
+            raise ConnectionError(f"{self} _ws_recv called without a websocket")
         try:
             raw = await self._websocket.recv()
             return json.loads(raw)

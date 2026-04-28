@@ -240,9 +240,17 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     # ------------------------------------------------------------------
 
     async def _transport_send_audio(self, audio: bytes):
+        if (
+            self._websocket is None
+        ):  # should never happen — caller should gate on _transport_is_active()
+            return
         await self._websocket.send(audio)
 
     async def _transport_send_json(self, message: dict):
+        if (
+            self._websocket is None
+        ):  # should never happen — caller should gate on _transport_is_active()
+            return
         await self._websocket.send(json.dumps(message))
 
     def _transport_is_active(self) -> bool:

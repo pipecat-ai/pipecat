@@ -290,6 +290,11 @@ class CartesiaSTTService(WebsocketSTTService):
         if not self._websocket or self._websocket.state is not State.OPEN:
             await self._connect()
 
+        if self._websocket is None:
+            logger.warning(f"{self}: websocket unavailable after reconnect, dropping audio")
+            yield None
+            return
+
         try:
             await self._websocket.send(audio)
         except Exception as e:

@@ -383,10 +383,11 @@ class GradiumSTTService(WebsocketSTTService):
                 "x-api-key": self._api_key,
                 "x-api-source": "pipecat",
             }
-            self._websocket = await websocket_connect(
+            websocket = await websocket_connect(
                 ws_url,
                 additional_headers=headers,
             )
+            self._websocket = websocket
             await self._call_event_handler("on_connected")
             setup_msg = {
                 "type": "setup",
@@ -406,8 +407,8 @@ class GradiumSTTService(WebsocketSTTService):
                 json_config["delay_in_frames"] = self._settings.delay_in_frames
             if json_config:
                 setup_msg["json_config"] = json_config
-            await self._websocket.send(json.dumps(setup_msg))
-            ready_msg = await self._websocket.recv()
+            await websocket.send(json.dumps(setup_msg))
+            ready_msg = await websocket.recv()
             ready_msg = json.loads(ready_msg)
             if ready_msg["type"] == "error":
                 raise Exception(f"received error {ready_msg['message']}")

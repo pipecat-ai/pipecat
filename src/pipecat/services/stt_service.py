@@ -859,6 +859,10 @@ class WebsocketSTTService(STTService, WebsocketService):
         Args:
             silence: Silent 16-bit mono PCM audio bytes.
         """
+        if (
+            self._websocket is None
+        ):  # should never happen — caller should gate on _is_keepalive_ready()
+            return
         await self._websocket.send(silence)
 
     async def _report_error(self, error: ErrorFrame):

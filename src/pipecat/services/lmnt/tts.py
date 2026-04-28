@@ -267,10 +267,11 @@ class LmntTTSService(InterruptibleTTSService):
             }
 
             # Connect to LMNT's websocket directly
-            self._websocket = await websocket_connect("wss://api.lmnt.com/v1/ai/speech/stream")
+            websocket = await websocket_connect("wss://api.lmnt.com/v1/ai/speech/stream")
+            self._websocket = websocket
 
             # Send initialization message
-            await self._websocket.send(json.dumps(init_msg))
+            await websocket.send(json.dumps(init_msg))
 
             await self._call_event_handler("on_connected")
         except Exception as e:
