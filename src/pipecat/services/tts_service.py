@@ -953,7 +953,7 @@ class TTSService(AIService):
         if slot:
             slot.complete = True
 
-    async def _flush_aggregated_text_frame_sequence(self):
+    async def _flush_aggregated_text_frame_sequence(self, last_word_pts: int | None = None):
         """Emit pending skipped slots that are now unblocked.
 
         Walks the front of _aggregated_text_frame_sequence:
@@ -961,6 +961,11 @@ class TTSService(AIService):
         - Skipped slots whose preceding spoken slots are all done are pushed downstream
           with append_to_context=True and removed.
         - Stops at the first incomplete spoken slot.
+
+        Args:
+            last_word_pts: PTS of the last spoken word. When provided, skipped frames
+                are assigned a PTS of last_word_pts + 1 so they appear immediately after
+                the final spoken word in the timeline.
         """
         while self._aggregated_text_frame_sequence:
             slot = self._aggregated_text_frame_sequence[0]
@@ -968,6 +973,8 @@ class TTSService(AIService):
                 self._aggregated_text_frame_sequence.pop(0)
             elif not slot.spoken and not slot.complete:
                 slot.frame.append_to_context = True
+                if last_word_pts:
+                    slot.frame.pts = last_word_pts + 1
                 await self.push_frame(slot.frame)
                 slot.complete = True
                 self._aggregated_text_frame_sequence.pop(0)
@@ -1267,7 +1274,13 @@ class TTSService(AIService):
                 )
                 if active and active.tracker.add_word_and_check_complete(word):
                     active.complete = True
-                    await self._flush_aggregated_text_frame_sequence()
+                    logger.debug(
+                        f"{self} Last word before flushing skipped aggregated frames: {frame.text}"
+                    )
+                    await self._flush_aggregated_text_frame_sequence(last_word_pts=frame.pts)
+                    # TODO: here now we should emit a new frame, to use the raw_content in the context
+                    # We need to also consider the case of interruption, but in this case, we need to be aware
+                    # until how far we have spoken, to maybe replace only part of the context.
 
     #
     # Audio context methods (active when using websocket-based TTS with context management)
