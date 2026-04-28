@@ -21,7 +21,7 @@ import io
 import wave
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypeAlias, TypeGuard, TypeVar
+from typing import Any, TypeAlias, TypeGuard, TypeVar, cast
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -129,13 +129,13 @@ class LLMContext:
             url: The URL of the image.
             text: Optional text to include with the image.
         """
-        content = []
+        content: list[dict[str, Any]] = []
         if text:
             content.append({"type": "text", "text": text})
 
         content.append({"type": "image_url", "image_url": {"url": url}})
 
-        return {"role": role, "content": content}
+        return cast(LLMContextMessage, {"role": role, "content": content})
 
     @staticmethod
     async def create_image_message(
@@ -187,7 +187,7 @@ class LLMContext:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
         """
-        content = [{"type": "text", "text": text}]
+        content: list[dict[str, Any]] = [{"type": "text", "text": text}]
 
         def encode_audio():
             sample_rate = audio_frames[0].sample_rate
@@ -214,7 +214,7 @@ class LLMContext:
             }
         )
 
-        return {"role": role, "content": content}
+        return cast(LLMContextMessage, {"role": role, "content": content})
 
     @property
     def messages(self) -> list[LLMContextMessage]:
@@ -295,7 +295,10 @@ class LLMContext:
                 result.append(msg_copy)
                 continue
 
-            msg = copy.deepcopy(message)
+            # The standard message variant is a union of TypedDicts; the
+            # mutations below operate on plain dicts at runtime. Treat as
+            # such for the duration of the redaction loop.
+            msg: dict[str, Any] = cast(dict[str, Any], copy.deepcopy(message))
             content = msg.get("content")
             if isinstance(content, list):
                 for item in content:
