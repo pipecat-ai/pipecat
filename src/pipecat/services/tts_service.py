@@ -964,7 +964,7 @@ class TTSService(AIService):
 
         Args:
             last_word_pts: PTS of the last spoken word. When provided, skipped frames
-                are assigned a PTS of last_word_pts + 1 so they appear immediately after
+                are assigned a PTS of last_word_pts so they appear immediately after
                 the final spoken word in the timeline.
         """
         while self._aggregated_text_frame_sequence:
@@ -975,7 +975,7 @@ class TTSService(AIService):
                 slot.frame.append_to_context = True
                 slot.frame.transport_destination = self._transport_destination
                 if last_word_pts:
-                    slot.frame.pts = last_word_pts + 1
+                    slot.frame.pts = last_word_pts
                 await self.push_frame(slot.frame)
                 slot.complete = True
                 self._aggregated_text_frame_sequence.pop(0)
@@ -1533,6 +1533,7 @@ class TTSService(AIService):
 
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
+        await self._flush_aggregated_text_frame_sequence()
         await self._maybe_reset_word_timestamps()
 
     async def on_audio_context_interrupted(self, context_id: str):

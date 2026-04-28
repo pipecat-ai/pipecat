@@ -55,8 +55,6 @@ class WordCompletionTracker:
         Returns:
             True when all expected content has been covered.
         """
-        logger.info(f"WordCompletionTracker add_word_and_check_complete: {word}")
-
         normalized = self._normalize(word)
 
         prev_len = len(self._received)
