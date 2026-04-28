@@ -973,6 +973,7 @@ class TTSService(AIService):
                 self._aggregated_text_frame_sequence.pop(0)
             elif not slot.spoken and not slot.complete:
                 slot.frame.append_to_context = True
+                slot.frame.transport_destination = self._transport_destination
                 if last_word_pts:
                     slot.frame.pts = last_word_pts + 1
                 await self.push_frame(slot.frame)
@@ -1081,18 +1082,6 @@ class TTSService(AIService):
             push_assistant_aggregation=push_assistant_aggregation,
         )
 
-        # Register this spoken frame in the ordered sequence. Word-timestamp services
-        # complete the slot via _add_word_timestamps; push_text_frames services complete
-        # it below after the TTSTextFrame is appended to the audio context.
-        self._aggregated_text_frame_sequence.append(
-            _AggregatedFrameSlot(
-                frame=src_frame,
-                context_id=context_id,
-                spoken=True,
-                tracker=WordCompletionTracker(text) if not self._push_text_frames else None,
-            )
-        )
-
         # Apply any final text preparation (e.g., trailing space)
         prepared_text = self._prepare_text_for_tts(transformed_text)
 
@@ -1103,6 +1092,18 @@ class TTSService(AIService):
             await self.create_audio_context(context_id)
             await self.start_ttfb_metrics()
             await self.append_to_audio_context(context_id, TTSStartedFrame(context_id=context_id))
+
+        # Register this spoken frame in the ordered sequence. Word-timestamp services
+        # complete the slot via _add_word_timestamps; push_text_frames services complete
+        # it below after the TTSTextFrame is appended to the audio context.
+        self._aggregated_text_frame_sequence.append(
+            _AggregatedFrameSlot(
+                frame=src_frame,
+                context_id=context_id,
+                spoken=True,
+                tracker=WordCompletionTracker(prepared_text) if not self._push_text_frames else None,
+            )
+        )
 
         await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
 
@@ -1212,6 +1213,7 @@ class TTSService(AIService):
         """
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
+                logger.info(f"Adding word timestamp to context: {word} @ {timestamp}")
                 await self.append_to_audio_context(
                     context_id,
                     _WordTimestampEntry(

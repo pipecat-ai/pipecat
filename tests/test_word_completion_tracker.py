@@ -100,6 +100,26 @@ class TestWordCompletionTrackerNormalization(unittest.TestCase):
         tracker.add_word_and_check_complete("hello")
         self.assertTrue(tracker.is_complete)
 
+    def test_ssml_tags_stripped_in_word(self):
+        """SSML tags like <spell>...</spell> in TTS word tokens are stripped before comparison."""
+        tracker = WordCompletionTracker("1234-5678")
+        # Cartesia returns something like "<spell>1234-5678</spell>" as a word token
+        self.assertTrue(tracker.add_word_and_check_complete("<spell>1234-5678</spell>"))
+
+    def test_ssml_tags_do_not_inflate_char_count(self):
+        """Tag names must not count as alphanumeric chars, preventing premature completion."""
+        tracker = WordCompletionTracker("ab")
+        # Without tag stripping "spell" (5 chars) would push received count over threshold.
+        tracker.add_word_and_check_complete("<spell>a</spell>")
+        self.assertFalse(tracker.is_complete)
+        tracker.add_word_and_check_complete("b")
+        self.assertTrue(tracker.is_complete)
+
+    def test_ssml_tags_in_expected_text(self):
+        """Tags in the expected text are also stripped."""
+        tracker = WordCompletionTracker("<speak>hello</speak>")
+        self.assertTrue(tracker.add_word_and_check_complete("hello"))
+
 
 class TestWordCompletionTrackerReset(unittest.TestCase):
     def test_reset_clears_progress(self):

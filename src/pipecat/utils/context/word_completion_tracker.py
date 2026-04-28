@@ -7,14 +7,16 @@
 """Word completion tracker for TTS context ordering."""
 
 import re
+from loguru import logger
 
 
 class WordCompletionTracker:
     """Tracks whether all words from a source AggregatedTextFrame have been spoken.
 
     Compares normalized alphanumeric character counts between the expected text
-    and accumulated spoken words, making the check robust to punctuation and
-    spacing differences between the original text and TTS-generated word tokens.
+    and accumulated spoken words, making the check robust to punctuation, spacing,
+    and XML/HTML tags (e.g. SSML tags like ``<spell>...</spell>`` returned by some
+    TTS providers in word-timestamp events).
 
     Example::
 
@@ -31,10 +33,12 @@ class WordCompletionTracker:
         """
         self._expected = self._normalize(expected_text)
         self._received = ""
+        logger.info(f"WordCompletionTracker: {self._expected}")
 
     @staticmethod
     def _normalize(text: str) -> str:
-        """Keep only lowercase alphanumeric characters."""
+        """Strip XML/HTML tags then keep only lowercase alphanumeric characters."""
+        text = re.sub(r"<[^>]+>", "", text)
         return re.sub(r"[^a-z0-9]", "", text.lower())
 
     def add_word_and_check_complete(self, word: str) -> bool:
@@ -46,6 +50,7 @@ class WordCompletionTracker:
         Returns:
             True when all expected content has been covered.
         """
+        logger.info(f"WordCompletionTracker add_word_and_check_complete: {word}")
         self._received += self._normalize(word)
         return self.is_complete
 
