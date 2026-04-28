@@ -411,8 +411,10 @@ class CartesiaTTSService(WebsocketTTSService):
 
     _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
-    def _strip_cartesia_tags(self, word: str) -> str:
-        return self._CARTESIA_TAG_RE.sub("", word)
+    def _strip_cartesia_tags(self, text: str) -> str:
+        text = self._CARTESIA_TAG_RE.sub(" ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
 
     def _normalize_word_timestamps(
         self, words: list[str], starts: list[float]
