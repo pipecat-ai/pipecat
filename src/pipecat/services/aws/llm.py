@@ -283,7 +283,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             self._settings.system_instruction
         )
         adapter = self.get_llm_adapter()
-        params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
+        params = adapter.get_llm_invocation_params(
             context, system_instruction=effective_instruction
         )
         messages = params["messages"]
@@ -372,7 +372,7 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
     def _get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
         adapter = self.get_llm_adapter()
-        params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(
+        params = adapter.get_llm_invocation_params(
             context, system_instruction=assert_given(self._settings.system_instruction)
         )
         return params

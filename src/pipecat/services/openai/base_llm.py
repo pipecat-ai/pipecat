@@ -297,7 +297,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             f"{self}: Generating chat from context {adapter.get_messages_for_logging(context)}"
         )
 
-        params_from_context: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
+        params_from_context = adapter.get_llm_invocation_params(
             context,
             system_instruction=self._settings.system_instruction,
             convert_developer_to_user=not self.supports_developer_role,
@@ -374,7 +374,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
         """
         effective_instruction = system_instruction or self._settings.system_instruction
         adapter = self.get_llm_adapter()
-        invocation_params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
+        invocation_params = adapter.get_llm_invocation_params(
             context,
             system_instruction=effective_instruction,
             convert_developer_to_user=not self.supports_developer_role,

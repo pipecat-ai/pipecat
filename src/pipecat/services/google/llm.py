@@ -21,7 +21,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     Frame,
@@ -292,7 +292,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         tools = []
         effective_instruction = system_instruction or self._settings.system_instruction
         adapter = self.get_llm_adapter()
-        params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
+        params = adapter.get_llm_invocation_params(
             context, system_instruction=effective_instruction
         )
         messages = params["messages"]
@@ -387,7 +387,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
     async def _stream_content(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
-        params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
+        params = adapter.get_llm_invocation_params(
             context, system_instruction=assert_given(self._settings.system_instruction)
         )
 

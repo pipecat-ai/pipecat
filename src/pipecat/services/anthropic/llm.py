@@ -329,7 +329,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
     def _get_llm_invocation_params(self, context: LLMContext) -> AnthropicLLMInvocationParams:
         adapter = self.get_llm_adapter()
-        params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(
+        params = adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=assert_given(self._settings.system_instruction),
