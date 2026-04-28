@@ -44,14 +44,17 @@ MODEL_SAMPLE_RATES: dict[str, int] = {
 }
 
 
-def language_to_camb_language(language: Language) -> str | None:
+def language_to_camb_language(language: Language) -> str:
     """Convert a Pipecat Language enum to Camb.ai language code.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding Camb.ai language code (BCP-47 format), or None if not supported.
+        The corresponding Camb.ai language code (BCP-47 format). If
+        ``language`` is not in the verified mapping, falls back to the base
+        language code (e.g., ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.EN: "en-us",

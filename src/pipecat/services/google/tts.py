@@ -60,7 +60,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_google_tts_language(language: Language) -> str | None:
+def language_to_google_tts_language(language: Language) -> str:
     """Convert a Language enum to Google TTS language code.
 
     Source:
@@ -70,7 +70,9 @@ def language_to_google_tts_language(language: Language) -> str | None:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding Google TTS language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the full language code string and
+        logs a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         # Arabic
@@ -219,7 +221,7 @@ def language_to_google_tts_language(language: Language) -> str | None:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
-def language_to_gemini_tts_language(language: Language) -> str | None:
+def language_to_gemini_tts_language(language: Language) -> str:
     """Convert a Language enum to Gemini TTS language code.
 
     Source:
@@ -229,7 +231,9 @@ def language_to_gemini_tts_language(language: Language) -> str | None:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding Gemini TTS language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the full language code string and
+        logs a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         # Afrikaans (Preview)

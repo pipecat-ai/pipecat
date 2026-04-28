@@ -9,14 +9,16 @@
 from pipecat.transcriptions.language import Language, resolve_language
 
 
-def language_to_azure_language(language: Language) -> str | None:
+def language_to_azure_language(language: Language) -> str:
     """Convert a Language enum to Azure language code.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding Azure language code, or None if not supported.
+        The corresponding Azure language code. If ``language`` is not in the
+        verified mapping, falls back to the full language code string and logs
+        a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         # Afrikaans

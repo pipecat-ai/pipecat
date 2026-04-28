@@ -111,7 +111,7 @@ MAX_CONSECUTIVE_FAILURES = 3
 CONNECTION_ESTABLISHED_THRESHOLD = 10.0  # seconds
 
 
-def language_to_gemini_language(language: Language) -> str | None:
+def language_to_gemini_language(language: Language) -> str:
     """Maps a Language enum value to a Gemini Live supported language code.
 
     Source:
@@ -121,7 +121,9 @@ def language_to_gemini_language(language: Language) -> str | None:
         language: The language enum value to convert.
 
     Returns:
-        The Gemini language code string, or None if the language is not supported.
+        The Gemini language code string. If ``language`` is not in the
+        verified mapping, falls back to the full language code string and logs
+        a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         # Arabic

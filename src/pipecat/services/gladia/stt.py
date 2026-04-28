@@ -56,14 +56,17 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_gladia_language(language: Language) -> str | None:
+def language_to_gladia_language(language: Language) -> str:
     """Convert a Language enum to Gladia's language code format.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The Gladia language code string or None if not supported.
+        The corresponding Gladia language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AF: "af",
@@ -361,7 +364,7 @@ class GladiaSTTService(WebsocketSTTService):
             language: The Language enum value to convert.
 
         Returns:
-            The Gladia language code string or None if not supported.
+            The Gladia language code string, or None if not supported.
         """
         return language_to_gladia_language(language)
 

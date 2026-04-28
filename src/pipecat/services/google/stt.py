@@ -60,14 +60,17 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_google_stt_language(language: Language) -> str | None:
+def language_to_google_stt_language(language: Language) -> str:
     """Maps Language enum to Google Speech-to-Text V2 language codes.
 
     Args:
         language: Language enum value.
 
     Returns:
-        Optional[str]: Google STT language code or None if not supported.
+        The corresponding Google STT language code. If ``language`` is not
+        in the verified mapping, falls back to the full language code string
+        and logs a warning (via
+        ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         # Afrikaans

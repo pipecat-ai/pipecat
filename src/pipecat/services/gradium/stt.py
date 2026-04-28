@@ -79,14 +79,17 @@ def _input_format_from_encoding(encoding: str, sample_rate: int) -> str:
     return encoding
 
 
-def language_to_gradium_language(language: Language) -> str | None:
+def language_to_gradium_language(language: Language) -> str:
     """Convert a Language enum to Gradium's language code format.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The Gradium language code string or None if not supported.
+        The corresponding Gradium language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.DE: "de",

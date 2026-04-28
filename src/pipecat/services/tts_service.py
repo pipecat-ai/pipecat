@@ -467,7 +467,10 @@ class TTSService(AIService):
             language: The language to convert.
 
         Returns:
-            The service-specific language identifier, or None if not supported.
+            The service-specific language identifier. Return ``None`` to
+            indicate an unsupported language. This optional return is an
+            extension hook for future or third-party subclasses; as of
+            2026-04-28, first-party services return a string.
         """
         return Language(language)
 

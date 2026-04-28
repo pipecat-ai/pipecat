@@ -182,9 +182,9 @@ class AzureSTTService(STTService):
         changed = await super()._update_settings(delta)
 
         if "language" in changed:
-            self._speech_config.speech_recognition_language = (
-                self._settings.language or language_to_azure_language(Language.EN_US)
-            )
+            self._speech_config.speech_recognition_language = assert_given(
+                self._settings.language
+            ) or language_to_azure_language(Language.EN_US)
             if self._audio_stream:
                 await self._disconnect()
                 await self._connect()

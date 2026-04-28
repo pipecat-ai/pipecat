@@ -40,7 +40,7 @@ class BaseWhisperSTTSettings(STTSettings):
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-def language_to_whisper_language(language: Language) -> str | None:
+def language_to_whisper_language(language: Language) -> str:
     """Maps pipecat Language enum to Whisper API language codes.
 
     Language support for Whisper API.
@@ -50,7 +50,10 @@ def language_to_whisper_language(language: Language) -> str | None:
         language: A Language enum value representing the input language.
 
     Returns:
-        str or None: The corresponding Whisper language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AF: "af",
@@ -235,7 +238,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             language: The Language enum value to convert.
 
         Returns:
-            str or None: The corresponding service language code, or None if not supported.
+            The corresponding service language code, or None if not supported.
         """
         return language_to_whisper_language(language)
 

@@ -32,7 +32,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 
-def language_to_deepgram_flux_language(language: Language) -> str | None:
+def language_to_deepgram_flux_language(language: Language) -> str:
     """Convert a Pipecat Language to a Deepgram Flux language code.
 
     Only honored by the ``flux-general-multi`` model. Locale variants
