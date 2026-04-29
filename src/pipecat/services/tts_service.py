@@ -998,7 +998,6 @@ class TTSService(AIService):
         # Skip sending to TTS if the aggregation type is in the skip list. Simply
         # push the original frame downstream.
         if type in self._skip_aggregator_types:
-            src_frame.skip_tts = True
             await self._push_frame_respecting_previous_aggregated_frame(src_frame, context_id)
             return
 
@@ -1269,6 +1268,13 @@ class TTSService(AIService):
                     (word, timestamp, context_id, includes_inter_frame_spaces)
                 )
             else:
+                # TODO We need to improve the word completion tracker, so, instead of just knowing
+                #  if all the words from an Aggregated sentence have been spoken,
+                #  we also need to return the original text, instead of just the text that we received from the LLM.
+
+                # TODO: we should probably create the TTSTextFrame after we know if there is an overflow or not
+
+                # TODO: When creating the TTSTextFrame, we should use both, text received from TTS provider, and the raw_text which matches exactly with our Aggregated sentence.
                 frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
                 if includes_inter_frame_spaces is not None:
                     frame.includes_inter_frame_spaces = includes_inter_frame_spaces
