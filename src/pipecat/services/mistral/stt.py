@@ -198,6 +198,13 @@ class MistralSTTService(STTService):
         if not self._connection or self._connection.is_closed:
             await self._connect()
 
+        # `_connect` swallows exceptions and may leave `_connection` unset;
+        # drop the audio chunk rather than crashing if reconnect failed.
+        if self._connection is None:
+            logger.warning(f"{self}: dropping audio chunk — Mistral STT not connected")
+            yield None
+            return
+
         await self._connection.send_audio(audio)
         yield None
 
@@ -248,8 +255,13 @@ class MistralSTTService(STTService):
 
     async def _receive_events(self):
         """Background task: iterate connection events and handle them."""
+        # `_connect` started this task only after assigning `_connection`,
+        # so it should not be None here; bail out defensively just in case.
+        connection = self._connection
+        if connection is None:
+            return
         try:
-            async for event in self._connection.events():
+            async for event in connection.events():
                 if isinstance(event, RealtimeTranscriptionSessionCreated):
                     logger.debug(f"{self}: Session created: {event.session}")
                     await self._call_event_handler("on_connected")

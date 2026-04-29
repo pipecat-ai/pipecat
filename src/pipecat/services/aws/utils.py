@@ -92,14 +92,18 @@ class AWSTranscribePresignedURL:
     """
 
     def __init__(
-        self, access_key: str, secret_key: str, session_token: str, region: str = "us-east-1"
+        self,
+        access_key: str,
+        secret_key: str,
+        session_token: str | None,
+        region: str = "us-east-1",
     ):
         """Initialize the presigned URL generator.
 
         Args:
             access_key: AWS access key ID.
             secret_key: AWS secret access key.
-            session_token: AWS session token for temporary credentials.
+            session_token: AWS session token for temporary credentials (optional).
             region: AWS region for the service. Defaults to "us-east-1".
         """
         self.access_key = access_key
@@ -129,8 +133,8 @@ class AWSTranscribePresignedURL:
         sample_rate: int,
         language_code: str = "",
         media_encoding: str = "pcm",
-        vocabulary_name: str = "",
-        vocabulary_filter_name: str = "",
+        vocabulary_name: str | None = None,
+        vocabulary_filter_name: str | None = None,
         show_speaker_label: bool = False,
         enable_channel_identification: bool = False,
         number_of_channels: int = 1,

@@ -612,8 +612,10 @@ class TTSService(AIService):
         """Handle the completion of a turn."""
         # For HTTP services they emit the frames synchronously, so close the audio context here
         # once all frames (including TTSTextFrame above) have been enqueued.
-        if self._is_yielding_frames_synchronously and self.audio_context_available(
-            self._turn_context_id
+        if (
+            self._is_yielding_frames_synchronously
+            and self._turn_context_id is not None
+            and self.audio_context_available(self._turn_context_id)
         ):
             if self._push_stop_frames:
                 await self.append_to_audio_context(
@@ -1206,12 +1208,17 @@ class TTSService(AIService):
         else:
             logger.debug(f"{self} unable to append audio to context {context_id}")
 
-    async def remove_audio_context(self, context_id: str):
+    async def remove_audio_context(self, context_id: str | None):
         """Remove an existing audio context.
 
         Args:
-            context_id: The context to remove.
+            context_id: The context to remove. ``None`` is accepted as a
+                no-op (logged) so callers can pass through values from
+                ``get_active_audio_context_id()`` without an explicit guard.
         """
+        if not context_id:
+            logger.debug(f"{self} unable to remove audio context: no context ID provided")
+            return
         if self.audio_context_available(context_id):
             # We just mark the audio context for deletion by appending
             # None. Once we reach None while handling audio we know we can

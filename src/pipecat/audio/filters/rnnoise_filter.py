@@ -60,7 +60,12 @@ class RNNoiseFilter(BaseAudioFilter):
         self._sample_rate = sample_rate
 
         try:
-            # RNNoise always requires 48kHz
+            # The module-level import sets `RNNoise` to `None` if pyrnnoise
+            # isn't installed; raise instead of calling `None(...)` so the
+            # except clause handles it cleanly.
+            if RNNoise is None:
+                raise ImportError("pyrnnoise is not installed")
+            # RNNoise always requires 48kHz.
             self._rnnoise = RNNoise(sample_rate=48000)
             self._rnnoise_ready = True
         except Exception as e:
@@ -107,7 +112,7 @@ class RNNoiseFilter(BaseAudioFilter):
         Returns:
             Noise-suppressed audio data as bytes.
         """
-        if not self._rnnoise_ready or not self._filtering:
+        if not self._rnnoise_ready or not self._filtering or self._rnnoise is None:
             return audio
 
         # Resample input if needed

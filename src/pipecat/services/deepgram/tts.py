@@ -232,17 +232,19 @@ class DeepgramTTSService(WebsocketTTSService):
 
             headers = {"Authorization": f"Token {self._api_key}"}
 
-            self._websocket = await websocket_connect(url, additional_headers=headers)
+            websocket = await websocket_connect(url, additional_headers=headers)
+            self._websocket = websocket
 
-            headers = {
-                k: v for k, v in self._websocket.response.headers.items() if k.startswith("dg-")
-            }
+            # `response` is populated after the handshake completes (which it
+            # has, since `websocket_connect` already returned).
+            response_headers = websocket.response.headers if websocket.response else {}
+            headers = {k: v for k, v in response_headers.items() if k.startswith("dg-")}
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
 
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -258,7 +260,7 @@ class DeepgramTTSService(WebsocketTTSService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error_frame(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
