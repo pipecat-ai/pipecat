@@ -542,6 +542,8 @@ class GladiaSTTService(WebsocketSTTService):
 
             logger.debug(f"{self}Connecting to Gladia WebSocket")
 
+            if self._session_url is None:
+                raise RuntimeError(f"{self} session URL is not initialized")
             self._websocket = await websocket_connect(self._session_url)
             self._connection_active = True
 

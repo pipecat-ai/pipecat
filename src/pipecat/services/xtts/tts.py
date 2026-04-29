@@ -214,7 +214,11 @@ class XTTSService(TTSService):
             logger.error(f"{self} no studio speakers available")
             return
 
-        embeddings = self._studio_speakers[assert_given(self._settings.voice)]
+        voice = assert_given(self._settings.voice)
+        if voice is None:
+            yield ErrorFrame(error="XTTS voice must be specified")
+            return
+        embeddings = self._studio_speakers[voice]
 
         url = self._base_url + "/tts_stream"
 

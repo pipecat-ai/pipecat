@@ -66,7 +66,7 @@ class OpenAILLMSettings(LLMSettings):
     )
     top_p: float | None | _NotGiven | OpenAINotGiven = field(default_factory=lambda: _NOT_GIVEN)
     max_tokens: int | None | _NotGiven | OpenAINotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    max_completion_tokens: int | _NotGiven | OpenAINotGiven = field(
+    max_completion_tokens: int | None | _NotGiven | OpenAINotGiven = field(
         default_factory=lambda: _NOT_GIVEN
     )
 

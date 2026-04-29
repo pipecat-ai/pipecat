@@ -1174,16 +1174,18 @@ class TTSService(AIService):
         logger.trace(f"{self} created audio context {context_id}")
 
     async def append_to_audio_context(
-        self, context_id: str, frame: Frame | _WordTimestampEntry | None
+        self, context_id: str | None, frame: Frame | _WordTimestampEntry | None
     ):
         """Append a frame or word-timestamp entry to an existing audio context queue.
 
-        Passing ``None`` signals end-of-context (used by remove_audio_context to mark
-        the queue for deletion). If the context no longer exists but the context_id
+        Passing a ``frame`` of ``None`` signals end-of-context (used by remove_audio_context
+        to mark the queue for deletion). If the context no longer exists but the context_id
         matches the active turn, the context is transparently recreated before appending.
 
         Args:
-            context_id: The context to append to.
+            context_id: The context to append to. ``None`` is accepted as a no-op
+                (with a debug log) so callers can pass through values from
+                ``get_active_audio_context_id()`` without an explicit guard.
             frame: The frame, word-timestamp entry, or ``None`` (end-of-context sentinel)
                 to append.
         """

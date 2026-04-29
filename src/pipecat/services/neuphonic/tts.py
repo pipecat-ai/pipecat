@@ -331,7 +331,10 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
     async def _receive_messages(self):
         """Receive and process messages from Neuphonic WebSocket."""
-        async for message in self._websocket:
+        websocket = self._websocket
+        if websocket is None:
+            return
+        async for message in websocket:
             if isinstance(message, str):
                 msg = json.loads(message)
                 if msg.get("data") and msg["data"].get("audio"):

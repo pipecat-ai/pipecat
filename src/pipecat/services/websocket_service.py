@@ -42,7 +42,7 @@ class WebsocketService(ABC):
             reconnect_on_error: Whether to automatically reconnect on connection errors.
             **kwargs: Additional arguments (unused, for compatibility).
         """
-        self._websocket: websockets.WebSocketClientProtocol | None = None
+        self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
         self._reconnect_on_error = reconnect_on_error
         self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False

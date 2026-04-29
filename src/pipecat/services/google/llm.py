@@ -52,7 +52,7 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 try:
-    from google import genai
+    import google.genai as genai
     from google.api_core.exceptions import DeadlineExceeded
     from google.genai.types import (
         GenerateContentConfig,
