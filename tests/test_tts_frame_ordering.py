@@ -589,6 +589,7 @@ async def test_http_word_timestamps_punctuation_tokens():
         frames_to_send=[TTSSpeakFrame(text="hello world! How are you?", append_to_context=False)],
     )
     text_frames_plain = [f for f in frames_plain[0] if isinstance(f, TTSTextFrame)]
+    expected_texts = ["hello", "world", "!", "How", "are", "you", "?"]
     assert [f.text for f in text_frames_plain] == expected_texts
     assert all(f.includes_inter_frame_spaces is False for f in text_frames_plain)
 

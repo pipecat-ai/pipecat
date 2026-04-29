@@ -54,7 +54,6 @@ class WordCompletionTracker:
         self,
         expected_text: str,
         raw_text: str | None = None,
-        includes_inter_frame_spaces: bool | None = False,
     ):
         """Initialize the tracker with the text of the frame being spoken.
 
@@ -68,7 +67,6 @@ class WordCompletionTracker:
                 raw span via ``get_raw_consumed()``. Both texts normalize to the
                 same alphanumeric sequence, so the same char-count cursor drives
                 position tracking in both.
-            includes_inter_frame_spaces: Whether the words received will include inter-frame spaces.
         """
         self._expected = self._normalize(expected_text)
         self._received = ""
@@ -90,7 +88,7 @@ class WordCompletionTracker:
         self._raw_overflow_word: str | None = None
         self._raw_consumed: str | None = None
         self._frame_word: str | None = None
-        self._includes_inter_frame_spaces = includes_inter_frame_spaces
+        self._includes_inter_frame_spaces = False
         logger.info(f"WordCompletionTracker: {self._expected}")
 
     @staticmethod
@@ -131,7 +129,9 @@ class WordCompletionTracker:
 
         return pos
 
-    def add_word_and_check_complete(self, word: str) -> bool:
+    def add_word_and_check_complete(
+        self, word: str, includes_inter_frame_spaces: bool | None = False
+    ) -> bool:
         """Record a spoken word from a word-timestamp event.
 
         Normalizes ``word``, appends it to the running total, and checks whether
@@ -158,11 +158,13 @@ class WordCompletionTracker:
 
         Args:
             word: A single word token returned by the TTS service.
+            includes_inter_frame_spaces: Whether the word includes inter-frame spaces.
 
         Returns:
             True when all expected content has been covered.
         """
         normalized = self._normalize(word)
+        self._includes_inter_frame_spaces = includes_inter_frame_spaces
 
         prev_len = len(self._received)
         expected_len = len(self._expected)

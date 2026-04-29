@@ -1275,7 +1275,9 @@ class TTSService(AIService):
                 is_complete = False
                 raw_overflow_word = None
                 if active and active.tracker:
-                    is_complete = active.tracker.add_word_and_check_complete(word)
+                    is_complete = active.tracker.add_word_and_check_complete(
+                        word, includes_inter_frame_spaces=includes_inter_frame_spaces
+                    )
                     raw_overflow_word = active.tracker.get_raw_overflow_word()
 
                 # Ask the tracker for the portion of the word that belongs to this
