@@ -88,8 +88,8 @@ class BandwidthFrameSerializer(FrameSerializer):
         stream_id: str,
         call_id: str | None = None,
         account_id: str | None = None,
-        username: str | None = None,
-        password: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
         params: InputParams | None = None,
     ):
         """Initialize the BandwidthFrameSerializer.
@@ -99,10 +99,11 @@ class BandwidthFrameSerializer(FrameSerializer):
                 event metadata.
             call_id: The Bandwidth Call ID (required for auto hang-up).
             account_id: The Bandwidth account ID (required for auto hang-up).
-            username: Bandwidth API account-token username for Basic Auth
-                (required for auto hang-up).
-            password: Bandwidth API account-token password for Basic Auth
-                (required for auto hang-up).
+            client_id: OAuth 2.0 Client ID for Bandwidth API authentication
+                (required for auto hang-up). Used together with
+                ``client_secret`` to obtain a Bearer token from Bandwidth's
+                identity provider via the client_credentials grant.
+            client_secret: OAuth 2.0 Client Secret (required for auto hang-up).
             params: Configuration parameters.
         """
         params = params or BandwidthFrameSerializer.InputParams()
@@ -115,10 +116,10 @@ class BandwidthFrameSerializer(FrameSerializer):
                 missing_credentials.append("call_id")
             if not account_id:
                 missing_credentials.append("account_id")
-            if not username:
-                missing_credentials.append("username")
-            if not password:
-                missing_credentials.append("password")
+            if not client_id:
+                missing_credentials.append("client_id")
+            if not client_secret:
+                missing_credentials.append("client_secret")
             if missing_credentials:
                 raise ValueError(
                     "auto_hang_up is enabled but missing required parameters: "
@@ -148,8 +149,8 @@ class BandwidthFrameSerializer(FrameSerializer):
         self._stream_id = stream_id
         self._call_id = call_id
         self._account_id = account_id
-        self._username = username
-        self._password = password
+        self._client_id = client_id
+        self._client_secret = client_secret
 
         self._bandwidth_sample_rate = self._params.bandwidth_sample_rate
         self._sample_rate = 0  # Pipeline input rate, set in setup()
@@ -252,11 +253,17 @@ class BandwidthFrameSerializer(FrameSerializer):
 
         return base64.b64encode(encoded).decode("utf-8"), content_type
 
+    OAUTH_TOKEN_URL = "https://api.bandwidth.com/api/v1/oauth2/token"
+    VOICE_API_BASE_URL = "https://voice.bandwidth.com/api/v2"
+
     async def _hang_up_call(self):
         """Hang up the Bandwidth call via the Voice API REST endpoint.
 
-        Sends ``POST /api/v2/accounts/{accountId}/calls/{callId}`` with
-        ``{"state": "completed"}`` and HTTP Basic Auth.
+        Authentication uses the OAuth 2.0 client_credentials grant: we POST
+        the client_id/client_secret pair (as Basic Auth) to Bandwidth's IDP
+        to obtain a short-lived Bearer token, then send it on the call-update
+        request. Legacy API username/password auth is deprecated by
+        Bandwidth (sunset 2026-12-02).
         """
         try:
             import aiohttp
@@ -265,15 +272,35 @@ class BandwidthFrameSerializer(FrameSerializer):
             # which is the only path that reaches this method.
             account_id = cast(str, self._account_id)
             call_id = cast(str, self._call_id)
-            username = cast(str, self._username)
-            password = cast(str, self._password)
-
-            endpoint = f"https://voice.bandwidth.com/api/v2/accounts/{account_id}/calls/{call_id}"
-            auth = aiohttp.BasicAuth(username, password)
-            body = {"state": "completed"}
+            client_id = cast(str, self._client_id)
+            client_secret = cast(str, self._client_secret)
 
             async with aiohttp.ClientSession() as session:
-                async with session.post(endpoint, auth=auth, json=body) as response:
+                token_auth = aiohttp.BasicAuth(client_id, client_secret)
+                async with session.post(
+                    self.OAUTH_TOKEN_URL,
+                    auth=token_auth,
+                    data={"grant_type": "client_credentials"},
+                ) as token_response:
+                    if token_response.status != 200:
+                        error_text = await token_response.text()
+                        logger.error(
+                            f"Failed to fetch Bandwidth OAuth token: "
+                            f"Status {token_response.status}, Response: {error_text}"
+                        )
+                        return
+                    token_data = await token_response.json()
+
+                access_token = token_data.get("access_token")
+                if not access_token:
+                    logger.error("Bandwidth OAuth response missing access_token")
+                    return
+
+                endpoint = f"{self.VOICE_API_BASE_URL}/accounts/{account_id}/calls/{call_id}"
+                headers = {"Authorization": f"Bearer {access_token}"}
+                body = {"state": "completed"}
+
+                async with session.post(endpoint, headers=headers, json=body) as response:
                     if 200 <= response.status < 300:
                         logger.info(f"Successfully terminated Bandwidth call {call_id}")
                     elif response.status == 404:

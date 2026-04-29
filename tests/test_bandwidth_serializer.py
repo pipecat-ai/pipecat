@@ -30,8 +30,8 @@ def _make_serializer(auto_hang_up: bool = False, **kwargs) -> BandwidthFrameSeri
         stream_id="test-stream-id",
         call_id="test-call-id",
         account_id="test-account-id",
-        username="test-user",
-        password="test-pass",
+        client_id="test-client-id",
+        client_secret="test-client-secret",
         params=params,
     )
 
@@ -62,7 +62,7 @@ class TestBandwidthFrameSerializerInit(unittest.IsolatedAsyncioTestCase):
                 params=BandwidthFrameSerializer.InputParams(auto_hang_up=True),
             )
         msg = str(ctx.exception)
-        for required in ("call_id", "account_id", "username", "password"):
+        for required in ("call_id", "account_id", "client_id", "client_secret"):
             self.assertIn(required, msg)
 
     def test_auto_hang_up_disabled_skips_credential_check(self):
@@ -217,38 +217,74 @@ class TestBandwidthFrameSerializerSerialize(unittest.IsolatedAsyncioTestCase):
 class TestBandwidthFrameSerializerHangup(unittest.IsolatedAsyncioTestCase):
     """End-of-call hang-up REST invocation."""
 
-    async def test_end_frame_triggers_hangup(self):
+    @staticmethod
+    def _make_post_ctx(status: int, json_body: dict | None = None) -> MagicMock:
+        """Build a mocked async context manager for ``session.post(...)``."""
+        response = MagicMock()
+        response.status = status
+        response.json = AsyncMock(return_value=json_body or {})
+        response.text = AsyncMock(return_value="")
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=response)
+        ctx.__aexit__ = AsyncMock(return_value=None)
+        return ctx
+
+    @staticmethod
+    def _make_session(post_side_effects: list[MagicMock]) -> MagicMock:
+        session = MagicMock()
+        session.post = MagicMock(side_effect=post_side_effects)
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        return session
+
+    async def test_end_frame_triggers_oauth_then_hangup(self):
+        """EndFrame should fetch a Bearer token, then terminate the call with it."""
         serializer = _make_serializer(auto_hang_up=True)
         await _setup(serializer)
 
-        # Mock aiohttp.ClientSession so we don't make a real HTTP call.
-        with patch("aiohttp.ClientSession") as session_cls:
-            response = MagicMock()
-            response.status = 200
-            response.text = AsyncMock(return_value="")
+        token_ctx = self._make_post_ctx(
+            200, {"access_token": "fake-jwt", "token_type": "Bearer", "expires_in": 3600}
+        )
+        hangup_ctx = self._make_post_ctx(200)
+        session = self._make_session([token_ctx, hangup_ctx])
 
-            post_ctx = MagicMock()
-            post_ctx.__aenter__ = AsyncMock(return_value=response)
-            post_ctx.__aexit__ = AsyncMock(return_value=None)
-
-            session = MagicMock()
-            session.post = MagicMock(return_value=post_ctx)
-            session.__aenter__ = AsyncMock(return_value=session)
-            session.__aexit__ = AsyncMock(return_value=None)
-
-            session_cls.return_value = session
-
+        with patch("aiohttp.ClientSession", return_value=session):
             result = await serializer.serialize(EndFrame())
 
-            self.assertIsNone(result)
-            self.assertTrue(serializer._hangup_attempted)
-            session.post.assert_called_once()
-            call_args = session.post.call_args
-            url = call_args.args[0]
-            self.assertIn("voice.bandwidth.com/api/v2", url)
-            self.assertIn("test-account-id", url)
-            self.assertIn("test-call-id", url)
-            self.assertEqual(call_args.kwargs["json"], {"state": "completed"})
+        self.assertIsNone(result)
+        self.assertTrue(serializer._hangup_attempted)
+        self.assertEqual(session.post.call_count, 2)
+
+        # First call: OAuth token request.
+        token_call = session.post.call_args_list[0]
+        self.assertIn("oauth2/token", token_call.args[0])
+        self.assertEqual(token_call.kwargs["data"], {"grant_type": "client_credentials"})
+        # Basic Auth header is set via the `auth` kwarg with client_id:client_secret.
+        self.assertIsNotNone(token_call.kwargs.get("auth"))
+
+        # Second call: call termination with Bearer token.
+        hangup_call = session.post.call_args_list[1]
+        url = hangup_call.args[0]
+        self.assertIn("voice.bandwidth.com/api/v2", url)
+        self.assertIn("test-account-id", url)
+        self.assertIn("test-call-id", url)
+        self.assertEqual(hangup_call.kwargs["json"], {"state": "completed"})
+        self.assertEqual(hangup_call.kwargs["headers"]["Authorization"], "Bearer fake-jwt")
+
+    async def test_token_fetch_failure_skips_hangup_request(self):
+        """If OAuth fails, we should not attempt the call-termination request."""
+        serializer = _make_serializer(auto_hang_up=True)
+        await _setup(serializer)
+
+        token_ctx = self._make_post_ctx(401, {"error": "invalid_client"})
+        # Only one POST should happen — the second side_effect would raise StopIteration
+        # if the code accidentally tries the hangup anyway, which would fail this test.
+        session = self._make_session([token_ctx])
+
+        with patch("aiohttp.ClientSession", return_value=session):
+            await serializer.serialize(EndFrame())
+
+        self.assertEqual(session.post.call_count, 1)
 
     async def test_cancel_frame_triggers_hangup(self):
         serializer = _make_serializer(auto_hang_up=True)
