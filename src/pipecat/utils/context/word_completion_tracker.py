@@ -120,6 +120,15 @@ class WordCompletionTracker:
                 pos += 1
             else:
                 pos += 1
+
+        # NEW: consume trailing punctuation (but not tags)
+        while pos < len(text):
+            if text[pos] == "<":
+                break
+            if text[pos].isalnum():
+                break
+            pos += 1
+
         return pos
 
     def add_word_and_check_complete(self, word: str) -> bool:
@@ -263,7 +272,7 @@ class WordCompletionTracker:
           portion. The incoming word is routed as overflow to the next slot.
         """
         return (
-            self._frame_word.lstrip()
+            self._frame_word.strip()
             if self._frame_word and not self._includes_inter_frame_spaces
             else self._frame_word
         )
@@ -271,7 +280,7 @@ class WordCompletionTracker:
     def get_overflow(self) -> str | None:
         """Return normalized overflow from the last added word, if any."""
         return (
-            self._overflow.lstrip()
+            self._overflow.strip()
             if self._overflow and not self._includes_inter_frame_spaces
             else self._overflow
         )
@@ -284,7 +293,7 @@ class WordCompletionTracker:
         natural word text.
         """
         return (
-            self._raw_overflow_word.lstrip()
+            self._raw_overflow_word.strip()
             if self._raw_overflow_word and not self._includes_inter_frame_spaces
             else self._raw_overflow_word
         )
@@ -295,7 +304,7 @@ class WordCompletionTracker:
         Returns None if no raw_text was provided at construction time.
         """
         return (
-            self._raw_consumed.lstrip()
+            self._raw_consumed.strip()
             if self._raw_consumed and not self._includes_inter_frame_spaces
             else self._raw_consumed
         )
