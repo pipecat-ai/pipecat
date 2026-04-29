@@ -97,16 +97,22 @@ class WordCompletionTracker:
         """Return the position in *text* after advancing past *n* alphanumeric chars.
 
         Moves through the text one character at a time, counting only alphanumeric
-        characters. Non-alphanumeric characters (spaces, punctuation, tags) are
-        passed over without decrementing the budget, so they end up included in
-        the returned span.
+        characters. XML/HTML tags (``<...>``) are skipped entirely — their content
+        is not counted against the budget, so the returned span includes the full tag.
+        Other non-alphanumeric characters (spaces, punctuation) are also passed over
+        without decrementing the budget.
         """
         pos = start_pos
         count = 0
         while pos < len(text) and count < n:
-            if text[pos].isalnum():
+            if text[pos] == "<":
+                end = text.find(">", pos)
+                pos = end + 1 if end != -1 else pos + 1
+            elif text[pos].isalnum():
                 count += 1
-            pos += 1
+                pos += 1
+            else:
+                pos += 1
         return pos
 
     def add_word_and_check_complete(self, word: str) -> bool:
