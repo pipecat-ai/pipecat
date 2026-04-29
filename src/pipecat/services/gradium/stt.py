@@ -15,7 +15,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -401,8 +401,10 @@ class GradiumSTTService(WebsocketSTTService):
             json_config = {}
             if self._json_config:
                 json_config = json.loads(self._json_config)
-            language = assert_given(self._settings.language)
-            if language:
+            # Technically `_settings.language` could be a raw string, but
+            # Language is a StrEnum so downstream handles either.
+            language = cast("Language | None", assert_given(self._settings.language))
+            if language is not None:
                 gradium_language = language_to_gradium_language(language)
                 if gradium_language:
                     json_config["language"] = gradium_language
@@ -482,12 +484,14 @@ class GradiumSTTService(WebsocketSTTService):
         """
         self._accumulated_text.append(text)
         accumulated = " ".join(self._accumulated_text)
+        # Technically `_settings.language` could be a raw string, but Language
+        # is a StrEnum so downstream handles either.
         await self.push_frame(
             InterimTranscriptionFrame(
                 text=accumulated,
                 user_id=self._user_id,
                 timestamp=time_now_iso8601(),
-                language=assert_given(self._settings.language),
+                language=cast("Language | None", assert_given(self._settings.language)),
             )
         )
         await self.stop_processing_metrics()
@@ -519,7 +523,9 @@ class GradiumSTTService(WebsocketSTTService):
         text = " ".join(self._accumulated_text)
         self._accumulated_text.clear()
         logger.debug(f"Final transcription: [{text}]")
-        language = assert_given(self._settings.language)
+        # Technically `_settings.language` could be a raw string, but Language
+        # is a StrEnum so downstream handles either.
+        language = cast("Language | None", assert_given(self._settings.language))
         await self.push_frame(
             TranscriptionFrame(
                 text,

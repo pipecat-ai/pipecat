@@ -345,7 +345,11 @@ class AWSPollyTTSService(TTSService):
             # Filter out None values
             filtered_params = {k: v for k, v in params.items() if v is not None}
 
-            async with self._aws_session.client("polly", **self._aws_params) as polly:
+            # aioboto3's `client()` is an async context manager but its stubs
+            # don't advertise `__aenter__` / `__aexit__` to pyright.
+            async with self._aws_session.client(  # pyright: ignore[reportGeneralTypeIssues]
+                "polly", **self._aws_params
+            ) as polly:
                 response = await polly.synthesize_speech(**filtered_params)
                 if "AudioStream" in response:
                     # Get the streaming body and read it
@@ -353,7 +357,7 @@ class AWSPollyTTSService(TTSService):
                     audio_data = await stream.read()
                 else:
                     logger.error(f"{self} No audio stream in response")
-                    audio_data = None
+                    return
 
                 audio_data = await self._resampler.resample(audio_data, 16000, self.sample_rate)
 

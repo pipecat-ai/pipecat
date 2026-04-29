@@ -6,7 +6,7 @@
 
 """OpenAI Responses API adapter for Pipecat."""
 
-from typing import Any, TypedDict, cast
+from typing import Any, Required, TypedDict, cast
 
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.responses import FunctionToolParam, ResponseInputItemParam, ToolParam
@@ -23,8 +23,10 @@ from pipecat.processors.aggregators.llm_context import (
 class OpenAIResponsesLLMInvocationParams(TypedDict, total=False):
     """Context-based parameters for invoking OpenAI Responses API."""
 
-    input: list[ResponseInputItemParam]
-    tools: list[ToolParam] | OpenAINotGiven
+    # `input` and `tools` are always populated by `get_llm_invocation_params`;
+    # `instructions` is only set when a system instruction is present.
+    input: Required[list[ResponseInputItemParam]]
+    tools: Required[list[ToolParam] | OpenAINotGiven]
     instructions: str
 
 

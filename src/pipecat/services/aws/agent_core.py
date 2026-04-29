@@ -201,7 +201,11 @@ class AWSAgentCoreProcessor(FrameProcessor):
             if not payload:
                 return
 
-            async with self._aws_session.client("bedrock-agentcore", **self._aws_params) as client:
+            # aioboto3's `client()` is an async context manager but its stubs don't
+            # advertise `__aenter__` / `__aexit__` in a way pyright can see.
+            async with self._aws_session.client(  # pyright: ignore[reportGeneralTypeIssues]
+                "bedrock-agentcore", **self._aws_params
+            ) as client:
                 # Invoke the AgentCore agent
                 response = await client.invoke_agent_runtime(
                     agentRuntimeArn=self._agentArn, payload=payload.encode()

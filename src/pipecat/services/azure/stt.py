@@ -13,7 +13,7 @@ Speech SDK for real-time audio transcription.
 import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -280,8 +280,11 @@ class AzureSTTService(STTService):
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or assert_given(
-                self._settings.language
+            # Technically either source could be a raw string, but Language is
+            # a StrEnum so downstream handles either.
+            language = cast(
+                "Language | None",
+                getattr(event.result, "language", None) or assert_given(self._settings.language),
             )
             frame = TranscriptionFrame(
                 event.result.text,
@@ -297,8 +300,11 @@ class AzureSTTService(STTService):
 
     def _on_handle_recognizing(self, event):
         if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or assert_given(
-                self._settings.language
+            # Technically either source could be a raw string, but Language is
+            # a StrEnum so downstream handles either.
+            language = cast(
+                "Language | None",
+                getattr(event.result, "language", None) or assert_given(self._settings.language),
             )
             frame = InterimTranscriptionFrame(
                 event.result.text,

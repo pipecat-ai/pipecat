@@ -16,7 +16,7 @@ import random
 import string
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -38,6 +38,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
+    from websockets import Subprotocol
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
@@ -314,7 +315,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             self._websocket = await websocket_connect(
                 presigned_url,
                 additional_headers=additional_headers,
-                subprotocols=["mqtt"],
+                subprotocols=[Subprotocol("mqtt")],
                 ping_interval=None,
                 ping_timeout=None,
                 compression=None,
@@ -534,7 +535,11 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                             is_final = not result.get("IsPartial", True)
 
                             if transcript:
-                                language = assert_given(self._settings.language)
+                                # Technically `_settings.language` could be a raw string, but
+                                # Language is a StrEnum so downstream handles either.
+                                language = cast(
+                                    "Language | None", assert_given(self._settings.language)
+                                )
                                 if is_final:
                                     await self.push_frame(
                                         TranscriptionFrame(

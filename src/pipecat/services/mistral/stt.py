@@ -12,7 +12,7 @@ Voxtral Realtime transcription API using the Mistral SDK's RealtimeConnection.
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -30,6 +30,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings, assert_given
 from pipecat.services.stt_latency import MISTRAL_TTFS_P99
 from pipecat.services.stt_service import STTService
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -132,7 +133,7 @@ class MistralSTTService(STTService):
         self._connection: RealtimeConnection | None = None
         self._receive_task = None
         self._accumulated_text = ""
-        self._detected_language: str | None = None
+        self._detected_language: Language | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -278,7 +279,9 @@ class MistralSTTService(STTService):
                     self._accumulated_text = ""
 
                 elif isinstance(event, TranscriptionStreamLanguage):
-                    self._detected_language = event.audio_language
+                    # Technically the SDK could emit a code we haven't added yet,
+                    # but Language is a StrEnum so downstream handles either.
+                    self._detected_language = cast("Language | None", event.audio_language)
 
                 elif isinstance(event, RealtimeTranscriptionError):
                     error_msg = event.error.message if event.error else "Unknown error"
