@@ -1233,10 +1233,9 @@ class TTSService(AIService):
                 includes_inter_frame_spaces=includes_inter_frame_spaces,
             )
 
-    # TODO add docstring
     def _get_active_aggregated_frame_slot(self) -> _AggregatedFrameSlot | None:
-        # Advance the word completion tracker for the active spoken slot.
-        active = next(
+        """Return the first incomplete spoken slot with a tracker."""
+        return next(
             (
                 s
                 for s in self._aggregated_text_frame_sequence
@@ -1244,7 +1243,6 @@ class TTSService(AIService):
             ),
             None,
         )
-        return active
 
     async def _add_word_timestamps(
         self,
@@ -1270,6 +1268,7 @@ class TTSService(AIService):
                     (word, timestamp, context_id, includes_inter_frame_spaces)
                 )
             else:
+                # logger.debug(f"{self} Handling word {word}")
                 # Advance the tracker first so we know the raw span and overflow
                 # before constructing the TTSTextFrame.
                 active = self._get_active_aggregated_frame_slot()
@@ -1279,11 +1278,10 @@ class TTSService(AIService):
                     is_complete = active.tracker.add_word_and_check_complete(word)
                     raw_overflow_word = active.tracker.get_raw_overflow_word()
 
-                # When the TTS word straddles a frame boundary (e.g. "1111 And"),
-                # the main frame should only carry the part that belongs to the
-                # current AggregatedTextFrame (e.g. "1111"), not the full word.
+                # Ask the tracker for the portion of the word that belongs to this
+                # slot: the full word, the prefix before a frame boundary.
                 frame_text = (
-                    word[: len(word) - len(raw_overflow_word)] if raw_overflow_word else word
+                    active.tracker.get_frame_word() if (active and active.tracker) else word
                 )
                 frame = TTSTextFrame(frame_text, aggregated_by=AggregationType.WORD)
                 if includes_inter_frame_spaces is not None:
@@ -1559,6 +1557,14 @@ class TTSService(AIService):
 
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
+
+        # Force-complete any spoken slots that are still incomplete. This handles
+        # TTS providers that silently drop word-timestamp events (e.g. a missing
+        # "number" token): without this, an incomplete slot would permanently block
+        # _flush_aggregated_text_frame_sequence from emitting subsequent skipped frames.
+        for slot in self._aggregated_text_frame_sequence:
+            if slot.spoken and not slot.complete:
+                slot.complete = True
         await self._flush_aggregated_text_frame_sequence()
         await self._maybe_reset_word_timestamps()
 
