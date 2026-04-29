@@ -165,7 +165,7 @@ class TestWordCompletionTrackerReset(unittest.TestCase):
         tracker.add_word_and_check_complete("number")
         # Partially advanced: remaining = " is"
         tracker.add_word_and_check_complete("4111")  # force-complete
-        self.assertEqual(tracker.get_frame_word(), " is")
+        self.assertEqual(tracker.get_frame_word(), "is")
 
         tracker.reset()
         # After reset the cursor is back at 0, so force-complete sees the full text.
@@ -308,6 +308,39 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
         for word in words[:-1]:
             self.assertFalse(tracker.add_word_and_check_complete(word))
         self.assertTrue(tracker.add_word_and_check_complete(words[-1]))
+
+    def test_credit_card_sentence_with_raw_consumed(self):
+        """Test that get_raw_consumed returns 'code:' after completing the sentence and all words."""
+        sentence = "Here is a sample credit card number and a simple Python code:"
+        words = [
+            "Here",
+            "is",
+            "a",
+            "samplecredit",
+            "card",
+            "number",
+            "and",
+            "a",
+            "simple",
+            "Python",
+            "code:",
+        ]
+
+        # Provide raw_text parameter so get_raw_consumed() works
+        tracker = WordCompletionTracker(sentence, raw_text=sentence)
+
+        # Add all words except the last one
+        for word in words[:-1]:
+            result = tracker.add_word_and_check_complete(word)
+            self.assertFalse(result, f"Should not be complete after adding '{word}'")
+
+        # Add the final word - should complete the tracker
+        result = tracker.add_word_and_check_complete(words[-1])
+        self.assertTrue(result, "Should be complete after adding the last word")
+        self.assertTrue(tracker.is_complete)
+
+        # get_raw_consumed should return "code:" for the last word
+        self.assertEqual(tracker.get_raw_consumed(), "code:")
 
 
 class TestWordCompletionTrackerWordBelongsHere(unittest.TestCase):
@@ -456,7 +489,7 @@ class TestWordCompletionTrackerMissingWord(unittest.TestCase):
         # Now remaining = " is"; "4111" doesn't belong
         result = tracker.add_word_and_check_complete("4111")
         self.assertTrue(result)
-        self.assertEqual(tracker.get_frame_word(), " is")
+        self.assertEqual(tracker.get_frame_word(), "is")
         self.assertEqual(tracker.get_overflow(), "4111")
 
     def test_force_complete_overflow_routes_to_next_tracker(self):
@@ -480,7 +513,7 @@ class TestWordCompletionTrackerMissingWord(unittest.TestCase):
         result = tracker.add_word_and_check_complete("4111")
         self.assertTrue(result)
         # frame_word should be the unspoken suffix including leading space
-        self.assertEqual(tracker.get_frame_word(), " number is")
+        self.assertEqual(tracker.get_frame_word(), "number is")
         self.assertEqual(tracker.get_raw_overflow_word(), "4111")
 
     def test_force_complete_marks_tracker_complete(self):
@@ -520,7 +553,7 @@ class TestWordCompletionTrackerRawText(unittest.TestCase):
         tracker.add_word_and_check_complete("hello")
         self.assertEqual(tracker.get_raw_consumed(), "hello")
         tracker.add_word_and_check_complete("world")
-        self.assertEqual(tracker.get_raw_consumed(), " world")
+        self.assertEqual(tracker.get_raw_consumed(), "world")
 
     def test_raw_text_opening_tag_included_in_first_word(self):
         """The opening tag preceding content is consumed with the first word."""
@@ -548,14 +581,14 @@ class TestWordCompletionTrackerRawText(unittest.TestCase):
         self.assertEqual(tracker.get_raw_consumed(), "<card>4111")
 
         tracker.add_word_and_check_complete("1111")
-        self.assertEqual(tracker.get_raw_consumed(), " 1111")
+        self.assertEqual(tracker.get_raw_consumed(), "1111")
 
         tracker.add_word_and_check_complete("1111")
-        self.assertEqual(tracker.get_raw_consumed(), " 1111")
+        self.assertEqual(tracker.get_raw_consumed(), "1111")
 
         tracker.add_word_and_check_complete("1111")
         # Last word: consume all remaining raw text including closing tag.
-        self.assertEqual(tracker.get_raw_consumed(), " 1111</card>")
+        self.assertEqual(tracker.get_raw_consumed(), "1111</card>")
         self.assertTrue(tracker.is_complete)
 
     def test_raw_text_closing_tag_consumed_with_last_word(self):
@@ -572,7 +605,7 @@ class TestWordCompletionTrackerRawText(unittest.TestCase):
         tracker.add_word_and_check_complete("hello")
         self.assertEqual(tracker.get_raw_consumed(), "<card>hello")
         tracker.add_word_and_check_complete("world")
-        self.assertEqual(tracker.get_raw_consumed(), " world</card>")
+        self.assertEqual(tracker.get_raw_consumed(), "world</card>")
 
     def test_raw_text_force_complete_consumes_all_remaining(self):
         """When force-complete fires, all remaining raw_text is consumed at once."""
@@ -581,7 +614,7 @@ class TestWordCompletionTrackerRawText(unittest.TestCase):
         tracker.add_word_and_check_complete("4111")  # advances cursor to pos 10
         # "WRONG" doesn't belong → force-complete
         tracker.add_word_and_check_complete("WRONG")
-        self.assertEqual(tracker.get_raw_consumed(), " 1111 1111 1111</card>")
+        self.assertEqual(tracker.get_raw_consumed(), "1111 1111 1111</card>")
         self.assertTrue(tracker.is_complete)
 
     def test_raw_text_overflow_word_last_raw_consumed_sweeps_tag(self):
@@ -597,7 +630,7 @@ class TestWordCompletionTrackerRawText(unittest.TestCase):
         self.assertEqual(tracker.get_frame_word(), "1111")
         self.assertEqual(tracker.get_raw_overflow_word(), "And")
         # is_complete → consume all remaining raw including </card>
-        self.assertEqual(tracker.get_raw_consumed(), " 1111</card>")
+        self.assertEqual(tracker.get_raw_consumed(), "1111</card>")
 
     def test_raw_text_with_ssml_tags_in_expected(self):
         """expected_text with SSML tags: raw cursor still advances by content alnum count."""
@@ -609,7 +642,7 @@ class TestWordCompletionTrackerRawText(unittest.TestCase):
         tracker.add_word_and_check_complete("4111")
         self.assertEqual(tracker.get_raw_consumed(), "<card>4111")
         tracker.add_word_and_check_complete("1111")
-        self.assertEqual(tracker.get_raw_consumed(), " 1111</card>")
+        self.assertEqual(tracker.get_raw_consumed(), "1111</card>")
         self.assertTrue(tracker.is_complete)
 
 
@@ -645,14 +678,14 @@ class TestWordCompletionTrackerMultiFrameSimulation(unittest.TestCase):
         self.assertEqual(tracker2.get_raw_consumed(), "<card>4111")
 
         tracker2.add_word_and_check_complete("1111")
-        self.assertEqual(tracker2.get_raw_consumed(), " 1111")
+        self.assertEqual(tracker2.get_raw_consumed(), "1111")
 
         tracker2.add_word_and_check_complete("1111")
-        self.assertEqual(tracker2.get_raw_consumed(), " 1111")
+        self.assertEqual(tracker2.get_raw_consumed(), "1111")
 
         result = tracker2.add_word_and_check_complete("1111")
         self.assertTrue(result)
-        self.assertEqual(tracker2.get_raw_consumed(), " 1111</card>")
+        self.assertEqual(tracker2.get_raw_consumed(), "1111</card>")
 
     def test_missing_word_force_complete_then_next_frame(self):
         """Dropped word-timestamp: force-complete slot 1, route word to slot 2."""
@@ -670,7 +703,7 @@ class TestWordCompletionTrackerMultiFrameSimulation(unittest.TestCase):
         result = tracker1.add_word_and_check_complete("4111")
         self.assertTrue(result)
         # frame_word carries the unspoken remainder so a TTSTextFrame can be emitted.
-        self.assertEqual(tracker1.get_frame_word(), " number is")
+        self.assertEqual(tracker1.get_frame_word(), "number is")
         overflow = tracker1.get_raw_overflow_word()
         self.assertEqual(overflow, "4111")
 
@@ -682,7 +715,7 @@ class TestWordCompletionTrackerMultiFrameSimulation(unittest.TestCase):
         tracker2.add_word_and_check_complete("1111")
         result = tracker2.add_word_and_check_complete("1111")
         self.assertTrue(result)
-        self.assertEqual(tracker2.get_raw_consumed(), " 1111</card>")
+        self.assertEqual(tracker2.get_raw_consumed(), "1111</card>")
 
     def test_overflow_word_spans_two_frames(self):
         """A word token that straddles two frame boundaries splits and routes correctly."""
@@ -720,7 +753,7 @@ class TestWordCompletionTrackerMultiFrameSimulation(unittest.TestCase):
         # "1111And" completes tracker1; "And" overflows to tracker2.
         result = tracker1.add_word_and_check_complete("1111And")
         self.assertTrue(result)
-        self.assertEqual(tracker1.get_raw_consumed(), " 1111</card>")
+        self.assertEqual(tracker1.get_raw_consumed(), "1111</card>")
         self.assertEqual(tracker1.get_raw_overflow_word(), "And")
 
         result = tracker2.add_word_and_check_complete(tracker1.get_raw_overflow_word())

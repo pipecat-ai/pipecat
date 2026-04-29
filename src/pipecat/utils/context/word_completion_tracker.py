@@ -50,7 +50,12 @@ class WordCompletionTracker:
         tracker.add_word_and_check_complete("world")   # True  — normalized "helloworld" >= "helloworld"
     """
 
-    def __init__(self, expected_text: str, raw_text: str | None = None):
+    def __init__(
+        self,
+        expected_text: str,
+        raw_text: str | None = None,
+        includes_inter_frame_spaces: bool | None = False,
+    ):
         """Initialize the tracker with the text of the frame being spoken.
 
         Args:
@@ -63,6 +68,7 @@ class WordCompletionTracker:
                 raw span via ``get_raw_consumed()``. Both texts normalize to the
                 same alphanumeric sequence, so the same char-count cursor drives
                 position tracking in both.
+            includes_inter_frame_spaces: Whether the words received will include inter-frame spaces.
         """
         self._expected = self._normalize(expected_text)
         self._received = ""
@@ -84,6 +90,7 @@ class WordCompletionTracker:
         self._raw_overflow_word: str | None = None
         self._raw_consumed: str | None = None
         self._frame_word: str | None = None
+        self._includes_inter_frame_spaces = includes_inter_frame_spaces
         logger.info(f"WordCompletionTracker: {self._expected}")
 
     @staticmethod
@@ -255,11 +262,19 @@ class WordCompletionTracker:
           ``expected_text`` so a TTSTextFrame can still be emitted for the dropped
           portion. The incoming word is routed as overflow to the next slot.
         """
-        return self._frame_word
+        return (
+            self._frame_word.lstrip()
+            if self._frame_word and not self._includes_inter_frame_spaces
+            else self._frame_word
+        )
 
     def get_overflow(self) -> str | None:
         """Return normalized overflow from the last added word, if any."""
-        return self._overflow
+        return (
+            self._overflow.lstrip()
+            if self._overflow and not self._includes_inter_frame_spaces
+            else self._overflow
+        )
 
     def get_raw_overflow_word(self) -> str | None:
         """Return the raw suffix of the last word that overflows into the next frame.
@@ -268,14 +283,22 @@ class WordCompletionTracker:
         casing and any non-alphanumeric characters so the overflow TTSTextFrame has
         natural word text.
         """
-        return self._raw_overflow_word
+        return (
+            self._raw_overflow_word.lstrip()
+            if self._raw_overflow_word and not self._includes_inter_frame_spaces
+            else self._raw_overflow_word
+        )
 
     def get_raw_consumed(self) -> str | None:
         """Return the raw text span consumed from raw_text for the last added word.
 
         Returns None if no raw_text was provided at construction time.
         """
-        return self._raw_consumed
+        return (
+            self._raw_consumed.lstrip()
+            if self._raw_consumed and not self._includes_inter_frame_spaces
+            else self._raw_consumed
+        )
 
     @property
     def is_complete(self) -> bool:
