@@ -90,6 +90,17 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
         logger.trace("Auto-detected: EXOTEL")
         return "exotel"
 
+    # Bandwidth detection
+    if (
+        message_data.get("eventType") == "start"
+        and "metadata" in message_data
+        and "streamId" in message_data.get("metadata", {})
+        and "callId" in message_data.get("metadata", {})
+        and "accountId" in message_data.get("metadata", {})
+    ):
+        logger.trace("Auto-detected: BANDWIDTH")
+        return "bandwidth"
+
     logger.trace("Auto-detection failed - unknown format")
     return "unknown"
 
@@ -138,6 +149,15 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "account_sid": str,
                 "from": str,
                 "to": str,
+            }
+
+        - Bandwidth::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+                "account_id": str,
+                "tracks": list[str],
             }
 
     Raises:
@@ -231,6 +251,16 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "from": start_data.get("from", ""),
                 "to": start_data.get("to", ""),
                 "custom_parameters": start_data.get("custom_parameters", ""),
+            }
+
+        elif transport_type == "bandwidth":
+            metadata = call_data_raw.get("metadata", {})
+            account_id = metadata.get("accountId")
+            call_data = {
+                "stream_id": metadata.get("streamId"),
+                "call_id": metadata.get("callId"),
+                "account_id": str(account_id) if account_id is not None else None,
+                "tracks": metadata.get("tracks", []),
             }
 
         else:
@@ -473,10 +503,20 @@ async def _create_telephony_transport(
             stream_sid=call_data["stream_id"],
             call_sid=call_data["call_id"],
         )
+    elif transport_type == "bandwidth":
+        from pipecat.serializers.bandwidth import BandwidthFrameSerializer
+
+        params.serializer = BandwidthFrameSerializer(
+            stream_id=call_data["stream_id"],
+            call_id=call_data["call_id"],
+            account_id=call_data["account_id"],
+            client_id=os.getenv("BANDWIDTH_CLIENT_ID", ""),
+            client_secret=os.getenv("BANDWIDTH_CLIENT_SECRET", ""),
+        )
     else:
         raise ValueError(
             f"Unsupported telephony provider: {transport_type}. "
-            f"Supported providers: twilio, telnyx, plivo, exotel"
+            f"Supported providers: twilio, telnyx, plivo, exotel, bandwidth"
         )
 
     return FastAPIWebsocketTransport(websocket=websocket, params=params)
@@ -493,7 +533,7 @@ async def create_transport(
     Args:
         runner_args: Arguments from the runner.
         transport_params: Dict mapping transport names to parameter factory functions.
-            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo", "exotel"
+            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo", "exotel", "bandwidth"
             Values should be functions that return transport parameters when called.
 
     Returns:
@@ -535,6 +575,12 @@ async def create_transport(
                 # add_wav_header and serializer will be set automatically
             ),
             "exotel": lambda: FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                # add_wav_header and serializer will be set automatically
+            ),
+            "bandwidth": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),

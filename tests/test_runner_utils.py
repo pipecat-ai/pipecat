@@ -148,6 +148,34 @@ class TestParseTelephonyWebSocket(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_data["call_id"], "call_exo_123")
         self.assertEqual(call_data["account_sid"], "acc_123")
 
+    async def test_bandwidth_detection(self):
+        """Test Bandwidth provider detection."""
+        bandwidth_message = json.dumps(
+            {
+                "eventType": "start",
+                "metadata": {
+                    "accountId": 9901287,
+                    "callId": "c-bw-123",
+                    "streamId": "s-bw-123",
+                    "streamName": "test-stream",
+                    "tracks": ["inbound"],
+                },
+            }
+        )
+
+        mock_websocket = MagicMock()
+        mock_websocket.iter_text.return_value = MockAsyncIterator([bandwidth_message])
+
+        transport_type, call_data = await parse_telephony_websocket(mock_websocket)
+
+        self.assertEqual(transport_type, "bandwidth")
+        self.assertEqual(call_data["stream_id"], "s-bw-123")
+        self.assertEqual(call_data["call_id"], "c-bw-123")
+        # accountId is numeric on the wire but stringified to match the
+        # serializer's expected param type.
+        self.assertEqual(call_data["account_id"], "9901287")
+        self.assertEqual(call_data["tracks"], ["inbound"])
+
 
 if __name__ == "__main__":
     unittest.main()
