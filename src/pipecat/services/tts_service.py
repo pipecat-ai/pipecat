@@ -976,6 +976,7 @@ class TTSService(AIService):
                 slot.frame.transport_destination = self._transport_destination
                 if last_word_pts:
                     slot.frame.pts = last_word_pts
+                logger.debug(f"{self}: Flushing Aggregated Frame {slot.frame}")
                 await self.push_frame(slot.frame)
                 slot.complete = True
                 self._aggregated_text_frame_sequence.pop(0)
@@ -1613,7 +1614,7 @@ class TTSService(AIService):
                     elif isinstance(frame, TTSStoppedFrame):
                         # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
                         await self._force_complete_spoken_slots()
-                        await self._flush_aggregated_text_frame_sequence()
+                        await self._flush_aggregated_text_frame_sequence(last_word_pts=self._word_last_pts)
 
                         should_push_stop_frame = False
                         # Setting the last word timestamp as the TTSStoppedFrame PTS
@@ -1633,7 +1634,7 @@ class TTSService(AIService):
                 break
 
         await self._force_complete_spoken_slots()
-        await self._flush_aggregated_text_frame_sequence()
+        await self._flush_aggregated_text_frame_sequence(last_word_pts=self._word_last_pts)
 
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
