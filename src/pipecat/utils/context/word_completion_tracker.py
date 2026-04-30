@@ -348,6 +348,27 @@ class WordCompletionTracker:
             else self._raw_consumed
         )
 
+    def get_remaining_text(self) -> str:
+        """Return the unspoken portion of expected_text, stripped of leading/trailing whitespace.
+
+        This is the text that the TTS provider has not yet confirmed via word-timestamp
+        events. Useful for force-completing a slot when the audio context ends before all
+        word-timestamp events have arrived.
+        """
+        return self._expected_raw_text[self._expected_raw_pos :].strip()
+
+    def get_remaining_raw_text(self) -> str | None:
+        """Return the unspoken portion of raw_text, stripped of leading/trailing whitespace.
+
+        Returns None if no raw_text was provided at construction time. Like
+        ``get_remaining_text()``, intended for force-completing a slot so that the
+        conversation context receives the full original text.
+        """
+        if self._raw_text is None:
+            return None
+        remaining = self._raw_text[self._raw_pos :].strip()
+        return remaining if remaining else None
+
     @property
     def is_complete(self) -> bool:
         """True when accumulated normalized chars >= expected normalized chars."""

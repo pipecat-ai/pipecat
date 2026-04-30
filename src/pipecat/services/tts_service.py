@@ -1540,6 +1540,43 @@ class TTSService(AIService):
             frame.pts = self._word_last_pts
             await self.push_frame(frame)
 
+    async def _force_complete_spoken_slots(self):
+        """Emit TTSTextFrames for any spoken slots whose word-timestamp stream ended early.
+
+        Called at the end of an audio context to handle TTS providers that silently drop
+        word-timestamp events. Without this, an incomplete slot would permanently block
+        ``_flush_aggregated_text_frame_sequence`` from emitting any subsequent skipped frames,
+        causing the conversation context to lose content that follows the incomplete slot.
+
+        For each incomplete spoken slot the tracker's remaining text is pushed as a
+        TTSTextFrame (mirroring what ``_add_word_timestamps`` would have done for those
+        missing events), then the slot is marked complete so the flush can proceed.
+        """
+        for slot in self._aggregated_text_frame_sequence:
+            if slot.spoken and not slot.complete:
+                if slot.tracker:
+                    remaining_text = slot.tracker.get_remaining_text()
+                    raw_remaining = slot.tracker.get_remaining_raw_text()
+                    if raw_remaining and remaining_text and remaining_text not in raw_remaining:
+                        logger.warning(
+                            f"{self} force-complete: raw_remaining {repr(raw_remaining)} "
+                            f"does not contain remaining_text {repr(remaining_text)}, discarding"
+                        )
+                        raw_remaining = None
+                    if remaining_text:
+                        logger.debug(
+                            f"{self} force-completing slot with remaining text {repr(remaining_text)}"
+                        )
+                        frame = self._build_word_frame(
+                            remaining_text,
+                            self._word_last_pts,
+                            slot.context_id,
+                            includes_inter_frame_spaces=None,
+                            raw_text=raw_remaining,
+                        )
+                        await self.push_frame(frame)
+                slot.complete = True
+
     async def _handle_audio_context(self, context_id: str):
         """Process items from an audio context queue until it is exhausted."""
         queue = self._audio_contexts[context_id]
@@ -1574,6 +1611,9 @@ class TTSService(AIService):
                     if isinstance(frame, TTSStartedFrame):
                         should_push_stop_frame = self._push_stop_frames
                     elif isinstance(frame, TTSStoppedFrame):
+                        # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
+                        await self._force_complete_spoken_slots()
+
                         should_push_stop_frame = False
                         # Setting the last word timestamp as the TTSStoppedFrame PTS
                         if not frame.pts:
@@ -1591,16 +1631,9 @@ class TTSService(AIService):
                     should_push_stop_frame = False
                 break
 
+        await self._force_complete_spoken_slots()
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
-
-        # Force-complete any spoken slots that are still incomplete. This handles
-        # TTS providers that silently drop word-timestamp events (e.g. a missing
-        # "number" token): without this, an incomplete slot would permanently block
-        # _flush_aggregated_text_frame_sequence from emitting subsequent skipped frames.
-        for slot in self._aggregated_text_frame_sequence:
-            if slot.spoken and not slot.complete:
-                slot.complete = True
         await self._flush_aggregated_text_frame_sequence()
         await self._maybe_reset_word_timestamps()
 
