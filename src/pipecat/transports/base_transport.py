@@ -47,7 +47,7 @@ class TransportParams(BaseModel):
         video_out_is_live: Enable real-time video output streaming.
         video_out_width: Video output width in pixels.
         video_out_height: Video output height in pixels.
-        video_out_bitrate: Video output bitrate in bits per second.
+        video_out_bitrate: [DEPRECATED] Video output bitrate in bits per second.
         video_out_framerate: Video output frame rate in FPS.
         video_out_color_format: Video output color format string.
         video_out_codec: Preferred video codec for output (e.g., 'VP8', 'H264', 'H265').
@@ -76,7 +76,7 @@ class TransportParams(BaseModel):
     video_out_is_live: bool = False
     video_out_width: int = 1024
     video_out_height: int = 768
-    video_out_bitrate: int = 800000
+    video_out_bitrate: int | None = None
     video_out_framerate: int = 30
     video_out_color_format: str = "RGB"
     video_out_codec: str | None = None

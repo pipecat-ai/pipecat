@@ -90,6 +90,18 @@ class BaseOutputTransport(FrameProcessor):
         # it.
         self._media_senders: dict[Any, BaseOutputTransport.MediaSender] = {}
 
+        if params.video_out_bitrate is not None:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Transport parameter `video_out_bitrate` is deprecated and will be removed in a future "
+                    "version. Use provider specific settings instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
     @property
     def sample_rate(self) -> int:
         """Get the current audio sample rate.

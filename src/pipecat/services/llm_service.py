@@ -51,7 +51,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import LLMSettings, assert_given
 from pipecat.services.websocket_service import WebsocketService
@@ -107,6 +107,9 @@ class FunctionCallParams:
             For async function calls (``cancel_on_interruption=False``), call
             it with ``properties=FunctionCallResultProperties(is_final=False)``
             to push intermediate updates before the final result.
+        tool_resources: Application-defined bag of resources (DB handles, clients,
+            state, etc.) shared across tool calls for the pipeline session. Set
+            via ``PipelineTask(..., tool_resources=...)`` and passed by reference.
     """
 
     function_name: str
@@ -115,6 +118,7 @@ class FunctionCallParams:
     llm: LLMService
     context: LLMContext
     result_callback: FunctionCallResultCallback
+    tool_resources: Any = None
 
 
 @dataclass
@@ -252,6 +256,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._sequential_runner_task: asyncio.Task | None = None
         self._skip_tts: bool | None = None
         self._summary_task: asyncio.Task | None = None
+        self._tool_resources: Any = None
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_function_calls_cancelled")
@@ -297,6 +302,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             The LLM's response as a string, or None if no response is generated.
         """
         raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the LLM service.
+
+        Args:
+            setup: The frame processor setup data.
+        """
+        await super().setup(setup)
+        self._tool_resources = setup.tool_resources
 
     async def start(self, frame: StartFrame):
         """Start the LLM service.
@@ -723,7 +737,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 logger.warning(
                     f"{self} is calling '{function_call.function_name}', but it's not registered."
                 )
-                continue
+                item = self._build_missing_function_call_registry_item(function_call.function_name)
 
             runner_items.append(
                 FunctionCallRunnerItem(
@@ -780,12 +794,21 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self._sequential_runner_queue.put(runner_item)
 
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
+        # Re-resolve the registry item at execution time. The function may have
+        # been unregistered between queuing and execution, in which case we
+        # fall back to the missing-function handler so the call still terminates
+        # with a normal tool result.
         if runner_item.function_name in self._functions.keys():
             item = self._functions[runner_item.function_name]
         elif None in self._functions.keys():
             item = self._functions[None]
+        elif runner_item.registry_item.handler == self._missing_function_call_handler:
+            item = runner_item.registry_item
         else:
-            return
+            logger.warning(
+                f"{self} is calling '{runner_item.function_name}', but it was just unregistered."
+            )
+            item = self._build_missing_function_call_registry_item(runner_item.function_name)
 
         logger.debug(
             f"{self} Calling function [{runner_item.function_name}:{runner_item.tool_call_id}] with arguments {runner_item.arguments}"
@@ -871,6 +894,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                         llm=self,
                         context=runner_item.context,
                         result_callback=function_call_result_callback,
+                        tool_resources=self._tool_resources,
                     ),
                 )
             else:
@@ -882,6 +906,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     llm=self,
                     context=runner_item.context,
                     result_callback=function_call_result_callback,
+                    tool_resources=self._tool_resources,
                 )
                 await item.handler(params)
         except Exception as e:
@@ -891,6 +916,20 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         finally:
             if timeout_task and not timeout_task.done():
                 await self.cancel_task(timeout_task)
+
+    def _build_missing_function_call_registry_item(
+        self, function_name: str
+    ) -> FunctionCallRegistryItem:
+        """Build a registry item that routes to the missing-function handler."""
+        return FunctionCallRegistryItem(
+            function_name=function_name,
+            handler=self._missing_function_call_handler,
+            cancel_on_interruption=True,
+        )
+
+    async def _missing_function_call_handler(self, params: FunctionCallParams):
+        """Return a terminal tool result when the LLM calls an unknown function."""
+        await params.result_callback(f"Error: function '{params.function_name}' is not registered.")
 
     def _has_async_tools(self) -> bool:
         """Return True if at least one non-builtin async tool is registered."""
