@@ -234,6 +234,7 @@ class WordCompletionTracker:
         )
 
         if self._raw_text is not None:
+            previous_raw_pos = self._raw_pos
             if self.is_complete:
                 # Consume all remaining raw text so that closing tags (e.g.
                 # </card>) are included in this frame's TTSTextFrame rather
@@ -269,6 +270,7 @@ class WordCompletionTracker:
                     f"WordCompletionTracker: raw_consumed {repr(self._raw_consumed)!s} "
                     f"does not contain frame_word {repr(self._frame_word)!s}, discarding"
                 )
+                self._raw_pos = previous_raw_pos
                 self._raw_consumed = None
 
         return self.is_complete
