@@ -89,7 +89,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         """Reset the strategy to its initial state."""
         pass
 
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult | None:
+    async def process_frame(self, _: Frame) -> ProcessFrameResult | None:
         """Process an incoming frame to decide whether the user stopped speaking.
 
         Subclasses should override this to implement logic that decides whether
