@@ -1040,9 +1040,7 @@ async def test_http_force_complete_raw_text_propagated():
         TTSTextFrame("4111").raw_text == "<card>4111"    — from normal word path
         TTSTextFrame("1111").raw_text == "1111</card>"   — from force-complete path
     """
-    tts = _MockPerCallWordTimestampHttpTTSService(
-        word_times_per_call=[[("4111", 0.0)]]
-    )
+    tts = _MockPerCallWordTimestampHttpTTSService(word_times_per_call=[[("4111", 0.0)]])
     frames_received = await run_test(
         tts,
         frames_to_send=[
