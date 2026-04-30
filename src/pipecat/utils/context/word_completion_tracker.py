@@ -89,7 +89,7 @@ class WordCompletionTracker:
         self._raw_consumed: str | None = None
         self._frame_word: str | None = None
         self._includes_inter_frame_spaces = False
-        logger.info(f"WordCompletionTracker: {self._expected}")
+        logger.debug(f"WordCompletionTracker: {self._expected}")
 
     @staticmethod
     def _normalize(text: str) -> str:
