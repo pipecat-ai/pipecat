@@ -14,6 +14,7 @@ including heartbeats, idle detection, and observer integration.
 import asyncio
 import importlib.util
 import os
+import warnings
 from collections.abc import AsyncIterable, Iterable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -193,6 +194,7 @@ class PipelineTask(BasePipelineTask):
         *,
         params: PipelineParams | None = None,
         additional_span_attributes: dict | None = None,
+        app_resources: Any = None,
         cancel_on_idle_timeout: bool = True,
         cancel_timeout_secs: float = CANCEL_TIMEOUT_SECS,
         check_dangling_tasks: bool = True,
@@ -216,6 +218,14 @@ class PipelineTask(BasePipelineTask):
             params: Configuration parameters for the pipeline.
             additional_span_attributes: Optional dictionary of attributes to propagate as
                 OpenTelemetry conversation span attributes.
+            app_resources: Optional application-defined bag of anything your
+                application code may want to share across this session (DB
+                handles, HTTP clients, etc.), passed by reference. Pipecat
+                passes it through untouched and exposes it on the task itself
+                as ``task.app_resources`` and passes it to tool handlers as
+                ``FunctionCallParams.app_resources``. The framework never
+                copies or clears this object; the caller retains their handle
+                and can read any mutations after the task finishes.
             cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
                 the idle timeout is reached.
             cancel_timeout_secs: Timeout (in seconds) to wait for cancellation to happen
@@ -235,13 +245,24 @@ class PipelineTask(BasePipelineTask):
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
             rtvi_processor: The RTVI processor to add if RTVI is enabled.
             task_manager: Optional task manager for handling asyncio tasks.
-            tool_resources: Optional application-defined bag of resources (DB handles,
-                clients, state, etc.) passed by reference to every tool handler via
-                ``FunctionCallParams.tool_resources``. The framework never copies or
-                clears this object; the caller retains their handle and can read any
-                mutations after the task finishes.
+            tool_resources: Deprecated alias for ``app_resources``.
+
+                .. deprecated:: 1.2.0
+                    Use ``app_resources`` instead. ``tool_resources`` will be
+                    removed in a future version.
         """
         super().__init__()
+        if tool_resources is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`PipelineTask(tool_resources=...)` is deprecated since 1.2.0, "
+                    "use `app_resources` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            if app_resources is None:
+                app_resources = tool_resources
         self._params = params or PipelineParams()
         self._additional_span_attributes = additional_span_attributes or {}
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
@@ -252,7 +273,7 @@ class PipelineTask(BasePipelineTask):
         self._enable_tracing = enable_tracing and is_tracing_available()
         self._enable_turn_tracking = enable_turn_tracking
         self._idle_timeout_secs = idle_timeout_secs
-        self._tool_resources = tool_resources
+        self._app_resources = app_resources
         observers = observers or []
         self._turn_tracking_observer: TurnTrackingObserver | None = None
         self._user_bot_latency_observer: UserBotLatencyObserver | None = None
@@ -390,6 +411,21 @@ class PipelineTask(BasePipelineTask):
             The pipeline parameters configuration.
         """
         return self._params
+
+    @property
+    def app_resources(self) -> Any:
+        """Get the application-defined resources passed to this task.
+
+        This is the same object passed to the constructor as
+        ``app_resources``. Tool handlers can also access it via
+        ``FunctionCallParams.app_resources``. The framework returns the
+        original reference; mutations are visible to all callers.
+
+        Returns:
+            The application-defined resources, or ``None`` if none were
+            passed.
+        """
+        return self._app_resources
 
     @property
     def pipeline(self) -> BasePipeline:
@@ -730,7 +766,13 @@ class PipelineTask(BasePipelineTask):
             clock=self._clock,
             task_manager=self._task_manager,
             observer=self._observer,
-            tool_resources=self._tool_resources,
+            pipeline_task=self,
+            # Populate the deprecated `tool_resources` field for backwards
+            # compatibility with custom FrameProcessor subclasses whose
+            # ``setup()`` overrides still read it. Reading the field emits a
+            # DeprecationWarning; new code should read
+            # ``setup.pipeline_task.app_resources`` instead.
+            tool_resources=self._app_resources,
         )
         await self._pipeline.setup(setup)
 
