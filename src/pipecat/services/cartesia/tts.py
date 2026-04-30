@@ -955,8 +955,10 @@ class CartesiaHttpTTSService(TTSService):
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    yield ErrorFrame(error=f"Cartesia API error: {error_text}")
-                    raise Exception(f"Cartesia API returned status {response.status}: {error_text}")
+                    yield ErrorFrame(
+                        error=f"Cartesia API error (status {response.status}): {error_text}"
+                    )
+                    return
 
                 audio_data = await response.read()
 
