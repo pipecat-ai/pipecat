@@ -245,7 +245,9 @@ class WordCompletionTracker:
                     # Advance through raw_text by exactly chars_for_frame alphanumeric
                     # chars. Non-alnum chars (spaces, opening tags) are included in the
                     # slice, preserving the original formatting for the context.
-                    new_pos = self._advance_by_alnums(self._raw_text, self._raw_pos, chars_for_frame)
+                    new_pos = self._advance_by_alnums(
+                        self._raw_text, self._raw_pos, chars_for_frame
+                    )
                     self._raw_consumed = self._raw_text[self._raw_pos : new_pos]
                     self._raw_pos = new_pos
 
