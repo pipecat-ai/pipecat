@@ -898,6 +898,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Reset the aggregation state."""
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
+        self._function_calls_in_progress = {}
+        self._function_calls_image_results = {}
         self._push_context_on_bot_stopped_speaking = False
 
     async def _reset_thought_aggregation(self):
