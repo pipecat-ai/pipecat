@@ -53,7 +53,7 @@ Supported transports:
 
 - Daily - Creates rooms and tokens, runs bot as participant
 - WebRTC - Provides local WebRTC interface with prebuilt UI
-- Telephony - Handles webhook and WebSocket connections for Twilio, Telnyx, Plivo, Exotel
+- Telephony - Handles webhook and WebSocket connections for Twilio, Telnyx, Plivo, Exotel, Bandwidth
 
 To run locally:
 
@@ -105,7 +105,7 @@ except ImportError as e:
 load_dotenv(override=True)
 os.environ["ENV"] = "local"
 
-TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
+TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel", "bandwidth"]
 
 # Mirror Pipecat Cloud's 4-hour max session limit so dev rooms get cleaned up.
 PIPECAT_ROOM_EXP_HOURS = 4.0
@@ -793,6 +793,11 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
 <Response>
   <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{args.proxy}/ws</Stream>
 </Response>""",
+        "bandwidth": f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <StartStream destination="wss://{args.proxy}/ws" mode="bidirectional" tracks="inbound"/>
+  <Pause duration="86400"/>
+</Response>""",
     }
 
     @app.post("/")
@@ -900,7 +905,7 @@ def main(parser: argparse.ArgumentParser | None = None):
     Command-line arguments:
        - --host: Server host address (default: localhost) 879
        - --port: Server port (default: 7860)
-       - -t/--transport: Transport type (daily, webrtc, twilio, telnyx, plivo, exotel)
+       - -t/--transport: Transport type (daily, webrtc, twilio, telnyx, plivo, exotel, bandwidth)
        - -x/--proxy: Public proxy hostname for telephony webhooks
        - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
        - -f/--folder: Path to downloads folder
