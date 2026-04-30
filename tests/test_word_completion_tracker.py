@@ -32,10 +32,11 @@ class TestWordCompletionTrackerBasic(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete("Hello"))
 
     def test_complete_stays_true_after_extra_words(self):
-        """Additional words beyond the expected text keep the tracker complete."""
+        """Extra words after completion force-complete (no-op remaining) and stay complete."""
         tracker = WordCompletionTracker("Hi")
         tracker.add_word_and_check_complete("Hi")
-        tracker.add_word_and_check_complete("extra")
+        result = tracker.add_word_and_check_complete("extra")
+        self.assertTrue(result)
         self.assertTrue(tracker.is_complete)
 
 
@@ -90,6 +91,15 @@ class TestWordCompletionTrackerNormalization(unittest.TestCase):
     def test_special_characters_only_in_expected(self):
         """If the expected text normalizes to empty, the tracker is immediately complete."""
         tracker = WordCompletionTracker("...")
+        self.assertTrue(tracker.is_complete)
+
+    def test_emoji_only_expected_accepts_emoji_word_without_warning(self):
+        """Emoji-only frame is already complete (normalizes to ''), but a TTS word event
+        for the emoji must still be accepted gracefully and return True without a warning."""
+        tracker = WordCompletionTracker("😊")
+        self.assertTrue(tracker.is_complete)
+        result = tracker.add_word_and_check_complete("😊")
+        self.assertTrue(result)
         self.assertTrue(tracker.is_complete)
 
     def test_special_characters_only_in_word(self):

@@ -178,7 +178,7 @@ class WordCompletionTracker:
         self._raw_consumed = None
         self._frame_word = None
 
-        if prev_len >= expected_len:
+        if prev_len > expected_len:
             logger.warning(f"{self}, trying to add a word in an already complete frame")
             return True
 
