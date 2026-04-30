@@ -1359,7 +1359,9 @@ class TTSService(AIService):
                 if is_complete:
                     active.complete = True
                     await self._flush_aggregated_text_frame_sequence(last_word_pts=pts)
-                    await self._emit_overflow_word(active, raw_overflow_word, pts)
+                    if raw_overflow_word:
+                        logger.debug(f"{self} Emitting overflow word '{raw_overflow_word}'")
+                        await self._emit_overflow_word(active, raw_overflow_word, pts)
 
     #
     # Audio context methods (active when using websocket-based TTS with context management)
