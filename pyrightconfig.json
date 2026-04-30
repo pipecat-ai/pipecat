@@ -42,7 +42,6 @@
     "src/pipecat/services/azure/stt.py",
     "src/pipecat/services/azure/tts.py",
     "src/pipecat/services/cartesia/stt.py",
-    "src/pipecat/services/cartesia/tts.py",
     "src/pipecat/services/deepgram/flux/base.py",
     "src/pipecat/services/deepgram/flux/sagemaker/stt.py",
     "src/pipecat/services/deepgram/flux/stt.py",

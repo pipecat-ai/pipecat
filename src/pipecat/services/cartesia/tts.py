@@ -916,6 +916,9 @@ class CartesiaHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
+            if self._session is None:
+                raise RuntimeError("HTTP session is not initialized; call start() before run_tts()")
+
             voice_config = {"mode": "id", "id": self._settings.voice}
 
             output_format = {
