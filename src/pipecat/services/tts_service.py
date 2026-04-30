@@ -1244,6 +1244,64 @@ class TTSService(AIService):
             None,
         )
 
+    def _build_word_frame(
+        self,
+        text: str,
+        pts: int,
+        context_id: str | None,
+        includes_inter_frame_spaces: bool | None,
+        raw_text: str | None = None,
+    ) -> TTSTextFrame:
+        """Build a TTSTextFrame with all standard word-timestamp attributes set."""
+        frame = TTSTextFrame(text, aggregated_by=AggregationType.WORD)
+        if includes_inter_frame_spaces is not None:
+            frame.includes_inter_frame_spaces = includes_inter_frame_spaces
+        frame.pts = pts
+        frame.context_id = context_id
+        if context_id in self._tts_contexts:
+            frame.append_to_context = self._tts_contexts[context_id].append_to_context
+        frame.raw_text = raw_text
+        return frame
+
+    async def _emit_overflow_word(
+        self,
+        active: _AggregatedFrameSlot,
+        raw_overflow_word: str | None,
+        pts: int,
+    ):
+        """Emit a TTSTextFrame for the overflow portion of a word that straddles two slots.
+
+        When a TTS word spans the boundary between two AggregatedTextFrames (e.g.
+        ``"<spell>1234</spell>And"`` where ``"1234"`` closes one frame and ``"And"``
+        opens the next), the overflow suffix is fed into the next slot's tracker and
+        emitted as its own TTSTextFrame. If the overflow word also completes the next
+        slot, that slot is marked complete and any waiting skipped frames are flushed.
+
+        Args:
+            active: The just-completed slot whose tracker produced the overflow.
+            raw_overflow_word: Raw (un-normalized) overflow suffix from the tracker.
+            pts: PTS to assign to the overflow frame.
+        """
+        overflow = active.tracker.get_overflow()
+        if overflow is None:
+            return
+        next_active = self._get_active_aggregated_frame_slot()
+        if not next_active or not next_active.tracker:
+            return
+        overflow_word = raw_overflow_word if raw_overflow_word is not None else overflow
+        overflow_complete = next_active.tracker.add_word_and_check_complete(overflow_word)
+        overflow_frame = self._build_word_frame(
+            overflow_word,
+            pts,
+            next_active.context_id,
+            includes_inter_frame_spaces=None,
+            raw_text=next_active.tracker.get_raw_consumed(),
+        )
+        await self.push_frame(overflow_frame)
+        if overflow_complete:
+            next_active.complete = True
+            await self._flush_aggregated_text_frame_sequence(last_word_pts=pts)
+
     async def _add_word_timestamps(
         self,
         word_times: list[tuple[str, float]],
@@ -1268,13 +1326,13 @@ class TTSService(AIService):
                     (word, timestamp, context_id, includes_inter_frame_spaces)
                 )
             else:
-                # logger.debug(f"{self} Handling word {word}")
-                # Advance the tracker first so we know the raw span and overflow
-                # before constructing the TTSTextFrame.
+                pts = self._initial_word_timestamp + ts_ns
                 active = self._get_active_aggregated_frame_slot()
                 is_complete = False
                 raw_overflow_word = None
                 if active and active.tracker:
+                    # Advance the tracker first so we know the raw span and overflow
+                    # before constructing the TTSTextFrame.
                     is_complete = active.tracker.add_word_and_check_complete(
                         word, includes_inter_frame_spaces=includes_inter_frame_spaces
                     )
@@ -1285,15 +1343,14 @@ class TTSService(AIService):
                 frame_text = (
                     active.tracker.get_frame_word() if (active and active.tracker) else word
                 )
-                frame = TTSTextFrame(frame_text, aggregated_by=AggregationType.WORD)
-                if includes_inter_frame_spaces is not None:
-                    frame.includes_inter_frame_spaces = includes_inter_frame_spaces
-                frame.pts = self._initial_word_timestamp + ts_ns
-                frame.context_id = context_id
-                if context_id in self._tts_contexts:
-                    frame.append_to_context = self._tts_contexts[context_id].append_to_context
-                if active and active.tracker:
-                    frame.raw_text = active.tracker.get_raw_consumed()
+                raw_text = (
+                    active.tracker.get_raw_consumed() if (active and active.tracker) else None
+                )
+                logger.debug(f"{self} Word '{word}' → frame_text='{frame_text}', raw='{raw_text}'")
+
+                frame = self._build_word_frame(
+                    frame_text, pts, context_id, includes_inter_frame_spaces, raw_text=raw_text
+                )
                 self._word_last_pts = frame.pts
                 await self.push_frame(frame)
 
@@ -1301,33 +1358,8 @@ class TTSService(AIService):
                 # any skipped frames queued behind it (e.g. code blocks) are flushed.
                 if is_complete:
                     active.complete = True
-                    logger.debug(
-                        f"{self} Last word before flushing skipped aggregated frames: {frame.text}"
-                    )
-                    await self._flush_aggregated_text_frame_sequence(last_word_pts=frame.pts)
-                    # When the TTS service returns a word that spans two AggregatedFrames
-                    # (e.g. "<spell>1234-5678-9012-3456</spell>And"), we feed the overflow
-                    # into the next slot's tracker and emit a separate TTSTextFrame for it
-                    # so the context sees two correctly-attributed entries.
-                    overflow = active.tracker.get_overflow()
-                    if overflow is not None:
-                        next_active = self._get_active_aggregated_frame_slot()
-                        if next_active and next_active.tracker:
-                            overflow_word = (
-                                raw_overflow_word if raw_overflow_word is not None else overflow
-                            )
-                            next_active.tracker.add_word_and_check_complete(overflow_word)
-                            overflow_frame = TTSTextFrame(
-                                overflow_word, aggregated_by=AggregationType.WORD
-                            )
-                            overflow_frame.pts = frame.pts
-                            overflow_frame.context_id = next_active.context_id
-                            if next_active.context_id in self._tts_contexts:
-                                overflow_frame.append_to_context = self._tts_contexts[
-                                    next_active.context_id
-                                ].append_to_context
-                            overflow_frame.raw_text = next_active.tracker.get_raw_consumed()
-                            await self.push_frame(overflow_frame)
+                    await self._flush_aggregated_text_frame_sequence(last_word_pts=pts)
+                    await self._emit_overflow_word(active, raw_overflow_word, pts)
 
     #
     # Audio context methods (active when using websocket-based TTS with context management)
