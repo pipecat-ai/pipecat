@@ -1614,7 +1614,9 @@ class TTSService(AIService):
                     elif isinstance(frame, TTSStoppedFrame):
                         # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
                         await self._force_complete_spoken_slots()
-                        await self._flush_aggregated_text_frame_sequence(last_word_pts=self._word_last_pts)
+                        await self._flush_aggregated_text_frame_sequence(
+                            last_word_pts=self._word_last_pts
+                        )
 
                         should_push_stop_frame = False
                         # Setting the last word timestamp as the TTSStoppedFrame PTS
