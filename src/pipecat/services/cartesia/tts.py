@@ -487,7 +487,7 @@ class CartesiaTTSService(WebsocketTTSService):
                 "sample_rate": self._output_sample_rate,
             },
             "add_timestamps": add_timestamps,
-            "use_normalized_timestamps": True,
+            "use_normalized_timestamps": False,
         }
 
         if self._max_buffer_delay_ms is not None:
