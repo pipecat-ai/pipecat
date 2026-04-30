@@ -43,13 +43,30 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 try:
     import aioboto3
     from botocore.config import Config
-    from botocore.exceptions import ReadTimeoutError
+    from botocore.exceptions import ClientError, ReadTimeoutError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
         "In order to use AWS services, you need to `pip install pipecat-ai[aws]`. Also, remember to set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
     )
     raise Exception(f"Missing module: {e}")
+
+
+# AWS error codes that indicate the service won't work until creds/region are
+# fixed. We treat these as fatal so the pipeline stops instead of silently
+# degrading.
+_AWS_AUTH_ERROR_CODES = frozenset(
+    {
+        "UnrecognizedClientException",
+        "InvalidSignatureException",
+        "AccessDeniedException",
+        "ExpiredTokenException",
+        "InvalidAccessKeyId",
+        "SignatureDoesNotMatch",
+        "MissingAuthenticationTokenException",
+        "AuthFailure",
+    }
+)
 
 
 @dataclass
@@ -555,6 +572,20 @@ class AWSBedrockLLMService(LLMService):
             raise
         except (TimeoutError, ReadTimeoutError):
             await self._call_event_handler("on_completion_timeout")
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code in _AWS_AUTH_ERROR_CODES:
+                await self.push_error(
+                    error_msg=(
+                        "AWS Bedrock authentication failed. "
+                        "Check AWS credentials and region. "
+                        f"Underlying error: {e}"
+                    ),
+                    exception=e,
+                    fatal=True,
+                )
+            else:
+                await self.push_error(error_msg=f"AWS Bedrock client error: {e}", exception=e)
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:

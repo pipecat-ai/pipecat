@@ -323,8 +323,18 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             logger.info(f"{self} Successfully connected to AWS Transcribe")
         except Exception as e:
+            # Connect-time failures (most commonly bad/missing AWS credentials,
+            # an unsupported region, or a 403 from the presigned URL) won't
+            # recover on retry. Treat them as fatal so the pipeline cancels
+            # with a clear ERROR rather than silently producing no transcripts.
             await self.push_error(
-                error_msg=f"Unable to connect to AWS Transcribe: {e}", exception=e
+                error_msg=(
+                    "Unable to connect to AWS Transcribe. "
+                    "Check AWS credentials and region. "
+                    f"Underlying error: {e}"
+                ),
+                exception=e,
+                fatal=True,
             )
             raise
 

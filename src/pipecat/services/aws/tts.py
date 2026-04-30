@@ -37,6 +37,23 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+# AWS error codes that indicate the service won't work until creds/region are
+# fixed. We treat these as fatal so the pipeline stops instead of silently
+# degrading.
+_AWS_AUTH_ERROR_CODES = frozenset(
+    {
+        "UnrecognizedClientException",
+        "InvalidSignatureException",
+        "AccessDeniedException",
+        "ExpiredTokenException",
+        "InvalidAccessKeyId",
+        "SignatureDoesNotMatch",
+        "MissingAuthenticationTokenException",
+        "AuthFailure",
+    }
+)
+
+
 def language_to_aws_language(language: Language) -> str | None:
     """Convert a Language enum to AWS Polly language code.
 
@@ -366,6 +383,21 @@ class AWSPollyTTSService(TTSService):
                         frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                         yield frame
 
-        except (BotoCoreError, ClientError) as error:
-            error_message = f"AWS Polly TTS error: {str(error)}"
-            yield ErrorFrame(error=error_message)
+        except ClientError as error:
+            error_code = error.response.get("Error", {}).get("Code", "")
+            if error_code in _AWS_AUTH_ERROR_CODES:
+                # Bad/missing credentials won't fix themselves between calls.
+                # Stop the pipeline so the failure surfaces clearly.
+                await self.push_error(
+                    error_msg=(
+                        "AWS Polly authentication failed. "
+                        "Check AWS credentials and region. "
+                        f"Underlying error: {error}"
+                    ),
+                    exception=error,
+                    fatal=True,
+                )
+            else:
+                yield ErrorFrame(error=f"AWS Polly TTS error: {error}")
+        except BotoCoreError as error:
+            yield ErrorFrame(error=f"AWS Polly TTS error: {error}")

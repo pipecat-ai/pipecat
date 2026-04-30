@@ -602,7 +602,19 @@ class AWSNovaSonicLLMService(LLMService):
             self._ready_to_send_context = True
             await self._finish_connecting_if_context_available()
         except Exception as e:
-            await self.push_error(error_msg=f"Initialization error: {e}", exception=e)
+            # Connect-time failures (most commonly bad/missing AWS credentials or
+            # an unsupported region) leave the bidirectional stream in a partial
+            # state and produce no audio output. Treat them as fatal so the
+            # pipeline cancels with a clear ERROR rather than continuing silently.
+            await self.push_error(
+                error_msg=(
+                    "AWS Nova Sonic failed to start. "
+                    "Check AWS credentials and region. "
+                    f"Underlying error: {e}"
+                ),
+                exception=e,
+                fatal=True,
+            )
             await self._disconnect()
 
     async def _process_completed_function_calls(self, send_new_results: bool):
@@ -703,17 +715,28 @@ class AWSNovaSonicLLMService(LLMService):
             # NOTE: see explanation of HACK, below
             self._disconnecting = True
 
-            # Clean up client
+            # Clean up client. If connect failed (e.g. bad credentials), the
+            # session may not have started, so end events can fail. Don't let
+            # that mask the real error or block cleanup.
             if self._client:
-                await self._send_session_end_events()
+                try:
+                    await self._send_session_end_events()
+                except Exception as e:
+                    logger.debug(f"Ignoring error while sending session-end events: {e}")
                 self._client = None
 
             # Clean up context
             self._context = None
 
-            # Clean up stream
+            # Clean up stream. A stream from a failed
+            # invoke_model_with_bidirectional_stream call has an already-
+            # cancelled awscrt future; closing it raises InvalidStateError that
+            # otherwise drowns out the real connect error in the logs.
             if self._stream:
-                await self._stream.close()
+                try:
+                    await self._stream.close()
+                except Exception as e:
+                    logger.debug(f"Ignoring error while closing partial stream: {e}")
                 self._stream = None
 
             # NOTE: see explanation of HACK, below
