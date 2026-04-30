@@ -232,12 +232,13 @@ class CartesiaTTSService(WebsocketTTSService):
         *,
         api_key: str,
         voice_id: str | None = None,
-        cartesia_version: str = "2025-04-16",
+        cartesia_version: str = "2026-03-01",
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str | None = None,
         sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
+        max_buffer_delay_ms: int | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
@@ -263,6 +264,12 @@ class CartesiaTTSService(WebsocketTTSService):
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
             container: Audio container format.
+            max_buffer_delay_ms: Server-side buffering window before generation
+                starts. ``0`` disables server buffering (custom buffering); any
+                value in (0, 5000] enables managed buffering. If ``None``,
+                derived from ``text_aggregation_mode``: ``0`` for ``SENTENCE``
+                (avoids stacking client and server buffering), unset for
+                ``TOKEN`` (uses Cartesia's 3000ms default).
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
@@ -352,6 +359,15 @@ class CartesiaTTSService(WebsocketTTSService):
         self._output_container = container
         self._output_encoding = encoding
         self._output_sample_rate = 0  # Set in start() from self.sample_rate
+
+        # Cartesia warns against the "middle ground" of client-side sentence
+        # aggregation plus the server's default 3000ms buffer. When the user
+        # doesn't pick a value, send 0 in SENTENCE mode (custom buffering) and
+        # leave it unset in TOKEN mode so the server default applies (managed
+        # buffering).
+        if max_buffer_delay_ms is None and not self._is_streaming_tokens:
+            max_buffer_delay_ms = 0
+        self._max_buffer_delay_ms = max_buffer_delay_ms
 
         self._receive_task = None
 
@@ -466,8 +482,11 @@ class CartesiaTTSService(WebsocketTTSService):
                 "sample_rate": self._output_sample_rate,
             },
             "add_timestamps": add_timestamps,
-            "use_original_timestamps": False if self._settings.model == "sonic" else True,
+            "use_normalized_timestamps": True,
         }
+
+        if self._max_buffer_delay_ms is not None:
+            msg["max_buffer_delay_ms"] = self._max_buffer_delay_ms
 
         if self._settings.language:
             msg["language"] = self._settings.language
@@ -647,6 +666,13 @@ class CartesiaTTSService(WebsocketTTSService):
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Error: {msg}")
                 self.reset_active_audio_context()
+            elif msg["type"] == "flush_done":
+                # Cartesia emits flush_done as a per-transcript boundary marker
+                # within a context (e.g. when max_buffer_delay_ms=0 causes the
+                # server to flush each submission). We don't need it: each turn
+                # already has its own context_id and audio chunks are tagged
+                # with it. Acknowledge silently.
+                pass
             else:
                 await self.push_error(error_msg=f"Error, unknown message type: {msg}")
 
