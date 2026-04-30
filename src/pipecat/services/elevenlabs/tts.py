@@ -923,7 +923,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
                     self._partial_word_start_time = 0.0
 
                     # Initialize context with voice settings and pronunciation dictionaries
-                    msg = {"text": " ", "context_id": context_id}
+                    msg: dict[str, Any] = {"text": " ", "context_id": context_id}
                     if self._voice_settings:
                         msg["voice_settings"] = self._voice_settings
                     if self._pronunciation_dictionary_locators:
@@ -1268,7 +1268,7 @@ class ElevenLabsHttpTTSService(TTSService):
         url = f"{self._base_url}/v1/text-to-speech/{self._settings.voice}/stream/with-timestamps"
 
         model_id = assert_given(self._settings.model)
-        payload: dict[str, str | dict[str, float | bool]] = {
+        payload: dict[str, Any] = {
             "text": text,
             "model_id": model_id,
         }
