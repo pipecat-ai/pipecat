@@ -51,10 +51,6 @@ class BaseUserMuteStrategy(BaseObject):
         """Cleanup the strategy."""
         pass
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        pass
-
     async def process_frame(self, frame: Frame) -> bool:
         """Process an incoming frame.
 

@@ -30,10 +30,6 @@ class FunctionCallUserMuteStrategy(BaseUserMuteStrategy):
         super().__init__()
         self._function_call_in_progress: set[str] = set()
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        self._function_call_in_progress = set()
-
     async def process_frame(self, frame: Frame) -> bool:
         """Process an incoming frame.
 
