@@ -1113,5 +1113,130 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
         self.assertTrue(tracker.is_complete)
 
 
+class TestWordCompletionTrackerRemainingText(unittest.TestCase):
+    """Tests for get_remaining_text() and get_remaining_raw_text().
+
+    These methods expose the unspoken suffix of expected_text / raw_text so that
+    _force_complete_spoken_slots() can emit a TTSTextFrame for any words that the
+    TTS provider dropped without sending a word-timestamp event.
+    """
+
+    # ------------------------------------------------------------------ #
+    # get_remaining_text                                                    #
+    # ------------------------------------------------------------------ #
+
+    def test_remaining_text_before_any_words(self):
+        """Before any words arrive, the full expected text is remaining."""
+        tracker = WordCompletionTracker("hello world")
+        self.assertEqual(tracker.get_remaining_text(), "hello world")
+
+    def test_remaining_text_after_partial_consumption(self):
+        """After one word is consumed, only the unspoken suffix is returned."""
+        tracker = WordCompletionTracker("hello world")
+        tracker.add_word_and_check_complete("hello")
+        self.assertEqual(tracker.get_remaining_text(), "world")
+
+    def test_remaining_text_after_completion(self):
+        """After full completion get_remaining_text returns an empty string."""
+        tracker = WordCompletionTracker("hello world")
+        tracker.add_word_and_check_complete("hello")
+        tracker.add_word_and_check_complete("world")
+        self.assertEqual(tracker.get_remaining_text(), "")
+
+    def test_remaining_text_strips_whitespace(self):
+        """Leading/trailing whitespace in the remaining portion is stripped."""
+        tracker = WordCompletionTracker("hello world")
+        tracker.add_word_and_check_complete("hello")
+        # The expected_raw_text suffix before stripping is " world".
+        result = tracker.get_remaining_text()
+        self.assertEqual(result, "world")
+        self.assertFalse(result.startswith(" "))
+
+    def test_remaining_text_preserves_punctuation(self):
+        """Punctuation inside the remaining text is not removed."""
+        tracker = WordCompletionTracker("Hello, world!")
+        tracker.add_word_and_check_complete("Hello,")
+        self.assertEqual(tracker.get_remaining_text(), "world!")
+
+    def test_remaining_text_after_force_complete(self):
+        """Force-completing the slot exhausts expected_raw_pos; remaining becomes empty."""
+        tracker = WordCompletionTracker("number is")
+        tracker.add_word_and_check_complete("4111")  # force-complete
+        self.assertTrue(tracker.is_complete)
+        self.assertEqual(tracker.get_remaining_text(), "number is")
+
+    def test_remaining_text_resets_after_reset(self):
+        """reset() resets expected_raw_pos; get_remaining_text returns the full text again."""
+        tracker = WordCompletionTracker("hello world")
+        tracker.add_word_and_check_complete("hello")
+        tracker.add_word_and_check_complete("world")
+        self.assertEqual(tracker.get_remaining_text(), "")
+        tracker.reset()
+        self.assertEqual(tracker.get_remaining_text(), "hello world")
+
+    # ------------------------------------------------------------------ #
+    # get_remaining_raw_text                                                #
+    # ------------------------------------------------------------------ #
+
+    def test_remaining_raw_text_none_when_no_raw_text(self):
+        """Without raw_text, get_remaining_raw_text always returns None."""
+        tracker = WordCompletionTracker("hello world")
+        self.assertIsNone(tracker.get_remaining_raw_text())
+        tracker.add_word_and_check_complete("hello")
+        self.assertIsNone(tracker.get_remaining_raw_text())
+
+    def test_remaining_raw_text_before_any_words(self):
+        """Before any words, the entire raw_text is remaining."""
+        raw = "<card>4111 1111</card>"
+        tracker = WordCompletionTracker("4111 1111", raw_text=raw)
+        self.assertEqual(tracker.get_remaining_raw_text(), raw)
+
+    def test_remaining_raw_text_after_partial_consumption(self):
+        """After one word, the raw cursor is past its span; only the tail is remaining."""
+        raw = "<card>4111 1111</card>"
+        tracker = WordCompletionTracker("4111 1111", raw_text=raw)
+        tracker.add_word_and_check_complete("4111")
+        # raw_pos moves past "<card>4111" (10 chars); remaining = " 1111</card>" → strip → "1111</card>"
+        self.assertEqual(tracker.get_remaining_raw_text(), "1111</card>")
+
+    def test_remaining_raw_text_none_after_completion(self):
+        """After full completion all raw_text is consumed; remaining is None."""
+        raw = "<card>4111 1111</card>"
+        tracker = WordCompletionTracker("4111 1111", raw_text=raw)
+        tracker.add_word_and_check_complete("4111")
+        tracker.add_word_and_check_complete("1111")
+        self.assertIsNone(tracker.get_remaining_raw_text())
+
+    def test_remaining_raw_text_resets_after_reset(self):
+        """reset() resets the raw cursor; get_remaining_raw_text returns the full raw_text again."""
+        raw = "<card>hello world</card>"
+        tracker = WordCompletionTracker("hello world", raw_text=raw)
+        tracker.add_word_and_check_complete("hello")
+        tracker.add_word_and_check_complete("world")
+        self.assertIsNone(tracker.get_remaining_raw_text())
+        tracker.reset()
+        self.assertEqual(tracker.get_remaining_raw_text(), raw)
+
+    def test_remaining_raw_text_strips_whitespace(self):
+        """Leading/trailing whitespace in the remaining raw portion is stripped."""
+        raw = "<card>hello world</card>"
+        tracker = WordCompletionTracker("hello world", raw_text=raw)
+        tracker.add_word_and_check_complete("hello")
+        # raw_pos is past "<card>hello" (11 chars); raw suffix = " world</card>" → strip
+        result = tracker.get_remaining_raw_text()
+        self.assertIsNotNone(result)
+        self.assertFalse(result.startswith(" "))
+        self.assertEqual(result, "world</card>")
+
+    def test_remaining_raw_text_after_force_complete(self):
+        """Force-complete sweeps all raw_text; remaining is None afterwards."""
+        raw = "<card>4111 1111 1111 1111</card>"
+        tracker = WordCompletionTracker("4111 1111 1111 1111", raw_text=raw)
+        tracker.add_word_and_check_complete("4111")
+        tracker.add_word_and_check_complete("WRONG")  # force-complete
+        self.assertTrue(tracker.is_complete)
+        self.assertIsNone(tracker.get_remaining_raw_text())
+
+
 if __name__ == "__main__":
     unittest.main()

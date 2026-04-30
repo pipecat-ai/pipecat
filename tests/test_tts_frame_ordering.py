@@ -384,7 +384,7 @@ def _assert_group_ordering(
         # All frames between TTSStartedFrame and TTSStoppedFrame must be audio.
         mid_types = types[started_idx + 1 : stopped_idx]
         for t in mid_types:
-            assert t is TTSAudioRawFrame, (
+            assert t in (TTSAudioRawFrame, TTSTextFrame), (
                 f"Group {foo_label!r}: unexpected frame {t.__name__!r} between "
                 f"TTSStartedFrame and TTSStoppedFrame. Got: {type_names}"
             )
@@ -922,6 +922,183 @@ async def test_overflow_word_spanning_two_aggregated_frames():
     )
     assert word_frames[0].context_id != word_frames[1].context_id, (
         "Overflow TTSTextFrame must carry frame 2's context_id, not frame 1's"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-call word-timestamp mock for WebSocket path (for force-complete tests)
+# ---------------------------------------------------------------------------
+
+
+class _MockPerCallWordTimestampWSTTSService(TTSService):
+    """WebSocket-style TTS where each run_tts() call consumes its own word-time list.
+
+    Mirrors _MockPerCallWordTimestampHttpTTSService but uses the async audio-context
+    delivery pattern so it exercises _handle_audio_context (the WebSocket path).
+    An empty inner list means no word-timestamp events are emitted for that call.
+    """
+
+    def __init__(
+        self,
+        word_times_per_call: list[list[tuple[str, float]]],
+        **kwargs,
+    ):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=False,
+            pause_frame_processing=False,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+        self._word_times_queue = list(word_times_per_call)
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        word_times = self._word_times_queue.pop(0) if self._word_times_queue else []
+
+        async def _deliver():
+            await asyncio.sleep(0.01)
+            if word_times:
+                await self.add_word_timestamps(word_times, context_id=context_id)
+            await self.append_to_audio_context(
+                context_id,
+                TTSAudioRawFrame(
+                    audio=_FAKE_AUDIO,
+                    sample_rate=_SAMPLE_RATE,
+                    num_channels=1,
+                    context_id=context_id,
+                ),
+            )
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
+
+        self.create_task(_deliver(), name=f"mock_ws_per_call_deliver_{context_id}")
+        if False:
+            yield
+
+
+# ---------------------------------------------------------------------------
+# Tests: _force_complete_spoken_slots — TTSTextFrame emission for dropped timestamps
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_http_force_complete_partial_timestamps_emits_remaining_text():
+    """_force_complete_spoken_slots emits a TTSTextFrame for the unspoken word suffix.
+
+    Only the first token ("hello") is delivered as a word-timestamp event; "world"
+    is never sent.  When the audio context ends _force_complete_spoken_slots fires,
+    reads get_remaining_text() from the tracker, and emits TTSTextFrame("world").
+
+    Expected TTSTextFrames in order: ["hello", "world"].
+    """
+    tts = _MockWordTimestampHttpTTSService(word_times=[("hello", 0.0)])
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+
+    assert [f.text for f in word_frames] == ["hello", "world"], (
+        f"Expected ['hello', 'world'] but got {[f.text for f in word_frames]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_http_force_complete_no_timestamps_emits_full_text():
+    """_force_complete_spoken_slots emits the full text when no word timestamps arrive.
+
+    No word-timestamp events are sent for "hello world".  The slot remains incomplete
+    when the audio context ends; force-complete reads the full remaining text from the
+    tracker and emits TTSTextFrame("hello world").
+    """
+    tts = _MockPerCallWordTimestampHttpTTSService(word_times_per_call=[[]])
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+
+    assert len(word_frames) == 1, (
+        f"Expected exactly 1 TTSTextFrame, got {len(word_frames)}: {[f.text for f in word_frames]}"
+    )
+    assert word_frames[0].text == "hello world", (
+        f"Expected TTSTextFrame('hello world'), got {word_frames[0].text!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_http_force_complete_raw_text_propagated():
+    """force-complete carries the correct raw_text span on the emitted TTSTextFrame.
+
+    AggregatedTextFrame carries raw_text="<card>4111 1111</card>".  Only "4111" arrives
+    as a word-timestamp; "1111" is force-completed.
+
+    Expected:
+        TTSTextFrame("4111").raw_text == "<card>4111"    — from normal word path
+        TTSTextFrame("1111").raw_text == "1111</card>"   — from force-complete path
+    """
+    tts = _MockPerCallWordTimestampHttpTTSService(
+        word_times_per_call=[[("4111", 0.0)]]
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            AggregatedTextFrame(
+                "4111 1111", AggregationType.SENTENCE, raw_text="<card>4111 1111</card>"
+            )
+        ],
+    )
+    word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+
+    assert [f.text for f in word_frames] == ["4111", "1111"], (
+        f"Expected ['4111', '1111'] but got {[f.text for f in word_frames]}"
+    )
+    assert word_frames[0].raw_text == "<card>4111", (
+        f"Expected raw_text '<card>4111' on first frame, got {word_frames[0].raw_text!r}"
+    )
+    assert word_frames[1].raw_text == "1111</card>", (
+        f"Expected raw_text '1111</card>' on force-complete frame, got {word_frames[1].raw_text!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ws_force_complete_partial_timestamps_emits_remaining_text():
+    """WebSocket path: _force_complete_spoken_slots emits TTSTextFrame for dropped token.
+
+    Mirrors test_http_force_complete_partial_timestamps_emits_remaining_text on the
+    async audio delivery path to confirm force-complete fires correctly from
+    _handle_audio_context when TTSStoppedFrame arrives before all word timestamps.
+    """
+    tts = _MockWordTimestampWSTTSService(word_times=[("hello", 0.0)])
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+
+    assert [f.text for f in word_frames] == ["hello", "world"], (
+        f"Expected ['hello', 'world'] but got {[f.text for f in word_frames]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ws_force_complete_no_timestamps_emits_full_text():
+    """WebSocket path: full text emitted as single TTSTextFrame when no timestamps arrive."""
+    tts = _MockPerCallWordTimestampWSTTSService(word_times_per_call=[[]])
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=False)],
+    )
+    word_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+
+    assert len(word_frames) == 1, (
+        f"Expected exactly 1 TTSTextFrame, got {len(word_frames)}: {[f.text for f in word_frames]}"
+    )
+    assert word_frames[0].text == "hello world", (
+        f"Expected TTSTextFrame('hello world'), got {word_frames[0].text!r}"
     )
 
 
