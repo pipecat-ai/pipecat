@@ -192,6 +192,16 @@ class WordCompletionTracker:
             if self._raw_text is not None:
                 self._raw_consumed = self._raw_text[self._raw_pos :]
                 self._raw_pos = len(self._raw_text)
+                # This should not happen: force-complete sweeps all remaining
+                # raw_text, so the span must contain the frame word. If it
+                # doesn't, expected_text and raw_text are out of sync in an
+                # unexpected way — discard rather than returning a corrupt span.
+                if self._frame_word and self._frame_word not in self._raw_consumed:
+                    logger.warning(
+                        f"WordCompletionTracker: force-complete raw_consumed {repr(self._raw_consumed)!s} "
+                        f"does not contain frame_word {repr(self._frame_word)!s}, discarding"
+                    )
+                    self._raw_consumed = None
             self._received = self._expected  # force-complete
             self._overflow = normalized
             self._raw_overflow_word = word
@@ -250,6 +260,16 @@ class WordCompletionTracker:
                     )
                     self._raw_consumed = self._raw_text[self._raw_pos : new_pos]
                     self._raw_pos = new_pos
+            # This should not happen: the raw cursor is driven by the same
+            # alnum count as the word stream, so the consumed span must contain
+            # the frame word. If it doesn't, the cursors drifted out of sync
+            # in an unexpected way — discard rather than returning a corrupt span.
+            if self._frame_word and self._frame_word not in self._raw_consumed:
+                logger.warning(
+                    f"WordCompletionTracker: raw_consumed {repr(self._raw_consumed)!s} "
+                    f"does not contain frame_word {repr(self._frame_word)!s}, discarding"
+                )
+                self._raw_consumed = None
 
         return self.is_complete
 

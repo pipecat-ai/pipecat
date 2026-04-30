@@ -985,5 +985,133 @@ class TestWordCompletionTrackerMultiFrameSimulation(unittest.TestCase):
         self.assertTrue(tracker2.add_word_and_check_complete("five"))
 
 
+class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
+    """Word-by-word validation of frame_word and raw_consumed for sentences
+    containing emojis and special characters.
+
+    Covers:
+    - Emoji in the middle of a sentence whose raw_text has surrounding XML tags.
+    - Emoji adjacent to currency symbols and punctuation.
+    - Multiple emojis scattered through a sentence with no XML tags.
+    - Emoji that does NOT appear in raw_text (safeguard must return None).
+    """
+
+    def _assert_word(self, tracker, word, expected_frame_word, expected_raw_consumed, idx):
+        msg = f"word {idx + 1} {repr(word)}"
+        self.assertEqual(tracker.get_frame_word(), expected_frame_word, f"{msg}: frame_word")
+        self.assertEqual(tracker.get_raw_consumed(), expected_raw_consumed, f"{msg}: raw_consumed")
+
+    def test_emoji_in_middle_with_raw_tags(self):
+        """Sentence: 'Great job! 🎉 Well done.' wrapped in <praise> tags.
+
+        The emoji word gets its own raw_consumed span ('🎉') because the
+        chars_for_frame==0 branch finds it at the correct offset in raw_text.
+        Words that follow the emoji pick up immediately after it.
+        """
+        sentence = "Great job! 🎉 Well done."
+        raw_text = f"<praise>{sentence}</praise>"
+        words = ["Great", "job!", "🎉", "Well", "done."]
+
+        expected_frame_words = ["Great", "job!", "🎉", "Well", "done."]
+        expected_raw_consumed = [
+            "<praise>Great",  # opening tag consumed with first alnum word
+            "job!",  # " job!" stripped
+            "🎉",  # emoji found directly in raw_text
+            "Well",  # " Well" stripped; emoji already consumed
+            "done.</praise>",  # last word sweeps closing tag
+        ]
+
+        tracker = WordCompletionTracker(sentence, raw_text=raw_text)
+        for i, word in enumerate(words):
+            is_complete = tracker.add_word_and_check_complete(word)
+            self._assert_word(tracker, word, expected_frame_words[i], expected_raw_consumed[i], i)
+            if i == len(words) - 1:
+                self.assertTrue(is_complete, f"should be complete after final word {repr(word)}")
+            else:
+                self.assertFalse(is_complete, f"should not be complete after {repr(word)}")
+
+    def test_emoji_with_currency_and_raw_tags(self):
+        """Sentence: 'Pay $50 😊 today!' wrapped in <promo> tags.
+
+        Validates that currency symbols ($) are treated as non-alnum punctuation
+        and that the emoji token is correctly assigned its own raw span.
+        """
+        sentence = "Pay $50 😊 today!"
+        raw_text = f"<promo>{sentence}</promo>"
+        words = ["Pay", "$50", "😊", "today!"]
+
+        expected_frame_words = ["Pay", "$50", "😊", "today!"]
+        expected_raw_consumed = [
+            "<promo>Pay",  # opening tag consumed with first word
+            "$50",  # " $50" stripped
+            "😊",  # emoji found directly in raw_text
+            "today!</promo>",  # last word sweeps closing tag
+        ]
+
+        tracker = WordCompletionTracker(sentence, raw_text=raw_text)
+        for i, word in enumerate(words):
+            is_complete = tracker.add_word_and_check_complete(word)
+            self._assert_word(tracker, word, expected_frame_words[i], expected_raw_consumed[i], i)
+            if i == len(words) - 1:
+                self.assertTrue(is_complete, f"should be complete after final word {repr(word)}")
+            else:
+                self.assertFalse(is_complete, f"should not be complete after {repr(word)}")
+
+    def test_multiple_emojis_no_tags(self):
+        """Sentence: 'Hello 😊 world 🎉 there!' with raw_text equal to the sentence.
+
+        Two emojis at different positions in the sentence; each gets its own
+        raw_consumed span and neither disrupts the alnum cursor for the words
+        that follow.
+        """
+        sentence = "Hello 😊 world 🎉 there!"
+        words = ["Hello", "😊", "world", "🎉", "there!"]
+
+        expected_frame_words = ["Hello", "😊", "world", "🎉", "there!"]
+        expected_raw_consumed = [
+            "Hello",  # no leading tag
+            "😊",  # emoji found directly
+            "world",  # " world" stripped
+            "🎉",  # second emoji found directly
+            "there!",  # " there!" stripped; last word
+        ]
+
+        tracker = WordCompletionTracker(sentence, raw_text=sentence)
+        for i, word in enumerate(words):
+            is_complete = tracker.add_word_and_check_complete(word)
+            self._assert_word(tracker, word, expected_frame_words[i], expected_raw_consumed[i], i)
+            if i == len(words) - 1:
+                self.assertTrue(is_complete, f"should be complete after final word {repr(word)}")
+            else:
+                self.assertFalse(is_complete, f"should not be complete after {repr(word)}")
+
+    def test_emoji_absent_from_raw_text_returns_none(self):
+        """Sentence: 'See you soon 😊' but raw_text omits the emoji.
+
+        The emoji is the last token the TTS returns for this frame. The alnum
+        content ('seeyousoon') is already complete after 'soon', so raw_text is
+        exhausted. The safeguard must set raw_consumed to None because the swept
+        span is empty and does not contain '😊'.
+        """
+        sentence = "See you soon 😊"
+        raw_text = "<note>See you soon</note>"
+        words = ["See", "you", "soon", "😊"]
+
+        expected_frame_words = ["See", "you", "soon", "😊"]
+        expected_raw_consumed = [
+            "<note>See",  # opening tag consumed with first word
+            "you",  # " you" stripped
+            "soon</note>",  # last alnum word sweeps closing tag
+            None,  # safeguard: emoji not in exhausted raw_text
+        ]
+
+        tracker = WordCompletionTracker(sentence, raw_text=raw_text)
+        for i, word in enumerate(words):
+            tracker.add_word_and_check_complete(word)
+            self._assert_word(tracker, word, expected_frame_words[i], expected_raw_consumed[i], i)
+
+        self.assertTrue(tracker.is_complete)
+
+
 if __name__ == "__main__":
     unittest.main()
