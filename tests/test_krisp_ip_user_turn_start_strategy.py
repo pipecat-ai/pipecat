@@ -12,10 +12,6 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-# Mock package version check before importing pipecat (development mode)
-_version_patcher = patch("importlib.metadata.version", return_value="0.0.0-dev")
-_version_patcher.start()
-
 # Mock krisp_audio before any pipecat import that loads krisp_instance / VIVA IP strategy
 mock_krisp_audio = MagicMock()
 mock_krisp_audio.SamplingRate.Sr8000Hz = 8000
@@ -37,18 +33,22 @@ sys.modules["pipecat_ai_krisp"] = mock_pipecat_krisp
 sys.modules["pipecat_ai_krisp.audio"] = MagicMock()
 sys.modules["pipecat_ai_krisp.audio.krisp_processor"] = MagicMock()
 
-from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
-    InputAudioRawFrame,
-    TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
-    VADUserStoppedSpeakingFrame,
-)
-from pipecat.turns.types import ProcessFrameResult
-from pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy import (
-    KrispVivaIPUserTurnStartStrategy,
-)
+# The version patch is scoped to just the import so it doesn't leak across the
+# test session and corrupt importlib.metadata.version for other tests
+# (e.g. transformers' import-time dependency checks).
+with patch("importlib.metadata.version", return_value="0.0.0-dev"):
+    from pipecat.frames.frames import (
+        BotStartedSpeakingFrame,
+        BotStoppedSpeakingFrame,
+        InputAudioRawFrame,
+        TranscriptionFrame,
+        VADUserStartedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
+    )
+    from pipecat.turns.types import ProcessFrameResult
+    from pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy import (
+        KrispVivaIPUserTurnStartStrategy,
+    )
 
 STRATEGY_MODULE = "pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy"
 
