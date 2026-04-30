@@ -7,7 +7,7 @@
 """Word completion tracker for TTS context ordering."""
 
 import re
-from typing import Optional
+import unicodedata
 
 from loguru import logger
 
@@ -95,7 +95,11 @@ class WordCompletionTracker:
     def _normalize(text: str) -> str:
         """Strip XML/HTML tags then keep only lowercase alphanumeric characters."""
         text = re.sub(r"<[^>]+>", "", text)
-        return re.sub(r"[^a-z0-9]", "", text.lower())
+        # Decompose accents (ā → a + ̄)
+        text = unicodedata.normalize("NFKD", text)
+        # Keep base characters only
+        text = "".join(c for c in text if c.isalnum())
+        return text.lower()
 
     @staticmethod
     def _advance_by_alnums(text: str, start_pos: int, n: int) -> int:
@@ -123,7 +127,7 @@ class WordCompletionTracker:
         while pos < len(text):
             if text[pos] == "<":
                 break
-            if text[pos].isalnum():
+            if text[pos].isalnum() or text[pos].isspace():
                 break
             pos += 1
 

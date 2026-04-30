@@ -342,6 +342,42 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
         # get_raw_consumed should return "code:" for the last word
         self.assertEqual(tracker.get_raw_consumed(), "code:")
 
+    def test_maori_culture_sentence(self):
+        """Test completion with Māori culture sentence - last word should be 'culture.'"""
+        sentence = (
+            "The indigenous Māori people are a significant part of the population and culture."
+        )
+        words = [
+            "The",
+            "indigenous",
+            "Māori",
+            "people",
+            "are",
+            "a",
+            "significant",
+            "part",
+            "of",
+            "the",
+            "population",
+            "and",
+            "culture.",
+        ]
+        tracker = WordCompletionTracker(sentence, raw_text=sentence)
+
+        # Add all words except the last one - should not complete
+        for word in words[:-1]:
+            result = tracker.add_word_and_check_complete(word)
+            self.assertFalse(result, f"Should not be complete after adding '{word}'")
+
+        # Add the final word "culture." - should complete the tracker
+        result = tracker.add_word_and_check_complete(words[-1])
+        self.assertTrue(result, "Should be complete after adding 'culture.'")
+        self.assertTrue(tracker.is_complete)
+
+        # get_raw_consumed should return "culture." for the last word
+        self.assertEqual(tracker.get_frame_word(), "culture.")
+        self.assertEqual(tracker.get_raw_consumed(), "culture.")
+
 
 class TestWordCompletionTrackerWordBelongsHere(unittest.TestCase):
     def test_belongs_when_word_is_prefix_of_remaining(self):
