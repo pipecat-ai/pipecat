@@ -231,12 +231,23 @@ class WordCompletionTracker:
                 self._raw_consumed = self._raw_text[self._raw_pos :]
                 self._raw_pos = len(self._raw_text)
             else:
-                # Advance through raw_text by exactly chars_for_frame alphanumeric
-                # chars. Non-alnum chars (spaces, opening tags) are included in the
-                # slice, preserving the original formatting for the context.
-                new_pos = self._advance_by_alnums(self._raw_text, self._raw_pos, chars_for_frame)
-                self._raw_consumed = self._raw_text[self._raw_pos : new_pos]
-                self._raw_pos = new_pos
+                if chars_for_frame == 0:
+                    # Consume exactly the raw word (including preceding spaces if present)
+                    start = self._raw_pos
+                    if not self._includes_inter_frame_spaces:
+                        # Skip leading spaces (they belong to previous token)
+                        while start < len(self._raw_text) and self._raw_text[start].isspace():
+                            start += 1
+                    end = start + len(word)
+                    self._raw_consumed = self._raw_text[start:end]
+                    self._raw_pos = end
+                else:
+                    # Advance through raw_text by exactly chars_for_frame alphanumeric
+                    # chars. Non-alnum chars (spaces, opening tags) are included in the
+                    # slice, preserving the original formatting for the context.
+                    new_pos = self._advance_by_alnums(self._raw_text, self._raw_pos, chars_for_frame)
+                    self._raw_consumed = self._raw_text[self._raw_pos : new_pos]
+                    self._raw_pos = new_pos
 
         return self.is_complete
 

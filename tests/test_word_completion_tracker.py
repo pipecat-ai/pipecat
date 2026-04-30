@@ -388,6 +388,95 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
         self.assertEqual(tracker.get_frame_word(), "culture.")
         self.assertEqual(tracker.get_raw_consumed(), "culture.")
 
+    def test_geography_sentence_frame_word_and_raw_consumed_validation(self):
+        """Test geography sentence word by word, validating _frame_word and _raw_consumed match expected values.
+        
+        Sentence: 'Here are some key facts: **Geography:** - It consists mainly of two large islands: 
+        the North Island and the South Island, as well as many smaller islands.'
+        
+        This test validates that the received word, _frame_word, and _raw_consumed are exactly
+        what we expect for each word addition, especially in special cases with punctuation.
+        """
+        sentence = "Here are some key facts: **Geography:** - It consists mainly of two large islands: the North Island and the South Island, as well as many smaller islands."
+        raw_text = f"<geography>{sentence}</geography>"
+        
+        words = [
+            "Here", "are", "some", "key", "facts:", "**Geography:**", "-", "It", "consists", 
+            "mainly", "of", "two", "large", "islands:", "the", "North", "Island", "and", 
+            "the", "South", "Island,", "as", "well", "as", "many", "smaller", "islands."
+        ]
+        
+        # Expected _frame_word for each word (should match the input word exactly)
+        expected_frame_words = [
+            "Here", "are", "some", "key", "facts:", "**Geography:**", "-", "It", "consists", 
+            "mainly", "of", "two", "large", "islands:", "the", "North", "Island", "and", 
+            "the", "South", "Island,", "as", "well", "as", "many", "smaller", "islands."
+        ]
+        
+        # Expected _raw_consumed for each word (spans from raw_text)
+        expected_raw_consumed = [
+            "<geography>Here", "are", "some", "key", "facts:", "**Geography:**", "-", "It", "consists", 
+            "mainly", "of", "two", "large", "islands:", "the", "North", "Island", "and", 
+            "the", "South", "Island,", "as", "well", "as", "many", "smaller", "islands.</geography>"
+        ]
+        
+        tracker = WordCompletionTracker(sentence, raw_text=raw_text)
+        
+        for i, word in enumerate(words):
+            is_complete = tracker.add_word_and_check_complete(word)
+            
+            # Test 1: Validate _frame_word matches expected
+            actual_frame_word = tracker.get_frame_word()
+            expected_frame_word = expected_frame_words[i]
+            self.assertEqual(
+                actual_frame_word, 
+                expected_frame_word,
+                f"Word {i+1} '{word}': expected _frame_word '{expected_frame_word}', got '{actual_frame_word}'"
+            )
+            
+            # Test 2: Validate _raw_consumed matches expected
+            actual_raw_consumed = tracker.get_raw_consumed()
+            expected_raw = expected_raw_consumed[i]
+            self.assertEqual(
+                actual_raw_consumed,
+                expected_raw,
+                f"Word {i+1} '{word}': expected _raw_consumed '{expected_raw}', got '{actual_raw_consumed}'"
+            )
+            
+            # Test 3: Validate completion status
+            if i == len(words) - 1:
+                self.assertTrue(is_complete, f"Should be complete after final word '{word}'")
+            else:
+                self.assertFalse(is_complete, f"Should not be complete after word '{word}' (position {i+1})")
+        
+        # Test special punctuation cases individually
+        special_cases = [
+            ("**Geography:**", "**Geography:**"),
+            ("facts:", "facts:"),
+            ("islands:", "islands:"),
+            ("Island,", "Island,"),
+            ("islands.", "islands.")
+        ]
+        
+        for word, expected_frame in special_cases:
+            tracker_special = WordCompletionTracker(word, raw_text=f"<test>{word}</test>")
+            tracker_special.add_word_and_check_complete(word)
+            
+            actual_frame = tracker_special.get_frame_word()
+            self.assertEqual(
+                actual_frame,
+                expected_frame,
+                f"Special case '{word}': expected _frame_word '{expected_frame}', got '{actual_frame}'"
+            )
+            
+            actual_raw = tracker_special.get_raw_consumed()
+            expected_raw_special = f"<test>{word}</test>"
+            self.assertEqual(
+                actual_raw,
+                expected_raw_special,
+                f"Special case '{word}': expected _raw_consumed '{expected_raw_special}', got '{actual_raw}'"
+            )
+
 
 class TestWordCompletionTrackerWordBelongsHere(unittest.TestCase):
     def test_belongs_when_word_is_prefix_of_remaining(self):
