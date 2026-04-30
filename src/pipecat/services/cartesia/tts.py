@@ -391,22 +391,27 @@ class CartesiaTTSService(WebsocketTTSService):
         return language_to_cartesia_language(language)
 
     # A set of Cartesia-specific helpers for text transformations
+    @staticmethod
     def SPELL(text: str) -> str:
         """Wrap text in Cartesia spell tag."""
         return f"<spell>{text}</spell>"
 
+    @staticmethod
     def EMOTION_TAG(emotion: CartesiaEmotion) -> str:
         """Convenience method to create an emotion tag."""
         return f'<emotion value="{emotion}" />'
 
+    @staticmethod
     def PAUSE_TAG(seconds: float) -> str:
         """Convenience method to create a pause tag."""
         return f'<break time="{seconds}s" />'
 
+    @staticmethod
     def VOLUME_TAG(volume: float) -> str:
         """Convenience method to create a volume tag."""
         return f'<volume ratio="{volume}" />'
 
+    @staticmethod
     def SPEED_TAG(speed: float) -> str:
         """Convenience method to create a speed tag."""
         return f'<speed ratio="{speed}" />'
