@@ -1613,6 +1613,7 @@ class TTSService(AIService):
                     elif isinstance(frame, TTSStoppedFrame):
                         # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
                         await self._force_complete_spoken_slots()
+                        await self._flush_aggregated_text_frame_sequence()
 
                         should_push_stop_frame = False
                         # Setting the last word timestamp as the TTSStoppedFrame PTS
@@ -1632,9 +1633,11 @@ class TTSService(AIService):
                 break
 
         await self._force_complete_spoken_slots()
+        await self._flush_aggregated_text_frame_sequence()
+
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))
-        await self._flush_aggregated_text_frame_sequence()
+
         await self._maybe_reset_word_timestamps()
 
     async def on_audio_context_interrupted(self, context_id: str):
