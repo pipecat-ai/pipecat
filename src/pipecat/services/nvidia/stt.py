@@ -49,7 +49,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_nvidia_nemotron_speech_language(language: Language) -> str | None:
+def language_to_nvidia_nemotron_speech_language(language: Language) -> str:
     """Maps Language enum to NVIDIA Nemotron Speech ASR language codes.
 
     Source:
@@ -59,7 +59,9 @@ def language_to_nvidia_nemotron_speech_language(language: Language) -> str | Non
         language: Language enum value.
 
     Returns:
-        str | None: NVIDIA Nemotron Speech language code or None if not supported.
+        The NVIDIA Nemotron Speech language code. If ``language`` is not in
+        the verified mapping, falls back to the full language code string and
+        logs a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         # Arabic

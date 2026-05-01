@@ -7,6 +7,8 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
@@ -37,6 +39,25 @@ class MockLLMService(LLMService):
             user_turn_completion_config=None,
         )
         super().__init__(settings=settings, **kwargs)
+
+
+class TestUnparameterizedSubclass(unittest.TestCase):
+    """Backward-compat coverage: third-party providers subclass LLMService
+    without specifying a generic adapter parameter. That should keep working
+    after LLMService became `Generic[TAdapter]`.
+    """
+
+    def test_unparameterized_subclass_instantiates(self):
+        # MockLLMService is declared as `class MockLLMService(LLMService):`
+        # — no generic bracket. The TypeVar's `bound=BaseLLMAdapter` should
+        # resolve TAdapter to BaseLLMAdapter for callers that don't opt in.
+        service = MockLLMService()
+        adapter = service.get_llm_adapter()
+
+        # Default adapter_class is OpenAILLMAdapter; the runtime instance
+        # should reflect that, regardless of how generics are erased.
+        self.assertIsInstance(adapter, OpenAILLMAdapter)
+        self.assertIsInstance(adapter, BaseLLMAdapter)
 
 
 class TestLLMService(unittest.IsolatedAsyncioTestCase):

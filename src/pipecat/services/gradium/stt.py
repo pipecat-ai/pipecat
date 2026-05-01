@@ -15,7 +15,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -79,14 +79,17 @@ def _input_format_from_encoding(encoding: str, sample_rate: int) -> str:
     return encoding
 
 
-def language_to_gradium_language(language: Language) -> str | None:
+def language_to_gradium_language(language: Language) -> str:
     """Convert a Language enum to Gradium's language code format.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The Gradium language code string or None if not supported.
+        The corresponding Gradium language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.DE: "de",
@@ -383,10 +386,11 @@ class GradiumSTTService(WebsocketSTTService):
                 "x-api-key": self._api_key,
                 "x-api-source": "pipecat",
             }
-            self._websocket = await websocket_connect(
+            websocket = await websocket_connect(
                 ws_url,
                 additional_headers=headers,
             )
+            self._websocket = websocket
             await self._call_event_handler("on_connected")
             setup_msg = {
                 "type": "setup",
@@ -397,8 +401,10 @@ class GradiumSTTService(WebsocketSTTService):
             json_config = {}
             if self._json_config:
                 json_config = json.loads(self._json_config)
-            language = assert_given(self._settings.language)
-            if language:
+            # Technically `_settings.language` could be a raw string, but
+            # Language is a StrEnum so downstream handles either.
+            language = cast("Language | None", assert_given(self._settings.language))
+            if language is not None:
                 gradium_language = language_to_gradium_language(language)
                 if gradium_language:
                     json_config["language"] = gradium_language
@@ -406,8 +412,8 @@ class GradiumSTTService(WebsocketSTTService):
                 json_config["delay_in_frames"] = self._settings.delay_in_frames
             if json_config:
                 setup_msg["json_config"] = json_config
-            await self._websocket.send(json.dumps(setup_msg))
-            ready_msg = await self._websocket.recv()
+            await websocket.send(json.dumps(setup_msg))
+            ready_msg = await websocket.recv()
             ready_msg = json.loads(ready_msg)
             if ready_msg["type"] == "error":
                 raise Exception(f"received error {ready_msg['message']}")
@@ -478,12 +484,14 @@ class GradiumSTTService(WebsocketSTTService):
         """
         self._accumulated_text.append(text)
         accumulated = " ".join(self._accumulated_text)
+        # Technically `_settings.language` could be a raw string, but Language
+        # is a StrEnum so downstream handles either.
         await self.push_frame(
             InterimTranscriptionFrame(
                 text=accumulated,
                 user_id=self._user_id,
                 timestamp=time_now_iso8601(),
-                language=assert_given(self._settings.language),
+                language=cast("Language | None", assert_given(self._settings.language)),
             )
         )
         await self.stop_processing_metrics()
@@ -515,7 +523,9 @@ class GradiumSTTService(WebsocketSTTService):
         text = " ".join(self._accumulated_text)
         self._accumulated_text.clear()
         logger.debug(f"Final transcription: [{text}]")
-        language = assert_given(self._settings.language)
+        # Technically `_settings.language` could be a raw string, but Language
+        # is a StrEnum so downstream handles either.
+        language = cast("Language | None", assert_given(self._settings.language))
         await self.push_frame(
             TranscriptionFrame(
                 text,

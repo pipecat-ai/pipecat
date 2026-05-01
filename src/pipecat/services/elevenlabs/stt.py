@@ -54,7 +54,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_elevenlabs_language(language: Language) -> str | None:
+def language_to_elevenlabs_language(language: Language) -> str:
     """Convert a Language enum to ElevenLabs language code.
 
     Source:
@@ -64,7 +64,9 @@ def language_to_elevenlabs_language(language: Language) -> str | None:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding ElevenLabs language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the full language code string and
+        logs a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         Language.AF: "afr",  # Afrikaans
@@ -739,6 +741,10 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Args:
             silence: Silent 16-bit mono PCM audio bytes.
         """
+        if (
+            self._websocket is None
+        ):  # should never happen — caller should gate on _is_keepalive_ready()
+            return
         audio_base64 = base64.b64encode(silence).decode("utf-8")
         message = {
             "message_type": "input_audio_chunk",

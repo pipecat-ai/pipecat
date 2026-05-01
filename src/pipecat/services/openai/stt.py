@@ -18,7 +18,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 
@@ -475,6 +475,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _connect_websocket(self):
         """Establish the WebSocket connection to the transcription endpoint."""
         try:
+            # `__init__` raises if websockets isn't installed, so these symbols
+            # are non-None by the time any method runs.
+            assert websocket_connect is not None and State is not None
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
@@ -534,7 +537,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """Send ``session.update`` to configure the transcription session."""
         transcription: dict = {"model": self._settings.model}
 
-        language = assert_given(self._settings.language)
+        # Technically `_settings.language` could be a raw string, but Language
+        # is a StrEnum so downstream handles either.
+        language = cast("Language | None", assert_given(self._settings.language))
         language_code = self._language_to_code(language) if language else None
         if language_code:
             transcription["language"] = language_code
@@ -611,6 +616,10 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         Called by ``WebsocketService._receive_task_handler`` which wraps
         this method with automatic reconnection on connection errors.
         """
+        # `_connect` only starts the receive task after `_websocket` is set,
+        # and reconnects re-establish it before the next iteration, so this
+        # invariant should always hold when this method runs.
+        assert self._websocket is not None
         async for message in self._websocket:
             try:
                 evt = json.loads(message)

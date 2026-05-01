@@ -210,11 +210,11 @@ class HeyGenApi(BaseAvatarApi):
             "quality": request_data.quality,
             "avatar_id": request_data.avatar_id,
             "voice": {
-                "voice_id": request_data.voice.voiceId if request_data.voice else None,
+                "voice_id": request_data.voice.voice_id if request_data.voice else None,
                 "rate": request_data.voice.rate if request_data.voice else None,
                 "emotion": request_data.voice.emotion if request_data.voice else None,
                 "elevenlabs_settings": (
-                    request_data.voice.elevenlabsSettings if request_data.voice else None
+                    request_data.voice.elevenlabs_settings if request_data.voice else None
                 ),
             },
             "knowledge_id": request_data.knowledge_id,

@@ -102,7 +102,7 @@ class RTVIProcessor(FrameProcessor):
         self._client_ready = True
         await self._call_event_handler("on_client_ready")
 
-    async def set_bot_ready(self, about: Mapping[str, Any] = None):
+    async def set_bot_ready(self, about: Mapping[str, Any] | None = None):
         """Mark the bot as ready and send the bot-ready message.
 
         Args:
@@ -404,7 +404,7 @@ class RTVIProcessor(FrameProcessor):
         )
         await self.push_frame(frame)
 
-    async def _send_bot_ready(self, about: Mapping[str, Any] = None):
+    async def _send_bot_ready(self, about: Mapping[str, Any] | None = None):
         """Send the bot-ready message to the client.
 
         Args:

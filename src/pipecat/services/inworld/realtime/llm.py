@@ -189,7 +189,7 @@ _NON_FATAL_ERROR_CODES = {
 }
 
 
-class InworldRealtimeLLMService(LLMService):
+class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     """Inworld Realtime LLM service for real-time audio and text communication.
 
     Implements the Inworld Realtime API with WebSocket communication for
@@ -664,7 +664,7 @@ class InworldRealtimeLLMService(LLMService):
     async def _send_session_update(self):
         """Update session settings on the server."""
         settings = assert_given(self._settings.session_properties)
-        adapter: InworldRealtimeLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
 
         if self._context:
             llm_invocation_params = adapter.get_llm_invocation_params(
@@ -963,7 +963,7 @@ class InworldRealtimeLLMService(LLMService):
             self._run_llm_when_api_session_ready = True
             return
 
-        adapter: InworldRealtimeLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
 
         if self._llm_needs_conversation_setup:
             logger.debug(

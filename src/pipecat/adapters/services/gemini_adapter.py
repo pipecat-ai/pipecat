@@ -9,7 +9,7 @@
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from loguru import logger
 from openai import NotGiven
@@ -154,9 +154,12 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         messages = self._from_universal_context_messages(self.get_messages(context)).messages
 
         # Sanitize messages for logging
-        messages_for_logging = []
+        messages_for_logging: list[dict[str, Any]] = []
         for message in messages:
-            obj = message.to_json_dict()
+            # `to_json_dict()` returns `dict[str, object]`; treat as a plain
+            # dict for the value indexing/mutation below. The broad `except`
+            # below is the safety net if any item isn't shaped as expected.
+            obj: dict[str, Any] = cast(dict[str, Any], message.to_json_dict())
             try:
                 if "parts" in obj:
                     for part in obj["parts"]:
@@ -274,7 +277,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         # Check if we only have function-related messages (no regular text)
         effective_system = extracted_system or system_instruction
         has_regular_messages = any(
-            len(msg.parts) == 1
+            msg.parts is not None
+            and len(msg.parts) == 1
             and getattr(msg.parts[0], "text", None)
             and not getattr(msg.parts[0], "function_call", None)
             and not getattr(msg.parts[0], "function_response", None)
@@ -346,8 +350,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     parts=[Part(function_call=FunctionCall(name="search", args={"query": "test"}))]
                 )
         """
-        role = message["role"]
-        content = message.get("content", [])
+        # ChatCompletionMessageParam (a union of TypedDicts) doesn't allow
+        # the dict-style key access used below; treat it as a plain dict.
+        msg = cast(dict[str, Any], message)
+        role = msg["role"]
+        content = msg.get("content", [])
 
         # Convert non-initial system/developer messages to user role,
         # as Gemini doesn't support these as input messages.
@@ -359,8 +366,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         parts = []
         tool_call_id_to_name_mapping = {}
 
-        if message.get("tool_calls"):
-            for tc in message["tool_calls"]:
+        if msg.get("tool_calls"):
+            for tc in msg["tool_calls"]:
                 id = tc["id"]
                 name = tc["function"]["name"]
                 tool_call_id_to_name_mapping[id] = name
@@ -376,7 +383,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         elif role == "tool":
             role = "user"
             try:
-                response = json.loads(message["content"])
+                response = json.loads(msg["content"])
                 if isinstance(response, dict):
                     response_dict = response
                 else:
@@ -384,10 +391,10 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             except Exception as e:
                 # Response might not be JSON-deserializable.
                 # This occurs with a UserImageFrame, for example, where we get a plain "COMPLETED" string.
-                response_dict = {"value": message["content"]}
+                response_dict = {"value": msg["content"]}
 
             # Get function name from mapping using tool_call_id, or fallback
-            tool_call_id = message.get("tool_call_id")
+            tool_call_id = msg.get("tool_call_id")
             function_name = "tool_call_result"  # Default fallback
             if tool_call_id and tool_call_id in params.tool_call_id_to_name_mapping:
                 function_name = params.tool_call_id_to_name_mapping[tool_call_id]
@@ -491,7 +498,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         def is_tool_call_message(msg: Content) -> bool:
             """Check if message contains only function_call parts."""
-            return (
+            return bool(
                 msg.role == "model"
                 and msg.parts
                 and all(getattr(part, "function_call", None) for part in msg.parts)
@@ -499,6 +506,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         def message_has_thought_signature(msg: Content) -> bool:
             """Check if any part in the message has a thought_signature."""
+            if msg.parts is None:
+                return False
             return any(getattr(part, "thought_signature", None) for part in msg.parts)
 
         merged_messages = []
@@ -564,6 +573,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         logger.debug(f"Thought signatures to apply: {len(thought_signature_dicts)}")
         for ts in thought_signature_dicts:
             bookmark = ts.get("bookmark")
+            if bookmark is None:
+                continue
             if bookmark.get("function_call"):
                 logger.trace(f" - To function call: {bookmark['function_call']}")
             elif bookmark.get("text"):
@@ -665,6 +676,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         if (
             hasattr(part, "inline_data")
             and part.inline_data
+            and part.inline_data.data is not None
+            and bookmark_inline_data.data is not None
             # Comparing length should be good enough for matching inline data,
             # especially since we're already matching thought signatures in
             # strict message order. Comparing actual data is expensive.

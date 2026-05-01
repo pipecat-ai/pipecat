@@ -67,9 +67,20 @@ class LangchainProcessor(FrameProcessor):
             # The last one by the human is the one we want to send to the LLM.
             logger.debug(f"Got transcription frame {frame}")
             messages = frame.context.get_messages()
-            text: str = messages[-1]["content"]
+            # Historically this processor has only handled plain-text user
+            # messages; the guards below make that contract explicit for the
+            # type checker. TODO: maybe handle other message shapes (provider-
+            # specific messages, multi-modal content lists, etc.).
+            last_message = messages[-1] if messages else None
+            if not isinstance(last_message, dict):
+                await self.push_frame(frame, direction)
+                return
+            content = last_message.get("content")
+            if not isinstance(content, str):
+                await self.push_frame(frame, direction)
+                return
 
-            await self._ainvoke(text.strip())
+            await self._ainvoke(content.strip())
         else:
             await self.push_frame(frame, direction)
 
@@ -87,7 +98,10 @@ class LangchainProcessor(FrameProcessor):
             case str():
                 return text
             case AIMessageChunk():
-                return text.content
+                # `content` is `str | list[...]` (multi-modal); stringify if
+                # it's a list, since downstream consumers want plain text.
+                content = text.content
+                return content if isinstance(content, str) else str(content)
             case _:
                 return ""
 

@@ -10,6 +10,7 @@ import io
 import wave
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from typing import Literal, cast
 
 from loguru import logger
 from pydantic import BaseModel
@@ -30,6 +31,19 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Groq, you need to `pip install pipecat-ai[groq]`.")
     raise Exception(f"Missing module: {e}")
+
+# Hint set for `output_format`. The values mirror the Literal that
+# `groq.resources.audio.speech.AsyncSpeech.create` accepts on its
+# `response_format` parameter (also visible as the `response_format` field of
+# `groq.types.audio.SpeechCreateParams`). The groq SDK does not export this as
+# a named alias, so we redeclare it here.
+#
+# This alias is used in unions like `GroqAudioFormat | str`, so pyright shows
+# these values as completion hints without rejecting other strings. If groq
+# adds a new format before this list is updated, callers can still pass it and
+# we forward it through (with a cast at the API boundary). Keep in sync on a
+# best-effort basis when bumping the groq dep.
+GroqAudioFormat = Literal["flac", "mp3", "mulaw", "ogg", "wav"]
 
 
 @dataclass
@@ -74,7 +88,7 @@ class GroqTTSService(TTSService):
         self,
         *,
         api_key: str,
-        output_format: str = "wav",
+        output_format: GroqAudioFormat | str = "wav",
         params: InputParams | None = None,
         model_name: str | None = None,
         voice_id: str | None = None,
@@ -147,7 +161,7 @@ class GroqTTSService(TTSService):
         )
 
         self._api_key = api_key
-        self._output_format = output_format
+        self._output_format: str = output_format
 
         self._client = AsyncGroq(api_key=self._api_key)
 
@@ -178,12 +192,18 @@ class GroqTTSService(TTSService):
             speed = assert_given(self._settings.speed)
             if model is None:
                 raise ValueError("Groq TTS model must be specified")
+            if voice is None:
+                raise ValueError("Groq TTS voice must be specified")
             if speed is None:
                 raise ValueError("Groq TTS speed must be specified")
             response = await self._client.audio.speech.create(
                 model=model,
                 voice=voice,
-                response_format=self._output_format,
+                # Cast satisfies groq's stricter Literal typing while letting
+                # callers pass any string (e.g. a newer groq format we haven't
+                # yet added to GroqAudioFormat). If the value is unsupported,
+                # groq's API will surface a runtime error with a clear message.
+                response_format=cast(GroqAudioFormat, self._output_format),
                 # Note: as of 2026-02-25, only a speed of 1.0 is supported, but
                 # here we pass it for completeness and future-proofing
                 speed=speed,

@@ -71,9 +71,15 @@ class StrandsAgentsProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, LLMContextFrame):
             messages = frame.context.get_messages()
-            if messages:
-                last_message = messages[-1]
-                await self._ainvoke(str(last_message["content"]).strip())
+            # Historically this processor has only handled plain-text user
+            # messages; the guards below make that contract explicit for the
+            # type checker. TODO: handle other message shapes (provider-
+            # specific messages, multi-modal content lists, etc.).
+            last_message = messages[-1] if messages else None
+            if isinstance(last_message, dict):
+                content = last_message.get("content")
+                if isinstance(content, str):
+                    await self._ainvoke(content.strip())
         else:
             await self.push_frame(frame, direction)
 
@@ -91,6 +97,9 @@ class StrandsAgentsProcessor(FrameProcessor):
             await self.start_ttfb_metrics()
 
             if self.graph:
+                # `__init__` asserts `graph_exit_node` is set whenever `graph`
+                # is, so this can't be None here.
+                assert self.graph_exit_node is not None
                 # Graph does not stream; await full result then emit assistant text
                 graph_result = await self.graph.invoke_async(text)
                 if ttfb_tracking:
@@ -115,6 +124,9 @@ class StrandsAgentsProcessor(FrameProcessor):
                 except Exception as parse_err:
                     logger.warning(f"Failed to extract messages from GraphResult: {parse_err}")
             else:
+                # `__init__` asserts at least one of `agent`/`graph` is set,
+                # and we're in the `not self.graph` branch.
+                assert self.agent is not None
                 # Agent supports streaming events via async iterator
                 async for event in self.agent.stream_async(text):
                     # Push to TTS service

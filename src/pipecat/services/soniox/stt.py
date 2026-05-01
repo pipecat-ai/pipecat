@@ -648,4 +648,7 @@ class SonioxSTTService(WebsocketSTTService):
         Args:
             silence: Silent PCM audio bytes (unused, Soniox uses a protocol message).
         """
+        if self._websocket is None:
+            logger.warning(f"{self}: websocket unavailable, skipping keepalive")
+            return
         await self._websocket.send(KEEPALIVE_MESSAGE)

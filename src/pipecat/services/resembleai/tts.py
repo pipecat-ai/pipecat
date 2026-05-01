@@ -409,7 +409,9 @@ class ResembleAITTSService(WebsocketTTSService):
 
                 await self.push_frame(TTSStoppedFrame(context_id=context_id))
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(error=f"{self} error: {error_name} - {error_msg}"))
+                await self.push_error_frame(
+                    ErrorFrame(error=f"{self} error: {error_name} - {error_msg}")
+                )
 
                 # Check if this is an unrecoverable error (connection-level failure)
                 if status_code in [401, 403]:

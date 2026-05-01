@@ -233,10 +233,11 @@ class AssemblyAISTTService(WebsocketSTTService):
                 sample_rate = connection_params.sample_rate
                 encoding = connection_params.encoding
                 default_settings.model = connection_params.speech_model
-                default_settings.formatted_finals = connection_params.formatted_finals
-                default_settings.word_finalization_max_wait_time = (
-                    connection_params.word_finalization_max_wait_time
-                )
+                # Note: `formatted_finals` and `word_finalization_max_wait_time`
+                # were added to Settings after this deprecated input model
+                # was frozen and have no equivalent on
+                # AssemblyAIConnectionParams; they are only configurable via
+                # the canonical `settings=...` API.
                 default_settings.end_of_turn_confidence_threshold = (
                     connection_params.end_of_turn_confidence_threshold
                 )

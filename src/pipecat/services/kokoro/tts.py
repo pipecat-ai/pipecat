@@ -216,6 +216,8 @@ class KokoroTTSService(TTSService):
             await self.start_tts_usage_metrics(text)
 
             voice = assert_given(self._settings.voice)
+            if voice is None:
+                raise ValueError("Kokoro TTS voice must be specified")
             lang = assert_given(self._settings.language)
             if lang is None:
                 raise ValueError("Kokoro TTS language must be specified")

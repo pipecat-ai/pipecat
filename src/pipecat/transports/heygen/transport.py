@@ -239,8 +239,9 @@ class HeyGenOutputTransport(BaseOutputTransport):
                     logger.warning("self._event_id is already defined!")
                 self._event_id = str(frame.id)
             elif isinstance(frame, BotStoppedSpeakingFrame):
-                await self._client.agent_speak_end(self._event_id)
-                self._event_id = None
+                if self._event_id is not None:
+                    await self._client.agent_speak_end(self._event_id)
+                    self._event_id = None
         await super().push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -261,7 +262,8 @@ class HeyGenOutputTransport(BaseOutputTransport):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, InterruptionFrame):
-            await self._client.interrupt(self._event_id)
+            if self._event_id is not None:
+                await self._client.interrupt(self._event_id)
             await self.push_frame(frame, direction)
         if isinstance(frame, UserStartedSpeakingFrame):
             await self._client.start_agent_listening()
@@ -281,6 +283,11 @@ class HeyGenOutputTransport(BaseOutputTransport):
         audio = frame.audio
         if frame.sample_rate != HEY_GEN_SAMPLE_RATE:
             audio = await self._resampler.resample(audio, frame.sample_rate, HEY_GEN_SAMPLE_RATE)
+        if self._event_id is None:
+            # No active bot-speech event — drop the chunk rather than send a
+            # message the HeyGen API will reject.
+            logger.warning(f"{self}: dropping audio frame because no event_id is set")
+            return False
         await self._client.agent_speak(bytes(audio), self._event_id)
         return True
 

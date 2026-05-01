@@ -224,6 +224,8 @@ class SmallWebRTCRequestHandler:
                     )
 
             answer = pipecat_connection.get_answer()
+            if answer is None:
+                raise RuntimeError("SmallWebRTC connection produced no SDP answer")
 
             if self._esp32_mode:
                 from pipecat.runner.utils import smallwebrtc_sdp_munging

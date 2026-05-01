@@ -235,12 +235,22 @@ class OpenAITTSService(TTSService):
             Frame: Audio frames containing the synthesized speech data.
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
+        voice = assert_given(self._settings.voice)
+        if voice is None:
+            yield ErrorFrame(error="OpenAI TTS voice must be specified")
+            return
+        if voice not in VALID_VOICES:
+            yield ErrorFrame(
+                error=f"OpenAI TTS voice {voice!r} is not supported "
+                f"(must be one of: {', '.join(sorted(VALID_VOICES))})"
+            )
+            return
         try:
             # Setup API parameters
             create_params = {
                 "input": text,
                 "model": self._settings.model,
-                "voice": VALID_VOICES[assert_given(self._settings.voice)],
+                "voice": VALID_VOICES[voice],
                 "response_format": "pcm",
             }
 

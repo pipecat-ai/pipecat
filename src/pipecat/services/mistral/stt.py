@@ -12,7 +12,7 @@ Voxtral Realtime transcription API using the Mistral SDK's RealtimeConnection.
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -30,6 +30,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings, assert_given
 from pipecat.services.stt_latency import MISTRAL_TTFS_P99
 from pipecat.services.stt_service import STTService
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -132,7 +133,7 @@ class MistralSTTService(STTService):
         self._connection: RealtimeConnection | None = None
         self._receive_task = None
         self._accumulated_text = ""
-        self._detected_language: str | None = None
+        self._detected_language: Language | None = None
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -197,6 +198,13 @@ class MistralSTTService(STTService):
         if not self._connection or self._connection.is_closed:
             await self._connect()
 
+        # `_connect` swallows exceptions and may leave `_connection` unset;
+        # drop the audio chunk rather than crashing if reconnect failed.
+        if self._connection is None:
+            logger.warning(f"{self}: dropping audio chunk — Mistral STT not connected")
+            yield None
+            return
+
         await self._connection.send_audio(audio)
         yield None
 
@@ -247,8 +255,13 @@ class MistralSTTService(STTService):
 
     async def _receive_events(self):
         """Background task: iterate connection events and handle them."""
+        # `_connect` started this task only after assigning `_connection`,
+        # so it should not be None here; bail out defensively just in case.
+        connection = self._connection
+        if connection is None:
+            return
         try:
-            async for event in self._connection.events():
+            async for event in connection.events():
                 if isinstance(event, RealtimeTranscriptionSessionCreated):
                     logger.debug(f"{self}: Session created: {event.session}")
                     await self._call_event_handler("on_connected")
@@ -278,7 +291,9 @@ class MistralSTTService(STTService):
                     self._accumulated_text = ""
 
                 elif isinstance(event, TranscriptionStreamLanguage):
-                    self._detected_language = event.audio_language
+                    # Technically the SDK could emit a code we haven't added yet,
+                    # but Language is a StrEnum so downstream handles either.
+                    self._detected_language = cast("Language | None", event.audio_language)
 
                 elif isinstance(event, RealtimeTranscriptionError):
                     error_msg = event.error.message if event.error else "Unknown error"

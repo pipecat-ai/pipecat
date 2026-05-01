@@ -360,6 +360,9 @@ class TavusTransportClient:
         Args:
             frame: The message frame to send.
         """
+        if self._client is None:
+            return
+
         await self._client.send_message(frame)
 
     @property
@@ -416,6 +419,7 @@ class TavusTransportClient:
         """
         if not self._client:
             return False
+
         return await self._client.write_audio_frame(frame)
 
     async def register_audio_destination(self, destination: str, auto_silence: bool | None = True):

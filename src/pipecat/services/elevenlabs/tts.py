@@ -69,14 +69,17 @@ ELEVENLABS_MULTILINGUAL_MODELS = {
 }
 
 
-def language_to_elevenlabs_language(language: Language) -> str | None:
+def language_to_elevenlabs_language(language: Language) -> str:
     """Convert a Language enum to ElevenLabs language code.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding ElevenLabs language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AR: "ar",
@@ -905,6 +908,11 @@ class ElevenLabsTTSService(WebsocketTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
+            if self._websocket is None:
+                logger.warning(f"{self}: websocket unavailable after reconnect, skipping TTS")
+                yield ErrorFrame(error="websocket unavailable")
+                return
+
             try:
                 if not self.audio_context_available(context_id):
                     await self.create_audio_context(context_id)
@@ -915,7 +923,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
                     self._partial_word_start_time = 0.0
 
                     # Initialize context with voice settings and pronunciation dictionaries
-                    msg = {"text": " ", "context_id": context_id}
+                    msg: dict[str, Any] = {"text": " ", "context_id": context_id}
                     if self._voice_settings:
                         msg["voice_settings"] = self._voice_settings
                     if self._pronunciation_dictionary_locators:
@@ -1260,7 +1268,7 @@ class ElevenLabsHttpTTSService(TTSService):
         url = f"{self._base_url}/v1/text-to-speech/{self._settings.voice}/stream/with-timestamps"
 
         model_id = assert_given(self._settings.model)
-        payload: dict[str, str | dict[str, float | bool]] = {
+        payload: dict[str, Any] = {
             "text": text,
             "model_id": model_id,
         }

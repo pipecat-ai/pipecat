@@ -21,7 +21,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     Frame,
@@ -52,7 +52,7 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 try:
-    from google import genai
+    import google.genai as genai
     from google.api_core.exceptions import DeadlineExceeded
     from google.genai.types import (
         GenerateContentConfig,
@@ -124,7 +124,7 @@ class GoogleLLMSettings(LLMSettings):
         return instance
 
 
-class GoogleLLMService(LLMService):
+class GoogleLLMService(LLMService[GeminiLLMAdapter]):
     """Google AI (Gemini) LLM service implementation.
 
     This class implements inference with Google's AI models, translating internally
@@ -292,7 +292,7 @@ class GoogleLLMService(LLMService):
         tools = []
         effective_instruction = system_instruction or self._settings.system_instruction
         adapter = self.get_llm_adapter()
-        params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
+        params = adapter.get_llm_invocation_params(
             context, system_instruction=effective_instruction
         )
         messages = params["messages"]
@@ -387,7 +387,7 @@ class GoogleLLMService(LLMService):
 
     async def _stream_content(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
-        params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
+        params = adapter.get_llm_invocation_params(
             context, system_instruction=assert_given(self._settings.system_instruction)
         )
 

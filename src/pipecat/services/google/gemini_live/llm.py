@@ -111,7 +111,7 @@ MAX_CONSECUTIVE_FAILURES = 3
 CONNECTION_ESTABLISHED_THRESHOLD = 10.0  # seconds
 
 
-def language_to_gemini_language(language: Language) -> str | None:
+def language_to_gemini_language(language: Language) -> str:
     """Maps a Language enum value to a Gemini Live supported language code.
 
     Source:
@@ -121,7 +121,9 @@ def language_to_gemini_language(language: Language) -> str | None:
         language: The language enum value to convert.
 
     Returns:
-        The Gemini language code string, or None if the language is not supported.
+        The Gemini language code string. If ``language`` is not in the
+        verified mapping, falls back to the full language code string and logs
+        a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         # Arabic
@@ -351,7 +353,7 @@ class GeminiLiveLLMSettings(LLMSettings):
     proactivity: ProactivityConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class GeminiLiveLLMService(LLMService):
+class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     """Provides access to Google's Gemini Live API.
 
     This service enables real-time conversations with Gemini, supporting both
@@ -778,7 +780,7 @@ class GeminiLiveLLMService(LLMService):
             # init-provided values). Note that the determination of "effective"
             # system instruction is delegated to the adapter, which still
             # chooses the init-provided value if there is one.
-            adapter: GeminiLLMAdapter = self.get_llm_adapter()
+            adapter = self.get_llm_adapter()
             params = adapter.get_llm_invocation_params(
                 self._context, system_instruction=assert_given(self._system_instruction_from_init)
             )
@@ -840,7 +842,7 @@ class GeminiLiveLLMService(LLMService):
 
     async def _process_completed_function_calls(self, send_new_results: bool):
         # Check for set of completed function calls in the context
-        adapter: GeminiLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
         for message in messages:
             if message.parts:
@@ -1027,7 +1029,7 @@ class GeminiLiveLLMService(LLMService):
             # Add system instruction and tools to configuration, if provided.
             # These settings from the context take precedence over the ones
             # provided at initialization time.
-            adapter: GeminiLLMAdapter = self.get_llm_adapter()
+            adapter = self.get_llm_adapter()
             system_instruction = None
             tools = None
             if self._context:
@@ -1333,7 +1335,7 @@ class GeminiLiveLLMService(LLMService):
             self._run_llm_when_session_ready = True
             return
 
-        adapter: GeminiLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
         if not messages:
             # No messages to seed convo with, so we're ready for realtime input right away
@@ -1392,7 +1394,7 @@ class GeminiLiveLLMService(LLMService):
         # Create a throwaway context just for the purpose of getting messages
         # in the right format
         context = LLMContext(messages=messages_list)
-        adapter: GeminiLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         messages = adapter.get_llm_invocation_params(context).get("messages", [])
 
         if not messages:

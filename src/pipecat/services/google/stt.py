@@ -60,14 +60,17 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_google_stt_language(language: Language) -> str | None:
+def language_to_google_stt_language(language: Language) -> str:
     """Maps Language enum to Google Speech-to-Text V2 language codes.
 
     Args:
         language: Language enum value.
 
     Returns:
-        Optional[str]: Google STT language code or None if not supported.
+        The corresponding Google STT language code. If ``language`` is not
+        in the verified mapping, falls back to the full language code string
+        and logs a warning (via
+        ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         # Afrikaans
@@ -617,17 +620,20 @@ class GoogleSTTService(STTService):
         """
         return True
 
-    def language_to_service_language(self, language: Language | list[Language]) -> str | list[str]:
-        """Convert Language enum(s) to Google STT language code(s).
+    def language_to_service_language(self, language: Language) -> str:
+        """Convert a Language enum to a Google STT language code.
+
+        Narrower return type than the base class's ``str | None``: this
+        override always returns a string, falling back to ``"en-US"`` for
+        languages not in the verified mapping (see
+        :func:`language_to_google_stt_language`).
 
         Args:
-            language: Single Language enum or list of Language enums.
+            language: The Language enum value to convert.
 
         Returns:
-            str | List[str]: Google STT language code(s).
+            The Google STT language code.
         """
-        if isinstance(language, list):
-            return [language_to_google_stt_language(lang) or "en-US" for lang in language]
         return language_to_google_stt_language(language) or "en-US"
 
     def _get_language_codes(self) -> list[str]:
@@ -639,8 +645,9 @@ class GoogleSTTService(STTService):
         Returns:
             List[str]: Google STT language code strings.
         """
-        if self._settings.languages:
-            return [self.language_to_service_language(lang) for lang in self._settings.languages]
+        languages = assert_given(self._settings.languages)
+        if languages:
+            return [self.language_to_service_language(lang) for lang in languages]
         language_codes = assert_given(self._settings.language_codes)
         if language_codes:
             return list(language_codes)

@@ -16,10 +16,13 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
     Any,
+    Generic,
     Protocol,
+    cast,
 )
 
 from loguru import logger
+from typing_extensions import TypeVar
 from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State
 
@@ -116,7 +119,12 @@ class FunctionCallParams:
     function_name: str
     tool_call_id: str
     arguments: Mapping[str, Any]
-    llm: LLMService
+    # `LLMService[Any]` so any concrete subclass (regardless of how — or
+    # whether — it parameterizes the adapter type) can be assigned here.
+    # Plain `LLMService` would invoke the TypeVar default and pyright would
+    # treat it invariantly, rejecting `LLMService[XAdapter]` at the call
+    # sites that build FunctionCallParams.
+    llm: LLMService[Any]
     context: LLMContext
     result_callback: FunctionCallResultCallback
     app_resources: Any = None
@@ -190,7 +198,14 @@ class FunctionCallRunnerItem:
     group_id: str | None = None
 
 
-class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
+# `default=BaseLLMAdapter` (PEP 696) so that unparameterized subclasses
+# (e.g. third-party `class MyService(LLMService):` with no bracket) get
+# `TAdapter = BaseLLMAdapter` instead of `Unknown` at type-check time —
+# matching the pre-generic behavior of `get_llm_adapter()`.
+TAdapter = TypeVar("TAdapter", bound=BaseLLMAdapter, default=BaseLLMAdapter)
+
+
+class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]):
     """Base class for all LLM services.
 
     Handles function calling registration and execution with support for both
@@ -222,6 +237,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     """
 
     _settings: LLMSettings
+    _adapter: TAdapter
 
     # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.
     # However, subclasses should override this with a more specific adapter when necessary.
@@ -269,7 +285,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._filter_incomplete_user_turns: bool = False
         self._async_tool_cancellation_enabled: bool = False
         self._base_system_instruction: str | None = None
-        self._adapter = self.adapter_class()
+        # `adapter_class` is typed as `type[BaseLLMAdapter]` so subclasses
+        # don't need to spell out the generic parameter just to subclass
+        # (backward compatibility for 3rd-party providers outside this repo).
+        # Cast to TAdapter to keep `_adapter` and `get_llm_adapter()` precisely
+        # typed for callers that opt into `LLMService[XAdapter]`.
+        self._adapter = cast(TAdapter, self.adapter_class())
         self._functions: dict[str | None, FunctionCallRegistryItem] = {}
         self._function_call_tasks: dict[asyncio.Task | None, FunctionCallRunnerItem] = {}
         self._sequential_runner_task: asyncio.Task | None = None
@@ -280,7 +301,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._register_event_handler("on_function_calls_cancelled")
         self._register_event_handler("on_completion_timeout")
 
-    def get_llm_adapter(self) -> BaseLLMAdapter:
+    def get_llm_adapter(self) -> TAdapter:
         """Get the LLM adapter instance.
 
         Returns:
@@ -1112,7 +1133,7 @@ class WebsocketReconnectedError(Exception):
     pass
 
 
-class WebsocketLLMService(LLMService, WebsocketService):
+class WebsocketLLMService(LLMService[TAdapter], WebsocketService, Generic[TAdapter]):
     """Base class for websocket-based LLM services.
 
     Each LLM inference is a discrete request/response exchange: send one
@@ -1160,7 +1181,11 @@ class WebsocketLLMService(LLMService, WebsocketService):
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to parent classes.
         """
-        LLMService.__init__(self, **kwargs)
+        # pyright stumbles here because the TypeVar default makes
+        # `LLMService` resolve to `LLMService[BaseLLMAdapter]` invariantly,
+        # while `self` is `WebsocketLLMService[TAdapter]` for an arbitrary
+        # TAdapter. The runtime call is fine — generics are erased.
+        LLMService.__init__(self, **kwargs)  # pyright: ignore[reportArgumentType]
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
         self._register_event_handler("on_connection_error")
 
@@ -1240,6 +1265,11 @@ class WebsocketLLMService(LLMService, WebsocketService):
         Returns:
             The parsed JSON message as a dict.
         """
+        # Should never happen — `_ensure_connected` (which callers must invoke
+        # first) raises ConnectionError if it can't establish a websocket.
+        # Match that contract here.
+        if self._websocket is None:
+            raise ConnectionError(f"{self} _ws_recv called without a websocket")
         try:
             raw = await self._websocket.recv()
             return json.loads(raw)
