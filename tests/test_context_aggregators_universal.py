@@ -174,8 +174,16 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         assert context.messages[0]["content"] == "Hi there!"
 
     async def test_llm_messages_update_does_not_inject_turn_completion_into_context(self):
+        from pipecat.turns.user_turn_strategies import (
+            llm_completion_user_turn_stop_strategies,
+        )
+
         context = LLMContext()
-        params = LLMUserAggregatorParams(filter_incomplete_user_turns=True)
+        params = LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=llm_completion_user_turn_stop_strategies(),
+            ),
+        )
         pipeline = Pipeline([LLMUserAggregator(context, params=params)])
 
         new_messages = [
@@ -286,8 +294,8 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             UserStartedSpeakingFrame,
             InterruptionFrame,
             VADUserStoppedSpeakingFrame,
-            UserStoppedSpeakingFrame,
             LLMContextFrame,
+            UserStoppedSpeakingFrame,
         ]
         await run_test(
             pipeline,
@@ -557,6 +565,132 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=[SpeechControlParamsFrame],
         )
+
+    async def test_inference_triggered_event_fires_on_default_strategies(self):
+        """Default flow fires inference-triggered before stopped, both with the same strategy."""
+        from pipecat.frames.frames import UserTurnCompletedFrame  # noqa: F401
+
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ]
+                ),
+            ),
+        )
+
+        events: list[str] = []
+
+        @user_aggregator.event_handler("on_user_turn_inference_triggered")
+        async def on_inference_triggered(aggregator, strategy):
+            events.append("inference_triggered")
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_stopped(aggregator, strategy, message):
+            events.append(f"stopped:{message.content}")
+
+        pipeline = Pipeline([user_aggregator])
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hi!", user_id="", timestamp="now"),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        await run_test(pipeline, frames_to_send=frames_to_send)
+
+        self.assertEqual(events, ["inference_triggered", "stopped:Hi!"])
+
+    async def test_filter_incomplete_user_turns_emits_deprecation_warning(self):
+        """Setting the legacy flag emits a DeprecationWarning."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            LLMUserAggregatorParams(filter_incomplete_user_turns=True)
+            matched = [
+                x
+                for x in w
+                if issubclass(x.category, DeprecationWarning)
+                and "filter_incomplete_user_turns" in str(x.message)
+            ]
+            self.assertTrue(matched, "expected a DeprecationWarning")
+
+    async def test_filter_incomplete_user_turns_installs_strategy(self):
+        """Legacy flag wraps existing stops with deferred() and appends the LLM strategy."""
+        import warnings
+
+        from pipecat.turns.user_stop import (
+            DeferredUserTurnStopStrategy,
+            LLMTurnCompletionUserTurnStopStrategy,
+            SpeechTimeoutUserTurnStopStrategy,
+        )
+
+        existing = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+
+        context = LLMContext()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            params = LLMUserAggregatorParams(
+                filter_incomplete_user_turns=True,
+                user_turn_strategies=UserTurnStrategies(stop=[existing]),
+            )
+            aggregator = LLMUserAggregator(context, params=params)
+
+        stop_strategies = aggregator._params.user_turn_strategies.stop
+        self.assertEqual(len(stop_strategies), 2)
+        self.assertIsInstance(stop_strategies[0], DeferredUserTurnStopStrategy)
+        self.assertIs(stop_strategies[0].inner, existing)
+        self.assertIsInstance(stop_strategies[1], LLMTurnCompletionUserTurnStopStrategy)
+
+    async def test_llm_completion_strategy_finalizes_on_complete_marker(self):
+        """LLMTurnCompletionUserTurnStopStrategy finalizes only on UserTurnCompletedFrame(complete)."""
+        from pipecat.frames.frames import UserTurnCompletedFrame
+        from pipecat.turns.user_stop import LLMTurnCompletionUserTurnStopStrategy, deferred
+
+        gating = LLMTurnCompletionUserTurnStopStrategy()
+        upstream = deferred(
+            SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        )
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(stop=[upstream, gating]),
+            ),
+        )
+
+        events: list[str] = []
+
+        @user_aggregator.event_handler("on_user_turn_inference_triggered")
+        async def on_inference_triggered(aggregator, strategy):
+            events.append("inference_triggered")
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_stopped(aggregator, strategy, message):
+            events.append("stopped")
+
+        pipeline = Pipeline([user_aggregator])
+
+        # Drive the pipeline. Inference fires after the upstream
+        # strategy's timeout. Stop fires only when UserTurnCompletedFrame
+        # arrives (producer absence == "not yet complete").
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hi", user_id="", timestamp="now"),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+            # At this point inference_triggered should have fired but NOT stopped.
+            UserTurnCompletedFrame(),
+            SleepFrame(),
+        ]
+        await run_test(pipeline, frames_to_send=frames_to_send)
+
+        self.assertEqual(events, ["inference_triggered", "stopped"])
 
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):

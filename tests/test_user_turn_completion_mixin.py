@@ -8,7 +8,7 @@ import unittest
 import unittest.mock
 from unittest.mock import AsyncMock
 
-from pipecat.frames.frames import LLMFullResponseEndFrame, LLMTextFrame
+from pipecat.frames.frames import LLMFullResponseEndFrame, LLMTextFrame, UserTurnCompletedFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
@@ -44,21 +44,25 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         # Simulate LLM generating: "✓ Hello there!"
         await processor._push_turn_text(f"{USER_TURN_COMPLETE_MARKER} Hello there!")
 
-        # Should have 2 text frames: marker (skip_tts) and content (normal)
-        self.assertEqual(len(pushed_frames), 2)
+        # Two LLMTextFrames: marker (skip_tts) and content (normal). The
+        # broadcast also pushes UserTurnCompletedFrame upstream + downstream.
+        text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(len(text_frames), 2)
 
-        # First frame should be the marker with skip_tts=True
-        self.assertIsInstance(pushed_frames[0], LLMTextFrame)
-        self.assertEqual(pushed_frames[0].text, USER_TURN_COMPLETE_MARKER)
-        self.assertTrue(pushed_frames[0].skip_tts)
+        # First text frame should be the marker with skip_tts=True
+        self.assertEqual(text_frames[0].text, USER_TURN_COMPLETE_MARKER)
+        self.assertTrue(text_frames[0].skip_tts)
 
-        # Second frame should be the actual text without skip_tts
-        self.assertIsInstance(pushed_frames[1], LLMTextFrame)
-        self.assertEqual(pushed_frames[1].text, "Hello there!")
-        self.assertFalse(pushed_frames[1].skip_tts)
+        # Second text frame should be the actual text without skip_tts
+        self.assertEqual(text_frames[1].text, "Hello there!")
+        self.assertFalse(text_frames[1].skip_tts)
+
+        # UserTurnCompletedFrame broadcast in both directions.
+        completed = [f for f in pushed_frames if isinstance(f, UserTurnCompletedFrame)]
+        self.assertEqual(len(completed), 2)
 
     async def test_incomplete_short_marker_suppresses_text(self):
-        """Test that ○ marker suppresses text with skip_tts."""
+        """Test that ○ marker suppresses text with skip_tts and emits no completed frame."""
         processor = MockProcessor()
 
         pushed_frames = []
@@ -70,14 +74,17 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         await processor._push_turn_text(USER_TURN_INCOMPLETE_SHORT_MARKER)
 
-        # Should have 1 text frame with skip_tts=True
-        self.assertEqual(len(pushed_frames), 1)
-        self.assertIsInstance(pushed_frames[0], LLMTextFrame)
-        self.assertEqual(pushed_frames[0].text, USER_TURN_INCOMPLETE_SHORT_MARKER)
-        self.assertTrue(pushed_frames[0].skip_tts)
+        text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(len(text_frames), 1)
+        self.assertEqual(text_frames[0].text, USER_TURN_INCOMPLETE_SHORT_MARKER)
+        self.assertTrue(text_frames[0].skip_tts)
+
+        # Incomplete markers do not emit UserTurnCompletedFrame.
+        completed = [f for f in pushed_frames if isinstance(f, UserTurnCompletedFrame)]
+        self.assertEqual(len(completed), 0)
 
     async def test_incomplete_long_marker_suppresses_text(self):
-        """Test that ◐ marker suppresses text with skip_tts."""
+        """Test that ◐ marker suppresses text with skip_tts and emits no completed frame."""
         processor = MockProcessor()
 
         pushed_frames = []
@@ -89,11 +96,13 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
 
         await processor._push_turn_text(USER_TURN_INCOMPLETE_LONG_MARKER)
 
-        # Should have 1 text frame with skip_tts=True
-        self.assertEqual(len(pushed_frames), 1)
-        self.assertIsInstance(pushed_frames[0], LLMTextFrame)
-        self.assertEqual(pushed_frames[0].text, USER_TURN_INCOMPLETE_LONG_MARKER)
-        self.assertTrue(pushed_frames[0].skip_tts)
+        text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(len(text_frames), 1)
+        self.assertEqual(text_frames[0].text, USER_TURN_INCOMPLETE_LONG_MARKER)
+        self.assertTrue(text_frames[0].skip_tts)
+
+        completed = [f for f in pushed_frames if isinstance(f, UserTurnCompletedFrame)]
+        self.assertEqual(len(completed), 0)
 
     async def test_text_buffered_until_marker_found(self):
         """Test that text is buffered until a marker is detected."""
@@ -114,8 +123,10 @@ class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase
         # Now send the complete marker
         await processor._push_turn_text(f" {USER_TURN_COMPLETE_MARKER} How are you?")
 
-        # Now frames should be pushed
-        self.assertEqual(len(pushed_frames), 2)
+        # Two LLMTextFrames pushed (marker + content) plus the
+        # UserTurnCompletedFrame broadcast.
+        text_frames = [f for f in pushed_frames if isinstance(f, LLMTextFrame)]
+        self.assertEqual(len(text_frames), 2)
 
     async def test_turn_state_reset_after_llm_full_response_end_frame(self):
         """Test that _turn_complete_found is reset when LLMFullResponseEndFrame is pushed."""

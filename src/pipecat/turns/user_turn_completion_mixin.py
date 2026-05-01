@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMRunFrame,
     LLMTextFrame,
+    UserTurnCompletedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -279,7 +280,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             await asyncio.sleep(timeout)
 
             # Timeout expired - reset state before prompting LLM
-            logger.info(f"Incomplete {incomplete_type} timeout expired, prompting LLM")
+            logger.debug(f"Incomplete {incomplete_type} timeout expired, prompting LLM")
             await self._turn_reset()
             self._incomplete_timeout_task = None
             self._incomplete_type = None
@@ -402,6 +403,10 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             )
             self._turn_suppressed = True
 
+            # No UserTurnCompletedFrame is broadcast here: the turn is
+            # explicitly not complete. The re-prompt path is driven by
+            # this mixin's own timeout.
+
             # Push the marker with skip_tts=True so it's added to context (maintains
             # conversation continuity per prompt instructions) but not spoken by TTS
             frame = LLMTextFrame(self._turn_text_buffer)
@@ -415,6 +420,13 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         # Check for ✓ (COMPLETE) marker - user's turn was complete, respond normally
         if USER_TURN_COMPLETE_MARKER in self._turn_text_buffer:
             logger.debug(f"COMPLETE ({USER_TURN_COMPLETE_MARKER}) detected, pushing buffered text")
+
+            # Broadcast that the user turn is complete so a stop strategy
+            # gating finalization on this signal (e.g.
+            # LLMTurnCompletionUserTurnStopStrategy) can fire
+            # `on_user_turn_stopped`. Must fire before the LLMTextFrame so
+            # downstream consumers see the signal before the response.
+            await self.broadcast_frame(UserTurnCompletedFrame)
 
             # Split buffer at the marker to handle cases where marker and text
             # arrive in the same chunk (e.g., "✓ Hello!" from some LLMs)

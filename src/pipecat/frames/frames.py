@@ -971,6 +971,24 @@ class UserSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class UserTurnCompletedFrame(SystemFrame):
+    """Frame indicating that the user turn is semantically complete.
+
+    Emitted by any component that can judge conversational turn
+    completeness — for example an LLM with turn-completion markers, an
+    STT service with built-in turn detection, or a dedicated
+    end-of-turn classifier. Stop strategies that gate the
+    user-turn-stop event on an external completeness signal (e.g.
+    ``LLMTurnCompletionUserTurnStopStrategy``) consume this frame to
+    finalize the turn. Producers should emit this frame only when they
+    judge the turn complete; an absence of this frame means the turn is
+    not yet considered complete.
+    """
+
+    pass
+
+
+@dataclass
 class VADUserStartedSpeakingFrame(SystemFrame):
     """Frame emitted when VAD definitively detects user started speaking.
 

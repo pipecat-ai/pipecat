@@ -53,7 +53,6 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
-    LLMUpdateSettingsFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
@@ -78,7 +77,6 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     SummaryAppliedEvent,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
@@ -111,13 +109,18 @@ class LLMUserAggregatorParams:
         audio_idle_timeout: Timeout in seconds to force speech stop when
             no audio frames are received while in SPEAKING state (e.g. user mutes
             mic mid-speech). Set to 0 to disable. Defaults to 1.0.
-        filter_incomplete_user_turns: Whether to filter out incomplete user turns.
-            When enabled, the LLM outputs a turn completion marker at the start of
-            each response: ✓ (complete), ○ (incomplete short), or ◐ (incomplete long).
-            Incomplete responses are suppressed and timeouts trigger re-prompting.
+        filter_incomplete_user_turns: [DEPRECATED] Add
+            :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`
+            to ``user_turn_strategies.stop`` instead. When enabled, the LLM
+            outputs a turn-completion marker at the start of each response:
+            ✓ (complete), ○ (incomplete short), or ◐ (incomplete long).
+            Incomplete responses are suppressed and timeouts trigger
+            re-prompting.
         user_turn_completion_config: Configuration for turn completion behavior including
             custom instructions, timeouts, and prompts. Only used when
-            filter_incomplete_user_turns is True.
+            filter_incomplete_user_turns is True (deprecated path) — for the
+            new strategy-based API, pass the config directly to
+            ``LLMTurnCompletionUserTurnStopStrategy(config=...)``.
     """
 
     user_turn_strategies: UserTurnStrategies | None = None
@@ -128,6 +131,16 @@ class LLMUserAggregatorParams:
     audio_idle_timeout: float = 1.0
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: UserTurnCompletionConfig | None = None
+
+    def __post_init__(self):
+        if self.filter_incomplete_user_turns:
+            warnings.warn(
+                "LLMUserAggregatorParams.filter_incomplete_user_turns is deprecated. "
+                "Add LLMTurnCompletionUserTurnStopStrategy to "
+                "user_turn_strategies.stop instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass
@@ -441,13 +454,35 @@ class LLMUserAggregator(LLMContextAggregator):
         self._register_event_handler("on_user_turn_stopped")
         self._register_event_handler("on_user_turn_stop_timeout")
         self._register_event_handler("on_user_turn_idle")
+        self._register_event_handler("on_user_turn_inference_triggered")
         self._register_event_handler("on_user_mute_started")
         self._register_event_handler("on_user_mute_stopped")
 
         user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
 
+        # Deprecated path: translate filter_incomplete_user_turns into
+        # wrapping pre-existing stop strategies with deferred() and
+        # appending LLMTurnCompletionUserTurnStopStrategy. The
+        # DeprecationWarning is emitted in LLMUserAggregatorParams.__post_init__.
+        if self._params.filter_incomplete_user_turns:
+            from pipecat.turns.user_stop import (
+                LLMTurnCompletionUserTurnStopStrategy,
+                deferred,
+            )
+
+            existing_stop = list(user_turn_strategies.stop or [])
+            user_turn_strategies.stop = [deferred(s) for s in existing_stop] + [
+                LLMTurnCompletionUserTurnStopStrategy(
+                    config=self._params.user_turn_completion_config
+                )
+            ]
+
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
+        # Aggregation captured at inference-trigger time and surfaced again
+        # in `on_user_turn_stopped`. Set to None when no inference-triggered
+        # event has fired since the last finalization.
+        self._pending_user_turn_aggregation: str | None = None
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -457,6 +492,9 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
         self._user_turn_controller.add_event_handler(
             "on_user_turn_started", self._on_user_turn_started
+        )
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_inference_triggered", self._on_user_turn_inference_triggered
         )
         self._user_turn_controller.add_event_handler(
             "on_user_turn_stopped", self._on_user_turn_stopped
@@ -574,21 +612,6 @@ class LLMUserAggregator(LLMContextAggregator):
 
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
-
-        # Enable incomplete turn filtering on the LLM if configured
-        if self._params.filter_incomplete_user_turns:
-            # Get config or use defaults
-            config = self._params.user_turn_completion_config or UserTurnCompletionConfig()
-
-            # Enable the feature on the LLM with config
-            await self.push_frame(
-                LLMUpdateSettingsFrame(
-                    delta=LLMSettings(
-                        filter_incomplete_user_turns=True,
-                        user_turn_completion_config=config,
-                    )
-                )
-            )
 
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
@@ -729,6 +752,7 @@ class LLMUserAggregator(LLMContextAggregator):
         logger.debug(f"{self}: User started speaking (strategy: {strategy})")
 
         self._user_turn_start_timestamp = time_now_iso8601()
+        self._pending_user_turn_aggregation = None
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
@@ -739,6 +763,22 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.broadcast_interruption()
 
         await self._call_event_handler("on_user_turn_started", strategy)
+
+    async def _on_user_turn_inference_triggered(
+        self,
+        controller: UserTurnController,
+        strategy: BaseUserTurnStopStrategy,
+    ):
+        logger.debug(f"{self}: User turn inference triggered (strategy: {strategy})")
+
+        # Push aggregation now: this writes the user message to the context
+        # and pushes LLMContextFrame, which is what kicks LLM inference.
+        # `on_user_turn_stopped` later fires when the turn is semantically
+        # final and surfaces the aggregated message via the public event.
+        aggregation = await self.push_aggregation()
+        self._pending_user_turn_aggregation = aggregation
+
+        await self._call_event_handler("on_user_turn_inference_triggered", strategy)
 
     async def _on_user_turn_stopped(
         self,
@@ -774,15 +814,31 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         """Maybe emit user turn stopped event.
 
+        The aggregation has typically already been pushed at
+        inference-trigger time and is cached in
+        ``self._pending_user_turn_aggregation``. Any aggregation that has
+        accumulated since the last inference-trigger (e.g. transcriptions
+        that arrived between inference trigger and finalization) is flushed
+        here so end-of-turn content is never lost.
+
         Args:
             strategy: The strategy that triggered the turn stop.
             on_session_end: If True, only emit if there's unemitted content
                 (avoids duplicate events when session ends).
         """
         aggregation = await self.push_aggregation()
-        if not on_session_end or aggregation:
+        previous_aggregation = self._pending_user_turn_aggregation
+        self._pending_user_turn_aggregation = None
+
+        content = None
+        if aggregation and previous_aggregation:
+            content = f"{previous_aggregation} {aggregation}".strip()
+        else:
+            content = previous_aggregation or aggregation
+
+        if not on_session_end or content:
             message = UserTurnStoppedMessage(
-                content=aggregation, timestamp=self._user_turn_start_timestamp
+                content=content, timestamp=self._user_turn_start_timestamp
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             self._user_turn_start_timestamp = ""

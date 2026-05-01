@@ -45,7 +45,16 @@ class BaseUserTurnStopStrategy(BaseObject):
     Events triggered by strategies:
 
       - `on_push_frame`: Indicates the strategy wants to push a frame.
-      - `on_user_turn_stopped`: Signals that the user stopped speaking.
+      - `on_user_turn_inference_triggered`: Signals that enough evidence
+        exists to start LLM inference for the current user turn. In most
+        cases this fires together with `on_user_turn_stopped`. Strategies
+        that gate finalization on the LLM (e.g.
+        ``LLMTurnCompletionUserTurnStopStrategy``) fire only this event
+        upstream and a separate strategy fires `on_user_turn_stopped` once
+        the LLM confirms the turn is complete.
+      - `on_user_turn_stopped`: Signals that the user turn is semantically
+        final. Observers, transcript appenders, and UI indicators should
+        bind this event.
 
     """
 
@@ -64,6 +73,7 @@ class BaseUserTurnStopStrategy(BaseObject):
         self._task_manager: BaseTaskManager | None = None
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
+        self._register_event_handler("on_user_turn_inference_triggered", sync=True)
         self._register_event_handler("on_user_turn_stopped", sync=True)
 
     @property
@@ -123,7 +133,23 @@ class BaseUserTurnStopStrategy(BaseObject):
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
     async def trigger_user_turn_stopped(self):
-        """Trigger the `on_user_turn_stopped` event."""
+        """Fire both ``on_user_turn_inference_triggered`` and ``on_user_turn_stopped``.
+
+        Most strategies call this when they decide a turn has ended. To
+        defer finalization to another strategy (so this strategy fires
+        only the inference-triggered event), wrap this strategy with
+        :func:`~pipecat.turns.user_stop.deferred` instead of changing
+        the trigger call.
+        """
+        await self.trigger_user_turn_inference_triggered()
+        await self.trigger_user_turn_finalized()
+
+    async def trigger_user_turn_inference_triggered(self):
+        """Trigger only the `on_user_turn_inference_triggered` event."""
+        await self._call_event_handler("on_user_turn_inference_triggered")
+
+    async def trigger_user_turn_finalized(self):
+        """Trigger only the `on_user_turn_stopped` event."""
         await self._call_event_handler(
             "on_user_turn_stopped",
             UserTurnStoppedParams(enable_user_speaking_frames=self._enable_user_speaking_frames),

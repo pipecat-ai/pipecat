@@ -41,6 +41,10 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_turn_strategies import (
+    UserTurnStrategies,
+    llm_completion_user_turn_stop_strategies,
+)
 
 load_dotenv(override=True)
 
@@ -83,23 +87,31 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     context = LLMContext()
+    # `llm_completion_user_turn_stop_strategies()` pairs the default
+    # stop strategies with `LLMTurnCompletionUserTurnStopStrategy`:
+    # those strategies trigger LLM inference but the public
+    # `on_user_turn_stopped` event fires only when the LLM confirms ✓.
+    # The LLM marks each response with one of:
+    # ✓ = complete (respond normally)
+    # ○ = incomplete short (wait 5s, then prompt)
+    # ◐ = incomplete long (wait 15s, then prompt)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
-            # Enable turn completion filtering - the LLM will output:
-            # ✓ = complete (respond normally)
-            # ○ = incomplete short (wait 5s, then prompt)
-            # ◐ = incomplete long (wait 15s, then prompt)
-            filter_incomplete_user_turns=True,
-            # Optional: customize turn completion behavior
-            # turn_completion_config=TurnCompletionConfig(
-            #     incomplete_short_timeout=5.0,
-            #     incomplete_long_timeout=15.0,
-            #     incomplete_short_prompt="Custom prompt...",
-            #     incomplete_long_prompt="Custom prompt...",
-            #     instructions="Custom turn completion instructions...",
-            # ),
+            user_turn_strategies=UserTurnStrategies(
+                stop=llm_completion_user_turn_stop_strategies(),
+                # Optional: customize turn completion behavior
+                # stop=llm_completion_user_turn_stop_strategies(
+                #     config=UserTurnCompletionConfig(
+                #         incomplete_short_timeout=5.0,
+                #         incomplete_long_timeout=15.0,
+                #         incomplete_short_prompt="Custom prompt...",
+                #         incomplete_long_prompt="Custom prompt...",
+                #         instructions="Custom turn completion instructions...",
+                #     ),
+                # ),
+            ),
         ),
     )
 
