@@ -29,11 +29,6 @@ class FirstSpeechUserMuteStrategy(BaseUserMuteStrategy):
         self._bot_speaking = False
         self._first_speech_handled = False
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        self._bot_speaking = False
-        self._first_speech_handled = False
-
     async def process_frame(self, frame: Frame) -> bool:
         """Process an incoming frame.
 
