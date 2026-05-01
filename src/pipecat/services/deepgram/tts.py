@@ -12,7 +12,7 @@ for generating speech from text using various voice models.
 
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -44,9 +44,13 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class DeepgramTTSSettings(TTSSettings):
-    """Settings for DeepgramTTSService and DeepgramHttpTTSService."""
+    """Settings for DeepgramTTSService and DeepgramHttpTTSService.
 
-    pass
+    Parameters:
+        mip_opt_out: Opt out of Deepgram's Model Improvement Program.
+    """
+
+    mip_opt_out: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramTTSService(WebsocketTTSService):
@@ -102,6 +106,7 @@ class DeepgramTTSService(WebsocketTTSService):
             model=None,
             voice="aura-2-helena-en",
             language=None,
+            mip_opt_out=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -221,6 +226,10 @@ class DeepgramTTSService(WebsocketTTSService):
             params.append(f"model={self._settings.voice}")
             params.append(f"encoding={self._encoding}")
             params.append(f"sample_rate={self.sample_rate}")
+            if is_given(self._settings.mip_opt_out) and self._settings.mip_opt_out is not None:
+                params.append(
+                    f"mip_opt_out={'true' if self._settings.mip_opt_out else 'false'}"
+                )
 
             url = f"{self._base_url}/v1/speak?{'&'.join(params)}"
 
@@ -405,6 +414,7 @@ class DeepgramHttpTTSService(TTSService):
             model=None,
             voice="aura-2-helena-en",
             language=None,
+            mip_opt_out=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -464,6 +474,8 @@ class DeepgramHttpTTSService(TTSService):
             "sample_rate": self.sample_rate,
             "container": "none",
         }
+        if is_given(self._settings.mip_opt_out) and self._settings.mip_opt_out is not None:
+            params["mip_opt_out"] = "true" if self._settings.mip_opt_out else "false"
 
         payload = {
             "text": text,
