@@ -13,9 +13,7 @@ from pipecat.services.deepgram.tts import DeepgramHttpTTSService, DeepgramTTSSer
 
 
 def _make_ws_service(**settings_kwargs) -> DeepgramTTSService:
-    settings = (
-        DeepgramTTSService.Settings(**settings_kwargs) if settings_kwargs else None
-    )
+    settings = DeepgramTTSService.Settings(**settings_kwargs) if settings_kwargs else None
     service = DeepgramTTSService(api_key="test-key", settings=settings)
     # Bypass start() lifecycle: sample_rate is the only field _connect_websocket reads.
     service._sample_rate = 16000
@@ -76,9 +74,7 @@ async def test_ws_mip_opt_out_default_absent():
 @pytest.mark.asyncio
 async def test_ws_explicit_empty_settings_omits_mip_opt_out():
     """Explicit Settings() with no kwargs must not leak the NOT_GIVEN sentinel."""
-    service = DeepgramTTSService(
-        api_key="test-key", settings=DeepgramTTSService.Settings()
-    )
+    service = DeepgramTTSService(api_key="test-key", settings=DeepgramTTSService.Settings())
     # Bypass start() lifecycle: sample_rate is the only field _connect_websocket reads.
     service._sample_rate = 16000
 
@@ -114,13 +110,9 @@ class _FakeResponse:
 
 
 def _make_http_service(**settings_kwargs) -> DeepgramHttpTTSService:
-    settings = (
-        DeepgramHttpTTSService.Settings(**settings_kwargs) if settings_kwargs else None
-    )
+    settings = DeepgramHttpTTSService.Settings(**settings_kwargs) if settings_kwargs else None
     session = MagicMock(spec=aiohttp.ClientSession)
-    service = DeepgramHttpTTSService(
-        api_key="test-key", aiohttp_session=session, settings=settings
-    )
+    service = DeepgramHttpTTSService(api_key="test-key", aiohttp_session=session, settings=settings)
     # Bypass start() lifecycle: sample_rate is the only field run_tts reads.
     service._sample_rate = 16000
     service._session.post = MagicMock(return_value=_FakeResponse())

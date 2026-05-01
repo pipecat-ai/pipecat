@@ -227,9 +227,7 @@ class DeepgramTTSService(WebsocketTTSService):
             params.append(f"encoding={self._encoding}")
             params.append(f"sample_rate={self.sample_rate}")
             if is_given(self._settings.mip_opt_out) and self._settings.mip_opt_out is not None:
-                params.append(
-                    f"mip_opt_out={'true' if self._settings.mip_opt_out else 'false'}"
-                )
+                params.append(f"mip_opt_out={'true' if self._settings.mip_opt_out else 'false'}")
 
             url = f"{self._base_url}/v1/speak?{'&'.join(params)}"
 
