@@ -70,6 +70,7 @@ class DeepgramTTSService(WebsocketTTSService):
         base_url: str = "wss://api.deepgram.com",
         sample_rate: int | None = None,
         encoding: str = "linear16",
+        mip_opt_out: bool | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -85,6 +86,8 @@ class DeepgramTTSService(WebsocketTTSService):
             base_url: WebSocket base URL for Deepgram API. Defaults to "wss://api.deepgram.com".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             encoding: Audio encoding format. Defaults to "linear16". Must be one of SUPPORTED_ENCODINGS.
+            mip_opt_out: Opt out of the Deepgram Model Improvement Program. See
+                https://dpgr.am/deepgram-mip for pricing impacts before setting to True.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService class.
@@ -129,6 +132,7 @@ class DeepgramTTSService(WebsocketTTSService):
         self._api_key = api_key
         self._base_url = base_url
         self._encoding = encoding
+        self._mip_opt_out = mip_opt_out
 
         self._receive_task = None
 
@@ -221,6 +225,8 @@ class DeepgramTTSService(WebsocketTTSService):
             params.append(f"model={self._settings.voice}")
             params.append(f"encoding={self._encoding}")
             params.append(f"sample_rate={self.sample_rate}")
+            if self._mip_opt_out is not None:
+                params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")
 
             url = f"{self._base_url}/v1/speak?{'&'.join(params)}"
 
@@ -380,6 +386,7 @@ class DeepgramHttpTTSService(TTSService):
         base_url: str = "https://api.deepgram.com",
         sample_rate: int | None = None,
         encoding: str = "linear16",
+        mip_opt_out: bool | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -396,6 +403,8 @@ class DeepgramHttpTTSService(TTSService):
             base_url: Custom base URL for Deepgram API. Defaults to "https://api.deepgram.com".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             encoding: Audio encoding format. Defaults to "linear16".
+            mip_opt_out: Opt out of the Deepgram Model Improvement Program. See
+                https://dpgr.am/deepgram-mip for pricing impacts before setting to True.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
@@ -431,6 +440,7 @@ class DeepgramHttpTTSService(TTSService):
         self._session = aiohttp_session
         self._base_url = base_url
         self._encoding = encoding
+        self._mip_opt_out = mip_opt_out
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -464,6 +474,9 @@ class DeepgramHttpTTSService(TTSService):
             "sample_rate": self.sample_rate,
             "container": "none",
         }
+
+        if self._mip_opt_out is not None:
+            params["mip_opt_out"] = str(self._mip_opt_out).lower()
 
         payload = {
             "text": text,
