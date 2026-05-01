@@ -16,10 +16,12 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import traceback
+import warnings
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
+    TYPE_CHECKING,
     Any,
     Optional,
 )
@@ -47,6 +49,9 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.frame_queue import FrameQueue
 
+if TYPE_CHECKING:
+    from pipecat.pipeline.task import PipelineTask
+
 
 class FrameDirection(Enum):
     """Direction of frame flow in the processing pipeline.
@@ -71,14 +76,44 @@ class FrameProcessorSetup:
         clock: The clock instance for timing operations.
         task_manager: The task manager for handling async operations.
         observer: Optional observer for monitoring frame processing events.
-        tool_resources: Application-defined resources shared with processors
-            for this pipeline run.
+        pipeline_task: The :class:`PipelineTask` running this pipeline. Stored
+            on each processor as ``self.pipeline_task`` so processors can
+            reach task-scoped state (e.g. ``self.pipeline_task.app_resources``).
+        tool_resources: Deprecated. :class:`PipelineTask` continues to populate
+            this with ``app_resources`` so that custom :class:`FrameProcessor`
+            subclasses whose ``setup()`` overrides read ``setup.tool_resources``
+            keep working. New code should read
+            ``setup.pipeline_task.app_resources`` instead.
+
+            .. deprecated:: 1.2.0
+                Reading this attribute emits a ``DeprecationWarning``. Read
+                ``setup.pipeline_task.app_resources`` instead.
+                ``tool_resources`` will be removed in a future version.
     """
 
     clock: BaseClock
     task_manager: BaseTaskManager
     observer: BaseObserver | None = None
+    pipeline_task: PipelineTask | None = None
     tool_resources: Any = None
+
+    def __getattribute__(self, name: str) -> Any:
+        # Warn when user code reads the deprecated ``tool_resources`` field.
+        # Set is unaffected (goes through ``__setattr__``), so PipelineTask can
+        # populate it for backwards compat without tripping the warning.
+        if name == "tool_resources":
+            value = object.__getattribute__(self, "tool_resources")
+            if value is not None:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "`FrameProcessorSetup.tool_resources` is deprecated since 1.2.0; "
+                        "read `setup.pipeline_task.app_resources` instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+            return value
+        return object.__getattribute__(self, name)
 
 
 class FrameProcessorQueue(asyncio.PriorityQueue):
@@ -187,6 +222,9 @@ class FrameProcessor(BaseObject):
 
         # Observer
         self._observer: BaseObserver | None = None
+
+        # Pipeline Task
+        self._pipeline_task: PipelineTask | None = None
 
         # Other properties
         self._enable_metrics = False
@@ -344,6 +382,22 @@ class FrameProcessor(BaseObject):
             raise Exception(f"{self} TaskManager is still not initialized.")
         return self._task_manager
 
+    @property
+    def pipeline_task(self) -> PipelineTask | None:
+        """Get the :class:`PipelineTask` this processor is running in.
+
+        Provides access to task-scoped state from inside a processor — most
+        notably ``self.pipeline_task.app_resources`` for the application's
+        shared bag of resources (DB handles, clients, feature flags, etc.).
+
+        Returns:
+            The :class:`PipelineTask` instance that set up this processor,
+            or ``None`` if the processor has not yet been set up by one
+            (for example, before the task has started, or when the processor
+            was instantiated in isolation).
+        """
+        return self._pipeline_task
+
     def processors_with_metrics(self):
         """Return processors that can generate metrics.
 
@@ -495,6 +549,7 @@ class FrameProcessor(BaseObject):
         self._clock = setup.clock
         self._task_manager = setup.task_manager
         self._observer = setup.observer
+        self._pipeline_task = setup.pipeline_task
 
         # Create processing tasks.
         self.__create_input_task()

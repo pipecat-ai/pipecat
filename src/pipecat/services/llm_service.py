@@ -51,7 +51,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import LLMSettings, assert_given
 from pipecat.services.websocket_service import WebsocketService
@@ -107,9 +107,10 @@ class FunctionCallParams:
             For async function calls (``cancel_on_interruption=False``), call
             it with ``properties=FunctionCallResultProperties(is_final=False)``
             to push intermediate updates before the final result.
-        tool_resources: Application-defined bag of resources (DB handles, clients,
-            state, etc.) shared across tool calls for the pipeline session. Set
-            via ``PipelineTask(..., tool_resources=...)`` and passed by reference.
+        app_resources: The application-defined resources passed to
+            ``PipelineTask(..., app_resources=...)``. Same object — passed by
+            reference, not a copy. Use it to share DB handles, clients, state,
+            feature flags, etc. across all of a session's tool handlers.
     """
 
     function_name: str
@@ -118,7 +119,25 @@ class FunctionCallParams:
     llm: LLMService
     context: LLMContext
     result_callback: FunctionCallResultCallback
-    tool_resources: Any = None
+    app_resources: Any = None
+
+    @property
+    def tool_resources(self) -> Any:
+        """Deprecated alias for :attr:`app_resources`.
+
+        .. deprecated:: 1.2.0
+            Use :attr:`app_resources` instead. ``tool_resources`` will be
+            removed in a future version.
+        """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`FunctionCallParams.tool_resources` is deprecated since 1.2.0, "
+                "use `app_resources` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return self.app_resources
 
 
 @dataclass
@@ -256,7 +275,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._sequential_runner_task: asyncio.Task | None = None
         self._skip_tts: bool | None = None
         self._summary_task: asyncio.Task | None = None
-        self._tool_resources: Any = None
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_function_calls_cancelled")
@@ -302,15 +320,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             The LLM's response as a string, or None if no response is generated.
         """
         raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Set up the LLM service.
-
-        Args:
-            setup: The frame processor setup data.
-        """
-        await super().setup(setup)
-        self._tool_resources = setup.tool_resources
 
     async def start(self, frame: StartFrame):
         """Start the LLM service.
@@ -882,6 +891,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         # it starts would leave the coroutine in a "never awaited" state.
         await asyncio.sleep(0)
 
+        # _pipeline_task may be unset when the service is driven without a PipelineTask.
+        app_resources = self._pipeline_task.app_resources if self._pipeline_task else None
+
         try:
             if isinstance(item.handler, DirectFunctionWrapper):
                 # Handler is a DirectFunctionWrapper
@@ -894,7 +906,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                         llm=self,
                         context=runner_item.context,
                         result_callback=function_call_result_callback,
-                        tool_resources=self._tool_resources,
+                        app_resources=app_resources,
                     ),
                 )
             else:
@@ -906,7 +918,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     llm=self,
                     context=runner_item.context,
                     result_callback=function_call_result_callback,
-                    tool_resources=self._tool_resources,
+                    app_resources=app_resources,
                 )
                 await item.handler(params)
         except Exception as e:
