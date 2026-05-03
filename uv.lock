@@ -4445,7 +4445,7 @@ requires-dist = [
     { name = "aic-sdk", marker = "extra == 'aic'", specifier = "~=2.2.0" },
     { name = "aioboto3", marker = "extra == 'aws'", specifier = ">=15.5.0,<16" },
     { name = "aiofiles", specifier = ">=24.1.0,<27" },
-    { name = "aiohttp", specifier = ">=3.11.12,<4" },
+    { name = "aiohttp", specifier = ">=3.11.13,<4" },
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.14.0,<2" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.49.0,<1" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.1" },
