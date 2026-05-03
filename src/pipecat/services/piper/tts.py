@@ -212,6 +212,7 @@ class PiperHttpTTSService(TTSService):
         *,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
+        speed: float = 1.0,
         voice_id: str | None = None,
         settings: Settings | None = None,
         **kwargs,
