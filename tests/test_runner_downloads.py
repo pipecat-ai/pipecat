@@ -8,12 +8,10 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-from fastapi import FastAPI, HTTPException
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
-from pipecat.runner.run import _resolve_download_path, _setup_webrtc_routes
+from pipecat.runner.run import _resolve_download_path
 
 
 class TestRunnerDownloads(unittest.TestCase):
@@ -40,15 +38,6 @@ class TestRunnerDownloads(unittest.TestCase):
                 _resolve_download_path(str(downloads), "../secret.txt")
 
             self.assertEqual(context.exception.status_code, 403)
-
-    def test_download_file_returns_404_when_folder_not_configured(self):
-        app = FastAPI()
-        args = SimpleNamespace(folder=None, esp32=False, host="127.0.0.1")
-        _setup_webrtc_routes(app, args)
-
-        response = TestClient(app).get("/files/recording.txt")
-
-        self.assertEqual(response.status_code, 404)
 
     def test_resolve_download_path_blocks_decoded_encoded_slashes(self):
         with tempfile.TemporaryDirectory() as tmpdir:

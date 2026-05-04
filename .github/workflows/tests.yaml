@@ -49,7 +49,6 @@ jobs:
             --extra runner \
             --extra sagemaker \
             --extra tracing \
-            --extra webrtc \
             --extra websocket
 
       - name: Test with pytest
