@@ -1266,7 +1266,6 @@ class TTSService(AIService):
 
     async def _emit_overflow_word(
         self,
-        active: _AggregatedFrameSlot,
         raw_overflow_word: str | None,
         pts: int,
     ):
@@ -1283,16 +1282,14 @@ class TTSService(AIService):
             raw_overflow_word: Raw (un-normalized) overflow suffix from the tracker.
             pts: PTS to assign to the overflow frame.
         """
-        overflow = active.tracker.get_overflow()
-        if overflow is None:
+        if raw_overflow_word is None:
             return
         next_active = self._get_active_aggregated_frame_slot()
         if not next_active or not next_active.tracker:
             return
-        overflow_word = raw_overflow_word if raw_overflow_word is not None else overflow
-        overflow_complete = next_active.tracker.add_word_and_check_complete(overflow_word)
+        overflow_complete = next_active.tracker.add_word_and_check_complete(raw_overflow_word)
         overflow_frame = self._build_word_frame(
-            overflow_word,
+            raw_overflow_word,
             pts,
             next_active.context_id,
             includes_inter_frame_spaces=None,
@@ -1337,12 +1334,12 @@ class TTSService(AIService):
                     is_complete = active.tracker.add_word_and_check_complete(
                         word, includes_inter_frame_spaces=includes_inter_frame_spaces
                     )
-                    raw_overflow_word = active.tracker.get_raw_overflow_word()
+                    raw_overflow_word = active.tracker.get_overflow_word()
 
                 # Ask the tracker for the portion of the word that belongs to this
                 # slot: the full word, the prefix before a frame boundary.
                 frame_text = (
-                    active.tracker.get_frame_word() if (active and active.tracker) else word
+                    active.tracker.get_word_for_frame() if (active and active.tracker) else word
                 )
                 raw_text = (
                     active.tracker.get_raw_consumed() if (active and active.tracker) else None
@@ -1362,7 +1359,7 @@ class TTSService(AIService):
                     await self._flush_aggregated_text_frame_sequence(last_word_pts=pts)
                     if raw_overflow_word:
                         logger.debug(f"{self} Emitting overflow word '{raw_overflow_word}'")
-                        await self._emit_overflow_word(active, raw_overflow_word, pts)
+                        await self._emit_overflow_word(raw_overflow_word, pts)
 
     #
     # Audio context methods (active when using websocket-based TTS with context management)

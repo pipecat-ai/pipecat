@@ -38,10 +38,9 @@ class WordCompletionTracker:
     Overflow handling: TTS providers sometimes return a single word token that
     spans the boundary between two AggregatedTextFrames (e.g. ``"1111</spell>And"``
     when one frame ends with ``1111</card>`` and the next begins with ``And``). The
-    tracker detects this, exposes the normalized overflow via ``get_overflow()``
-    and the raw word suffix via ``get_raw_overflow_word()``, so callers can feed the
-    remainder into the next frame's tracker and emit a correctly-attributed
-    TTSTextFrame for each part.
+    tracker detects this and exposes the raw overflow suffix via ``get_overflow_word()``,
+    so callers can feed the remainder into the next frame's tracker and emit a
+    correctly-attributed TTSTextFrame for each part.
 
     Example::
 
@@ -84,7 +83,6 @@ class WordCompletionTracker:
         self._raw_text = raw_text
         self._raw_pos = 0
 
-        self._overflow: str | None = None
         self._raw_overflow_word: str | None = None
         self._raw_consumed: str | None = None
         self._frame_word: str | None = None
@@ -173,7 +171,6 @@ class WordCompletionTracker:
         prev_len = len(self._received)
         expected_len = len(self._expected)
 
-        self._overflow = None
         self._raw_overflow_word = None
         self._raw_consumed = None
         self._frame_word = None
@@ -203,7 +200,6 @@ class WordCompletionTracker:
                     )
                     self._raw_consumed = None
             self._received = self._expected  # force-complete
-            self._overflow = normalized
             self._raw_overflow_word = word
             return True
 
@@ -221,7 +217,6 @@ class WordCompletionTracker:
             #     to build a TTSTextFrame attributed to the next AggregatedTextFrame.
             split_pos = self._advance_by_alnums(word, 0, chars_for_frame)
             self._frame_word = word[:split_pos]
-            self._overflow = normalized[expected_len - prev_len :]
             self._raw_overflow_word = word[split_pos:]
         else:
             # Word fits entirely in this frame.
@@ -302,7 +297,7 @@ class WordCompletionTracker:
         check_len = min(len(normalized), len(remaining))
         return remaining.startswith(normalized[:check_len])
 
-    def get_frame_word(self) -> str | None:
+    def get_word_for_frame(self) -> str | None:
         """Return the portion of the last word that belongs to this frame.
 
         - Normal word (no overflow): the full word.
@@ -318,20 +313,12 @@ class WordCompletionTracker:
             else self._frame_word
         )
 
-    def get_overflow(self) -> str | None:
-        """Return normalized overflow from the last added word, if any."""
-        return (
-            self._overflow.strip()
-            if self._overflow and not self._includes_inter_frame_spaces
-            else self._overflow
-        )
-
-    def get_raw_overflow_word(self) -> str | None:
+    def get_overflow_word(self) -> str | None:
         """Return the raw suffix of the last word that overflows into the next frame.
 
-        Unlike ``get_overflow()`` (which is normalized), this preserves the original
-        casing and any non-alphanumeric characters so the overflow TTSTextFrame has
-        natural word text.
+        Preserves the original casing and any non-alphanumeric characters so the
+        overflow TTSTextFrame has natural word text. Returns None when there is no
+        overflow (the word fit entirely within this frame).
         """
         return (
             self._raw_overflow_word.strip()
@@ -349,6 +336,25 @@ class WordCompletionTracker:
             if self._raw_consumed and not self._includes_inter_frame_spaces
             else self._raw_consumed
         )
+
+    def get_accumulated_text(self) -> str:
+        """Return all consumed text from expected_text up to the current cursor position.
+
+        Unlike ``get_word_for_frame()`` (which reflects only the last word), this returns
+        everything that has been consumed since construction or the last ``reset()``.
+        """
+        return self._expected_raw_text[: self._expected_raw_pos]
+
+    def get_accumulated_raw_text(self) -> str | None:
+        """Return all consumed text from raw_text up to the current cursor position.
+
+        Unlike ``get_raw_consumed()`` (which reflects only the last word), this returns
+        everything that has been consumed since construction or the last ``reset()``.
+        Returns None if no raw_text was provided at construction time.
+        """
+        if self._raw_text is None:
+            return None
+        return self._raw_text[: self._raw_pos]
 
     def get_remaining_text(self) -> str:
         """Return the unspoken portion of expected_text, stripped of leading/trailing whitespace.
@@ -381,7 +387,6 @@ class WordCompletionTracker:
         self._received = ""
         self._expected_raw_pos = 0
         self._raw_pos = 0
-        self._overflow = None
         self._raw_overflow_word = None
         self._raw_consumed = None
         self._frame_word = None
