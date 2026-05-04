@@ -927,7 +927,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_end_or_cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMAssistantPushAggregationFrame):
-            await self.push_aggregation()
+            await self._handle_push_aggregation()
         elif isinstance(frame, LLMFullResponseStartFrame):
             await self._handle_llm_start(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -1307,6 +1307,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self._trigger_assistant_turn_started()
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
+        await self._trigger_assistant_turn_stopped()
+
+    async def _handle_push_aggregation(self):
+        # LLMAssistantPushAggregationFrame is emitted by TTSService at the end
+        # of a TTSSpeakFrame-driven utterance (no surrounding LLM response
+        # cycle), so no LLMFullResponseStartFrame ever set the turn-start
+        # timestamp. Open a turn now so on_assistant_turn_stopped fires for the
+        # greeting text the same way it did before LLMAssistantPushAggregationFrame
+        # was introduced.
+        if not self._assistant_turn_start_timestamp:
+            await self._trigger_assistant_turn_started()
         await self._trigger_assistant_turn_stopped()
 
     async def _handle_text(self, frame: TextFrame):

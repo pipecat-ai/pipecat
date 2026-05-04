@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     AggregatedTextFrame,
     DataFrame,
     Frame,
+    LLMAssistantPushAggregationFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     TextFrame,
@@ -655,6 +656,56 @@ async def test_websocket_word_timestamps_punctuation_tokens():
         "Verbatim tokens must not be modified"
     )
     assert all(f.includes_inter_frame_spaces is True for f in text_frames)
+
+
+@pytest.mark.asyncio
+async def test_push_aggregation_pts_after_last_word():
+    """LLMAssistantPushAggregationFrame must carry PTS > last TTSTextFrame PTS.
+
+    Without a PTS the aggregation frame routes through the transport's audio
+    (sync) queue while word-level TTSTextFrames go through the clock queue, so
+    it can overtake the last words and leave the trailing text orphaned in the
+    aggregator buffer (issue #4264).
+    """
+    word_times = [("hello", 0.0), ("world", 0.2)]
+    tts = _MockWordTimestampHttpTTSService(word_times=word_times)
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=True)],
+    )
+    down = frames_received[0]
+    text_frames = [f for f in down if isinstance(f, TTSTextFrame)]
+    push_frames = [f for f in down if isinstance(f, LLMAssistantPushAggregationFrame)]
+
+    assert len(push_frames) == 1, (
+        f"Expected exactly one LLMAssistantPushAggregationFrame, got {len(push_frames)}"
+    )
+    assert text_frames, "Expected TTSTextFrames to be emitted"
+
+    last_word_pts = max(f.pts for f in text_frames)
+    assert push_frames[0].pts is not None and push_frames[0].pts > last_word_pts, (
+        f"LLMAssistantPushAggregationFrame.pts ({push_frames[0].pts}) must exceed "
+        f"the last TTSTextFrame PTS ({last_word_pts}) so it can't overtake it in the "
+        f"transport's clock queue"
+    )
+
+
+@pytest.mark.asyncio
+async def test_push_aggregation_no_pts_without_word_timestamps():
+    """Aggregation frame stays unstamped when no word timestamps were emitted.
+
+    Without word frames, both the aggregation frame and any other downstream
+    frames travel through the transport's sync queue in order, so adding a PTS
+    would needlessly route it through the clock queue.
+    """
+    tts = MockHttpTTSService()
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[TTSSpeakFrame(text="hello world", append_to_context=True)],
+    )
+    push_frames = [f for f in frames_received[0] if isinstance(f, LLMAssistantPushAggregationFrame)]
+    assert len(push_frames) == 1
+    assert push_frames[0].pts is None or push_frames[0].pts == 0
 
 
 if __name__ == "__main__":
