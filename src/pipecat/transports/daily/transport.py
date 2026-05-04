@@ -611,6 +611,9 @@ class DailyTransportClient(EventHandler):
         Returns:
             error: An error description or None.
         """
+        if not self._client:
+            return None
+
         if not self._joined:
             self._join_message_queue.append(frame)
             return None
