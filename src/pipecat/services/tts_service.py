@@ -1281,6 +1281,7 @@ class TTSService(AIService):
         self,
         raw_overflow_word: str | None,
         pts: int,
+        includes_inter_frame_spaces: bool | None = None,
     ):
         """Emit a TTSTextFrame for the overflow portion of a word that straddles two slots.
 
@@ -1294,6 +1295,7 @@ class TTSService(AIService):
             active: The just-completed slot whose tracker produced the overflow.
             raw_overflow_word: Raw (un-normalized) overflow suffix from the tracker.
             pts: PTS to assign to the overflow frame.
+            includes_inter_frame_spaces: When True, the tokens already embed inter-word
         """
         if raw_overflow_word is None:
             return
@@ -1305,7 +1307,7 @@ class TTSService(AIService):
             raw_overflow_word,
             pts,
             next_active.context_id,
-            includes_inter_frame_spaces=None,
+            includes_inter_frame_spaces=includes_inter_frame_spaces,
             raw_text=next_active.tracker.get_llm_consumed(),
         )
         await self.push_frame(overflow_frame)
