@@ -248,32 +248,37 @@ class ElevenLabsHttpTTSSettings(TTSSettings):
     )
 
 
-def _strip_leading_space(
-    alignment: Mapping[str, Any], keys: tuple[str, str, str]
+def _strip_utterance_leading_spaces(
+    alignment: Mapping[str, Any], keys: tuple[str, str, str], should_strip: bool
 ) -> Mapping[str, Any]:
-    """Return alignment with a prepended space char removed, if present.
+    """Return alignment with utterance-leading space chars removed, if requested.
 
-    Normalized alignment chunks from ElevenLabs begin with a leading space that
-    marks the prosody/chunk boundary. Left in place, it would prematurely
-    terminate a partial word carried over from the previous chunk. Stripping it
-    is lossless for timing: the dropped space's duration is still reflected in
-    the next char's `charStartTimesMs`, and the chunk's last-element values
-    (used to advance cumulative time) are untouched.
+    Normalized alignment chunks from ElevenLabs often begin with a space. On the
+    first chunk of an utterance, that space is leading whitespace and should not
+    become a text token. On subsequent chunks, however, a leading space can be a
+    real inter-word separator (Flash models commonly split sentences this way),
+    so it must be preserved for ``calculate_word_times`` to flush any partial
+    word carried over from the previous chunk.
 
     Args:
         alignment: Alignment dict from the API.
         keys: Tuple of (chars_key, start_times_key, durations_or_end_times_key)
-            naming the three parallel arrays — these differ between the
+            naming the three parallel arrays - these differ between the
             WebSocket and HTTP response schemas.
+        should_strip: Whether this is still utterance-leading alignment data.
     """
     chars_key, starts_key, tail_key = keys
     chars = alignment.get(chars_key) or []
-    if chars and chars[0] == " ":
-        return {
-            chars_key: chars[1:],
-            starts_key: alignment.get(starts_key, [])[1:],
-            tail_key: alignment.get(tail_key, [])[1:],
-        }
+    if should_strip and chars and chars[0] == " ":
+        strip_count = 0
+        while strip_count < len(chars) and chars[strip_count] == " ":
+            strip_count += 1
+
+        stripped = dict(alignment)
+        stripped[chars_key] = chars[strip_count:]
+        stripped[starts_key] = alignment.get(starts_key, [])[strip_count:]
+        stripped[tail_key] = alignment.get(tail_key, [])[strip_count:]
+        return stripped
     return alignment
 
 
@@ -548,6 +553,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         # Track partial words that span across alignment chunks
         self._partial_word = ""
         self._partial_word_start_time = 0.0
+        self._alignment_started_context_ids: set[str | None] = set()
 
         # Context management for v1 multi API
         self._receive_task = None
@@ -773,6 +779,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
         self._cumulative_time = 0.0
         self._partial_word = ""
         self._partial_word_start_time = 0.0
+        self._alignment_started_context_ids.discard(context_id)
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Close the ElevenLabs context when the bot is interrupted."""
@@ -827,10 +834,12 @@ class ElevenLabsTTSService(WebsocketTTSService):
                 # alignment (the input text), so word timestamps stay accurate
                 # when a pronunciation dictionary or text normalization rewrites
                 # the input.
-                alignment = _strip_leading_space(
+                alignment = _strip_utterance_leading_spaces(
                     msg["normalizedAlignment"],
                     ("chars", "charStartTimesMs", "charDurationsMs"),
+                    received_ctx_id not in self._alignment_started_context_ids,
                 )
+                self._alignment_started_context_ids.add(received_ctx_id)
                 word_times, self._partial_word, self._partial_word_start_time = (
                     calculate_word_times(
                         alignment,
@@ -1326,6 +1335,7 @@ class ElevenLabsHttpTTSService(TTSService):
 
                 # Track the duration of this utterance based on the last character's end time
                 utterance_duration = 0
+                alignment_started = False
                 async for line in response.content:
                     line_str = line.decode("utf-8").strip()
                     if not line_str:
@@ -1348,14 +1358,16 @@ class ElevenLabsHttpTTSService(TTSService):
                         # accurate when a pronunciation dictionary or text
                         # normalization rewrites the input.
                         if data and data.get("normalized_alignment"):
-                            alignment = _strip_leading_space(
+                            alignment = _strip_utterance_leading_spaces(
                                 data["normalized_alignment"],
                                 (
                                     "characters",
                                     "character_start_times_seconds",
                                     "character_end_times_seconds",
                                 ),
+                                not alignment_started,
                             )
+                            alignment_started = True
                             # Get end time of the last character in this chunk
                             char_end_times = alignment.get("character_end_times_seconds", [])
                             if char_end_times:
