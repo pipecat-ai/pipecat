@@ -1266,5 +1266,124 @@ class TestWordCompletionTrackerRemainingText(unittest.TestCase):
         self.assertIsNone(tracker.get_remaining_llm_text())
 
 
+class TestWordCompletionTrackerAccumulatedText(unittest.TestCase):
+    """Tests for get_accumulated_tts_text() and get_accumulated_llm_text().
+
+    These methods return the prefix of tts_text / llm_text that has already been
+    consumed by word-timestamp events — the complement of get_remaining_tts_text()
+    and get_remaining_llm_text() which return the unspoken suffix.
+    """
+
+    # ------------------------------------------------------------------ #
+    # get_accumulated_tts_text                                              #
+    # ------------------------------------------------------------------ #
+
+    def test_accumulated_tts_text_before_any_words(self):
+        """Before any words arrive, nothing has been consumed."""
+        tracker = WordCompletionTracker("hello world")
+        self.assertEqual(tracker.get_accumulated_tts_text(), "")
+
+    def test_accumulated_tts_text_after_partial_consumption(self):
+        """After one word the accumulated prefix covers exactly that word."""
+        tracker = WordCompletionTracker("hello world")
+        tracker.add_word_and_check_complete("hello")
+        self.assertEqual(tracker.get_accumulated_tts_text(), "hello")
+
+    def test_accumulated_tts_text_after_completion(self):
+        """After all words, the entire tts_text is accumulated."""
+        tracker = WordCompletionTracker("hello world")
+        tracker.add_word_and_check_complete("hello")
+        tracker.add_word_and_check_complete("world")
+        self.assertEqual(tracker.get_accumulated_tts_text(), "hello world")
+
+    def test_accumulated_tts_text_includes_trailing_punctuation(self):
+        """The TTS cursor consumes trailing punctuation, so it appears in the accumulated span."""
+        tracker = WordCompletionTracker("Hello, world!")
+        tracker.add_word_and_check_complete("Hello,")
+        self.assertEqual(tracker.get_accumulated_tts_text(), "Hello,")
+
+    def test_accumulated_tts_text_complements_remaining(self):
+        """accumulated + stripped-whitespace + remaining reconstructs tts_text."""
+        tts_text = "hello world"
+        tracker = WordCompletionTracker(tts_text)
+        tracker.add_word_and_check_complete("hello")
+        accumulated = tracker.get_accumulated_tts_text()
+        remaining = tracker.get_remaining_tts_text()
+        # The space between tokens is stripped from remaining, so re-join with one.
+        self.assertEqual(accumulated + " " + remaining, tts_text)
+
+    def test_accumulated_tts_text_after_force_complete(self):
+        """Force-complete does not advance the TTS cursor; accumulated stays at the
+        point reached before the mismatched word arrived."""
+        tracker = WordCompletionTracker("number is")
+        tracker.add_word_and_check_complete("number")
+        tracker.add_word_and_check_complete("4111")  # force-complete
+        self.assertEqual(tracker.get_accumulated_tts_text(), "number")
+
+    def test_accumulated_tts_text_resets_after_reset(self):
+        """reset() resets the TTS cursor; accumulated returns empty string again."""
+        tracker = WordCompletionTracker("hello world")
+        tracker.add_word_and_check_complete("hello")
+        tracker.add_word_and_check_complete("world")
+        self.assertEqual(tracker.get_accumulated_tts_text(), "hello world")
+        tracker.reset()
+        self.assertEqual(tracker.get_accumulated_tts_text(), "")
+
+    # ------------------------------------------------------------------ #
+    # get_accumulated_llm_text                                              #
+    # ------------------------------------------------------------------ #
+
+    def test_accumulated_llm_text_none_when_no_llm_text(self):
+        """Without llm_text, get_accumulated_llm_text always returns None."""
+        tracker = WordCompletionTracker("hello world")
+        self.assertIsNone(tracker.get_accumulated_llm_text())
+        tracker.add_word_and_check_complete("hello")
+        self.assertIsNone(tracker.get_accumulated_llm_text())
+
+    def test_accumulated_llm_text_before_any_words(self):
+        """Before any words, nothing has been consumed from llm_text."""
+        tracker = WordCompletionTracker("4111 1111", llm_text="<card>4111 1111</card>")
+        self.assertEqual(tracker.get_accumulated_llm_text(), "")
+
+    def test_accumulated_llm_text_after_partial_consumption(self):
+        """After one word, the consumed prefix includes the opening tag and first word."""
+        tracker = WordCompletionTracker("4111 1111", llm_text="<card>4111 1111</card>")
+        tracker.add_word_and_check_complete("4111")
+        self.assertEqual(tracker.get_accumulated_llm_text(), "<card>4111")
+
+    def test_accumulated_llm_text_after_completion(self):
+        """After all words, the entire llm_text is accumulated (closing tag included)."""
+        tracker = WordCompletionTracker("4111 1111", llm_text="<card>4111 1111</card>")
+        tracker.add_word_and_check_complete("4111")
+        tracker.add_word_and_check_complete("1111")
+        self.assertEqual(tracker.get_accumulated_llm_text(), "<card>4111 1111</card>")
+
+    def test_accumulated_llm_text_complements_remaining(self):
+        """accumulated + stripped-whitespace + remaining reconstructs llm_text."""
+        llm = "<card>4111 1111</card>"
+        tracker = WordCompletionTracker("4111 1111", llm_text=llm)
+        tracker.add_word_and_check_complete("4111")
+        accumulated = tracker.get_accumulated_llm_text()
+        remaining = tracker.get_remaining_llm_text()
+        self.assertEqual(accumulated.rstrip() + " " + remaining, llm)
+
+    def test_accumulated_llm_text_after_force_complete(self):
+        """Force-complete sweeps all remaining llm_text; accumulated covers the full string."""
+        llm = "<card>4111 1111 1111 1111</card>"
+        tracker = WordCompletionTracker("4111 1111 1111 1111", llm_text=llm)
+        tracker.add_word_and_check_complete("4111")
+        tracker.add_word_and_check_complete("WRONG")  # force-complete sweeps remaining llm_text
+        self.assertEqual(tracker.get_accumulated_llm_text(), llm)
+
+    def test_accumulated_llm_text_resets_after_reset(self):
+        """reset() resets the LLM cursor; accumulated returns empty string again."""
+        tracker = WordCompletionTracker("hello world", llm_text="<card>hello world</card>")
+        tracker.add_word_and_check_complete("hello")
+        tracker.add_word_and_check_complete("world")
+        self.assertEqual(tracker.get_accumulated_llm_text(), "<card>hello world</card>")
+        tracker.reset()
+        self.assertEqual(tracker.get_accumulated_llm_text(), "")
+
+
 if __name__ == "__main__":
     unittest.main()
