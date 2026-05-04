@@ -1245,6 +1245,19 @@ class TTSService(AIService):
             None,
         )
 
+    def _get_next_active_aggregated_frame_slot(
+        self, current: _AggregatedFrameSlot
+    ) -> _AggregatedFrameSlot | None:
+        """Return the first incomplete spoken slot with a tracker after *current*."""
+        found = False
+        for s in self._aggregated_text_frame_sequence:
+            if s is current:
+                found = True
+                continue
+            if found and s.spoken and not s.complete and s.tracker is not None:
+                return s
+        return None
+
     def _build_word_frame(
         self,
         text: str,
@@ -1329,6 +1342,29 @@ class TTSService(AIService):
                 is_complete = False
                 raw_overflow_word = None
                 if active and active.tracker:
+                    # Look-ahead: before allowing a force-complete, check whether the
+                    # word belongs to the next slot. If neither the current nor the next
+                    # slot recognises the word, emit it as a passthrough without touching
+                    # the tracker — avoids cascading errors from a single mismatched token.
+                    if not active.tracker.word_belongs_here(word):
+                        next_slot = self._get_next_active_aggregated_frame_slot(active)
+                        word_fits_next = (
+                            next_slot is not None
+                            and next_slot.tracker is not None
+                            and next_slot.tracker.word_belongs_here(word)
+                        )
+                        if not word_fits_next:
+                            logger.warning(
+                                f"{self} Word '{word}' not recognised by any slot, "
+                                "emitting as passthrough"
+                            )
+                            frame = self._build_word_frame(
+                                word, pts, context_id, includes_inter_frame_spaces
+                            )
+                            self._word_last_pts = frame.pts
+                            await self.push_frame(frame)
+                            continue
+
                     # Advance the tracker first so we know the raw span and overflow
                     # before constructing the TTSTextFrame.
                     is_complete = active.tracker.add_word_and_check_complete(
