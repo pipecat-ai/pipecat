@@ -100,6 +100,14 @@ class WordCompletionTracker:
         return text.lower()
 
     @staticmethod
+    def _remove_trailing_punctuation(text: str) -> str:
+        """Remove punctuation only at the very end of the given text."""
+        i = len(text)
+        while i > 0 and unicodedata.category(text[i - 1]).startswith("P"):
+            i -= 1
+        return text[:i]
+
+    @staticmethod
     def _advance_by_alnums(text: str, start_pos: int, n: int) -> int:
         """Return the position in *text* after advancing past *n* alphanumeric chars.
 
@@ -193,7 +201,11 @@ class WordCompletionTracker:
                 # raw_text, so the span must contain the frame word. If it
                 # doesn't, expected_text and raw_text are out of sync in an
                 # unexpected way — discard rather than returning a corrupt span.
-                if self._frame_word and self._frame_word not in self._raw_consumed:
+                # Also removing punctuation from the frame word to match the
+                # expected text, since some TTS services may add punctuation to
+                # the raw text.
+                word_without_punctuation = self._remove_trailing_punctuation(self._frame_word)
+                if word_without_punctuation and word_without_punctuation not in self._raw_consumed:
                     logger.warning(
                         f"WordCompletionTracker: force-complete raw_consumed {repr(self._raw_consumed)!s} "
                         f"does not contain frame_word {repr(self._frame_word)!s}, discarding"
@@ -229,7 +241,6 @@ class WordCompletionTracker:
         )
 
         if self._raw_text is not None:
-            previous_raw_pos = self._raw_pos
             if self.is_complete:
                 # Consume all remaining raw text so that closing tags (e.g.
                 # </card>) are included in this frame's TTSTextFrame rather
@@ -260,12 +271,16 @@ class WordCompletionTracker:
             # alnum count as the word stream, so the consumed span must contain
             # the frame word. If it doesn't, the cursors drifted out of sync
             # in an unexpected way — discard rather than returning a corrupt span.
-            if self._frame_word and self._frame_word not in self._raw_consumed:
+            # Also removing punctuation from the frame word to match the
+            # expected text, since some TTS services may add punctuation to
+            # the raw text.
+            word_without_punctuation = self._remove_trailing_punctuation(self._frame_word)
+            if word_without_punctuation and word_without_punctuation not in self._raw_consumed:
                 logger.warning(
                     f"WordCompletionTracker: raw_consumed {repr(self._raw_consumed)!s} "
                     f"does not contain frame_word {repr(self._frame_word)!s}, discarding"
                 )
-                self._raw_pos = previous_raw_pos
+                #self._raw_pos = previous_raw_pos
                 self._raw_consumed = None
 
         return self.is_complete
