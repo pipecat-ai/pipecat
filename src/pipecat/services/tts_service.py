@@ -1103,7 +1103,7 @@ class TTSService(AIService):
                 context_id=context_id,
                 spoken=True,
                 tracker=WordCompletionTracker(
-                    prepared_text, raw_text=src_frame.raw_text or src_frame.text
+                    prepared_text, llm_text=src_frame.raw_text or src_frame.text
                 )
                 if not self._push_text_frames
                 else None,
@@ -1293,7 +1293,7 @@ class TTSService(AIService):
             pts,
             next_active.context_id,
             includes_inter_frame_spaces=None,
-            raw_text=next_active.tracker.get_raw_consumed(),
+            raw_text=next_active.tracker.get_llm_consumed(),
         )
         await self.push_frame(overflow_frame)
         if overflow_complete:
@@ -1342,7 +1342,7 @@ class TTSService(AIService):
                     active.tracker.get_word_for_frame() if (active and active.tracker) else word
                 )
                 raw_text = (
-                    active.tracker.get_raw_consumed() if (active and active.tracker) else None
+                    active.tracker.get_llm_consumed() if (active and active.tracker) else None
                 )
                 logger.debug(f"{self} Word '{word}' → frame_text='{frame_text}', raw='{raw_text}'")
 
@@ -1553,8 +1553,8 @@ class TTSService(AIService):
         for slot in self._aggregated_text_frame_sequence:
             if slot.spoken and not slot.complete:
                 if slot.tracker:
-                    remaining_text = slot.tracker.get_remaining_text()
-                    raw_remaining = slot.tracker.get_remaining_raw_text()
+                    remaining_text = slot.tracker.get_remaining_tts_text()
+                    raw_remaining = slot.tracker.get_remaining_llm_text()
                     if raw_remaining and remaining_text and remaining_text not in raw_remaining:
                         logger.warning(
                             f"{self} force-complete: raw_remaining {repr(raw_remaining)} "

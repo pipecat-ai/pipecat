@@ -168,15 +168,15 @@ class TestWordCompletionTrackerReset(unittest.TestCase):
         self.assertTrue(tracker.add_word_and_check_complete("Hi"))
 
     def test_reset_clears_raw_pos_cursor(self):
-        """reset() resets the raw_text cursor so raw_consumed is correct after replay."""
+        """reset() resets the llm_text cursor so raw_consumed is correct after replay."""
         raw = "<card>4111</card>"
-        tracker = WordCompletionTracker("4111", raw_text=raw)
+        tracker = WordCompletionTracker("4111", llm_text=raw)
         tracker.add_word_and_check_complete("4111")
-        self.assertEqual(tracker.get_raw_consumed(), "<card>4111</card>")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>4111</card>")
         tracker.reset()
         tracker.add_word_and_check_complete("4111")
         # Cursor restarts from position 0 after reset.
-        self.assertEqual(tracker.get_raw_consumed(), "<card>4111</card>")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>4111</card>")
 
     def test_reset_clears_expected_raw_pos_cursor(self):
         """reset() resets the expected_raw cursor so force-complete uses full text again."""
@@ -346,8 +346,8 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
             "code:",
         ]
 
-        # Provide raw_text parameter so get_raw_consumed() works
-        tracker = WordCompletionTracker(sentence, raw_text=sentence)
+        # Provide llm_text parameter so get_llm_consumed() works
+        tracker = WordCompletionTracker(sentence, llm_text=sentence)
 
         # Add all words except the last one
         for word in words[:-1]:
@@ -360,7 +360,7 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
         self.assertTrue(tracker.is_complete)
 
         # get_raw_consumed should return "code:" for the last word
-        self.assertEqual(tracker.get_raw_consumed(), "code:")
+        self.assertEqual(tracker.get_llm_consumed(), "code:")
 
     def test_maori_culture_sentence(self):
         """Test completion with Māori culture sentence - last word should be 'culture.'"""
@@ -382,7 +382,7 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
             "and",
             "culture.",
         ]
-        tracker = WordCompletionTracker(sentence, raw_text=sentence)
+        tracker = WordCompletionTracker(sentence, llm_text=sentence)
 
         # Add all words except the last one - should not complete
         for word in words[:-1]:
@@ -396,7 +396,7 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
 
         # get_raw_consumed should return "culture." for the last word
         self.assertEqual(tracker.get_word_for_frame(), "culture.")
-        self.assertEqual(tracker.get_raw_consumed(), "culture.")
+        self.assertEqual(tracker.get_llm_consumed(), "culture.")
 
     def test_geography_sentence_frame_word_and_raw_consumed_validation(self):
         """Test geography sentence word by word, validating _frame_word and _raw_consumed match expected values.
@@ -408,7 +408,7 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
         what we expect for each word addition, especially in special cases with punctuation.
         """
         sentence = "Here are some key facts: **Geography:** - It consists mainly of two large islands: the North Island and the South Island, as well as many smaller islands."
-        raw_text = f"<geography>{sentence}</geography>"
+        llm_text = f"<geography>{sentence}</geography>"
 
         words = [
             "Here",
@@ -471,7 +471,7 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
             "islands.",
         ]
 
-        # Expected _raw_consumed for each word (spans from raw_text)
+        # Expected _llm_consumed for each word (spans from llm_text)
         expected_raw_consumed = [
             "<geography>Here",
             "are",
@@ -502,7 +502,7 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
             "islands.</geography>",
         ]
 
-        tracker = WordCompletionTracker(sentence, raw_text=raw_text)
+        tracker = WordCompletionTracker(sentence, llm_text=llm_text)
 
         for i, word in enumerate(words):
             is_complete = tracker.add_word_and_check_complete(word)
@@ -517,7 +517,7 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
             )
 
             # Test 2: Validate _raw_consumed matches expected
-            actual_raw_consumed = tracker.get_raw_consumed()
+            actual_raw_consumed = tracker.get_llm_consumed()
             expected_raw = expected_raw_consumed[i]
             self.assertEqual(
                 actual_raw_consumed,
@@ -543,7 +543,7 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
         ]
 
         for word, expected_frame in special_cases:
-            tracker_special = WordCompletionTracker(word, raw_text=f"<test>{word}</test>")
+            tracker_special = WordCompletionTracker(word, llm_text=f"<test>{word}</test>")
             tracker_special.add_word_and_check_complete(word)
 
             actual_frame = tracker_special.get_word_for_frame()
@@ -553,7 +553,7 @@ class TestWordCompletionTrackerRealisticSentences(unittest.TestCase):
                 f"Special case '{word}': expected _frame_word '{expected_frame}', got '{actual_frame}'",
             )
 
-            actual_raw = tracker_special.get_raw_consumed()
+            actual_raw = tracker_special.get_llm_consumed()
             expected_raw_special = f"<test>{word}</test>"
             self.assertEqual(
                 actual_raw,
@@ -776,91 +776,91 @@ class TestWordCompletionTrackerMissingWord(unittest.TestCase):
         self.assertIsNone(tracker2.get_overflow_word())
 
 
-class TestWordCompletionTrackerRawText(unittest.TestCase):
-    """raw_text cursor tracking: each word maps back to its span in the original text."""
+class TestWordCompletionTrackerLLMText(unittest.TestCase):
+    """llm_text cursor tracking: each word maps back to its span in the original LLM text."""
 
-    def test_raw_text_none_when_no_raw_text_provided(self):
-        """get_raw_consumed returns None when raw_text was not given."""
+    def test_llm_text_none_when_no_llm_text_provided(self):
+        """get_raw_consumed returns None when llm_text was not given."""
         tracker = WordCompletionTracker("hello world")
         tracker.add_word_and_check_complete("hello")
-        self.assertIsNone(tracker.get_raw_consumed())
+        self.assertIsNone(tracker.get_llm_consumed())
 
-    def test_raw_text_single_word_no_tags(self):
-        """Simple case: raw_text matches expected_text, no tags."""
-        tracker = WordCompletionTracker("hello world", raw_text="hello world")
+    def test_llm_text_single_word_no_tags(self):
+        """Simple case: llm_text matches tts_text, no tags."""
+        tracker = WordCompletionTracker("hello world", llm_text="hello world")
         tracker.add_word_and_check_complete("hello")
-        self.assertEqual(tracker.get_raw_consumed(), "hello")
+        self.assertEqual(tracker.get_llm_consumed(), "hello")
         tracker.add_word_and_check_complete("world")
-        self.assertEqual(tracker.get_raw_consumed(), "world")
+        self.assertEqual(tracker.get_llm_consumed(), "world")
 
-    def test_raw_text_opening_tag_included_in_first_word(self):
+    def test_llm_text_opening_tag_included_in_first_word(self):
         """The opening tag preceding content is consumed with the first word."""
         raw = "<card>4111 1111 1111 1111</card>"
-        tracker = WordCompletionTracker("4111 1111 1111 1111", raw_text=raw)
+        tracker = WordCompletionTracker("4111 1111 1111 1111", llm_text=raw)
         tracker.add_word_and_check_complete("4111")
-        self.assertEqual(tracker.get_raw_consumed(), "<card>4111")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>4111")
 
-    def test_raw_text_tag_chars_not_counted_as_alnum(self):
+    def test_llm_text_tag_chars_not_counted_as_alnum(self):
         """Tag chars (c,a,r,d) inside <card> must not burn the alnum budget."""
         # If tag chars were counted, "4111" would only consume "<card" (4 alnum budget
         # spent on c,a,r,d) and the result would be wrong.
         raw = "<card>4111</card>"
-        tracker = WordCompletionTracker("4111", raw_text=raw)
+        tracker = WordCompletionTracker("4111", llm_text=raw)
         tracker.add_word_and_check_complete("4111")
         # The full "<card>4111</card>" should be consumed (last word → consume all).
-        self.assertEqual(tracker.get_raw_consumed(), "<card>4111</card>")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>4111</card>")
 
-    def test_raw_text_four_words_with_card_tags(self):
+    def test_llm_text_four_words_with_card_tags(self):
         """Full card-number scenario: each word maps to its correct raw span."""
         raw = "<card>4111 1111 1111 1111</card>"
-        tracker = WordCompletionTracker("4111 1111 1111 1111", raw_text=raw)
+        tracker = WordCompletionTracker("4111 1111 1111 1111", llm_text=raw)
 
         tracker.add_word_and_check_complete("4111")
-        self.assertEqual(tracker.get_raw_consumed(), "<card>4111")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>4111")
 
         tracker.add_word_and_check_complete("1111")
-        self.assertEqual(tracker.get_raw_consumed(), "1111")
+        self.assertEqual(tracker.get_llm_consumed(), "1111")
 
         tracker.add_word_and_check_complete("1111")
-        self.assertEqual(tracker.get_raw_consumed(), "1111")
+        self.assertEqual(tracker.get_llm_consumed(), "1111")
 
         tracker.add_word_and_check_complete("1111")
         # Last word: consume all remaining raw text including closing tag.
-        self.assertEqual(tracker.get_raw_consumed(), "1111</card>")
+        self.assertEqual(tracker.get_llm_consumed(), "1111</card>")
         self.assertTrue(tracker.is_complete)
 
-    def test_raw_text_closing_tag_consumed_with_last_word(self):
+    def test_llm_text_closing_tag_consumed_with_last_word(self):
         """Closing tag is swept into the last word's raw_consumed, not lost."""
         raw = "<card>hello</card>"
-        tracker = WordCompletionTracker("hello", raw_text=raw)
+        tracker = WordCompletionTracker("hello", llm_text=raw)
         tracker.add_word_and_check_complete("hello")
-        self.assertEqual(tracker.get_raw_consumed(), "<card>hello</card>")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>hello</card>")
 
-    def test_raw_text_mid_frame_word_does_not_consume_closing_tag(self):
+    def test_llm_text_mid_frame_word_does_not_consume_closing_tag(self):
         """Non-final words stop before the closing tag; only the last sweeps it up."""
         raw = "<card>hello world</card>"
-        tracker = WordCompletionTracker("hello world", raw_text=raw)
+        tracker = WordCompletionTracker("hello world", llm_text=raw)
         tracker.add_word_and_check_complete("hello")
-        self.assertEqual(tracker.get_raw_consumed(), "<card>hello")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>hello")
         tracker.add_word_and_check_complete("world")
-        self.assertEqual(tracker.get_raw_consumed(), "world</card>")
+        self.assertEqual(tracker.get_llm_consumed(), "world</card>")
 
-    def test_raw_text_force_complete_consumes_all_remaining(self):
-        """When force-complete fires, all remaining raw_text is consumed at once."""
+    def test_llm_text_force_complete_consumes_all_remaining(self):
+        """When force-complete fires, all remaining llm_text is consumed at once."""
         raw = "<card>4111 1111 1111 1111</card>"
-        tracker = WordCompletionTracker("4111 1111 1111 1111", raw_text=raw)
+        tracker = WordCompletionTracker("4111 1111 1111 1111", llm_text=raw)
         tracker.add_word_and_check_complete("4111")  # advances cursor to pos 10
         # "WRONG" doesn't belong → force-complete
         tracker.add_word_and_check_complete("WRONG")
-        self.assertEqual(tracker.get_raw_consumed(), "1111 1111 1111</card>")
+        self.assertEqual(tracker.get_llm_consumed(), "1111 1111 1111</card>")
         self.assertTrue(tracker.is_complete)
 
-    def test_raw_text_overflow_word_last_raw_consumed_sweeps_tag(self):
+    def test_llm_text_overflow_word_last_raw_consumed_sweeps_tag(self):
         """When a straddling word completes the frame, closing tag is consumed with it."""
         raw = "<card>4111 1111</card>"
-        tracker = WordCompletionTracker("4111 1111", raw_text=raw)
+        tracker = WordCompletionTracker("4111 1111", llm_text=raw)
         tracker.add_word_and_check_complete("4111")
-        self.assertEqual(tracker.get_raw_consumed(), "<card>4111")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>4111")
 
         # "1111And" straddles into the next frame
         result = tracker.add_word_and_check_complete("1111And")
@@ -868,19 +868,19 @@ class TestWordCompletionTrackerRawText(unittest.TestCase):
         self.assertEqual(tracker.get_word_for_frame(), "1111")
         self.assertEqual(tracker.get_overflow_word(), "And")
         # is_complete → consume all remaining raw including </card>
-        self.assertEqual(tracker.get_raw_consumed(), "1111</card>")
+        self.assertEqual(tracker.get_llm_consumed(), "1111</card>")
 
-    def test_raw_text_with_ssml_tags_in_expected(self):
+    def test_llm_text_with_ssml_tags_in_expected(self):
         """expected_text with SSML tags: raw cursor still advances by content alnum count."""
         # Cartesia might receive "<spell>4111 1111</spell>" as expected_text
-        # while raw_text is "<card>4111 1111</card>"
+        # while <llm_text is "<card>4111 1111</card>"
         raw = "<card>4111 1111</card>"
-        tracker = WordCompletionTracker("<spell>4111 1111</spell>", raw_text=raw)
+        tracker = WordCompletionTracker("<spell>4111 1111</spell>", llm_text=raw)
         # normalized expected = "41111111" (8 chars); both texts share the same alnum count.
         tracker.add_word_and_check_complete("4111")
-        self.assertEqual(tracker.get_raw_consumed(), "<card>4111")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>4111")
         tracker.add_word_and_check_complete("1111")
-        self.assertEqual(tracker.get_raw_consumed(), "1111</card>")
+        self.assertEqual(tracker.get_llm_consumed(), "1111</card>")
         self.assertTrue(tracker.is_complete)
 
 
@@ -900,12 +900,12 @@ class TestWordCompletionTrackerMultiFrameSimulation(unittest.TestCase):
             self.assertFalse(tracker2.add_word_and_check_complete(word))
         self.assertTrue(tracker2.add_word_and_check_complete("42"))
 
-    def test_credit_card_full_flow_with_raw_text(self):
-        """Full card-number scenario with raw_text tracking across two frames."""
+    def test_credit_card_full_flow_with_llm_text(self):
+        """Full card-number scenario with llm_text tracking across two frames."""
         tracker1 = WordCompletionTracker("Your credit card number is")
         tracker2 = WordCompletionTracker(
             "4111 1111 1111 1111",
-            raw_text="<card>4111 1111 1111 1111</card>",
+            llm_text="<card>4111 1111 1111 1111</card>",
         )
 
         for word in ["Your", "credit", "card", "number", "is"]:
@@ -913,24 +913,24 @@ class TestWordCompletionTrackerMultiFrameSimulation(unittest.TestCase):
         self.assertTrue(tracker1.is_complete)
 
         tracker2.add_word_and_check_complete("4111")
-        self.assertEqual(tracker2.get_raw_consumed(), "<card>4111")
+        self.assertEqual(tracker2.get_llm_consumed(), "<card>4111")
 
         tracker2.add_word_and_check_complete("1111")
-        self.assertEqual(tracker2.get_raw_consumed(), "1111")
+        self.assertEqual(tracker2.get_llm_consumed(), "1111")
 
         tracker2.add_word_and_check_complete("1111")
-        self.assertEqual(tracker2.get_raw_consumed(), "1111")
+        self.assertEqual(tracker2.get_llm_consumed(), "1111")
 
         result = tracker2.add_word_and_check_complete("1111")
         self.assertTrue(result)
-        self.assertEqual(tracker2.get_raw_consumed(), "1111</card>")
+        self.assertEqual(tracker2.get_llm_consumed(), "1111</card>")
 
     def test_missing_word_force_complete_then_next_frame(self):
         """Dropped word-timestamp: force-complete slot 1, route word to slot 2."""
         tracker1 = WordCompletionTracker("Your credit card number is")
         tracker2 = WordCompletionTracker(
             "4111 1111 1111 1111",
-            raw_text="<card>4111 1111 1111 1111</card>",
+            llm_text="<card>4111 1111 1111 1111</card>",
         )
 
         # "Your", "credit", "card" arrive; then "number" and "is" are dropped.
@@ -947,13 +947,13 @@ class TestWordCompletionTrackerMultiFrameSimulation(unittest.TestCase):
 
         # Route overflow into tracker2.
         tracker2.add_word_and_check_complete(overflow)
-        self.assertEqual(tracker2.get_raw_consumed(), "<card>4111")
+        self.assertEqual(tracker2.get_llm_consumed(), "<card>4111")
 
         tracker2.add_word_and_check_complete("1111")
         tracker2.add_word_and_check_complete("1111")
         result = tracker2.add_word_and_check_complete("1111")
         self.assertTrue(result)
-        self.assertEqual(tracker2.get_raw_consumed(), "1111</card>")
+        self.assertEqual(tracker2.get_llm_consumed(), "1111</card>")
 
     def test_overflow_word_spans_two_frames(self):
         """A word token that straddles two frame boundaries splits and routes correctly."""
@@ -976,21 +976,21 @@ class TestWordCompletionTrackerMultiFrameSimulation(unittest.TestCase):
 
         self.assertTrue(tracker2.add_word_and_check_complete("your"))
 
-    def test_overflow_with_raw_text_across_frames(self):
+    def test_overflow_with_llm_text_across_frames(self):
         """Raw text cursor is correct when the last straddling word completes the frame."""
         tracker1 = WordCompletionTracker(
             "4111 1111",
-            raw_text="<card>4111 1111</card>",
+            llm_text="<card>4111 1111</card>",
         )
         tracker2 = WordCompletionTracker("And")
 
         tracker1.add_word_and_check_complete("4111")
-        self.assertEqual(tracker1.get_raw_consumed(), "<card>4111")
+        self.assertEqual(tracker1.get_llm_consumed(), "<card>4111")
 
         # "1111And" completes tracker1; "And" overflows to tracker2.
         result = tracker1.add_word_and_check_complete("1111And")
         self.assertTrue(result)
-        self.assertEqual(tracker1.get_raw_consumed(), "1111</card>")
+        self.assertEqual(tracker1.get_llm_consumed(), "1111</card>")
         self.assertEqual(tracker1.get_overflow_word(), "And")
 
         result = tracker2.add_word_and_check_complete(tracker1.get_overflow_word())
@@ -1018,38 +1018,38 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
     containing emojis and special characters.
 
     Covers:
-    - Emoji in the middle of a sentence whose raw_text has surrounding XML tags.
+    - Emoji in the middle of a sentence whose llm_text has surrounding XML tags.
     - Emoji adjacent to currency symbols and punctuation.
     - Multiple emojis scattered through a sentence with no XML tags.
-    - Emoji that does NOT appear in raw_text (safeguard must return None).
+    - Emoji that does NOT appear in llm_text (safeguard must return None).
     """
 
     def _assert_word(self, tracker, word, expected_frame_word, expected_raw_consumed, idx):
         msg = f"word {idx + 1} {repr(word)}"
         self.assertEqual(tracker.get_word_for_frame(), expected_frame_word, f"{msg}: frame_word")
-        self.assertEqual(tracker.get_raw_consumed(), expected_raw_consumed, f"{msg}: raw_consumed")
+        self.assertEqual(tracker.get_llm_consumed(), expected_raw_consumed, f"{msg}: raw_consumed")
 
     def test_emoji_in_middle_with_raw_tags(self):
         """Sentence: 'Great job! 🎉 Well done.' wrapped in <praise> tags.
 
         The emoji word gets its own raw_consumed span ('🎉') because the
-        chars_for_frame==0 branch finds it at the correct offset in raw_text.
+        chars_for_frame==0 branch finds it at the correct offset in llm_text.
         Words that follow the emoji pick up immediately after it.
         """
         sentence = "Great job! 🎉 Well done."
-        raw_text = f"<praise>{sentence}</praise>"
+        llm_text = f"<praise>{sentence}</praise>"
         words = ["Great", "job!", "🎉", "Well", "done."]
 
         expected_frame_words = ["Great", "job!", "🎉", "Well", "done."]
         expected_raw_consumed = [
             "<praise>Great",  # opening tag consumed with first alnum word
             "job!",  # " job!" stripped
-            "🎉",  # emoji found directly in raw_text
+            "🎉",  # emoji found directly in llm_text
             "Well",  # " Well" stripped; emoji already consumed
             "done.</praise>",  # last word sweeps closing tag
         ]
 
-        tracker = WordCompletionTracker(sentence, raw_text=raw_text)
+        tracker = WordCompletionTracker(sentence, llm_text=llm_text)
         for i, word in enumerate(words):
             is_complete = tracker.add_word_and_check_complete(word)
             self._assert_word(tracker, word, expected_frame_words[i], expected_raw_consumed[i], i)
@@ -1065,18 +1065,18 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
         and that the emoji token is correctly assigned its own raw span.
         """
         sentence = "Pay $50 😊 today!"
-        raw_text = f"<promo>{sentence}</promo>"
+        llm_text = f"<promo>{sentence}</promo>"
         words = ["Pay", "$50", "😊", "today!"]
 
         expected_frame_words = ["Pay", "$50", "😊", "today!"]
         expected_raw_consumed = [
             "<promo>Pay",  # opening tag consumed with first word
             "$50",  # " $50" stripped
-            "😊",  # emoji found directly in raw_text
+            "😊",  # emoji found directly in llm_text
             "today!</promo>",  # last word sweeps closing tag
         ]
 
-        tracker = WordCompletionTracker(sentence, raw_text=raw_text)
+        tracker = WordCompletionTracker(sentence, llm_text=llm_text)
         for i, word in enumerate(words):
             is_complete = tracker.add_word_and_check_complete(word)
             self._assert_word(tracker, word, expected_frame_words[i], expected_raw_consumed[i], i)
@@ -1086,7 +1086,7 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
                 self.assertFalse(is_complete, f"should not be complete after {repr(word)}")
 
     def test_multiple_emojis_no_tags(self):
-        """Sentence: 'Hello 😊 world 🎉 there!' with raw_text equal to the sentence.
+        """Sentence: 'Hello 😊 world 🎉 there!' with llm_text equal to the sentence.
 
         Two emojis at different positions in the sentence; each gets its own
         raw_consumed span and neither disrupts the alnum cursor for the words
@@ -1104,7 +1104,7 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
             "there!",  # " there!" stripped; last word
         ]
 
-        tracker = WordCompletionTracker(sentence, raw_text=sentence)
+        tracker = WordCompletionTracker(sentence, llm_text=sentence)
         for i, word in enumerate(words):
             is_complete = tracker.add_word_and_check_complete(word)
             self._assert_word(tracker, word, expected_frame_words[i], expected_raw_consumed[i], i)
@@ -1113,16 +1113,16 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
             else:
                 self.assertFalse(is_complete, f"should not be complete after {repr(word)}")
 
-    def test_emoji_absent_from_raw_text_returns_none(self):
-        """Sentence: 'See you soon 😊' but raw_text omits the emoji.
+    def test_emoji_absent_from_llm_text_returns_none(self):
+        """Sentence: 'See you soon 😊' but llm_text omits the emoji.
 
         The emoji is the last token the TTS returns for this frame. The alnum
-        content ('seeyousoon') is already complete after 'soon', so raw_text is
+        content ('seeyousoon') is already complete after 'soon', so llm_text is
         exhausted. The safeguard must set raw_consumed to None because the swept
         span is empty and does not contain '😊'.
         """
         sentence = "See you soon 😊"
-        raw_text = "<note>See you soon</note>"
+        llm_text = "<note>See you soon</note>"
         words = ["See", "you", "soon", "😊"]
 
         expected_frame_words = ["See", "you", "soon", "😊"]
@@ -1130,10 +1130,10 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
             "<note>See",  # opening tag consumed with first word
             "you",  # " you" stripped
             "soon</note>",  # last alnum word sweeps closing tag
-            None,  # safeguard: emoji not in exhausted raw_text
+            None,  # safeguard: emoji not in exhausted llm_text
         ]
 
-        tracker = WordCompletionTracker(sentence, raw_text=raw_text)
+        tracker = WordCompletionTracker(sentence, llm_text=llm_text)
         for i, word in enumerate(words):
             tracker.add_word_and_check_complete(word)
             self._assert_word(tracker, word, expected_frame_words[i], expected_raw_consumed[i], i)
@@ -1142,9 +1142,9 @@ class TestWordCompletionTrackerEmojiInSentence(unittest.TestCase):
 
 
 class TestWordCompletionTrackerRemainingText(unittest.TestCase):
-    """Tests for get_remaining_text() and get_remaining_raw_text().
+    """Tests for get_remaining_tts_text() and get_remaining_llm_text().
 
-    These methods expose the unspoken suffix of expected_text / raw_text so that
+    These methods expose the unspoken suffix of tts_text / llm_text so that
     _force_complete_spoken_slots() can emit a TTSTextFrame for any words that the
     TTS provider dropped without sending a word-timestamp event.
     """
@@ -1156,27 +1156,27 @@ class TestWordCompletionTrackerRemainingText(unittest.TestCase):
     def test_remaining_text_before_any_words(self):
         """Before any words arrive, the full expected text is remaining."""
         tracker = WordCompletionTracker("hello world")
-        self.assertEqual(tracker.get_remaining_text(), "hello world")
+        self.assertEqual(tracker.get_remaining_tts_text(), "hello world")
 
     def test_remaining_text_after_partial_consumption(self):
         """After one word is consumed, only the unspoken suffix is returned."""
         tracker = WordCompletionTracker("hello world")
         tracker.add_word_and_check_complete("hello")
-        self.assertEqual(tracker.get_remaining_text(), "world")
+        self.assertEqual(tracker.get_remaining_tts_text(), "world")
 
     def test_remaining_text_after_completion(self):
         """After full completion get_remaining_text returns an empty string."""
         tracker = WordCompletionTracker("hello world")
         tracker.add_word_and_check_complete("hello")
         tracker.add_word_and_check_complete("world")
-        self.assertEqual(tracker.get_remaining_text(), "")
+        self.assertEqual(tracker.get_remaining_tts_text(), "")
 
     def test_remaining_text_strips_whitespace(self):
         """Leading/trailing whitespace in the remaining portion is stripped."""
         tracker = WordCompletionTracker("hello world")
         tracker.add_word_and_check_complete("hello")
-        # The expected_raw_text suffix before stripping is " world".
-        result = tracker.get_remaining_text()
+        # The tts_text suffix before stripping is " world".
+        result = tracker.get_remaining_tts_text()
         self.assertEqual(result, "world")
         self.assertFalse(result.startswith(" "))
 
@@ -1184,86 +1184,86 @@ class TestWordCompletionTrackerRemainingText(unittest.TestCase):
         """Punctuation inside the remaining text is not removed."""
         tracker = WordCompletionTracker("Hello, world!")
         tracker.add_word_and_check_complete("Hello,")
-        self.assertEqual(tracker.get_remaining_text(), "world!")
+        self.assertEqual(tracker.get_remaining_tts_text(), "world!")
 
     def test_remaining_text_after_force_complete(self):
         """Force-completing the slot exhausts expected_raw_pos; remaining becomes empty."""
         tracker = WordCompletionTracker("number is")
         tracker.add_word_and_check_complete("4111")  # force-complete
         self.assertTrue(tracker.is_complete)
-        self.assertEqual(tracker.get_remaining_text(), "number is")
+        self.assertEqual(tracker.get_remaining_tts_text(), "number is")
 
     def test_remaining_text_resets_after_reset(self):
         """reset() resets expected_raw_pos; get_remaining_text returns the full text again."""
         tracker = WordCompletionTracker("hello world")
         tracker.add_word_and_check_complete("hello")
         tracker.add_word_and_check_complete("world")
-        self.assertEqual(tracker.get_remaining_text(), "")
+        self.assertEqual(tracker.get_remaining_tts_text(), "")
         tracker.reset()
-        self.assertEqual(tracker.get_remaining_text(), "hello world")
+        self.assertEqual(tracker.get_remaining_tts_text(), "hello world")
 
     # ------------------------------------------------------------------ #
-    # get_remaining_raw_text                                                #
+    # get_remaining_llm_text                                                #
     # ------------------------------------------------------------------ #
 
-    def test_remaining_raw_text_none_when_no_raw_text(self):
-        """Without raw_text, get_remaining_raw_text always returns None."""
+    def test_remaining_llm_text_none_when_no_llm_text(self):
+        """Without llm_text, get_remaining_llm_text always returns None."""
         tracker = WordCompletionTracker("hello world")
-        self.assertIsNone(tracker.get_remaining_raw_text())
+        self.assertIsNone(tracker.get_remaining_llm_text())
         tracker.add_word_and_check_complete("hello")
-        self.assertIsNone(tracker.get_remaining_raw_text())
+        self.assertIsNone(tracker.get_remaining_llm_text())
 
-    def test_remaining_raw_text_before_any_words(self):
-        """Before any words, the entire raw_text is remaining."""
+    def test_remaining_llm_text_before_any_words(self):
+        """Before any words, the entire llm_text is remaining."""
         raw = "<card>4111 1111</card>"
-        tracker = WordCompletionTracker("4111 1111", raw_text=raw)
-        self.assertEqual(tracker.get_remaining_raw_text(), raw)
+        tracker = WordCompletionTracker("4111 1111", llm_text=raw)
+        self.assertEqual(tracker.get_remaining_llm_text(), raw)
 
-    def test_remaining_raw_text_after_partial_consumption(self):
+    def test_remaining_llm_text_after_partial_consumption(self):
         """After one word, the raw cursor is past its span; only the tail is remaining."""
         raw = "<card>4111 1111</card>"
-        tracker = WordCompletionTracker("4111 1111", raw_text=raw)
+        tracker = WordCompletionTracker("4111 1111", llm_text=raw)
         tracker.add_word_and_check_complete("4111")
         # raw_pos moves past "<card>4111" (10 chars); remaining = " 1111</card>" → strip → "1111</card>"
-        self.assertEqual(tracker.get_remaining_raw_text(), "1111</card>")
+        self.assertEqual(tracker.get_remaining_llm_text(), "1111</card>")
 
-    def test_remaining_raw_text_none_after_completion(self):
-        """After full completion all raw_text is consumed; remaining is None."""
+    def test_remaining_llm_text_none_after_completion(self):
+        """After full completion all llm_text is consumed; remaining is None."""
         raw = "<card>4111 1111</card>"
-        tracker = WordCompletionTracker("4111 1111", raw_text=raw)
+        tracker = WordCompletionTracker("4111 1111", llm_text=raw)
         tracker.add_word_and_check_complete("4111")
         tracker.add_word_and_check_complete("1111")
-        self.assertIsNone(tracker.get_remaining_raw_text())
+        self.assertIsNone(tracker.get_remaining_llm_text())
 
-    def test_remaining_raw_text_resets_after_reset(self):
-        """reset() resets the raw cursor; get_remaining_raw_text returns the full raw_text again."""
+    def test_remaining_llm_text_resets_after_reset(self):
+        """reset() resets the raw cursor; get_remaining_llm_text returns the full llm_text again."""
         raw = "<card>hello world</card>"
-        tracker = WordCompletionTracker("hello world", raw_text=raw)
+        tracker = WordCompletionTracker("hello world", llm_text=raw)
         tracker.add_word_and_check_complete("hello")
         tracker.add_word_and_check_complete("world")
-        self.assertIsNone(tracker.get_remaining_raw_text())
+        self.assertIsNone(tracker.get_remaining_llm_text())
         tracker.reset()
-        self.assertEqual(tracker.get_remaining_raw_text(), raw)
+        self.assertEqual(tracker.get_remaining_llm_text(), raw)
 
-    def test_remaining_raw_text_strips_whitespace(self):
+    def test_remaining_llm_text_strips_whitespace(self):
         """Leading/trailing whitespace in the remaining raw portion is stripped."""
         raw = "<card>hello world</card>"
-        tracker = WordCompletionTracker("hello world", raw_text=raw)
+        tracker = WordCompletionTracker("hello world", llm_text=raw)
         tracker.add_word_and_check_complete("hello")
         # raw_pos is past "<card>hello" (11 chars); raw suffix = " world</card>" → strip
-        result = tracker.get_remaining_raw_text()
+        result = tracker.get_remaining_llm_text()
         self.assertIsNotNone(result)
         self.assertFalse(result.startswith(" "))
         self.assertEqual(result, "world</card>")
 
-    def test_remaining_raw_text_after_force_complete(self):
-        """Force-complete sweeps all raw_text; remaining is None afterwards."""
+    def test_remaining_llm_text_after_force_complete(self):
+        """Force-complete sweeps all llm_text; remaining is None afterwards."""
         raw = "<card>4111 1111 1111 1111</card>"
-        tracker = WordCompletionTracker("4111 1111 1111 1111", raw_text=raw)
+        tracker = WordCompletionTracker("4111 1111 1111 1111", llm_text=raw)
         tracker.add_word_and_check_complete("4111")
         tracker.add_word_and_check_complete("WRONG")  # force-complete
         self.assertTrue(tracker.is_complete)
-        self.assertIsNone(tracker.get_remaining_raw_text())
+        self.assertIsNone(tracker.get_remaining_llm_text())
 
 
 if __name__ == "__main__":
