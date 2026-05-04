@@ -771,7 +771,17 @@ class TTSService(AIService):
         if isinstance(frame, TTSStoppedFrame) and frame.context_id:
             if frame.context_id in self._tts_contexts:
                 if self._tts_contexts[frame.context_id].push_assistant_aggregation:
-                    await self.push_frame(LLMAssistantPushAggregationFrame())
+                    aggregation_frame = LLMAssistantPushAggregationFrame()
+                    # When word-level TTSTextFrames are routed through the
+                    # transport's clock queue (PTS-based), the aggregation frame
+                    # would otherwise take the audio (sync) queue path and
+                    # could overtake the final word frames. Stamping it with a
+                    # PTS just past the last word forces it through the clock
+                    # queue too, so the assistant aggregator sees every word
+                    # before flushing.
+                    if self._word_last_pts:
+                        aggregation_frame.pts = self._word_last_pts + 1
+                    await self.push_frame(aggregation_frame)
                 logger.debug(f"{self} cleaning up TTS context {frame.context_id}")
                 del self._tts_contexts[frame.context_id]
 

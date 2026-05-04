@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
+    LLMAssistantPushAggregationFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -34,6 +35,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
+    TTSTextFrame,
     UserMuteStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -58,6 +60,7 @@ from pipecat.turns.user_mute import (
 )
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.utils.text.base_text_aggregator import AggregationType
 
 USER_TURN_STOP_TIMEOUT = 0.2
 TRANSCRIPTION_TIMEOUT = 0.1
@@ -974,6 +977,83 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The pending text should be emitted on EndFrame
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")
+
+    async def test_push_aggregation_fires_turn_stopped_for_tts_speak(self):
+        """LLMAssistantPushAggregationFrame must fire on_assistant_turn_stopped.
+
+        Mirrors the TTSSpeakFrame(append_to_context=True) greeting flow: TTS-driven
+        TTSTextFrames accumulate without an LLMFullResponseStartFrame, then the
+        TTS service emits LLMAssistantPushAggregationFrame to commit them.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        start_count = 0
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_started")
+        async def on_assistant_turn_started(aggregator):
+            nonlocal start_count
+            start_count += 1
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            TTSTextFrame("Hello,", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("how", aggregated_by=AggregationType.WORD),
+            TTSTextFrame("can I help?", aggregated_by=AggregationType.WORD),
+            LLMAssistantPushAggregationFrame(),
+        ]
+        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertEqual(start_count, 1)
+        self.assertEqual(len(stop_messages), 1)
+        self.assertFalse(stop_messages[0].interrupted)
+        self.assertEqual(stop_messages[0].content, "Hello, how can I help?")
+        self.assertEqual(
+            context.messages[-1],
+            {"role": "assistant", "content": "Hello, how can I help?"},
+        )
+
+    async def test_push_aggregation_does_not_double_fire_in_llm_response(self):
+        """LLMAssistantPushAggregationFrame mid-response must not double-fire turn events.
+
+        Inside an LLMFullResponseStart/End cycle, a stray LLMAssistantPushAggregationFrame
+        should flush whatever is buffered and consume the active turn (firing exactly
+        one stopped event). The closing LLMFullResponseEndFrame then has no pending
+        turn to stop.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        start_count = 0
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_started")
+        async def on_assistant_turn_started(aggregator):
+            nonlocal start_count
+            start_count += 1
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello!"),
+            LLMAssistantPushAggregationFrame(),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        self.assertEqual(start_count, 1)
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hello!")
 
     async def test_turn_completion_markers_stripped_from_transcript(self):
         """Turn completion markers should be stripped from assistant transcript."""
