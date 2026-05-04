@@ -1385,5 +1385,82 @@ class TestWordCompletionTrackerAccumulatedText(unittest.TestCase):
         self.assertEqual(tracker.get_accumulated_llm_text(), "")
 
 
+class TestWordCompletionTrackerUnicodeSymbolSubstitution(unittest.TestCase):
+    """Guards against the regression where ElevenLabs maps Unicode symbols such
+    as '→' to ASCII punctuation like '-' in word-timestamp events.
+
+    The literal-substring check in _symbol_word_belongs_here failed to find '-'
+    inside '→ Santiago…', which caused premature force-completion of the whole
+    frame after 'Paulo' was consumed.  The symbol-substitution fallback (check
+    whether the next non-space char in the TTS text is itself a non-alnum symbol)
+    must accept the substituted '-' and keep the tracker running normally.
+    """
+
+    # The exact sentence that revealed the bug.
+    SENTENCE = "- Example route: São Paulo → Santiago (Chile) → Auckland (New Zealand)."
+
+    # Words as ElevenLabs emits them: both '→' chars are reported as '-'.
+    ELEVENLABS_WORDS = [
+        "-",
+        "Example",
+        "route:",
+        "São",
+        "Paulo",
+        "-",          # ElevenLabs substitution for first →
+        "Santiago",
+        "(Chile)",
+        "-",          # ElevenLabs substitution for second →
+        "Auckland",
+        "(New",
+        "Zealand).",
+    ]
+
+    def test_arrow_as_dash_belongs_here_before_first_arrow(self):
+        """After consuming up to 'Paulo', word_belongs_here('-') must return True.
+
+        The next character in the TTS text is '→'.  ElevenLabs sends '-' instead;
+        the symbol-substitution fallback must accept it without force-completing.
+        """
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in ["-", "Example", "route:", "São", "Paulo"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.word_belongs_here("-"))
+
+    def test_first_arrow_substitution_does_not_force_complete(self):
+        """Processing '-' in place of the first '→' must not complete the tracker.
+
+        Without the fix, word_belongs_here('-') returned False here and the
+        force-complete path fired, marking the entire frame done prematurely.
+        """
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in ["-", "Example", "route:", "São", "Paulo"]:
+            tracker.add_word_and_check_complete(word)
+        result = tracker.add_word_and_check_complete("-")
+        self.assertFalse(result, "tracker must not be complete after the first → substitution")
+        self.assertFalse(tracker.is_complete)
+
+    def test_arrow_as_dash_belongs_here_before_second_arrow(self):
+        """After consuming through '(Chile)', word_belongs_here('-') must return True again."""
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in ["-", "Example", "route:", "São", "Paulo", "-", "Santiago", "(Chile)"]:
+            tracker.add_word_and_check_complete(word)
+        self.assertTrue(tracker.word_belongs_here("-"))
+
+    def test_completes_after_all_elevenlabs_words(self):
+        """Feeding the full ElevenLabs word-timestamp stream must complete the tracker."""
+        tracker = WordCompletionTracker(self.SENTENCE)
+        results = [tracker.add_word_and_check_complete(w) for w in self.ELEVENLABS_WORDS]
+        self.assertTrue(results[-1], "tracker should be complete after the last word")
+        self.assertTrue(tracker.is_complete)
+
+    def test_only_last_word_triggers_completion(self):
+        """No intermediate word should complete the tracker."""
+        tracker = WordCompletionTracker(self.SENTENCE)
+        for word in self.ELEVENLABS_WORDS[:-1]:
+            result = tracker.add_word_and_check_complete(word)
+            self.assertFalse(result, f"should not be complete after '{word}'")
+        self.assertTrue(tracker.add_word_and_check_complete(self.ELEVENLABS_WORDS[-1]))
+
+
 if __name__ == "__main__":
     unittest.main()

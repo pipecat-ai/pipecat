@@ -284,45 +284,69 @@ class WordCompletionTracker:
     def word_belongs_here(self, word: str) -> bool:
         """Return True if this word plausibly belongs to the remaining TTS text.
 
-        Checks whether the normalized word is a prefix match for the remaining
-        expected chars. Used to detect when the TTS provider silently dropped a
-        word-timestamp event: if the incoming word does not match the next expected
-        chars of the current slot, the caller should skip to the next slot rather
-        than advancing this tracker with wrong content.
+        Dispatches to one of two checks depending on whether the word contains
+        any alphanumeric characters after normalization:
 
-        For example, if the remaining expected is ``"number"`` and the word is
-        ``"4111"``, the check fails → skip to the next slot. If remaining is
-        ``"4111111111111111"`` and word is ``"4111"``, the check passes → correct slot.
+        - Alnum words: prefix-match against the remaining expected chars.
+        - Symbol/punctuation words (empty after normalization): literal substring
+          search in the remaining raw TTS text, with a fallback for TTS providers
+          that substitute Unicode symbols with ASCII punctuation.
 
-        Words that normalize to empty (emoji, pure punctuation) are checked against
-        the remaining un-normalized TTS text: if the raw word appears there it
-        belongs here, otherwise it is routed to the next frame.
+        Used to detect when the TTS provider silently dropped a word-timestamp
+        event: if the incoming word does not match this slot's remaining content,
+        the caller should force-complete this slot and route the word to the next.
         """
         normalized = self._normalize(word)
-        if not normalized:
-            # Word has no alnum content (e.g. emoji, pure punctuation). Fall back to
-            # checking whether the raw word appears anywhere in the remaining TTS text.
-            # If it does, it belongs to this frame; if not, it likely belongs to
-            # the next frame and should be routed there as overflow.
-            #
-            # _advance_by_alnums consumes trailing punctuation so _tts_pos may already
-            # be past punctuation chars that haven't been attributed to a frame word
-            # yet. Back up to include them in the search window.
-            start = self._tts_pos
-            while start > 0:
-                ch = self._tts_text[start - 1]
-                if ch.isalnum() or ch.isspace() or ch == ">":
-                    break
-                start -= 1
-            remaining_tts = self._tts_text[start:]
-            return word in remaining_tts
+        if normalized:
+            return self._alnum_word_belongs_here(normalized)
+        else:
+            return self._symbol_word_belongs_here(word)
+
+    def _alnum_word_belongs_here(self, normalized: str) -> bool:
+        """Return True if an alnum-containing word matches this frame's remaining expected chars.
+
+        Accepts both full words and partial tokens — the word belongs here as long
+        as its normalized characters are a prefix of what is still expected. This
+        also handles the overflow case where the word is longer than the remaining
+        content (the excess is detected and split in ``add_word_and_check_complete``).
+        """
         remaining = self._tts_normalized[len(self._received) :]
         if not remaining:
             return False
-        # The word belongs here if its normalized chars are a prefix of the
-        # remaining expected text (handles both full words and partial tokens).
         check_len = min(len(normalized), len(remaining))
         return remaining.startswith(normalized[:check_len])
+
+    def _symbol_word_belongs_here(self, word: str) -> bool:
+        """Return True if a non-alnum word (emoji, punctuation, symbol) belongs to this frame.
+
+        Two checks are applied in order:
+
+        1. **Literal substring**: search for the raw word in the remaining TTS text.
+           ``_advance_by_alnums`` may have already moved ``_tts_pos`` past some trailing
+           punctuation, so the search window is backed up to include those characters.
+
+        2. **Symbol substitution fallback**: some TTS providers substitute Unicode symbols
+           with ASCII punctuation in word-timestamp events (e.g. ElevenLabs reports ``→``
+           as ``-``), so check 1 always fails even though the word belongs here. If alnum
+           content still remains unconsumed and the next non-space character in the TTS
+           text is itself a non-alnum symbol, accept the word as a substitution.
+        """
+        search_start = self._tts_pos
+        while search_start > 0:
+            ch = self._tts_text[search_start - 1]
+            if ch.isalnum() or ch.isspace() or ch == ">":
+                break
+            search_start -= 1
+        if word in self._tts_text[search_start:]:
+            return True
+
+        if len(self._received) >= len(self._tts_normalized):
+            return False
+
+        pos = self._tts_pos
+        while pos < len(self._tts_text) and self._tts_text[pos].isspace():
+            pos += 1
+        return pos < len(self._tts_text) and not self._tts_text[pos].isalnum()
 
     def get_word_for_frame(self) -> str | None:
         """Return the portion of the last word that belongs to this frame.
