@@ -103,12 +103,21 @@ class TestWordCompletionTrackerNormalization(unittest.TestCase):
         self.assertTrue(tracker.is_complete)
 
     def test_special_characters_only_in_word(self):
-        """A word token that normalizes to empty contributes nothing."""
+        """A word token that normalizes to empty and is absent from the expected text
+        triggers force-complete; one that is present in the expected text is consumed
+        normally and contributes nothing to the alnum count."""
+        # "---" is not in "hello" → force-complete
         tracker = WordCompletionTracker("hello")
-        tracker.add_word_and_check_complete("---")  # normalizes to ""
-        self.assertFalse(tracker.is_complete)
-        tracker.add_word_and_check_complete("hello")
+        tracker.add_word_and_check_complete("---")
         self.assertTrue(tracker.is_complete)
+        self.assertEqual(tracker.get_overflow_word(), "---")
+
+        # "..." IS in "hello..." so it belongs here and contributes 0 alnum chars
+        tracker2 = WordCompletionTracker("hello...")
+        tracker2.add_word_and_check_complete("...")  # belongs, but no alnum chars → incomplete
+        self.assertFalse(tracker2.is_complete)
+        tracker2.add_word_and_check_complete("hello")
+        self.assertTrue(tracker2.is_complete)
 
     def test_ssml_tags_stripped_in_word(self):
         """SSML tags like <spell>...</spell> in TTS word tokens are stripped before comparison."""
@@ -565,12 +574,37 @@ class TestWordCompletionTrackerWordBelongsHere(unittest.TestCase):
         # '4' does not match 'n' (start of "numberis")
         self.assertFalse(tracker.word_belongs_here("4111"))
 
-    def test_punctuation_only_word_is_neutral(self):
-        """A word that normalizes to empty always belongs (no content to mismatch)."""
-        tracker = WordCompletionTracker("hello")
-        self.assertTrue(tracker.word_belongs_here("..."))
+    def test_punctuation_present_in_expected_belongs(self):
+        """Punctuation that appears in the remaining expected text belongs here."""
+        tracker = WordCompletionTracker("hello, world")
+        tracker.add_word_and_check_complete("hello")
+        # remaining expected = ", world" — comma is present, so it belongs
         self.assertTrue(tracker.word_belongs_here(","))
+
+    def test_punctuation_absent_from_expected_does_not_belong(self):
+        """Punctuation absent from the remaining expected text does not belong here."""
+        tracker = WordCompletionTracker("hello")
+        # "..." and "," are not in "hello", so they don't belong
+        self.assertFalse(tracker.word_belongs_here("..."))
+        self.assertFalse(tracker.word_belongs_here(","))
+
+    def test_empty_word_always_belongs(self):
+        """An empty word token always belongs (empty string is a substring of any text)."""
+        tracker = WordCompletionTracker("hello")
         self.assertTrue(tracker.word_belongs_here(""))
+
+    def test_emoji_in_expected_belongs(self):
+        """An emoji present in the remaining expected text belongs to this frame."""
+        tracker = WordCompletionTracker("Hello 😊")
+        tracker.add_word_and_check_complete("Hello")
+        self.assertTrue(tracker.word_belongs_here("😊"))
+
+    def test_emoji_absent_from_expected_does_not_belong(self):
+        """An emoji not in the remaining expected text is routed to the next frame."""
+        tracker = WordCompletionTracker("Hello world")
+        tracker.add_word_and_check_complete("Hello")
+        # 😊 is not in "Hello world", so it doesn't belong here
+        self.assertFalse(tracker.word_belongs_here("😊"))
 
     def test_belongs_when_partial_prefix_matches(self):
         """Partial token (fewer chars than remaining) still passes if it is a prefix."""

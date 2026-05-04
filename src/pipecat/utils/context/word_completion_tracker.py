@@ -298,12 +298,28 @@ class WordCompletionTracker:
         ``"4111"``, the check fails → skip to the next slot. If remaining is
         ``"4111111111111111"`` and word is ``"4111"``, the check passes → correct slot.
 
-        Punctuation/whitespace-only words (empty after normalization) are neutral
-        and always return True.
+        Words that normalize to empty (emoji, pure punctuation) are checked against
+        the remaining un-normalized expected text: if the raw word appears there it
+        belongs here, otherwise it is routed to the next frame.
         """
         normalized = self._normalize(word)
         if not normalized:
-            return True
+            # Word has no alnum content (e.g. emoji, pure punctuation). Fall back to
+            # checking whether the raw word appears anywhere in the remaining expected
+            # text. If it does, it belongs to this frame; if not, it likely belongs to
+            # the next frame and should be routed there as overflow.
+            #
+            # _advance_by_alnums consumes trailing punctuation so _expected_raw_pos
+            # may already be past punctuation chars that haven't been attributed to a
+            # frame word yet. Back up to include them in the search window.
+            start = self._expected_raw_pos
+            while start > 0:
+                ch = self._expected_raw_text[start - 1]
+                if ch.isalnum() or ch.isspace() or ch == ">":
+                    break
+                start -= 1
+            remaining_raw = self._expected_raw_text[start:]
+            return word in remaining_raw
         remaining = self._expected[len(self._received) :]
         if not remaining:
             return False
