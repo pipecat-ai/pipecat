@@ -42,6 +42,7 @@ jobs:
             --extra langchain \
             --extra livekit \
             --extra piper \
+            --extra runner \
             --extra sagemaker \
             --extra tracing \
             --extra websocket
