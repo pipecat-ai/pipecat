@@ -10,7 +10,6 @@ This module provides integration with Amazon Polly for text-to-speech synthesis,
 supporting multiple languages, voices, and SSML features.
 """
 
-import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 
@@ -23,6 +22,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
+from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -191,8 +191,11 @@ class AWSPollyTTSService(TTSService):
         """Initializes the AWS Polly TTS service.
 
         Args:
-            api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
-            aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
+            api_key: AWS secret access key. If None, falls back to environment
+                variables and the default boto3 credential chain (instance
+                profiles, IRSA, ECS task roles, SSO, etc.).
+            aws_access_key_id: AWS access key ID. Same fallback behaviour as
+                ``api_key``.
             aws_session_token: AWS session token for temporary credentials.
             region: AWS region for Polly service. Defaults to 'us-east-1'.
             voice_id: Voice ID to use for synthesis. Defaults to 'Joanna'.
@@ -250,13 +253,13 @@ class AWSPollyTTSService(TTSService):
             **kwargs,
         )
 
-        # Get credentials from environment variables if not provided
-        self._aws_params = {
-            "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": api_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
-            "region_name": region or os.getenv("AWS_REGION", "us-east-1"),
-        }
+        # Resolve credentials using the shared chain (explicit → env → boto3).
+        self._aws_params = resolve_credentials(
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=api_key,
+            aws_session_token=aws_session_token,
+            region=region,
+        ).to_boto_kwargs()
 
         self._aws_session = aioboto3.Session()
 
@@ -348,7 +351,8 @@ class AWSPollyTTSService(TTSService):
             # aioboto3's `client()` is an async context manager but its stubs
             # don't advertise `__aenter__` / `__aexit__` to pyright.
             async with self._aws_session.client(  # pyright: ignore[reportGeneralTypeIssues]
-                "polly", **self._aws_params
+                "polly",
+                **self._aws_params,  # pyright: ignore[reportArgumentType]
             ) as polly:
                 response = await polly.synthesize_speech(**filtered_params)
                 if "AudioStream" in response:

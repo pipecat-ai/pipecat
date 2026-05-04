@@ -34,6 +34,15 @@ class AWSCredentials:
     session_token: str | None
     region: str
 
+    def to_boto_kwargs(self) -> dict[str, str | None]:
+        """Return credentials as kwargs accepted by ``boto3``/``aioboto3`` clients."""
+        return {
+            "aws_access_key_id": self.access_key,
+            "aws_secret_access_key": self.secret_key,
+            "aws_session_token": self.session_token,
+            "region_name": self.region,
+        }
+
 
 def resolve_credentials(
     *,

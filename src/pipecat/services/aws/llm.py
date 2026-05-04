@@ -13,7 +13,6 @@ function calling.
 
 import asyncio
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,6 +35,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.tracing.service_decorators import traced_llm
@@ -135,8 +135,11 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                 .. deprecated:: 0.0.105
                     Use ``settings=AWSBedrockLLMService.Settings(model=...)`` instead.
 
-            aws_access_key: AWS access key ID. If None, uses default credentials.
-            aws_secret_key: AWS secret access key. If None, uses default credentials.
+            aws_access_key: AWS access key ID. If None, falls back to
+                environment variables and the default boto3 credential chain
+                (instance profiles, IRSA, ECS task roles, SSO, etc.).
+            aws_secret_key: AWS secret access key. Same fallback behaviour as
+                ``aws_access_key``.
             aws_session_token: AWS session token for temporary credentials.
             aws_region: AWS region for the Bedrock service.
             params: Model parameters and configuration.
@@ -215,14 +218,14 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
         self._aws_session = aioboto3.Session()
 
-        # Store AWS session parameters for creating client in async context
-        self._aws_params = {
-            "aws_access_key_id": aws_access_key or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": aws_secret_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
-            "region_name": aws_region or os.getenv("AWS_REGION", "us-east-1"),
-            "config": client_config,
-        }
+        # Resolve credentials using the shared chain (explicit → env → boto3).
+        resolved = resolve_credentials(
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key,
+            aws_session_token=aws_session_token,
+            region=aws_region,
+        )
+        self._aws_params = {**resolved.to_boto_kwargs(), "config": client_config}
 
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
