@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Any
+from urllib.parse import quote
 
 from loguru import logger
 
@@ -235,7 +236,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model=None,
+            model="grok-voice-think-fast-1.0",
             system_instruction=None,
             temperature=None,
             max_tokens=None,
@@ -533,8 +534,13 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             if self._websocket:
                 return
 
+            # Model is selected via query param at connection time; xAI does
+            # not support changing it via session.update.
+            model = assert_given(self._settings.model)
+            uri = f"{self.base_url}?model={quote(model, safe='')}"
+
             self._websocket = await websocket_connect(
-                uri=self.base_url,
+                uri=uri,
                 additional_headers={
                     "Authorization": f"Bearer {self.api_key}",
                 },
