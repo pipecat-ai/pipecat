@@ -1134,8 +1134,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # If an image frame has been added to the context, let's run inference.
             run_llm = await self._maybe_append_image_to_context(image_frame)
 
-        # Run inference if the function call result requires it.
-        if frame.result:
+        # Final result frames should be considered completion events even when
+        # the tool returns a falsy payload like None, {}, [], 0, or "".
+        if is_final or frame.result is not None:
             if properties and properties.run_llm is not None:
                 # If the tool call result has a run_llm property, use it.
                 run_llm = properties.run_llm
@@ -1230,7 +1231,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         is_async = not in_progress_frame.cancel_on_interruption
         del self._function_calls_in_progress[frame.tool_call_id]
 
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = json.dumps(frame.result, ensure_ascii=False)
 
         if is_async:
             # For async function calls inject a developer message so the LLM is
