@@ -44,6 +44,7 @@ from pipecat.frames.frames import (
     LLMContextSummaryRequestFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMarkerFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
@@ -990,6 +991,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_llm_end(frame)
         elif isinstance(frame, TextFrame):
             await self._handle_text(frame)
+        elif isinstance(frame, LLMMarkerFrame):
+            await self._handle_marker_frame(frame)
         elif isinstance(frame, LLMThoughtStartFrame):
             await self._handle_thought_start(frame)
         elif isinstance(frame, LLMThoughtTextFrame):
@@ -1392,6 +1395,31 @@ class LLMAssistantAggregator(LLMContextAggregator):
             TextPartForConcatenation(
                 frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
             )
+        )
+
+    async def _handle_marker_frame(self, frame: LLMMarkerFrame):
+        if frame.append_to_context_immediately:
+            # Stand-alone marker: write it to the context now as its
+            # own assistant message. Used when the marker is the entire
+            # assistant turn — e.g. the ○ / ◐ incomplete-turn signals,
+            # where the spoken response is suppressed and the marker
+            # is the only artifact.
+            self._context.add_message({"role": "assistant", "content": frame.marker})
+            await self.push_context_frame()
+            timestamp_frame = LLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
+            await self.push_frame(timestamp_frame)
+            return
+
+        # Marker is part of an in-progress assistant response. Append
+        # it to the running aggregation so `push_aggregation` writes
+        # marker + text as a single context message — e.g. the ✓
+        # complete-turn signal that prefixes the spoken response,
+        # producing "✓ <response>" in context. Markers are stripped
+        # from the transcript via
+        # `_maybe_strip_turn_completion_markers` so consumers see
+        # clean text.
+        self._aggregation.append(
+            TextPartForConcatenation(frame.marker, includes_inter_part_spaces=False)
         )
 
     async def _handle_thought_start(self, frame: LLMThoughtStartFrame):
