@@ -291,12 +291,13 @@ def _strip_utterance_leading_spaces(
 ) -> Mapping[str, Any]:
     """Return alignment with utterance-leading space chars removed, if requested.
 
-    Normalized alignment chunks from ElevenLabs often begin with a space. On the
-    first chunk of an utterance, that space is leading whitespace and should not
-    become a text token. On subsequent chunks, however, a leading space can be a
-    real inter-word separator (Flash models commonly split sentences this way),
-    so it must be preserved for ``calculate_word_times`` to flush any partial
-    word carried over from the previous chunk.
+    ElevenLabs Flash normalized alignment chunks can begin with a leading space
+    at the start of an utterance. Strip only utterance-leading spaces so bot
+    turn text does not start with whitespace. On subsequent chunks, however, a
+    leading space can be a real inter-word separator (Flash models commonly
+    split sentences this way), so it must be preserved for
+    ``calculate_word_times`` to flush any partial word carried over from the
+    previous chunk.
 
     Args:
         alignment: Alignment dict from the API.
