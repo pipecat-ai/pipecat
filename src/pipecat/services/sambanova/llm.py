@@ -174,6 +174,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
                     )
                     await self.start_llm_usage_metrics(tokens)
 
+                if chunk.model and self.get_full_model_name() != chunk.model:
+                    self.set_full_model_name(chunk.model)
+
                 if chunk.choices is None or len(chunk.choices) == 0:
                     continue
 
