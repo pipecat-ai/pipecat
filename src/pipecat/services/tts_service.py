@@ -683,7 +683,15 @@ class TTSService(AIService):
             # Stop the aggregation metric (no-op if already stopped on first sentence).
             await self.stop_text_aggregation_metrics()
             if remaining:
-                await self._push_tts_frames(AggregatedTextFrame(remaining.text, remaining.type))
+                await self._push_tts_frames(
+                    AggregatedTextFrame(
+                        remaining.text,
+                        remaining.type,
+                        raw_text=remaining.full_match
+                        if isinstance(remaining, PatternMatch)
+                        else remaining.text,
+                    )
+                )
 
             # We pause processing incoming frames if the LLM response included
             # text (it might be that it's only a function calling response). We
@@ -726,7 +734,7 @@ class TTSService(AIService):
             push_assistant_aggregation = frame.append_to_context and not self._llm_response_started
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
             await self._push_tts_frames(
-                AggregatedTextFrame(frame.text, AggregationType.SENTENCE),
+                AggregatedTextFrame(frame.text, AggregationType.SENTENCE, raw_text=frame.text),
                 append_tts_text_to_context=frame.append_to_context,
                 push_assistant_aggregation=push_assistant_aggregation,
             )
@@ -901,7 +909,9 @@ class TTSService(AIService):
             if aggregate.type != AggregationType.TOKEN:
                 # Stop the aggregation metric on the first sentence only.
                 await self.stop_text_aggregation_metrics()
-            raw_text = aggregate.full_match if isinstance(aggregate, PatternMatch) else None
+            raw_text = (
+                aggregate.full_match if isinstance(aggregate, PatternMatch) else aggregate.text
+            )
             await self._push_tts_frames(
                 AggregatedTextFrame(aggregate.text, aggregate.type, raw_text=raw_text),
                 includes_inter_frame_spaces,
