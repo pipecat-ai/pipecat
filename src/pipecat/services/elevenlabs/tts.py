@@ -248,6 +248,44 @@ class ElevenLabsHttpTTSSettings(TTSSettings):
     )
 
 
+def _select_alignment(
+    msg: Mapping[str, Any],
+    *,
+    normalized_key: str,
+    alignment_key: str,
+    prefer_normalized: bool,
+) -> Mapping[str, Any] | None:
+    """Pick the alignment field to use from a TTS message, with fallback.
+
+    ElevenLabs returns two alignment fields per chunk:
+
+    - ``normalized_key`` (``normalizedAlignment`` for WebSocket,
+      ``normalized_alignment`` for HTTP): the post-normalized form of what was
+      spoken - pronunciation-dictionary substitutions, text normalization, or
+      romanization of non-Latin scripts (e.g., Chinese rendered as pinyin).
+    - ``alignment_key`` (``alignment``): the original input characters.
+
+    Prefer ``normalized`` only when a pronunciation dictionary is configured -
+    that's the case where ``alignment`` has overlapping restarts that produce
+    duplicated/garbled words (issue #4316). Otherwise prefer ``alignment`` so
+    the LLM context preserves the original input rather than the normalized
+    form. Fall back to the other field if the preferred one is missing or
+    null - the API schema marks both as nullable.
+
+    Args:
+        msg: TTS response message from ElevenLabs.
+        normalized_key: Key for the normalized-alignment field on this transport.
+        alignment_key: Key for the original-alignment field on this transport.
+        prefer_normalized: True iff the caller is using pronunciation dictionaries.
+
+    Returns:
+        The chosen alignment dict, or ``None`` if both fields are absent/null.
+    """
+    if prefer_normalized:
+        return msg.get(normalized_key) or msg.get(alignment_key)
+    return msg.get(alignment_key) or msg.get(normalized_key)
+
+
 def _strip_utterance_leading_spaces(
     alignment: Mapping[str, Any], keys: tuple[str, str, str], should_strip: bool
 ) -> Mapping[str, Any]:
@@ -829,13 +867,15 @@ class ElevenLabsTTSService(WebsocketTTSService):
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=received_ctx_id)
                 await self.append_to_audio_context(received_ctx_id, frame)
 
-            if msg.get("normalizedAlignment"):
-                # Use normalizedAlignment (what was actually spoken) rather than
-                # alignment (the input text), so word timestamps stay accurate
-                # when a pronunciation dictionary or text normalization rewrites
-                # the input.
+            raw_alignment = _select_alignment(
+                msg,
+                normalized_key="normalizedAlignment",
+                alignment_key="alignment",
+                prefer_normalized=bool(self._pronunciation_dictionary_locators),
+            )
+            if raw_alignment:
                 alignment = _strip_utterance_leading_spaces(
-                    msg["normalizedAlignment"],
+                    raw_alignment,
                     ("chars", "charStartTimesMs", "charDurationsMs"),
                     received_ctx_id not in self._alignment_started_context_ids,
                 )
@@ -1353,13 +1393,15 @@ class ElevenLabsHttpTTSService(TTSService):
                                 audio, self.sample_rate, 1, context_id=context_id
                             )
 
-                        # Process alignment if present. Use normalized_alignment
-                        # (what was actually spoken) so word timestamps stay
-                        # accurate when a pronunciation dictionary or text
-                        # normalization rewrites the input.
-                        if data and data.get("normalized_alignment"):
+                        raw_alignment = data and _select_alignment(
+                            data,
+                            normalized_key="normalized_alignment",
+                            alignment_key="alignment",
+                            prefer_normalized=bool(self._pronunciation_dictionary_locators),
+                        )
+                        if raw_alignment:
                             alignment = _strip_utterance_leading_spaces(
-                                data["normalized_alignment"],
+                                raw_alignment,
                                 (
                                     "characters",
                                     "character_start_times_seconds",

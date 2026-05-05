@@ -9,6 +9,7 @@
 from typing import Any
 
 from pipecat.services.elevenlabs.tts import (
+    _select_alignment,
     _strip_utterance_leading_spaces,
     calculate_word_times,
 )
@@ -90,3 +91,112 @@ def test_elevenlabs_alignment_strips_only_utterance_leading_spaces():
 
     assert first["chars"] == list("Hello")
     assert subsequent["chars"] == list(" world")
+
+
+def test_select_alignment_default_prefers_alignment():
+    msg = {
+        "alignment": _chunk("Hello"),
+        "normalizedAlignment": _chunk(" Hello"),
+    }
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=False,
+    )
+    assert selected is not None
+    assert selected["chars"] == list("Hello")
+
+
+def test_select_alignment_dictionary_mode_prefers_normalized():
+    msg = {
+        "alignment": _chunk("Hello"),
+        "normalizedAlignment": _chunk(" Hello"),
+    }
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=True,
+    )
+    assert selected is not None
+    assert selected["chars"] == list(" Hello")
+
+
+def test_select_alignment_falls_back_when_preferred_missing():
+    msg_default = {"normalizedAlignment": _chunk(" Hello")}
+    selected = _select_alignment(
+        msg_default,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=False,
+    )
+    assert selected is not None
+    assert selected["chars"] == list(" Hello")
+
+    msg_dict = {"alignment": _chunk("Hello")}
+    selected = _select_alignment(
+        msg_dict,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=True,
+    )
+    assert selected is not None
+    assert selected["chars"] == list("Hello")
+
+
+def test_select_alignment_falls_back_when_preferred_null():
+    msg = {"alignment": None, "normalizedAlignment": _chunk(" Hello")}
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalizedAlignment",
+        alignment_key="alignment",
+        prefer_normalized=False,
+    )
+    assert selected is not None
+    assert selected["chars"] == list(" Hello")
+
+
+def test_select_alignment_returns_none_when_both_missing():
+    assert (
+        _select_alignment(
+            {},
+            normalized_key="normalizedAlignment",
+            alignment_key="alignment",
+            prefer_normalized=False,
+        )
+        is None
+    )
+    assert (
+        _select_alignment(
+            {"alignment": None, "normalizedAlignment": None},
+            normalized_key="normalizedAlignment",
+            alignment_key="alignment",
+            prefer_normalized=True,
+        )
+        is None
+    )
+
+
+def test_select_alignment_works_with_http_field_names():
+    msg = {
+        "alignment": {"characters": list("Hi")},
+        "normalized_alignment": {"characters": list(" Hi")},
+    }
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalized_alignment",
+        alignment_key="alignment",
+        prefer_normalized=False,
+    )
+    assert selected is not None
+    assert selected["characters"] == list("Hi")
+
+    selected = _select_alignment(
+        msg,
+        normalized_key="normalized_alignment",
+        alignment_key="alignment",
+        prefer_normalized=True,
+    )
+    assert selected is not None
+    assert selected["characters"] == list(" Hi")
