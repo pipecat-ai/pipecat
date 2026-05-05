@@ -206,7 +206,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             api_key=os.getenv("INWORLD_API_KEY"),
             llm_model="openai/gpt-4.1-nano",
             voice="Sarah",
-            tts_model="inworld-tts-1.5-max",
+            tts_model="inworld-tts-2",
         )
 
     For full control over session properties (note: ``session_properties``
@@ -231,7 +231,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                         output=AudioOutput(
                             format=PCMAudioFormat(rate=24000),
                             voice="Sarah",
-                            model="inworld-tts-1.5-max",
+                            model="inworld-tts-2",
                         ),
                     ),
                 ),
@@ -269,7 +269,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 Shorthand for ``session_properties.model``.
             voice: Voice ID for TTS output (e.g. "Sarah", "Clive").
                 Shorthand for ``session_properties.audio.output.voice``.
-            tts_model: TTS model to use (e.g. "inworld-tts-1.5-max").
+            tts_model: TTS model to use (e.g. "inworld-tts-2").
                 Shorthand for ``session_properties.audio.output.model``.
             stt_model: STT model for input transcription
                 (e.g. "assemblyai/universal-streaming-multilingual").
@@ -286,7 +286,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         """
         default_model = llm_model or "openai/gpt-4.1-mini"
         default_voice = voice or "Clive"
-        default_tts_model = tts_model or "inworld-tts-1.5-max"
+        default_tts_model = tts_model or "inworld-tts-2"
         default_stt_model = stt_model or "assemblyai/u3-rt-pro"
 
         default_settings = self.Settings(

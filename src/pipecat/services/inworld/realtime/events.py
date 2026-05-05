@@ -124,7 +124,7 @@ class AudioOutput(BaseModel):
 
     Parameters:
         format: The format configuration for output audio.
-        model: The TTS model to use (e.g. "inworld-tts-1.5-max").
+        model: The TTS model to use (e.g. "inworld-tts-2").
         voice: The voice ID to use (e.g. "Sarah", "Clive").
     """
 

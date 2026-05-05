@@ -162,7 +162,7 @@ class InworldHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="inworld-tts-1.5-max",
+            model="inworld-tts-2",
             voice="Ashley",
             language=None,
             speaking_rate=None,
@@ -604,7 +604,7 @@ class InworldTTSService(WebsocketTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="inworld-tts-1.5-max",
+            model="inworld-tts-2",
             voice="Ashley",
             language=None,
             speaking_rate=None,
