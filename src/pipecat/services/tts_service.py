@@ -50,6 +50,7 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.settings import TTSSettings, is_given
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
@@ -99,24 +100,6 @@ class _WordTimestampEntry:
     word: str
     timestamp: float
     context_id: str
-
-
-@dataclass
-class _AggregatedFrameSlot:
-    """Internal: ordered slot tracking one AggregatedTextFrame through _push_tts_frames.
-
-    Every frame that passes through _push_tts_frames — whether spoken or skipped —
-    occupies a slot in _aggregated_text_frame_sequence. Skipped frames wait at their
-    position and are emitted downstream only after all preceding spoken slots are complete,
-    preserving correct context ordering.
-
-    """
-
-    frame: "AggregatedTextFrame"
-    context_id: str
-    spoken: bool
-    tracker: WordCompletionTracker | None = None
-    complete: bool = False
 
 
 class TTSService(AIService):
@@ -313,7 +296,10 @@ class TTSService(AIService):
         # until all preceding spoken slots are complete, then flushed downstream so
         # their append_to_context=True arrives at the assistant aggregator in the
         # correct order relative to the TTSTextFrames from spoken sentences.
-        self._aggregated_text_frame_sequence: list[_AggregatedFrameSlot] = []
+        # Tracks all AggregatedTextFrame slots (spoken and skipped) in order.
+        # Skipped frames are held until preceding spoken slots complete, ensuring
+        # append_to_context=True reaches the assistant aggregator in the right order.
+        self._aggregated_frame_sequencer = AggregatedFrameSequencer(name=str(self))
 
         self._resampler = create_stream_resampler()
 
@@ -884,7 +870,7 @@ class TTSService(AIService):
         self._llm_response_started = False
         self._streamed_text = ""
         self._text_aggregation_metrics_started = False
-        self._aggregated_text_frame_sequence.clear()
+        self._aggregated_frame_sequencer.clear()  # discard all pending slots on interruption
         await self.reset_word_timestamps()
 
         await self._stop_audio_context_task()
@@ -924,64 +910,12 @@ class TTSService(AIService):
     async def _push_frame_respecting_previous_aggregated_frame(
         self, frame: AggregatedTextFrame, context_id: str
     ):
-        """Enqueue a skipped AggregatedTextFrame for ordered context emission.
-
-        The frame is not pushed immediately. It is held in _aggregated_text_frame_sequence
-        and flushed only after all preceding spoken slots are marked complete, so that
-        append_to_context=True reaches the assistant aggregator in the correct order.
-        If no spoken slot precedes it, it is emitted right away.
-
-        Args:
-            frame: The skipped AggregatedTextFrame (e.g. code block).
-            context_id: The context_id assigned to this frame in _push_tts_frames.
-        """
-        frame.context_id = context_id
-        slot = _AggregatedFrameSlot(frame=frame, context_id=context_id, spoken=False)
-        self._aggregated_text_frame_sequence.append(slot)
-        await self._flush_aggregated_text_frame_sequence()
-
-    def _complete_active_spoken_slot(self):
-        """Mark the first pending spoken slot as complete.
-
-        Used by non-word-timestamp services (push_text_frames=True) after the
-        TTSTextFrame for a sentence is appended to the audio context.
-        """
-        slot = next(
-            (s for s in self._aggregated_text_frame_sequence if s.spoken and not s.complete),
-            None,
-        )
-        if slot:
-            slot.complete = True
-
-    async def _flush_aggregated_text_frame_sequence(self, last_word_pts: int | None = None):
-        """Emit pending skipped slots that are now unblocked.
-
-        Walks the front of _aggregated_text_frame_sequence:
-        - Complete spoken slots are removed (their TTSTextFrames are already downstream).
-        - Skipped slots whose preceding spoken slots are all done are pushed downstream
-          with append_to_context=True and removed.
-        - Stops at the first incomplete spoken slot.
-
-        Args:
-            last_word_pts: PTS of the last spoken word. When provided, skipped frames
-                are assigned a PTS of last_word_pts so they appear immediately after
-                the final spoken word in the timeline.
-        """
-        while self._aggregated_text_frame_sequence:
-            slot = self._aggregated_text_frame_sequence[0]
-            if slot.spoken and slot.complete:
-                self._aggregated_text_frame_sequence.pop(0)
-            elif not slot.spoken and not slot.complete:
-                slot.frame.append_to_context = True
-                slot.frame.transport_destination = self._transport_destination
-                if last_word_pts:
-                    slot.frame.pts = last_word_pts
-                logger.debug(f"{self}: Flushing Aggregated Frame {slot.frame}")
-                await self.push_frame(slot.frame)
-                slot.complete = True
-                self._aggregated_text_frame_sequence.pop(0)
-            else:
-                break  # spoken but not yet complete: wait
+        # Enqueue the skipped frame; returns it immediately if no spoken slot
+        # precedes it, or holds it until the sequencer can flush it in order.
+        for f in self._aggregated_frame_sequencer.register_skipped(
+            frame, context_id, self._transport_destination
+        ):
+            await self.push_frame(f)
 
     async def _push_tts_frames(
         self,
@@ -1094,20 +1028,19 @@ class TTSService(AIService):
             await self.start_ttfb_metrics()
             await self.append_to_audio_context(context_id, TTSStartedFrame(context_id=context_id))
 
-        # Register this spoken frame in the ordered sequence. Word-timestamp services
-        # complete the slot via _add_word_timestamps; push_text_frames services complete
-        # it below after the TTSTextFrame is appended to the audio context.
-        self._aggregated_text_frame_sequence.append(
-            _AggregatedFrameSlot(
-                frame=src_frame,
-                context_id=context_id,
-                spoken=True,
-                tracker=WordCompletionTracker(
-                    prepared_text, llm_text=src_frame.raw_text or src_frame.text
-                )
-                if not self._push_text_frames
-                else None,
+        # Register this spoken frame so the sequencer can track its completion
+        # and unblock any skipped frames queued behind it. Word-timestamp services
+        # complete the slot via process_word; push_text_frames services complete it
+        # below after the TTSTextFrame is appended to the audio context.
+        self._aggregated_frame_sequencer.register_spoken(
+            src_frame,
+            context_id,
+            tracker=WordCompletionTracker(
+                prepared_text, llm_text=src_frame.raw_text or src_frame.text
             )
+            if not self._push_text_frames
+            else None,
+            append_to_context=self._tts_contexts[context_id].append_to_context,
         )
 
         await self.tts_process_generator(context_id, self.run_tts(prepared_text, context_id))
@@ -1131,10 +1064,10 @@ class TTSService(AIService):
                 frame.append_to_context = append_tts_text_to_context
             # Appending to the context, so it preserves the ordering.
             await self.append_to_audio_context(context_id, frame)
-            # TTSTextFrame is now queued; mark the spoken slot complete and flush any
-            # skipped frames (e.g. code blocks) that were waiting behind this sentence.
-            self._complete_active_spoken_slot()
-            await self._flush_aggregated_text_frame_sequence()
+            # TTSTextFrame is queued; mark the spoken slot complete so any skipped
+            # frames (e.g. code blocks) waiting behind it can be flushed in order.
+            for f in self._aggregated_frame_sequencer.complete_spoken_slot():
+                await self.push_frame(f)
 
     async def tts_process_generator(
         self, context_id: str, generator: AsyncGenerator[Frame | None, None]
@@ -1231,76 +1164,6 @@ class TTSService(AIService):
         else:
             await self._add_word_timestamps(word_times=word_times, context_id=context_id)
 
-    def _get_active_aggregated_frame_slot(self) -> _AggregatedFrameSlot | None:
-        """Return the first incomplete spoken slot with a tracker."""
-        return next(
-            (
-                s
-                for s in self._aggregated_text_frame_sequence
-                if s.spoken and not s.complete and s.tracker is not None
-            ),
-            None,
-        )
-
-    def _get_next_active_aggregated_frame_slot(
-        self, current: _AggregatedFrameSlot
-    ) -> _AggregatedFrameSlot | None:
-        """Return the first incomplete spoken slot with a tracker after *current*."""
-        found = False
-        for s in self._aggregated_text_frame_sequence:
-            if s is current:
-                found = True
-                continue
-            if found and s.spoken and not s.complete and s.tracker is not None:
-                return s
-        return None
-
-    def _build_word_frame(
-        self,
-        text: str,
-        pts: int,
-        context_id: str | None,
-        raw_text: str | None = None,
-    ) -> TTSTextFrame:
-        """Build a TTSTextFrame with all standard word-timestamp attributes set."""
-        frame = TTSTextFrame(text, aggregated_by=AggregationType.WORD)
-        frame.pts = pts
-        frame.context_id = context_id
-        if context_id in self._tts_contexts:
-            frame.append_to_context = self._tts_contexts[context_id].append_to_context
-        frame.raw_text = raw_text
-        return frame
-
-    async def _emit_overflow_word(self, raw_overflow_word: str | None, pts: int):
-        """Emit a TTSTextFrame for the overflow portion of a word that straddles two slots.
-
-        When a TTS word spans the boundary between two AggregatedTextFrames (e.g.
-        ``"<spell>1234</spell>And"`` where ``"1234"`` closes one frame and ``"And"``
-        opens the next), the overflow suffix is fed into the next slot's tracker and
-        emitted as its own TTSTextFrame. If the overflow word also completes the next
-        slot, that slot is marked complete and any waiting skipped frames are flushed.
-
-        Args:
-            raw_overflow_word: Raw (un-normalized) overflow suffix from the tracker.
-            pts: PTS to assign to the overflow frame.
-        """
-        if raw_overflow_word is None:
-            return
-        next_active = self._get_active_aggregated_frame_slot()
-        if not next_active or not next_active.tracker:
-            return
-        overflow_complete = next_active.tracker.add_word_and_check_complete(raw_overflow_word)
-        overflow_frame = self._build_word_frame(
-            raw_overflow_word,
-            pts,
-            next_active.context_id,
-            raw_text=next_active.tracker.get_llm_consumed(),
-        )
-        await self.push_frame(overflow_frame)
-        if overflow_complete:
-            next_active.complete = True
-            await self._flush_aggregated_text_frame_sequence(last_word_pts=pts)
-
     async def _add_word_timestamps(
         self,
         word_times: list[tuple[str, float]],
@@ -1323,58 +1186,12 @@ class TTSService(AIService):
                 self._initial_word_times.append((word, timestamp, context_id))
             else:
                 pts = self._initial_word_timestamp + ts_ns
-                active = self._get_active_aggregated_frame_slot()
-                is_complete = False
-                raw_overflow_word = None
-                if active and active.tracker:
-                    # Look-ahead: before allowing a force-complete, check whether the
-                    # word belongs to the next slot. If neither the current nor the next
-                    # slot recognises the word, emit it as a passthrough without touching
-                    # the tracker — avoids cascading errors from a single mismatched token.
-                    if not active.tracker.word_belongs_here(word):
-                        next_slot = self._get_next_active_aggregated_frame_slot(active)
-                        word_fits_next = (
-                            next_slot is not None
-                            and next_slot.tracker is not None
-                            and next_slot.tracker.word_belongs_here(word)
-                        )
-                        if not word_fits_next:
-                            logger.warning(
-                                f"{self} Word '{word}' not recognised by any slot, "
-                                "emitting as passthrough"
-                            )
-                            frame = self._build_word_frame(word, pts, context_id)
-                            self._word_last_pts = frame.pts
-                            await self.push_frame(frame)
-                            continue
-
-                    # Advance the tracker first so we know the raw span and overflow
-                    # before constructing the TTSTextFrame.
-                    is_complete = active.tracker.add_word_and_check_complete(word)
-                    raw_overflow_word = active.tracker.get_overflow_word()
-
-                # Ask the tracker for the portion of the word that belongs to this
-                # slot: the full word, the prefix before a frame boundary.
-                frame_text = (
-                    active.tracker.get_word_for_frame() if (active and active.tracker) else word
-                )
-                raw_text = (
-                    active.tracker.get_llm_consumed() if (active and active.tracker) else None
-                )
-                logger.debug(f"{self} Word '{word}' → frame_text='{frame_text}', raw='{raw_text}'")
-
-                frame = self._build_word_frame(frame_text, pts, context_id, raw_text=raw_text)
-                self._word_last_pts = frame.pts
-                await self.push_frame(frame)
-
-                # When all expected chars are covered the slot is marked complete and
-                # any skipped frames queued behind it (e.g. code blocks) are flushed.
-                if is_complete:
-                    active.complete = True
-                    await self._flush_aggregated_text_frame_sequence(last_word_pts=pts)
-                    if raw_overflow_word:
-                        logger.debug(f"{self} Emitting overflow word '{raw_overflow_word}'")
-                        await self._emit_overflow_word(raw_overflow_word, pts)
+                # Build TTSTextFrame(s) for this word token, advancing the active
+                # slot's tracker and flushing any skipped frames now unblocked.
+                for f in self._aggregated_frame_sequencer.process_word(word, pts, context_id):
+                    if isinstance(f, TTSTextFrame):
+                        self._word_last_pts = f.pts
+                    await self.push_frame(f)
 
     #
     # Audio context methods (active when using websocket-based TTS with context management)
@@ -1553,41 +1370,17 @@ class TTSService(AIService):
             frame.pts = self._word_last_pts
             await self.push_frame(frame)
 
-    async def _force_complete_spoken_slots(self):
-        """Emit TTSTextFrames for any spoken slots whose word-timestamp stream ended early.
+    async def _apply_force_complete(self):
+        """Force-complete all incomplete spoken slots and push any unblocked skipped frames.
 
-        Called at the end of an audio context to handle TTS providers that silently drop
-        word-timestamp events. Without this, an incomplete slot would permanently block
-        ``_flush_aggregated_text_frame_sequence`` from emitting any subsequent skipped frames,
-        causing the conversation context to lose content that follows the incomplete slot.
-
-        For each incomplete spoken slot the tracker's remaining text is pushed as a
-        TTSTextFrame (mirroring what ``_add_word_timestamps`` would have done for those
-        missing events), then the slot is marked complete so the flush can proceed.
+        Called at end-of-context to handle TTS providers that silently drop word-timestamp
+        events. Emits a TTSTextFrame for any remaining unspoken text, then flushes skipped
+        frames that were blocked by those incomplete slots.
         """
-        for slot in self._aggregated_text_frame_sequence:
-            if slot.spoken and not slot.complete:
-                if slot.tracker:
-                    remaining_text = slot.tracker.get_remaining_tts_text()
-                    raw_remaining = slot.tracker.get_remaining_llm_text()
-                    if raw_remaining and remaining_text and remaining_text not in raw_remaining:
-                        logger.warning(
-                            f"{self} force-complete: raw_remaining {repr(raw_remaining)} "
-                            f"does not contain remaining_text {repr(remaining_text)}, discarding"
-                        )
-                        raw_remaining = None
-                    if remaining_text:
-                        logger.debug(
-                            f"{self} force-completing slot with remaining text {repr(remaining_text)}"
-                        )
-                        frame = self._build_word_frame(
-                            remaining_text,
-                            self._word_last_pts,
-                            slot.context_id,
-                            raw_text=raw_remaining,
-                        )
-                        await self.push_frame(frame)
-                slot.complete = True
+        for f in self._aggregated_frame_sequencer.force_complete(self._word_last_pts):
+            if isinstance(f, TTSTextFrame):
+                self._word_last_pts = f.pts
+            await self.push_frame(f)
 
     async def _handle_audio_context(self, context_id: str):
         """Process items from an audio context queue until it is exhausted."""
@@ -1623,10 +1416,7 @@ class TTSService(AIService):
                         should_push_stop_frame = self._push_stop_frames
                     elif isinstance(frame, TTSStoppedFrame):
                         # Checking if we have any remaining spoken slots before pushing the TTSStoppedFrame
-                        await self._force_complete_spoken_slots()
-                        await self._flush_aggregated_text_frame_sequence(
-                            last_word_pts=self._word_last_pts
-                        )
+                        await self._apply_force_complete()
 
                         should_push_stop_frame = False
                         # Setting the last word timestamp as the TTSStoppedFrame PTS
@@ -1645,8 +1435,7 @@ class TTSService(AIService):
                     should_push_stop_frame = False
                 break
 
-        await self._force_complete_spoken_slots()
-        await self._flush_aggregated_text_frame_sequence(last_word_pts=self._word_last_pts)
+        await self._apply_force_complete()
 
         if should_push_stop_frame and self._push_stop_frames:
             await self.push_frame(TTSStoppedFrame(context_id=context_id))

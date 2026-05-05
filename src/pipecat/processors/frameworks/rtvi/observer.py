@@ -510,7 +510,7 @@ class RTVIObserver(BaseObserver):
         ):
             return
 
-        text = frame.raw_text or frame.text
+        text = frame.text
         agg_type = frame.aggregated_by
         for aggregation_type, transform in self._aggregation_transforms:
             if aggregation_type == agg_type or aggregation_type == "*":
