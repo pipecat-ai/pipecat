@@ -17,8 +17,11 @@ from pipecat.turns.user_start import (
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
+    LLMTurnCompletionUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
+    deferred,
 )
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
 
 def default_user_turn_start_strategies() -> list[BaseUserTurnStartStrategy]:
@@ -46,6 +49,42 @@ def default_user_turn_stop_strategies() -> list[BaseUserTurnStopStrategy]:
     from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 
     return [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+
+
+def llm_completion_user_turn_stop_strategies(
+    strategies: list[BaseUserTurnStopStrategy] | None = None,
+    *,
+    config: UserTurnCompletionConfig | None = None,
+) -> list[BaseUserTurnStopStrategy]:
+    """Build a stop-strategy list gated on the LLM's turn-completion verdict.
+
+    Wraps ``strategies`` with :func:`deferred` so they trigger inference
+    but don't fire ``on_user_turn_stopped`` themselves, then appends
+    :class:`~pipecat.turns.user_stop.LLMTurnCompletionUserTurnStopStrategy`
+    as the finalizer. Use as the ``stop`` field of a
+    :class:`UserTurnStrategies`::
+
+        UserTurnStrategies(
+            stop=llm_completion_user_turn_stop_strategies(),
+        )
+
+    Args:
+        strategies: Stop strategies that should drive inference. If
+            None, uses :func:`default_user_turn_stop_strategies`.
+        config: Optional configuration applied to the LLM via the
+            ``filter_incomplete_user_turns`` setting. Customizes the
+            turn-completion instructions, incomplete-turn timeouts, and
+            re-prompts.
+
+    Returns:
+        ``[deferred(s) for s in strategies] +
+        [LLMTurnCompletionUserTurnStopStrategy(config=config)]``.
+    """
+    strategies = strategies if strategies is not None else default_user_turn_stop_strategies()
+    return [
+        *(deferred(s) for s in strategies),
+        LLMTurnCompletionUserTurnStopStrategy(config=config),
+    ]
 
 
 @dataclass

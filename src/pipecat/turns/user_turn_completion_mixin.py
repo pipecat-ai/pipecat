@@ -22,9 +22,11 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
+    LLMMarkerFrame,
     LLMMessagesAppendFrame,
     LLMRunFrame,
     LLMTextFrame,
+    UserTurnCompletedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -279,7 +281,7 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             await asyncio.sleep(timeout)
 
             # Timeout expired - reset state before prompting LLM
-            logger.info(f"Incomplete {incomplete_type} timeout expired, prompting LLM")
+            logger.debug(f"Incomplete {incomplete_type} timeout expired, prompting LLM")
             await self._turn_reset()
             self._incomplete_timeout_task = None
             self._incomplete_type = None
@@ -402,11 +404,15 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
             )
             self._turn_suppressed = True
 
-            # Push the marker with skip_tts=True so it's added to context (maintains
-            # conversation continuity per prompt instructions) but not spoken by TTS
-            frame = LLMTextFrame(self._turn_text_buffer)
-            frame.skip_tts = True
-            await self.push_frame(frame)
+            # No UserTurnCompletedFrame is broadcast here: the turn is
+            # explicitly not complete. The re-prompt path is driven by
+            # this mixin's own timeout.
+
+            # Persist the marker to context as a stand-alone assistant
+            # message via LLMMarkerFrame: the bot produces no spoken
+            # output for incomplete turns, so the marker is the entire
+            # context entry.
+            await self.push_frame(LLMMarkerFrame(marker))
 
             self._turn_text_buffer = ""
             await self._start_incomplete_timeout(incomplete_type)
@@ -416,16 +422,24 @@ class UserTurnCompletionLLMServiceMixin(FrameProcessor):
         if USER_TURN_COMPLETE_MARKER in self._turn_text_buffer:
             logger.debug(f"COMPLETE ({USER_TURN_COMPLETE_MARKER}) detected, pushing buffered text")
 
+            # Broadcast that the user turn is complete so a stop strategy
+            # gating finalization on this signal (e.g.
+            # LLMTurnCompletionUserTurnStopStrategy) can fire
+            # `on_user_turn_stopped`. Must fire before the marker so
+            # downstream consumers see the signal before the response.
+            await self.broadcast_frame(UserTurnCompletedFrame)
+
+            # Push the marker as a sideband signal that the assistant
+            # aggregator will prepend to the upcoming aggregated text,
+            # so the context message ends up as "✓ <response>".
+            await self.push_frame(
+                LLMMarkerFrame(USER_TURN_COMPLETE_MARKER, append_to_context_immediately=False)
+            )
+
             # Split buffer at the marker to handle cases where marker and text
             # arrive in the same chunk (e.g., "✓ Hello!" from some LLMs)
             marker_pos = self._turn_text_buffer.index(USER_TURN_COMPLETE_MARKER)
             marker_end = marker_pos + len(USER_TURN_COMPLETE_MARKER)
-
-            # Push the marker with skip_tts=True - adds to context but not spoken
-            marker_text = self._turn_text_buffer[:marker_end]
-            frame = LLMTextFrame(marker_text)
-            frame.skip_tts = True
-            await self.push_frame(frame)
 
             # Push remaining text after marker as normal speech
             remaining_text = self._turn_text_buffer[marker_end:]

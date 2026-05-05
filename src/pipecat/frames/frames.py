@@ -340,6 +340,40 @@ class LLMTextFrame(TextFrame):
 
 
 @dataclass
+class LLMMarkerFrame(DataFrame):
+    """Sideband marker emitted by an LLM service.
+
+    A marker is short, structured assistant output that should be
+    persisted in the conversation context but should not flow through
+    the standard text path (TTS, transcript). The assistant aggregator
+    writes the marker to the context so the LLM can self-condition on
+    prior markers on subsequent turns.
+
+    The primary use today is the ``filter_incomplete_user_turns``
+    protocol, where ``UserTurnCompletionLLMServiceMixin`` emits the
+    turn-completion markers ✓ / ○ / ◐ on every response. The frame is
+    intentionally generic so other components — STT services with
+    built-in turn signals, end-of-turn classifiers, custom annotations,
+    etc. — can use the same mechanism to inject sideband signals into
+    the assistant context.
+
+    Parameters:
+        marker: The marker payload (typically a short string such as a
+            single character).
+        append_to_context_immediately: If True, the marker is written
+            to the context as its own standalone assistant message as
+            soon as it's received. If False, the marker is appended to
+            the running assistant aggregation and flushed to the
+            context together with the following text as a single
+            message (e.g. for the ✓ case the context message ends up
+            as "✓ <response>").
+    """
+
+    marker: str
+    append_to_context_immediately: bool = True
+
+
+@dataclass
 class AggregatedTextFrame(TextFrame):
     """Text frame representing an aggregation of TextFrames.
 
@@ -965,6 +999,24 @@ class UserSpeakingFrame(SystemFrame):
     """Frame indicating the user is speaking.
 
     Emitted by VAD to indicate the user is speaking.
+    """
+
+    pass
+
+
+@dataclass
+class UserTurnCompletedFrame(SystemFrame):
+    """Frame indicating that the user turn is semantically complete.
+
+    Emitted by any component that can judge conversational turn
+    completeness — for example an LLM with turn-completion markers, an
+    STT service with built-in turn detection, or a dedicated
+    end-of-turn classifier. Stop strategies that gate the
+    user-turn-stop event on an external completeness signal (e.g.
+    ``LLMTurnCompletionUserTurnStopStrategy``) consume this frame to
+    finalize the turn. Producers should emit this frame only when they
+    judge the turn complete; an absence of this frame means the turn is
+    not yet considered complete.
     """
 
     pass
