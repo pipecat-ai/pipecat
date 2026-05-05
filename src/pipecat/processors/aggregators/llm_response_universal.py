@@ -72,6 +72,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContextMessage,
     LLMSpecificMessage,
     NotGiven,
+    is_given,
 )
 from pipecat.processors.aggregators.llm_context_summarizer import (
     LLMContextSummarizer,
@@ -118,6 +119,18 @@ class LLMUserAggregatorParams:
         user_turn_completion_config: Configuration for turn completion behavior including
             custom instructions, timeouts, and prompts. Only used when
             filter_incomplete_user_turns is True.
+        add_tool_change_messages: When True, on each ``LLMSetToolsFrame`` the
+            aggregator computes the diff against the currently advertised tools
+            and appends a developer-role message to the context describing
+            additions/removals. Helps the LLM stay coherent across
+            mid-conversation tool changes, mitigating several flavors of
+            tool-call-related hallucination: calling tools that have been
+            removed, avoiding tools that have been re-added, and hallucinating
+            output (made-up answers or tool-call-shaped non-tool-calls) when
+            tools are unavailable. Only standard tools are diffed; custom
+            (LLM-specific) tools are ignored. When using
+            ``LLMContextAggregatorPair``, prefer setting this via its
+            ``add_tool_change_messages`` argument instead. Defaults to False.
     """
 
     user_turn_strategies: UserTurnStrategies | None = None
@@ -128,6 +141,7 @@ class LLMUserAggregatorParams:
     audio_idle_timeout: float = 1.0
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: UserTurnCompletionConfig | None = None
+    add_tool_change_messages: bool = False
 
 
 @dataclass
@@ -143,10 +157,23 @@ class LLMAssistantAggregatorParams:
             summarization. Controls trigger thresholds, message preservation, and
             summarization prompts. If None, uses default
             ``LLMAutoContextSummarizationConfig`` values.
+        add_tool_change_messages: When True, on each ``LLMSetToolsFrame`` the
+            aggregator computes the diff against the currently advertised tools
+            and appends a developer-role message to the context describing
+            additions/removals. Helps the LLM stay coherent across
+            mid-conversation tool changes, mitigating several flavors of
+            tool-call-related hallucination: calling tools that have been
+            removed, avoiding tools that have been re-added, and hallucinating
+            output (made-up answers or tool-call-shaped non-tool-calls) when
+            tools are unavailable. Only standard tools are diffed; custom
+            (LLM-specific) tools are ignored. When using
+            ``LLMContextAggregatorPair``, prefer setting this via its
+            ``add_tool_change_messages`` argument instead. Defaults to False.
     """
 
     enable_auto_context_summarization: bool = False
     auto_context_summarization_config: LLMAutoContextSummarizationConfig | None = None
+    add_tool_change_messages: bool = False
 
     # ---------------------------------------------------------------------------
     # Deprecated field names — kept for backward compatibility.
@@ -248,19 +275,86 @@ class LLMContextAggregator(FrameProcessor):
     common functionality for context-based conversation management.
     """
 
-    def __init__(self, *, context: LLMContext, role: str, **kwargs):
+    # Developer-role messages appended to the context when tools are added/
+    # removed via ``LLMSetToolsFrame`` (only when ``add_tool_change_messages``
+    # is enabled on the aggregator's params). ``{function_names}`` is
+    # substituted with a sorted, comma-separated, backtick-wrapped list.
+    TOOL_ACTIVATION_MESSAGE_TEMPLATE = (
+        "The following function(s) have just been added and may now be called: "
+        "{function_names}. Any previously available functions remain available."
+    )
+    TOOL_DEACTIVATION_MESSAGE_TEMPLATE = (
+        "The following function(s) have just been removed and should not be called: "
+        "{function_names}. Any previously available functions remain available. "
+        "The removed function(s) may become available again later, in which case "
+        "you will be informed."
+    )
+
+    def __init__(
+        self,
+        *,
+        context: LLMContext,
+        role: str,
+        add_tool_change_messages: bool = False,
+        **kwargs,
+    ):
         """Initialize the context response aggregator.
 
         Args:
             context: The LLM context to use for conversation storage.
             role: The role this aggregator represents (e.g. "user", "assistant").
+            add_tool_change_messages: See the field of the same name on the
+                aggregator-specific params dataclasses. Subclasses propagate
+                this from their ``params``.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
         self._context = context
         self._role = role
+        self._add_tool_change_messages = add_tool_change_messages
 
         self._aggregation: list[TextPartForConcatenation] = []
+
+    def _maybe_add_tool_change_messages(self, new_tools: ToolsSchema | NotGiven) -> None:
+        """Append a developer message describing tool add/remove deltas.
+
+        No-op unless ``add_tool_change_messages`` was enabled on the aggregator,
+        and no-op when the diff against the currently advertised tools is empty.
+        Custom (LLM-specific) tools are ignored — only standard tools are diffed.
+
+        Both aggregators call this on every ``LLMSetToolsFrame`` they handle.
+        Whichever aggregator handles the frame first computes a real diff
+        against the shared context and adds the announcement; by the time
+        the other aggregator sees it (if at all), the context already
+        reflects the new tools, so its diff is empty and no duplicate
+        message is added. This is order-independent: it works whether the
+        frame flows downstream (user aggregator first) or upstream
+        (assistant aggregator first, and consumed without being forwarded).
+        """
+        if not self._add_tool_change_messages:
+            return
+
+        def _names(tools: ToolsSchema | NotGiven) -> set[str]:
+            if not is_given(tools):
+                return set()
+            return {s.name for s in tools.standard_tools}
+
+        old_names = _names(self._context.tools)
+        new_names = _names(new_tools)
+        added = new_names - old_names
+        removed = old_names - new_names
+        if not added and not removed:
+            return
+
+        parts: list[str] = []
+        if added:
+            names = ", ".join(f"`{n}`" for n in sorted(added))
+            parts.append(self.TOOL_ACTIVATION_MESSAGE_TEMPLATE.format(function_names=names))
+        if removed:
+            names = ", ".join(f"`{n}`" for n in sorted(removed))
+            parts.append(self.TOOL_DEACTIVATION_MESSAGE_TEMPLATE.format(function_names=names))
+
+        self._context.add_message({"role": "developer", "content": " ".join(parts)})
 
     @property
     def messages(self) -> list[LLMContextMessage]:
@@ -434,8 +528,14 @@ class LLMUserAggregator(LLMContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments.
         """
-        super().__init__(context=context, role="user", **kwargs)
-        self._params = params or LLMUserAggregatorParams()
+        params = params or LLMUserAggregatorParams()
+        super().__init__(
+            context=context,
+            role="user",
+            add_tool_change_messages=params.add_tool_change_messages,
+            **kwargs,
+        )
+        self._params = params
 
         self._register_event_handler("on_user_turn_started")
         self._register_event_handler("on_user_turn_stopped")
@@ -536,6 +636,7 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, LLMMessagesTransformFrame):
             await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
+            self._maybe_add_tool_change_messages(frame.tools)
             self.set_tools(frame.tools)
             # Push the LLMSetToolsFrame as well, since speech-to-speech LLM
             # services (like OpenAI Realtime) may need to know about tool
@@ -843,8 +944,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments.
         """
-        super().__init__(context=context, role="assistant", **kwargs)
-        self._params = params or LLMAssistantAggregatorParams()
+        params = params or LLMAssistantAggregatorParams()
+        super().__init__(
+            context=context,
+            role="assistant",
+            add_tool_change_messages=params.add_tool_change_messages,
+            **kwargs,
+        )
+        self._params = params
 
         self._function_calls_in_progress: dict[str, FunctionCallInProgressFrame | None] = {}
         self._function_calls_image_results: dict[str, UserImageRawFrame] = {}
@@ -949,6 +1056,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, LLMMessagesTransformFrame):
             await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
+            self._maybe_add_tool_change_messages(frame.tools)
             self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
@@ -1489,6 +1597,7 @@ class LLMContextAggregatorPair:
         *,
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
+        add_tool_change_messages: bool | None = None,
     ):
         """Initialize the LLM context aggregator pair.
 
@@ -1496,9 +1605,22 @@ class LLMContextAggregatorPair:
             context: The context to be managed by the aggregators.
             user_params: Parameters for the user context aggregator.
             assistant_params: Parameters for the assistant context aggregator.
+            add_tool_change_messages: When provided, sets the field of the
+                same name on both ``user_params`` and ``assistant_params``,
+                overriding any value already set on either. This is the
+                preferred way to enable tool-change announcements: it ensures
+                both aggregators participate, which makes the feature robust
+                regardless of which aggregator handles a given
+                ``LLMSetToolsFrame``. The shared context guarantees the
+                announcement is added exactly once (the second aggregator's
+                diff is empty by the time it sees the frame). Leave as
+                ``None`` to respect per-params settings.
         """
         user_params = user_params or LLMUserAggregatorParams()
         assistant_params = assistant_params or LLMAssistantAggregatorParams()
+        if add_tool_change_messages is not None:
+            user_params.add_tool_change_messages = add_tool_change_messages
+            assistant_params.add_tool_change_messages = add_tool_change_messages
         self._user = LLMUserAggregator(context, params=user_params)
         self._assistant = LLMAssistantAggregator(context, params=assistant_params)
 

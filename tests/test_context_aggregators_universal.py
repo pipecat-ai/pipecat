@@ -7,6 +7,8 @@
 import json
 import unittest
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -26,6 +28,7 @@ from pipecat.frames.frames import (
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
     LLMRunFrame,
+    LLMSetToolsFrame,
     LLMTextFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
@@ -48,6 +51,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
     AssistantThoughtMessage,
     AssistantTurnStoppedMessage,
     LLMAssistantAggregator,
+    LLMAssistantAggregatorParams,
+    LLMContextAggregatorPair,
     LLMUserAggregator,
     LLMUserAggregatorParams,
 )
@@ -1245,6 +1250,205 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=expected_up_frames,
         )
         assert context.messages[0]["content"] == "HELLO"
+
+
+def _function_schema(name: str) -> FunctionSchema:
+    return FunctionSchema(name=name, description="", properties={}, required=[])
+
+
+def _tools(*names: str) -> ToolsSchema:
+    return ToolsSchema(standard_tools=[_function_schema(n) for n in names])
+
+
+def _developer_messages(context: LLMContext) -> list[str]:
+    return [
+        m["content"]
+        for m in context.messages
+        if isinstance(m, dict) and m.get("role") == "developer"
+    ]
+
+
+class TestToolChangeMessages(unittest.IsolatedAsyncioTestCase):
+    """Coverage for the opt-in ``add_tool_change_messages`` feature.
+
+    The feature appends a developer-role message to the context whenever
+    ``LLMSetToolsFrame`` changes the set of advertised standard tools.
+    """
+
+    async def _send_set_tools_to_user_aggregator(self, aggregator, tools):
+        # User aggregator forwards LLMSetToolsFrame downstream, so we expect
+        # the SpeechControlParamsFrame (emitted on StartFrame) and the
+        # forwarded LLMSetToolsFrame.
+        await run_test(
+            aggregator,
+            frames_to_send=[LLMSetToolsFrame(tools=tools)],
+            expected_down_frames=[SpeechControlParamsFrame, LLMSetToolsFrame],
+        )
+
+    async def test_default_off_adds_no_message(self):
+        context = LLMContext(tools=_tools("a"))
+        aggregator = LLMUserAggregator(context)
+        await self._send_set_tools_to_user_aggregator(aggregator, _tools("a", "b"))
+        self.assertEqual(_developer_messages(context), [])
+
+    async def test_user_aggregator_announces_additions(self):
+        context = LLMContext(tools=_tools("a"))
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        await self._send_set_tools_to_user_aggregator(aggregator, _tools("a", "b", "c"))
+        msgs = _developer_messages(context)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("just been added", msgs[0])
+        self.assertIn("`b`", msgs[0])
+        self.assertIn("`c`", msgs[0])
+        self.assertNotIn("removed", msgs[0])
+        # Sorted, stable order
+        self.assertLess(msgs[0].index("`b`"), msgs[0].index("`c`"))
+
+    async def test_user_aggregator_announces_removals(self):
+        context = LLMContext(tools=_tools("a", "b", "c"))
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        await self._send_set_tools_to_user_aggregator(aggregator, _tools("a"))
+        msgs = _developer_messages(context)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("just been removed", msgs[0])
+        self.assertIn("`b`", msgs[0])
+        self.assertIn("`c`", msgs[0])
+        self.assertNotIn("just been added", msgs[0])
+
+    async def test_user_aggregator_combined_add_and_remove(self):
+        context = LLMContext(tools=_tools("a", "b"))
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        await self._send_set_tools_to_user_aggregator(aggregator, _tools("b", "c"))
+        msgs = _developer_messages(context)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("just been added", msgs[0])
+        self.assertIn("`c`", msgs[0])
+        self.assertIn("just been removed", msgs[0])
+        self.assertIn("`a`", msgs[0])
+        # Activation phrase appears before deactivation phrase.
+        self.assertLess(msgs[0].index("just been added"), msgs[0].index("just been removed"))
+
+    async def test_no_message_when_diff_is_empty(self):
+        context = LLMContext(tools=_tools("a", "b"))
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        await self._send_set_tools_to_user_aggregator(aggregator, _tools("a", "b"))
+        self.assertEqual(_developer_messages(context), [])
+
+    async def test_set_tools_to_not_given_lists_all_as_removed(self):
+        from pipecat.processors.aggregators.llm_context import NOT_GIVEN
+
+        context = LLMContext(tools=_tools("a", "b"))
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        await self._send_set_tools_to_user_aggregator(aggregator, NOT_GIVEN)
+        msgs = _developer_messages(context)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("just been removed", msgs[0])
+        self.assertIn("`a`", msgs[0])
+        self.assertIn("`b`", msgs[0])
+
+    async def test_set_tools_from_not_given_lists_all_as_added(self):
+        context = LLMContext()  # tools default to NOT_GIVEN
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        await self._send_set_tools_to_user_aggregator(aggregator, _tools("x", "y"))
+        msgs = _developer_messages(context)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("just been added", msgs[0])
+        self.assertIn("`x`", msgs[0])
+        self.assertIn("`y`", msgs[0])
+
+    async def test_custom_tools_only_change_no_message(self):
+        # Standard tools identical; only custom tools differ → no announcement.
+        context = LLMContext(
+            tools=ToolsSchema(
+                standard_tools=[_function_schema("a")],
+                custom_tools={AdapterType.OPENAI: [{"type": "web_search"}]},
+            )
+        )
+        aggregator = LLMUserAggregator(
+            context, params=LLMUserAggregatorParams(add_tool_change_messages=True)
+        )
+        new_tools = ToolsSchema(
+            standard_tools=[_function_schema("a")],
+            custom_tools={AdapterType.OPENAI: [{"type": "file_search"}]},
+        )
+        await self._send_set_tools_to_user_aggregator(aggregator, new_tools)
+        self.assertEqual(_developer_messages(context), [])
+
+    async def test_pipeline_with_both_aggregators_announces_once(self):
+        """User agg runs first; assistant agg sees no diff and stays silent."""
+        context = LLMContext(tools=_tools("a"))
+        user, assistant = LLMContextAggregatorPair(context, add_tool_change_messages=True)
+        pipeline = Pipeline([user, assistant])
+        # The user aggregator forwards LLMSetToolsFrame downstream; the
+        # assistant aggregator consumes it (does not forward).
+        await run_test(
+            pipeline,
+            frames_to_send=[LLMSetToolsFrame(tools=_tools("a", "b"))],
+            expected_down_frames=[SpeechControlParamsFrame],
+        )
+        msgs = _developer_messages(context)
+        self.assertEqual(len(msgs), 1, f"expected exactly one announcement, got {msgs}")
+        self.assertIn("`b`", msgs[0])
+
+    async def test_assistant_aggregator_announces_when_handled_first(self):
+        """Order-independence: an upstream LLMSetToolsFrame hits the assistant
+        aggregator first (before being consumed). It should announce, and the
+        user aggregator (which never sees it) shouldn't matter for correctness.
+        """
+        context = LLMContext(tools=_tools("a"))
+        assistant = LLMAssistantAggregator(
+            context,
+            params=LLMAssistantAggregatorParams(add_tool_change_messages=True),
+        )
+        # Send the frame upstream so the assistant aggregator processes it.
+        await run_test(
+            assistant,
+            frames_to_send=[LLMSetToolsFrame(tools=_tools("a", "b"))],
+            frames_to_send_direction=FrameDirection.UPSTREAM,
+            expected_up_frames=[],
+        )
+        msgs = _developer_messages(context)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("`b`", msgs[0])
+
+    async def test_pair_propagates_flag_to_both(self):
+        context = LLMContext()
+        pair = LLMContextAggregatorPair(context, add_tool_change_messages=True)
+        self.assertTrue(pair.user()._add_tool_change_messages)
+        self.assertTrue(pair.assistant()._add_tool_change_messages)
+
+    async def test_pair_arg_overrides_per_params_settings(self):
+        context = LLMContext()
+        pair = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(add_tool_change_messages=False),
+            assistant_params=LLMAssistantAggregatorParams(add_tool_change_messages=False),
+            add_tool_change_messages=True,
+        )
+        self.assertTrue(pair.user()._add_tool_change_messages)
+        self.assertTrue(pair.assistant()._add_tool_change_messages)
+
+    async def test_pair_default_respects_per_params(self):
+        context = LLMContext()
+        pair = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(add_tool_change_messages=True),
+            assistant_params=LLMAssistantAggregatorParams(add_tool_change_messages=False),
+        )
+        self.assertTrue(pair.user()._add_tool_change_messages)
+        self.assertFalse(pair.assistant()._add_tool_change_messages)
 
 
 if __name__ == "__main__":

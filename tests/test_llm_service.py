@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     FunctionCallFromLLM,
@@ -19,6 +21,10 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
+
+
+def _expected_missing_tool_message(name: str) -> str:
+    return LLMService.MISSING_FUNCTION_CALL_MESSAGE_TEMPLATE.format(function_name=name)
 
 
 class MockLLMService(LLMService):
@@ -104,13 +110,14 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recorded_frames[1].function_name, "missing_tool")
         self.assertEqual(
             recorded_frames[2].result,
-            "Error: function 'missing_tool' is not registered.",
+            _expected_missing_tool_message("missing_tool"),
         )
 
-        # Only the queue-time warning should fire; the execution-time
-        # "just unregistered" warning must not double-log.
+        # The tool was not advertised, so this is treated as a hallucination
+        # (warning at queue time). The execution-time "just unregistered"
+        # warning must not double-log.
         warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
-        self.assertTrue(any("not registered" in w for w in warnings))
+        self.assertTrue(any("not in the currently advertised tool set" in w for w in warnings))
         self.assertFalse(any("just unregistered" in w for w in warnings))
 
     async def test_function_unregistered_between_queue_and_execute(self):
@@ -160,8 +167,123 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             recorded_frames[2].result,
-            "Error: function 'doomed_tool' is not registered.",
+            _expected_missing_tool_message("doomed_tool"),
         )
+
+    async def test_missing_function_call_dev_error_logged_as_error(self):
+        """Tool advertised to the LLM but missing a handler → logger.error."""
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+        service.broadcast_frame = AsyncMock()
+
+        context = LLMContext(
+            tools=ToolsSchema(
+                standard_tools=[
+                    FunctionSchema(
+                        name="advertised_but_unhandled",
+                        description="",
+                        properties={},
+                        required=[],
+                    )
+                ]
+            )
+        )
+
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            await service.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name="advertised_but_unhandled",
+                        tool_call_id="call_1",
+                        arguments={},
+                        context=context,
+                    )
+                ]
+            )
+
+        errors = [c.args[0] for c in mock_logger.error.call_args_list]
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        self.assertTrue(
+            any(
+                "advertised" in e and "register_function" in e and "advertised_but_unhandled" in e
+                for e in errors
+            ),
+            f"expected dev-error log; got errors={errors}, warnings={warnings}",
+        )
+        self.assertFalse(any("not in the currently advertised tool set" in w for w in warnings))
+
+    async def test_missing_function_call_hallucination_logged_as_warning(self):
+        """Tool not advertised to the LLM → logger.warning (hallucination)."""
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+        service.broadcast_frame = AsyncMock()
+
+        context = LLMContext(
+            tools=ToolsSchema(
+                standard_tools=[
+                    FunctionSchema(
+                        name="something_else",
+                        description="",
+                        properties={},
+                        required=[],
+                    )
+                ]
+            )
+        )
+
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            await service.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name="never_advertised",
+                        tool_call_id="call_1",
+                        arguments={},
+                        context=context,
+                    )
+                ]
+            )
+
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        errors = [c.args[0] for c in mock_logger.error.call_args_list]
+        self.assertTrue(
+            any(
+                "not in the currently advertised tool set" in w and "never_advertised" in w
+                for w in warnings
+            ),
+            f"expected hallucination warning; got warnings={warnings}, errors={errors}",
+        )
+        self.assertFalse(any("advertised" in e and "register_function" in e for e in errors))
+
+    async def test_catch_all_handler_suppresses_missing_warnings(self):
+        """register_function(None, ...) suppresses both dev-error and hallucination logs."""
+        service = MockLLMService()
+        service._call_event_handler = AsyncMock()
+        await self._run_function_calls_inline(service)
+        service.broadcast_frame = AsyncMock()
+
+        async def catch_all(params):
+            await params.result_callback("handled")
+
+        service.register_function(None, catch_all)
+
+        with patch("pipecat.services.llm_service.logger") as mock_logger:
+            await service.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name="anything",
+                        tool_call_id="call_1",
+                        arguments={},
+                        context=LLMContext(),
+                    )
+                ]
+            )
+
+        errors = [c.args[0] for c in mock_logger.error.call_args_list]
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        self.assertFalse(any("register_function" in e for e in errors))
+        self.assertFalse(any("not in the currently advertised tool set" in w for w in warnings))
 
     async def test_missing_function_call_allows_user_mute_cleanup(self):
         service = MockLLMService()
