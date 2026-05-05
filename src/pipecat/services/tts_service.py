@@ -54,6 +54,7 @@ from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
+from pipecat.utils.text.word_timestamp_utils import merge_punct_tokens
 from pipecat.utils.time import seconds_to_nanoseconds
 
 
@@ -98,7 +99,6 @@ class _WordTimestampEntry:
     word: str
     timestamp: float
     context_id: str
-    includes_inter_frame_spaces: bool | None = None
 
 
 @dataclass
@@ -1183,10 +1183,8 @@ class TTSService(AIService):
             if self._initial_word_times:
                 cached = self._initial_word_times.copy()
                 self._initial_word_times = []
-                for word, timestamp_seconds, ctx_id, ifs in cached:
-                    await self._add_word_timestamps(
-                        [(word, timestamp_seconds)], ctx_id, includes_inter_frame_spaces=ifs
-                    )
+                for word, timestamp_seconds, ctx_id in cached:
+                    await self._add_word_timestamps([(word, timestamp_seconds)], ctx_id)
 
     async def reset_word_timestamps(self):
         """Reset word timestamp tracking."""
@@ -1208,6 +1206,11 @@ class TTSService(AIService):
         playback order by _handle_audio_context. Otherwise they are processed immediately
         via _add_word_timestamps.
 
+        When ``includes_inter_frame_spaces`` is True (e.g. Inworld TTS), punctuation and
+        space-only tokens are merged into the preceding word via ``_merge_punct_tokens``
+        before queuing, so the tracker always receives words with trailing punctuation
+        already attached.  ``includes_inter_frame_spaces`` is reset to None after merging.
+
         Args:
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
             context_id: Unique identifier for the TTS context.
@@ -1216,23 +1219,17 @@ class TTSService(AIService):
                 consumers must not inject additional spaces between tokens. None leaves
                 the frame's own default unchanged.
         """
+        if includes_inter_frame_spaces:
+            word_times = merge_punct_tokens(word_times)
+
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
                 await self.append_to_audio_context(
                     context_id,
-                    _WordTimestampEntry(
-                        word=word,
-                        timestamp=timestamp,
-                        context_id=context_id,
-                        includes_inter_frame_spaces=includes_inter_frame_spaces,
-                    ),
+                    _WordTimestampEntry(word=word, timestamp=timestamp, context_id=context_id),
                 )
         else:
-            await self._add_word_timestamps(
-                word_times=word_times,
-                context_id=context_id,
-                includes_inter_frame_spaces=includes_inter_frame_spaces,
-            )
+            await self._add_word_timestamps(word_times=word_times, context_id=context_id)
 
     def _get_active_aggregated_frame_slot(self) -> _AggregatedFrameSlot | None:
         """Return the first incomplete spoken slot with a tracker."""
@@ -1263,13 +1260,10 @@ class TTSService(AIService):
         text: str,
         pts: int,
         context_id: str | None,
-        includes_inter_frame_spaces: bool | None,
         raw_text: str | None = None,
     ) -> TTSTextFrame:
         """Build a TTSTextFrame with all standard word-timestamp attributes set."""
         frame = TTSTextFrame(text, aggregated_by=AggregationType.WORD)
-        if includes_inter_frame_spaces is not None:
-            frame.includes_inter_frame_spaces = includes_inter_frame_spaces
         frame.pts = pts
         frame.context_id = context_id
         if context_id in self._tts_contexts:
@@ -1277,12 +1271,7 @@ class TTSService(AIService):
         frame.raw_text = raw_text
         return frame
 
-    async def _emit_overflow_word(
-        self,
-        raw_overflow_word: str | None,
-        pts: int,
-        includes_inter_frame_spaces: bool | None = None,
-    ):
+    async def _emit_overflow_word(self, raw_overflow_word: str | None, pts: int):
         """Emit a TTSTextFrame for the overflow portion of a word that straddles two slots.
 
         When a TTS word spans the boundary between two AggregatedTextFrames (e.g.
@@ -1292,10 +1281,8 @@ class TTSService(AIService):
         slot, that slot is marked complete and any waiting skipped frames are flushed.
 
         Args:
-            active: The just-completed slot whose tracker produced the overflow.
             raw_overflow_word: Raw (un-normalized) overflow suffix from the tracker.
             pts: PTS to assign to the overflow frame.
-            includes_inter_frame_spaces: When True, the tokens already embed inter-word
         """
         if raw_overflow_word is None:
             return
@@ -1307,7 +1294,6 @@ class TTSService(AIService):
             raw_overflow_word,
             pts,
             next_active.context_id,
-            includes_inter_frame_spaces=includes_inter_frame_spaces,
             raw_text=next_active.tracker.get_llm_consumed(),
         )
         await self.push_frame(overflow_frame)
@@ -1319,7 +1305,6 @@ class TTSService(AIService):
         self,
         word_times: list[tuple[str, float]],
         context_id: str | None = None,
-        includes_inter_frame_spaces: bool | None = None,
     ):
         """Process word timestamps directly, building and pushing TTSTextFrames inline.
 
@@ -1335,9 +1320,7 @@ class TTSService(AIService):
             ts_ns = seconds_to_nanoseconds(timestamp)
             if self._initial_word_timestamp == -1:
                 # Cache until we have audio and can compute PTS.
-                self._initial_word_times.append(
-                    (word, timestamp, context_id, includes_inter_frame_spaces)
-                )
+                self._initial_word_times.append((word, timestamp, context_id))
             else:
                 pts = self._initial_word_timestamp + ts_ns
                 active = self._get_active_aggregated_frame_slot()
@@ -1360,18 +1343,14 @@ class TTSService(AIService):
                                 f"{self} Word '{word}' not recognised by any slot, "
                                 "emitting as passthrough"
                             )
-                            frame = self._build_word_frame(
-                                word, pts, context_id, includes_inter_frame_spaces
-                            )
+                            frame = self._build_word_frame(word, pts, context_id)
                             self._word_last_pts = frame.pts
                             await self.push_frame(frame)
                             continue
 
                     # Advance the tracker first so we know the raw span and overflow
                     # before constructing the TTSTextFrame.
-                    is_complete = active.tracker.add_word_and_check_complete(
-                        word, includes_inter_frame_spaces=includes_inter_frame_spaces
-                    )
+                    is_complete = active.tracker.add_word_and_check_complete(word)
                     raw_overflow_word = active.tracker.get_overflow_word()
 
                 # Ask the tracker for the portion of the word that belongs to this
@@ -1384,9 +1363,7 @@ class TTSService(AIService):
                 )
                 logger.debug(f"{self} Word '{word}' → frame_text='{frame_text}', raw='{raw_text}'")
 
-                frame = self._build_word_frame(
-                    frame_text, pts, context_id, includes_inter_frame_spaces, raw_text=raw_text
-                )
+                frame = self._build_word_frame(frame_text, pts, context_id, raw_text=raw_text)
                 self._word_last_pts = frame.pts
                 await self.push_frame(frame)
 
@@ -1607,7 +1584,6 @@ class TTSService(AIService):
                             remaining_text,
                             self._word_last_pts,
                             slot.context_id,
-                            includes_inter_frame_spaces=None,
                             raw_text=raw_remaining,
                         )
                         await self.push_frame(frame)
@@ -1633,7 +1609,6 @@ class TTSService(AIService):
                     await self._add_word_timestamps(
                         [(frame.word, frame.timestamp)],
                         frame.context_id,
-                        includes_inter_frame_spaces=frame.includes_inter_frame_spaces,
                     )
                     continue
                 elif isinstance(frame, TTSAudioRawFrame):

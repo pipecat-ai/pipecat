@@ -513,7 +513,7 @@ async def test_http_push_text_llm_response_end_after_tts_text():
 
 @pytest.mark.asyncio
 async def test_http_word_timestamps_verbatim_tokens():
-    """HTTP path: text, PTS order, flag, and text-before-audio are all verified.
+    """HTTP path: text, PTS order, and text-before-audio are all verified.
 
     Word timestamps arrive in the audio context queue before the audio frame.
     _handle_audio_context caches them, then flushes when the first audio frame
@@ -534,7 +534,6 @@ async def test_http_word_timestamps_verbatim_tokens():
     audio_frames = [f for f in down if isinstance(f, TTSAudioRawFrame)]
 
     assert [f.text for f in tts_text_frames] == ["hello", "world"]
-    assert all(f.includes_inter_frame_spaces is True for f in tts_text_frames)
 
     pts_values = [f.pts for f in tts_text_frames]
     assert pts_values == sorted(pts_values) and len(set(pts_values)) == len(pts_values), (
@@ -552,15 +551,14 @@ async def test_http_word_timestamps_verbatim_tokens():
 
 @pytest.mark.asyncio
 async def test_http_word_timestamps_punctuation_tokens():
-    """Verbatim punctuation tokens are preserved with flag=True; default flag is False.
+    """Punct-only tokens are merged into the preceding word when includes_inter_frame_spaces=True.
 
-    Models the Inworld API scenario: the TTS returns tokens exactly as sent.
-    Space placement rule:
-      - word-follows-word: space is the leading char of the next word (e.g. " world")
-      - word-follows-punctuation: space is the trailing char of the punctuation token
-        (e.g. "! "), so the following word token carries no leading space.
-    The flag must reach every frame and the text must not be modified.
-    Also acts as a regression guard that flag=False is the default.
+    Models the Inworld API scenario: the TTS returns separate space and punctuation
+    tokens.  add_word_timestamps calls merge_punct_tokens when includes_inter_frame_spaces
+    is True, collapsing those tokens into the preceding word before the tracker sees them.
+
+    With flag=False (default) tokens are forwarded as-is; the tracker strips leading/
+    trailing whitespace from each frame word via get_word_for_frame().
     """
     verbatim_tokens = [
         ("hello", 0.0),
@@ -571,9 +569,9 @@ async def test_http_word_timestamps_punctuation_tokens():
         (" you", 0.75),
         ("?", 0.9),
     ]
-    expected_texts = ["hello", " world", "! ", "How", " are", " you", "?"]
 
-    # With flag=True: all tokens verbatim, all frames carry the flag.
+    # With flag=True: punct-only tokens ("! " and "?") are merged into the preceding
+    # words (" world" → " world! " and " you" → " you?"), then stripped by the tracker.
     tts_ifs = _MockWordTimestampHttpTTSService(
         includes_inter_frame_spaces=True,
         word_times=verbatim_tokens,
@@ -583,12 +581,11 @@ async def test_http_word_timestamps_punctuation_tokens():
         frames_to_send=[TTSSpeakFrame(text="hello world! How are you?", append_to_context=False)],
     )
     text_frames_ifs = [f for f in frames_ifs[0] if isinstance(f, TTSTextFrame)]
-    assert [f.text for f in text_frames_ifs] == expected_texts, (
-        "Verbatim tokens must not be modified"
+    assert [f.text for f in text_frames_ifs] == ["hello", "world!", "How", "are", "you?"], (
+        "Punct-only tokens must be merged into the preceding word"
     )
-    assert all(f.includes_inter_frame_spaces is True for f in text_frames_ifs)
 
-    # With flag=False (default): same tokens, flag must be False on every frame.
+    # With flag=False (default): no merging; tracker strips leading/trailing spaces.
     tts_plain = _MockWordTimestampHttpTTSService(
         word_times=verbatim_tokens,
     )
@@ -597,14 +594,12 @@ async def test_http_word_timestamps_punctuation_tokens():
         frames_to_send=[TTSSpeakFrame(text="hello world! How are you?", append_to_context=False)],
     )
     text_frames_plain = [f for f in frames_plain[0] if isinstance(f, TTSTextFrame)]
-    expected_texts = ["hello", "world", "!", "How", "are", "you", "?"]
-    assert [f.text for f in text_frames_plain] == expected_texts
-    assert all(f.includes_inter_frame_spaces is False for f in text_frames_plain)
+    assert [f.text for f in text_frames_plain] == ["hello", "world", "!", "How", "are", "you", "?"]
 
 
 @pytest.mark.asyncio
 async def test_websocket_word_timestamps_verbatim_tokens():
-    """WebSocket path: _WordTimestampEntry carries verbatim text, PTS, and flag.
+    """WebSocket path: text, PTS order, and text-before-audio are all verified.
 
     Unlike the HTTP path the word timestamps are sent asynchronously from a
     background task.  They arrive before the audio frame and are cached until
@@ -625,7 +620,6 @@ async def test_websocket_word_timestamps_verbatim_tokens():
     audio_frames = [f for f in down if isinstance(f, TTSAudioRawFrame)]
 
     assert [f.text for f in tts_text_frames] == ["hello", "world"]
-    assert all(f.includes_inter_frame_spaces is True for f in tts_text_frames)
 
     pts_values = [f.pts for f in tts_text_frames]
     assert pts_values == sorted(pts_values) and len(set(pts_values)) == len(pts_values), (
@@ -641,7 +635,7 @@ async def test_websocket_word_timestamps_verbatim_tokens():
 
 @pytest.mark.asyncio
 async def test_websocket_word_timestamps_punctuation_tokens():
-    """WebSocket path: verbatim punctuation tokens reach TTSTextFrame unchanged."""
+    """WebSocket path: punct-only tokens are merged into the preceding word."""
     verbatim_tokens = [
         ("hello", 0.0),
         (" world", 0.15),
@@ -660,10 +654,9 @@ async def test_websocket_word_timestamps_punctuation_tokens():
         frames_to_send=[TTSSpeakFrame(text="hello world! How are you?", append_to_context=False)],
     )
     text_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
-    assert [f.text for f in text_frames] == ["hello", " world", "! ", "How", " are", " you", "?"], (
-        "Verbatim tokens must not be modified"
+    assert [f.text for f in text_frames] == ["hello", "world!", "How", "are", "you?"], (
+        "Punct-only tokens must be merged into the preceding word"
     )
-    assert all(f.includes_inter_frame_spaces is True for f in text_frames)
 
 
 # ---------------------------------------------------------------------------

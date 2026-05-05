@@ -1406,10 +1406,10 @@ class TestWordCompletionTrackerUnicodeSymbolSubstitution(unittest.TestCase):
         "route:",
         "São",
         "Paulo",
-        "-",          # ElevenLabs substitution for first →
+        "-",  # ElevenLabs substitution for first →
         "Santiago",
         "(Chile)",
-        "-",          # ElevenLabs substitution for second →
+        "-",  # ElevenLabs substitution for second →
         "Auckland",
         "(New",
         "Zealand).",

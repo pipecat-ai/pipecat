@@ -86,7 +86,6 @@ class WordCompletionTracker:
         self._overflow_word: str | None = None
         self._llm_consumed: str | None = None
         self._frame_word: str | None = None
-        self._includes_inter_frame_spaces = False
         logger.debug(f"WordCompletionTracker: {self._tts_normalized}")
 
     @staticmethod
@@ -116,6 +115,15 @@ class WordCompletionTracker:
         is not counted against the budget, so the returned span includes the full tag.
         Other non-alphanumeric characters (spaces, punctuation) are also passed over
         without decrementing the budget.
+
+        After the *n* alnum chars are consumed, advances further past any immediately
+        following punctuation (e.g. the ``,`` in ``"questions,"`` or the ``.`` in
+        ``"done."``), stopping before the next space, alnum char, or XML tag.
+
+        Args:
+            text: The source text to scan.
+            start_pos: Starting position in *text*.
+            n: Number of alphanumeric characters to consume.
         """
         pos = start_pos
         count = 0
@@ -129,7 +137,6 @@ class WordCompletionTracker:
             else:
                 pos += 1
 
-        # NEW: consume trailing punctuation (but not tags)
         while pos < len(text):
             if text[pos] == "<":
                 break
@@ -139,9 +146,7 @@ class WordCompletionTracker:
 
         return pos
 
-    def add_word_and_check_complete(
-        self, word: str, includes_inter_frame_spaces: bool | None = False
-    ) -> bool:
+    def add_word_and_check_complete(self, word: str) -> bool:
         """Record a spoken word from a word-timestamp event.
 
         Normalizes ``word``, appends it to the running total, and checks whether
@@ -167,14 +172,15 @@ class WordCompletionTracker:
         AggregatedTextFrame.
 
         Args:
-            word: A single word token returned by the TTS service.
-            includes_inter_frame_spaces: Whether the word includes inter-frame spaces.
+            word: A single word token returned by the TTS service. TTS services that
+                emit spaces and punctuation as separate tokens (e.g. Inworld) must
+                pre-merge those tokens into the preceding word before calling this
+                method (see ``TTSService._merge_punct_tokens``).
 
         Returns:
             True when all expected content has been covered.
         """
         normalized = self._normalize(word)
-        self._includes_inter_frame_spaces = includes_inter_frame_spaces
 
         prev_len = len(self._received)
         expected_len = len(self._tts_normalized)
@@ -239,19 +245,17 @@ class WordCompletionTracker:
 
         if self._llm_text is not None:
             if self.is_complete:
-                # Consume all remaining LLM text so that closing tags (e.g.
-                # </card>) are included in this frame's TTSTextFrame rather
-                # than silently dropped.
+                # Consume ALL remaining LLM text: closing tags (e.g. </card>)
+                # and any trailing punctuation that the TTS will not send separately.
                 self._llm_consumed = self._llm_text[self._llm_pos :]
                 self._llm_pos = len(self._llm_text)
             else:
                 if chars_for_frame == 0:
-                    # Consume exactly the raw word (including preceding spaces if present)
+                    # Consume exactly the raw word in llm_text, skipping any
+                    # leading spaces that belong to the previous token's span.
                     start = self._llm_pos
-                    if not self._includes_inter_frame_spaces:
-                        # Skip leading spaces (they belong to previous token)
-                        while start < len(self._llm_text) and self._llm_text[start].isspace():
-                            start += 1
+                    while start < len(self._llm_text) and self._llm_text[start].isspace():
+                        start += 1
                     end = start + len(word)
                     self._llm_consumed = self._llm_text[start:end]
                     self._llm_pos = end
@@ -358,11 +362,7 @@ class WordCompletionTracker:
           ``tts_text`` so a TTSTextFrame can still be emitted for the dropped
           portion. The incoming word is routed as overflow to the next slot.
         """
-        return (
-            self._frame_word.strip()
-            if self._frame_word and not self._includes_inter_frame_spaces
-            else self._frame_word
-        )
+        return self._frame_word.strip() if self._frame_word else self._frame_word
 
     def get_overflow_word(self) -> str | None:
         """Return the raw suffix of the last word that overflows into the next frame.
@@ -371,22 +371,14 @@ class WordCompletionTracker:
         overflow TTSTextFrame has natural word text. Returns None when there is no
         overflow (the word fit entirely within this frame).
         """
-        return (
-            self._overflow_word.strip()
-            if self._overflow_word and not self._includes_inter_frame_spaces
-            else self._overflow_word
-        )
+        return self._overflow_word.strip() if self._overflow_word else self._overflow_word
 
     def get_llm_consumed(self) -> str | None:
         """Return the LLM text span consumed for the last added word.
 
         Returns None if no llm_text was provided at construction time.
         """
-        return (
-            self._llm_consumed.strip()
-            if self._llm_consumed and not self._includes_inter_frame_spaces
-            else self._llm_consumed
-        )
+        return self._llm_consumed.strip() if self._llm_consumed else self._llm_consumed
 
     def get_accumulated_tts_text(self) -> str:
         """Return all consumed text from tts_text up to the current cursor position.
