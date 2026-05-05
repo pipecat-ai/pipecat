@@ -692,6 +692,75 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(events, ["inference_triggered", "stopped"])
 
+    async def test_multiple_inferences_in_one_turn_preserve_aggregation(self):
+        """Two inference triggers before finalization should preserve the full user transcript.
+
+        When the LLM marks the first inference incomplete (○ / ◐) and the
+        user keeps speaking, the deferred upstream strategy fires a
+        second inference. Both the public ``on_user_turn_stopped`` event
+        and the conversation context should reflect the full user
+        utterance, not just the segment from the last inference.
+        """
+        from pipecat.frames.frames import UserTurnCompletedFrame
+        from pipecat.turns.user_stop import LLMTurnCompletionUserTurnStopStrategy, deferred
+
+        gating = LLMTurnCompletionUserTurnStopStrategy()
+        upstream = deferred(
+            SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+        )
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(stop=[upstream, gating]),
+            ),
+        )
+
+        inference_count = 0
+        stop_message = None
+
+        @user_aggregator.event_handler("on_user_turn_inference_triggered")
+        async def on_inference_triggered(aggregator, strategy):
+            nonlocal inference_count
+            inference_count += 1
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_stopped(aggregator, strategy, message):
+            nonlocal stop_message
+            stop_message = message
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="I'm thinking", user_id="", timestamp="now"),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+            # First inference fired here. Imagine the LLM returned ○;
+            # the turn is not yet finalized, so the user keeps talking.
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="about pizza", user_id="", timestamp="now"),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+            # Second inference fired here. Now the LLM returns ✓ and the
+            # turn finalizes via UserTurnCompletedFrame.
+            UserTurnCompletedFrame(),
+            SleepFrame(),
+        ]
+        await run_test(pipeline, frames_to_send=frames_to_send)
+
+        self.assertEqual(inference_count, 2)
+        self.assertIsNotNone(stop_message)
+        # The public event should report the full transcript, even
+        # though each inference push only writes its own segment to
+        # the context.
+        self.assertEqual(stop_message.content, "I'm thinking about pizza")
+
+        user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
+        self.assertEqual([m["content"] for m in user_messages], ["I'm thinking", "about pizza"])
+
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_empty(self):

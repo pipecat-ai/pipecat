@@ -480,10 +480,14 @@ class LLMUserAggregator(LLMContextAggregator):
 
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
-        # Aggregation captured at inference-trigger time and surfaced again
-        # in `on_user_turn_stopped`. Set to None when no inference-triggered
-        # event has fired since the last finalization.
-        self._pending_user_turn_aggregation: str | None = None
+        # Full transcript across the user turn. Each
+        # `_on_user_turn_inference_triggered` push captures only the
+        # new segment since the previous push (push_aggregation resets
+        # `_aggregation` after writing to context); we accumulate those
+        # segments here so the eventual `on_user_turn_stopped` event
+        # surfaces the full turn transcript even when several
+        # inferences fire before finalization.
+        self._full_user_turn_aggregation: str | None = None
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -753,7 +757,7 @@ class LLMUserAggregator(LLMContextAggregator):
         logger.debug(f"{self}: User started speaking (strategy: {strategy})")
 
         self._user_turn_start_timestamp = time_now_iso8601()
-        self._pending_user_turn_aggregation = None
+        self._full_user_turn_aggregation = None
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
@@ -772,12 +776,20 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         logger.debug(f"{self}: User turn inference triggered (strategy: {strategy})")
 
-        # Push aggregation now: this writes the user message to the context
-        # and pushes LLMContextFrame, which is what kicks LLM inference.
-        # `on_user_turn_stopped` later fires when the turn is semantically
-        # final and surfaces the aggregated message via the public event.
-        aggregation = await self.push_aggregation()
-        self._pending_user_turn_aggregation = aggregation
+        # Push aggregation now: this writes the user message segment to
+        # the context and emits LLMContextFrame, which kicks LLM
+        # inference. Concatenate the segment into
+        # `_full_user_turn_aggregation` so multiple inferences in the
+        # same turn don't lose earlier segments from the eventual
+        # `on_user_turn_stopped` event.
+        segment = await self.push_aggregation()
+        if segment:
+            if self._full_user_turn_aggregation:
+                self._full_user_turn_aggregation = (
+                    f"{self._full_user_turn_aggregation} {segment}".strip()
+                )
+            else:
+                self._full_user_turn_aggregation = segment
 
         await self._call_event_handler("on_user_turn_inference_triggered", strategy)
 
@@ -815,27 +827,25 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         """Maybe emit user turn stopped event.
 
-        The aggregation has typically already been pushed at
-        inference-trigger time and is cached in
-        ``self._pending_user_turn_aggregation``. Any aggregation that has
-        accumulated since the last inference-trigger (e.g. transcriptions
-        that arrived between inference trigger and finalization) is flushed
-        here so end-of-turn content is never lost.
+        Earlier inference triggers in the same turn have already pushed
+        their segments to the context and accumulated them into
+        ``self._full_user_turn_aggregation``. Any aggregation that
+        arrived after the last inference trigger is flushed here so
+        end-of-turn content is never lost from the public event.
 
         Args:
             strategy: The strategy that triggered the turn stop.
             on_session_end: If True, only emit if there's unemitted content
                 (avoids duplicate events when session ends).
         """
-        aggregation = await self.push_aggregation()
-        previous_aggregation = self._pending_user_turn_aggregation
-        self._pending_user_turn_aggregation = None
+        segment = await self.push_aggregation()
+        full_aggregation = self._full_user_turn_aggregation
+        self._full_user_turn_aggregation = None
 
-        content = None
-        if aggregation and previous_aggregation:
-            content = f"{previous_aggregation} {aggregation}".strip()
+        if segment and full_aggregation:
+            content = f"{full_aggregation} {segment}".strip()
         else:
-            content = previous_aggregation or aggregation
+            content = full_aggregation or segment
 
         if not on_session_end or content:
             message = UserTurnStoppedMessage(
