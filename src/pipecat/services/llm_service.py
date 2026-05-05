@@ -53,6 +53,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
+    is_given,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
@@ -242,6 +243,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
     # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.
     # However, subclasses should override this with a more specific adapter when necessary.
     adapter_class: type[BaseLLMAdapter] = OpenAILLMAdapter
+
+    # Returned to the LLM as the tool result when an unavailable function is
+    # called. Deliberately neutral about future availability so the LLM can
+    # pick the function up again if it returns (e.g. via the
+    # ``add_tool_change_messages`` activation message, or silently on a
+    # later inference). ``{function_name}`` is substituted at runtime.
+    MISSING_FUNCTION_CALL_MESSAGE_TEMPLATE = (
+        "The function `{function_name}` is not currently available."
+    )
 
     def __init__(
         self,
@@ -764,9 +774,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             elif None in self._functions.keys():
                 item = self._functions[None]
             else:
-                logger.warning(
-                    f"{self} is calling '{function_call.function_name}', but it's not registered."
-                )
+                self._log_missing_function_call(function_call.function_name, function_call.context)
                 item = self._build_missing_function_call_registry_item(function_call.function_name)
 
             runner_items.append(
@@ -835,8 +843,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         elif runner_item.registry_item.handler == self._missing_function_call_handler:
             item = runner_item.registry_item
         else:
+            # Function was unregistered between queue and execution; the
+            # registry-item-handler check above already covered the
+            # missing-from-the-start case.
             logger.warning(
-                f"{self} is calling '{runner_item.function_name}', but it was just unregistered."
+                f"{self}: '{runner_item.function_name}' was just unregistered "
+                f"between queueing and execution."
             )
             item = self._build_missing_function_call_registry_item(runner_item.function_name)
 
@@ -962,7 +974,45 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
     async def _missing_function_call_handler(self, params: FunctionCallParams):
         """Return a terminal tool result when the LLM calls an unknown function."""
-        await params.result_callback(f"Error: function '{params.function_name}' is not registered.")
+        await params.result_callback(
+            self.MISSING_FUNCTION_CALL_MESSAGE_TEMPLATE.format(function_name=params.function_name)
+        )
+
+    @staticmethod
+    def _advertised_tool_names(context) -> set[str]:
+        """Return the set of standard-tool names currently advertised to the LLM.
+
+        Custom (LLM-specific) tools are not included, since they have no
+        consistent name field across adapters.
+        """
+        tools = context.tools if context is not None else None
+        if tools is None or not is_given(tools):
+            return set()
+        return {t.name for t in tools.standard_tools}
+
+    def _log_missing_function_call(self, function_name: str, context) -> None:
+        """Log an appropriate message when a tool is called with no handler.
+
+        Distinguishes two cases:
+
+        - **Developer error:** the tool is advertised to the LLM but no handler
+          was registered (likely a missed ``register_function`` call). Logged
+          at error level since this almost always indicates a bug.
+        - **Hallucination:** the tool is not in the currently advertised tool
+          set. Logged at warning level since this is model behavior the
+          application can do little about beyond returning a terminal result.
+        """
+        if function_name in self._advertised_tool_names(context):
+            logger.error(
+                f"{self}: tool '{function_name}' is advertised to the LLM "
+                f"but has no registered handler — did you forget to call "
+                f"register_function()?"
+            )
+        else:
+            logger.warning(
+                f"{self}: LLM called '{function_name}', which is not in the "
+                f"currently advertised tool set."
+            )
 
     def _has_async_tools(self) -> bool:
         """Return True if at least one non-builtin async tool is registered."""
