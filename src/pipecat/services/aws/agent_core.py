@@ -12,7 +12,6 @@ Amazon Bedrock AgentCore Runtime and streams their responses as LLMTextFrames.
 
 import asyncio
 import json
-import os
 from collections.abc import Callable
 
 import aioboto3
@@ -27,6 +26,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.aws.utils import resolve_credentials
 
 
 def default_context_to_payload_transformer(
@@ -122,8 +122,11 @@ class AWSAgentCoreProcessor(FrameProcessor):
 
         Args:
             agentArn: The Amazon Web Services Resource Name (ARN) of the agent.
-            aws_access_key: AWS access key ID. If None, uses default credentials.
-            aws_secret_key: AWS secret access key. If None, uses default credentials.
+            aws_access_key: AWS access key ID. If None, falls back to
+                environment variables and the default boto3 credential chain
+                (instance profiles, IRSA, ECS task roles, SSO, etc.).
+            aws_secret_key: AWS secret access key. Same fallback behaviour as
+                ``aws_access_key``.
             aws_session_token: AWS session token for temporary credentials.
             aws_region: AWS region.
             context_to_payload_transformer: Optional callable to transform
@@ -139,13 +142,13 @@ class AWSAgentCoreProcessor(FrameProcessor):
         self._agentArn = agentArn
         self._aws_session = aioboto3.Session()
 
-        # Store AWS session parameters for creating client in async context
-        self._aws_params = {
-            "aws_access_key_id": aws_access_key or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": aws_secret_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
-            "region_name": aws_region or os.getenv("AWS_REGION", "us-east-1"),
-        }
+        # Resolve credentials using the shared chain (explicit → env → boto3).
+        self._aws_params = resolve_credentials(
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key,
+            aws_session_token=aws_session_token,
+            region=aws_region,
+        ).to_boto_kwargs()
 
         # Set transformers with defaults
         self._context_to_payload_transformer = (
@@ -204,7 +207,8 @@ class AWSAgentCoreProcessor(FrameProcessor):
             # aioboto3's `client()` is an async context manager but its stubs don't
             # advertise `__aenter__` / `__aexit__` in a way pyright can see.
             async with self._aws_session.client(  # pyright: ignore[reportGeneralTypeIssues]
-                "bedrock-agentcore", **self._aws_params
+                "bedrock-agentcore",
+                **self._aws_params,  # pyright: ignore[reportArgumentType]
             ) as client:
                 # Invoke the AgentCore agent
                 response = await client.invoke_agent_runtime(
