@@ -17,13 +17,13 @@ class TestMergePunctTokens(unittest.TestCase):
         input = [("hello", 0.0), ("world", 1.0)]
         self.assertEqual(merge_punct_tokens(input), [("hello", 0.0), ("world", 1.0)])
 
-    def test_trailing_space_merged_into_preceding_word(self):
+    def test_trailing_space_merged_and_stripped(self):
         input = [("I", 0.0), (" ", 0.2)]
-        self.assertEqual(merge_punct_tokens(input), [("I ", 0.0)])
+        self.assertEqual(merge_punct_tokens(input), [("I", 0.0)])
 
-    def test_comma_space_merged_into_preceding_word(self):
+    def test_comma_space_merged_and_stripped(self):
         input = [("questions", 1.0), (", ", 1.2), ("explain", 1.4)]
-        self.assertEqual(merge_punct_tokens(input), [("questions, ", 1.0), ("explain", 1.4)])
+        self.assertEqual(merge_punct_tokens(input), [("questions,", 1.0), ("explain", 1.4)])
 
     def test_leading_space_with_no_preceding_word_discarded(self):
         input = [(" ", 0.0), ("hello", 0.5)]
@@ -33,9 +33,9 @@ class TestMergePunctTokens(unittest.TestCase):
         input = [("", 0.0), ("hello", 0.5)]
         self.assertEqual(merge_punct_tokens(input), [("hello", 0.5)])
 
-    def test_multiple_consecutive_punct_tokens_merged(self):
+    def test_multiple_consecutive_punct_tokens_merged_and_stripped(self):
         input = [("word", 0.0), (",", 0.1), (" ", 0.2), ("next", 0.3)]
-        self.assertEqual(merge_punct_tokens(input), [("word, ", 0.0), ("next", 0.3)])
+        self.assertEqual(merge_punct_tokens(input), [("word,", 0.0), ("next", 0.3)])
 
     def test_timestamp_of_preceding_word_is_kept(self):
         """Merged punct tokens adopt the preceding word's timestamp."""
@@ -54,7 +54,7 @@ class TestMergePunctTokens(unittest.TestCase):
         self.assertEqual(merge_punct_tokens(input), [("<spell>123</spell>", 0.0), ("and", 0.5)])
 
     def test_inworld_style_full_stream(self):
-        """Full Inworld-style raw stream produces expected merged output."""
+        """Full Inworld-style raw stream produces expected merged and stripped output."""
         raw = [
             ("", 0.0),
             ("I", 0.1),
@@ -71,11 +71,11 @@ class TestMergePunctTokens(unittest.TestCase):
             (".", 1.2),
         ]
         expected = [
-            ("I ", 0.1),
-            ("can ", 0.3),
-            ("answer ", 0.5),
-            ("questions, ", 0.7),
-            ("explain ", 0.9),
+            ("I", 0.1),
+            ("can", 0.3),
+            ("answer", 0.5),
+            ("questions,", 0.7),
+            ("explain", 0.9),
             ("things.", 1.1),
         ]
         self.assertEqual(merge_punct_tokens(raw), expected)

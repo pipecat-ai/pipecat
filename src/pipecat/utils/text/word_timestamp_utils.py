@@ -24,18 +24,20 @@ def merge_punct_tokens(
     characters after stripping XML/HTML tags.  Such tokens are appended to the
     preceding word's text and their timestamp is discarded (the preceding word's
     timestamp is kept).  Leading punct/space tokens with no preceding word are
-    silently discarded.
+    silently discarded.  Every output token is stripped of leading and trailing
+    whitespace (spaces, tabs, newlines).
 
     Args:
         word_times: Raw list of ``(word, timestamp)`` pairs from the TTS service.
 
     Returns:
-        Merged list where every entry contains at least one alphanumeric character.
+        Merged list where every entry contains at least one alphanumeric character
+        and has no leading or trailing whitespace.
 
     Example::
 
         merge_punct_tokens([("questions", 1.0), (", ", 1.2), ("explain", 1.4)])
-        # → [("questions, ", 1.0), ("explain", 1.4)]
+        # → [("questions,", 1.0), ("explain", 1.4)]
     """
     merged: list[tuple[str, float]] = []
     for word, ts in word_times:
@@ -48,4 +50,4 @@ def merge_punct_tokens(
             # else: leading punct/space with no preceding word → discard
         else:
             merged.append((word, ts))
-    return merged
+    return [(word.strip(), ts) for word, ts in merged]
