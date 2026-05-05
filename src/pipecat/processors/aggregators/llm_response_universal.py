@@ -25,6 +25,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     AssistantImageRawFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -1332,9 +1333,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if len(frame.text) == 0:
             return
 
+        text = (
+            frame.raw_text
+            if isinstance(frame, AggregatedTextFrame) and frame.raw_text
+            else frame.text
+        )
         self._aggregation.append(
             TextPartForConcatenation(
-                frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+                text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
             )
         )
 

@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
+from pipecat.utils.text.pattern_pair_aggregator import PatternMatch
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
@@ -85,7 +86,11 @@ class LLMTextProcessor(FrameProcessor):
             out_frame = AggregatedTextFrame(
                 text=aggregation.text,
                 aggregated_by=aggregation.type,
+                raw_text=aggregation.full_match
+                if isinstance(aggregation, PatternMatch)
+                else aggregation.text,
             )
+            out_frame.append_to_context = True
             out_frame.skip_tts = in_frame.skip_tts
             await self.push_frame(out_frame)
 
@@ -96,6 +101,9 @@ class LLMTextProcessor(FrameProcessor):
             out_frame = AggregatedTextFrame(
                 text=remaining.text,
                 aggregated_by=remaining.type,
+                raw_text=remaining.full_match
+                if isinstance(remaining, PatternMatch)
+                else remaining.text,
             )
             out_frame.skip_tts = skip_tts
             await self.push_frame(out_frame)

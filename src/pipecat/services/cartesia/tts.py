@@ -8,6 +8,7 @@
 
 import base64
 import json
+import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -432,10 +433,20 @@ class CartesiaTTSService(WebsocketTTSService):
         base_lang = language.split("-")[0].lower()
         return base_lang in cjk_languages
 
-    def _process_word_timestamps_for_language(
+    _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
+
+    def _strip_cartesia_tags(self, text: str) -> str:
+        text = self._CARTESIA_TAG_RE.sub(" ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+    def _normalize_word_timestamps(
         self, words: list[str], starts: list[float]
     ) -> list[tuple[str, float]]:
-        """Process word timestamps based on the current language.
+        """Normalize raw word timestamps from Cartesia before further processing.
+
+        Strips Cartesia SSML tags (spell, emotion, break, volume, speed) from each word
+        and drops entries that become empty after stripping.
 
         For CJK languages, Cartesia groups related characters in the same timestamp message.
         For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
@@ -458,14 +469,18 @@ class CartesiaTTSService(WebsocketTTSService):
             # For CJK languages, combine all characters in this message into one word
             # using the first character's start time
             if words and starts:
-                combined_word = "".join(words)
+                combined_word = "".join(self._strip_cartesia_tags(w) for w in words)
                 first_start = starts[0]
-                return [(combined_word, first_start)]
+                return [(combined_word, first_start)] if combined_word else []
             else:
                 return []
         else:
-            # For non-CJK languages, use as-is
-            return list(zip(words, starts))
+            result = []
+            for word, start in zip(words, starts):
+                cleaned = self._strip_cartesia_tags(word)
+                if cleaned:
+                    result.append((cleaned, start))
+            return result
 
     def _build_msg(
         self,
@@ -657,7 +672,7 @@ class CartesiaTTSService(WebsocketTTSService):
                 await self.remove_audio_context(ctx_id)
             elif msg["type"] == "timestamps":
                 # Process the timestamps based on language before adding them
-                processed_timestamps = self._process_word_timestamps_for_language(
+                processed_timestamps = self._normalize_word_timestamps(
                     msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
                 )
                 await self.add_word_timestamps(processed_timestamps, ctx_id)

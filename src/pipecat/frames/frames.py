@@ -349,10 +349,14 @@ class AggregatedTextFrame(TextFrame):
     Parameters:
         aggregated_by: Method used to aggregate the text frames.
         context_id: Unique identifier for the TTS context that generated this text.
+        raw_text: The full matched text including start/end pattern delimiters, set when
+            this frame was produced from a PatternMatch (e.g. a ``<code>...</code>`` block).
+            None for ordinary sentence aggregations.
     """
 
     aggregated_by: AggregationType | str
     context_id: str | None = None
+    raw_text: str | None = None
 
 
 @dataclass

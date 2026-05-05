@@ -517,6 +517,9 @@ class RTVIObserver(BaseObserver):
                 text = await transform(text, agg_type)
 
         isTTS = isinstance(frame, TTSTextFrame)
+        if agg_type is not AggregationType.WORD:
+            logger.debug(f"{self} Aggregated LLM text: {text}, {agg_type} spoken:{isTTS}")
+
         if self._params.bot_output_enabled:
             message = RTVI.BotOutputMessage(
                 data=RTVI.BotOutputMessageData(text=text, spoken=isTTS, aggregated_by=agg_type)
