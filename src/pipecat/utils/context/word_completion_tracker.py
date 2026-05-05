@@ -98,6 +98,24 @@ class WordCompletionTracker:
         text = "".join(c for c in text if c.isalnum())
         return text.lower()
 
+    # Typographic variants that LLMs commonly emit but TTS services normalize away.
+    _TYPOGRAPHY_FOLD = str.maketrans(
+        {
+            "‘": "'",  # ' LEFT SINGLE QUOTATION MARK
+            "’": "'",  # ' RIGHT SINGLE QUOTATION MARK
+            "ʼ": "'",  # ʼ MODIFIER LETTER APOSTROPHE
+            "“": '"',  # " LEFT DOUBLE QUOTATION MARK
+            "”": '"',  # " RIGHT DOUBLE QUOTATION MARK
+            "–": "-",  # – EN DASH
+            "—": "-",  # — EM DASH
+        }
+    )
+
+    @staticmethod
+    def _fold_typography(text: str) -> str:
+        """Replace typographic punctuation variants with their ASCII equivalents."""
+        return text.translate(WordCompletionTracker._TYPOGRAPHY_FOLD)
+
     @staticmethod
     def _remove_trailing_punctuation(text: str) -> str:
         """Remove punctuation only at the very end of the given text."""
@@ -276,7 +294,9 @@ class WordCompletionTracker:
             # expected text, since some TTS services may add punctuation to
             # the raw text.
             word_without_punctuation = self._remove_trailing_punctuation(self._frame_word)
-            if word_without_punctuation and word_without_punctuation not in self._llm_consumed:
+            if word_without_punctuation and self._fold_typography(
+                word_without_punctuation
+            ) not in self._fold_typography(self._llm_consumed):
                 logger.warning(
                     f"WordCompletionTracker: llm_consumed {repr(self._llm_consumed)!s} "
                     f"does not contain frame_word {repr(self._frame_word)!s}, discarding"

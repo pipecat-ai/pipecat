@@ -139,6 +139,24 @@ class TestWordCompletionTrackerNormalization(unittest.TestCase):
         tracker = WordCompletionTracker("<speak>hello</speak>")
         self.assertTrue(tracker.add_word_and_check_complete("hello"))
 
+    def test_curly_apostrophe_in_llm_text_matches_straight_apostrophe_in_tts_word(self):
+        """LLM curly apostrophe must not trigger the safeguard when TTS uses straight."""
+        llm = "you’re welcome"  # LLM: RIGHT SINGLE QUOTATION MARK
+        tracker = WordCompletionTracker(llm, llm_text=llm)
+        tracker.add_word_and_check_complete("you’re")  # TTS: straight apostrophe
+        self.assertIsNotNone(tracker.get_llm_consumed())
+        tracker.add_word_and_check_complete("welcome")
+        self.assertTrue(tracker.is_complete)
+
+    def test_curly_apostrophe_in_tts_word_matches_straight_apostrophe_in_llm_text(self):
+        """TTS curly apostrophe must not trigger the safeguard when LLM uses straight."""
+        llm = "you’re welcome"  # LLM: straight apostrophe
+        tracker = WordCompletionTracker(llm, llm_text=llm)
+        tracker.add_word_and_check_complete("you’re")  # TTS: RIGHT SINGLE QUOTATION MARK
+        self.assertIsNotNone(tracker.get_llm_consumed())
+        tracker.add_word_and_check_complete("welcome")
+        self.assertTrue(tracker.is_complete)
+
 
 class TestWordCompletionTrackerReset(unittest.TestCase):
     def test_reset_clears_progress(self):
