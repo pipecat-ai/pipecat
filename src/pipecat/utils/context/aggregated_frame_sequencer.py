@@ -175,7 +175,9 @@ class AggregatedFrameSequencer:
             is_complete = active.tracker.add_word_and_check_complete(word)
             raw_overflow_word = active.tracker.get_overflow_word()
 
-        frame_text = active.tracker.get_word_for_frame() if (active and active.tracker) else word
+        frame_text = (
+            active.tracker.get_word_for_frame() if (active and active.tracker) else word
+        ) or word
         raw_text = active.tracker.get_llm_consumed() if (active and active.tracker) else None
         emit_context_id = active.context_id if active else context_id
 
@@ -184,7 +186,7 @@ class AggregatedFrameSequencer:
             self._build_word_frame(frame_text, pts, emit_context_id, raw_text=raw_text)
         ]
 
-        if is_complete:
+        if is_complete and active:
             active.complete = True
             frames.extend(self.flush(last_word_pts=pts))
             if raw_overflow_word:
@@ -318,12 +320,16 @@ class AggregatedFrameSequencer:
         pts: int,
         context_id: str | None,
         raw_text: str | None = None,
-    ) -> TTSTextFrame:
+    ) -> Frame:
         """Build a TTSTextFrame with all standard word-timestamp attributes set."""
         frame = TTSTextFrame(text, aggregated_by=AggregationType.WORD)
         frame.pts = pts
         frame.context_id = context_id
-        frame.append_to_context = self._context_append_to_context.get(context_id, True)
+        frame.append_to_context = (
+            self._context_append_to_context.get(context_id, True)
+            if context_id is not None
+            else True
+        )
         frame.raw_text = raw_text
         return frame
 
