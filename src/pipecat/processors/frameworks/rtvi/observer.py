@@ -58,6 +58,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
+    RTVIUICommandFrame,
+    RTVIUITaskFrame,
 )
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.string import match_endofsentence
@@ -430,6 +432,15 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVI.ServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
+        elif isinstance(frame, RTVIUICommandFrame):
+            message = RTVI.UICommandMessage(
+                data=RTVI.UICommandData(name=frame.command_name, payload=frame.payload)
+            )
+            await self.send_rtvi_message(message)
+        elif isinstance(frame, RTVIUITaskFrame):
+            if frame.data is not None:
+                message = RTVI.UITaskMessage(data=frame.data)
+                await self.send_rtvi_message(message)
         elif isinstance(frame, RTVIServerResponseFrame):
             if frame.error is not None:
                 await self._send_error_response(frame)
