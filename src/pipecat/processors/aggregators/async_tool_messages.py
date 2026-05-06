@@ -23,11 +23,15 @@ This module is the single source of truth for the on-the-wire payload shape:
 
 - The aggregator uses the ``build_*_message`` functions when injecting messages.
 - Realtime LLM services use ``parse_message`` when scanning the context for
-  async-tool messages to forward to their providers.
+  async-tool messages to forward to their providers, then
+  ``prepare_message_payload_for_realtime`` to produce a wire-ready string.
 
-Keeping construction and parsing in one module ensures the two sides can't
-drift out of sync. Consumers are expected to import the module rather than
-its individual functions, e.g.::
+Internally, ``AsyncToolMessagePayload`` is the canonical structured form;
+the on-the-wire JSON string is always derived from it (never stored) so the
+two representations can't drift.
+
+Consumers are expected to import the module rather than its individual
+functions, e.g.::
 
     from pipecat.processors.aggregators import async_tool_messages
     ...
@@ -37,7 +41,7 @@ its individual functions, e.g.::
 
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from pipecat.processors.aggregators.llm_context import LLMStandardMessage
 
@@ -85,24 +89,17 @@ _FINAL_DESCRIPTION = (
 
 @dataclass(frozen=True)
 class AsyncToolMessagePayload:
-    """A parsed async-tool message extracted from an LLM context entry.
+    """The structured contents of an async-tool message in an LLM context.
 
     Parameters:
         kind: Which of the three async-tool message stages this is.
-        tool_call_id: The id of the tool invocation this message relates to.
+        tool_call_id: The id of the tool invocation this payload relates to.
         status: ``"running"`` for started/intermediate, ``"finished"`` for
             the final message.
-        description: Human-readable description from the message payload. May
-            be empty.
+        description: Human-readable description from the payload. May be empty.
         result: For ``intermediate`` and ``final`` messages, the JSON-encoded
             result string (or the literal ``"COMPLETED"`` if the function
             returned no value). ``None`` for ``started`` messages.
-        raw_content: The original JSON-encoded payload string (i.e. the
-            ``content`` field of the source LLM context message). Use this
-            when forwarding the message to a provider as a formal tool
-            result, so the provider receives the complete payload (with
-            ``type``, ``status``, ``tool_call_id``, ``description``, and any
-            ``result``) rather than just a sub-field.
     """
 
     kind: AsyncToolMessageKind
@@ -110,7 +107,48 @@ class AsyncToolMessagePayload:
     status: Literal["running", "finished"]
     description: str
     result: str | None
-    raw_content: str
+
+
+# --- Internal: payload ↔ on-the-wire forms -----------------------------------
+
+
+def _payload_to_json(payload: AsyncToolMessagePayload) -> str:
+    """Serialize a payload to its on-the-wire JSON string form.
+
+    Fields that don't apply to the payload's kind are omitted (notably
+    ``result`` is left out of ``started`` payloads, since the task hasn't
+    produced a result yet).
+    """
+    obj: dict[str, Any] = {
+        "type": _PAYLOAD_TYPE,
+        "status": payload.status,
+        "tool_call_id": payload.tool_call_id,
+        "description": payload.description,
+    }
+    if payload.result is not None:
+        obj["result"] = payload.result
+    return json.dumps(obj)
+
+
+def _payload_to_message(payload: AsyncToolMessagePayload) -> LLMStandardMessage:
+    """Wrap a payload in the LLM context message shape that matches its kind.
+
+    - ``started``: ``role="tool"`` plus ``tool_call_id`` at the top level
+      (so the message can sit alongside other regular tool-result messages).
+    - ``intermediate`` / ``final``: ``role="developer"``; ``tool_call_id``
+      lives only inside the JSON payload.
+    """
+    content = _payload_to_json(payload)
+    if payload.kind == "started":
+        return {
+            "role": "tool",
+            "content": content,
+            "tool_call_id": payload.tool_call_id,
+        }
+    return {
+        "role": "developer",
+        "content": content,
+    }
 
 
 # --- Builders ----------------------------------------------------------------
@@ -130,18 +168,15 @@ def build_started_message(tool_call_id: str) -> LLMStandardMessage:
     Returns:
         A message ready to pass to ``LLMContext.add_message``.
     """
-    return {
-        "role": "tool",
-        "content": json.dumps(
-            {
-                "type": _PAYLOAD_TYPE,
-                "status": _STATUS_RUNNING,
-                "tool_call_id": tool_call_id,
-                "description": _STARTED_DESCRIPTION,
-            }
-        ),
-        "tool_call_id": tool_call_id,
-    }
+    return _payload_to_message(
+        AsyncToolMessagePayload(
+            kind="started",
+            tool_call_id=tool_call_id,
+            status=_STATUS_RUNNING,
+            description=_STARTED_DESCRIPTION,
+            result=None,
+        )
+    )
 
 
 def build_intermediate_result_message(tool_call_id: str, result: str) -> LLMStandardMessage:
@@ -160,18 +195,15 @@ def build_intermediate_result_message(tool_call_id: str, result: str) -> LLMStan
     Returns:
         A message ready to pass to ``LLMContext.add_message``.
     """
-    return {
-        "role": "developer",
-        "content": json.dumps(
-            {
-                "type": _PAYLOAD_TYPE,
-                "tool_call_id": tool_call_id,
-                "status": _STATUS_RUNNING,
-                "description": _INTERMEDIATE_DESCRIPTION,
-                "result": result,
-            }
-        ),
-    }
+    return _payload_to_message(
+        AsyncToolMessagePayload(
+            kind="intermediate",
+            tool_call_id=tool_call_id,
+            status=_STATUS_RUNNING,
+            description=_INTERMEDIATE_DESCRIPTION,
+            result=result,
+        )
+    )
 
 
 def build_final_result_message(tool_call_id: str, result: str) -> LLMStandardMessage:
@@ -190,18 +222,15 @@ def build_final_result_message(tool_call_id: str, result: str) -> LLMStandardMes
     Returns:
         A message ready to pass to ``LLMContext.add_message``.
     """
-    return {
-        "role": "developer",
-        "content": json.dumps(
-            {
-                "type": _PAYLOAD_TYPE,
-                "tool_call_id": tool_call_id,
-                "status": _STATUS_FINISHED,
-                "description": _FINAL_DESCRIPTION,
-                "result": result,
-            }
-        ),
-    }
+    return _payload_to_message(
+        AsyncToolMessagePayload(
+            kind="final",
+            tool_call_id=tool_call_id,
+            status=_STATUS_FINISHED,
+            description=_FINAL_DESCRIPTION,
+            result=result,
+        )
+    )
 
 
 # --- Parsing -----------------------------------------------------------------
@@ -217,8 +246,8 @@ def parse_message(message: LLMStandardMessage) -> AsyncToolMessagePayload | None
             values can carry async-tool payloads.
 
     Returns:
-        An ``AsyncToolMessagePayload`` if the message is a recognized async-tool
-        payload, otherwise ``None``.
+        An ``AsyncToolMessagePayload`` if the message is a recognized
+        async-tool payload, otherwise ``None``.
     """
     role = message.get("role")
     if role not in ("tool", "developer"):
@@ -254,5 +283,101 @@ def parse_message(message: LLMStandardMessage) -> AsyncToolMessagePayload | None
         status=status,
         description=description,
         result=result,
-        raw_content=content,
+    )
+
+
+# --- Realtime preparation ----------------------------------------------------
+
+
+# Natural-language reminder grafted onto the ``description`` field of in-flight
+# payloads (started / intermediate) when they're sent to a realtime LLM
+# service. Realtime services receive these mid-stream while the model is
+# still talking with the user, which is the moment the model is most likely
+# to mistakenly re-issue the same tool call. Keeping this reminder out of the
+# canonical payload descriptions (and confined to the realtime path) avoids
+# influencing non-realtime consumers of the same context. We don't graft it
+# onto ``final`` payloads, because at that point the task is done and
+# re-invocation by the model is no longer a mistake.
+#
+# The reminder is appended *after* the canonical description so the model
+# first reads the protocol-level explanation of what async-tool messages are
+# and how they work, and only then encounters the behavioral directive,
+# which now flows naturally from that context.
+_REALTIME_REINVOCATION_REMINDER = (
+    "While this task is in flight, do not call the same tool with the same "
+    "arguments again; you would just kick off a duplicate task."
+)
+
+
+def prepare_message_payload_for_realtime(payload: AsyncToolMessagePayload) -> str:
+    """Prepare an async-tool message payload for sending to a realtime LLM service.
+
+    Returns a wire-ready JSON string. Realtime services that fully honor the
+    async-tool mechanism send the ``started`` payload via the formal
+    tool-result channel and the subsequent ``intermediate`` / ``final``
+    payloads as text injected mid-conversation; this function returns the
+    string to send in either case, and callers route it to the appropriate
+    channel.
+
+    The exact transformation depends on the payload kind. Each kind is
+    handled by its own private helper, so per-kind tweaks can be added later
+    without entangling the others. Today:
+
+    - ``started`` / ``intermediate``: a natural-language reminder
+      discouraging the model from re-invoking the in-flight tool is grafted
+      onto the ``description`` field, then the payload is re-serialized.
+      Grafting into ``description`` (rather than wrapping the JSON with extra
+      text) keeps the output well-formed JSON, which the formal tool-result
+      channel requires.
+    - ``final``: pass-through; the payload is serialized as-is. The task is
+      done at this point, so re-invocation by the model (if the user asks
+      again later) is no longer a mistake.
+
+    Args:
+        payload: The parsed async-tool message payload.
+
+    Returns:
+        The prepared JSON string, ready to be sent to the realtime service.
+    """
+    if payload.kind == "started":
+        return _prepare_started_message_payload_for_realtime(payload)
+    if payload.kind == "intermediate":
+        return _prepare_intermediate_result_message_payload_for_realtime(payload)
+    if payload.kind == "final":
+        return _prepare_final_result_message_payload_for_realtime(payload)
+    raise ValueError(f"Unknown async-tool message payload kind: {payload.kind!r}")
+
+
+def _prepare_started_message_payload_for_realtime(payload: AsyncToolMessagePayload) -> str:
+    return _payload_to_json(_with_reinvocation_reminder_grafted_in(payload))
+
+
+def _prepare_intermediate_result_message_payload_for_realtime(
+    payload: AsyncToolMessagePayload,
+) -> str:
+    return _payload_to_json(_with_reinvocation_reminder_grafted_in(payload))
+
+
+def _prepare_final_result_message_payload_for_realtime(payload: AsyncToolMessagePayload) -> str:
+    # Pass-through, for now
+    return _payload_to_json(payload)
+
+
+def _with_reinvocation_reminder_grafted_in(
+    payload: AsyncToolMessagePayload,
+) -> AsyncToolMessagePayload:
+    """Return a copy of ``payload`` with the re-invocation reminder appended to ``description``.
+
+    The reminder lives inside ``description`` so the surrounding JSON
+    envelope stays well-formed (which the formal tool-result channel
+    requires). It's appended (rather than prefixed) so the model first
+    reads the protocol-level explanation of what async-tool messages are
+    and only then encounters the behavioral directive.
+    """
+    return AsyncToolMessagePayload(
+        kind=payload.kind,
+        tool_call_id=payload.tool_call_id,
+        status=payload.status,
+        description=f"{payload.description} {_REALTIME_REINVOCATION_REMINDER}",
+        result=payload.result,
     )

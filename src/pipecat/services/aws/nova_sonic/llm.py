@@ -663,11 +663,12 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                 )
                 return
             if send_new_results:
+                payload = async_tool_messages.prepare_message_payload_for_realtime(info)
                 logger.debug(
                     f"{self}: async_tool send started as tool result: "
-                    f"tool_call_id={info.tool_call_id} payload={info.raw_content!r}"
+                    f"tool_call_id={info.tool_call_id} payload={payload!r}"
                 )
-                await self._send_tool_result(info.tool_call_id, info.raw_content)
+                await self._send_tool_result(info.tool_call_id, payload)
             else:
                 logger.trace(
                     f"{self}: async_tool started mark-handled (no send): "
@@ -685,11 +686,12 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             )
             return
         if send_new_results:
+            payload = async_tool_messages.prepare_message_payload_for_realtime(info)
             logger.debug(
                 f"{self}: async_tool send {info.kind} as text input: "
-                f"tool_call_id={info.tool_call_id} text={info.raw_content!r}"
+                f"tool_call_id={info.tool_call_id} text={payload!r}"
             )
-            await self._send_async_tool_text(info.raw_content)
+            await self._send_async_tool_text(payload)
         else:
             logger.trace(
                 f"{self}: async_tool {info.kind} mark-handled (no send): "

@@ -54,14 +54,14 @@ async def track_current_location(params: FunctionCallParams):
         properties=FunctionCallResultProperties(is_final=False),
     )
 
-    await asyncio.sleep(10)
+    await asyncio.sleep(20)
     gps = {"lat": 33.96003, "lng": -118.40639}
     await params.result_callback(
         {"gps": gps, "city": "Los Angeles"},
         properties=FunctionCallResultProperties(is_final=False),
     )
 
-    await asyncio.sleep(10)
+    await asyncio.sleep(20)
     gps = {"lat": 32.743569, "lng": -117.20466}
     await params.result_callback({"gps": gps, "city": "San Diego"})
 

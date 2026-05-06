@@ -58,20 +58,6 @@ class TestParseMessage(unittest.TestCase):
         assert info.status == "finished"
         assert info.result == '"done"'
 
-    def test_raw_content_preserves_original_payload(self):
-        # raw_content should round-trip the source message's `content` field so
-        # services can forward the full payload to providers.
-        msg = _final_message("abc", '"done"')
-        info = async_tool_messages.parse_message(msg)
-        assert info is not None
-        assert info.raw_content == msg["content"]
-        # Sanity: it should parse back to the original payload dict.
-        payload = json.loads(info.raw_content)
-        assert payload["type"] == "async_tool"
-        assert payload["tool_call_id"] == "abc"
-        assert payload["status"] == "finished"
-        assert payload["result"] == '"done"'
-
     def test_parses_completed_sentinel_result(self):
         # When a function returns no value, the aggregator sets the result to
         # the literal "COMPLETED" — same convention used for synchronous tool
@@ -226,7 +212,6 @@ class TestBuilders(unittest.TestCase):
         assert info.tool_call_id == "call_x"
         assert info.status == "running"
         assert info.result is None
-        assert info.raw_content == msg["content"]
 
     def test_intermediate_round_trip(self):
         msg = async_tool_messages.build_intermediate_result_message("call_x", '{"step": 1}')
@@ -245,6 +230,56 @@ class TestBuilders(unittest.TestCase):
         assert info.tool_call_id == "call_x"
         assert info.status == "finished"
         assert info.result == '{"answer": 42}'
+
+
+class TestPrepareMessagePayloadForRealtime(unittest.TestCase):
+    def test_started_grafts_reminder_into_description(self):
+        msg = async_tool_messages.build_started_message("call_42")
+        info = async_tool_messages.parse_message(msg)
+        assert info is not None
+        text = async_tool_messages.prepare_message_payload_for_realtime(info)
+        # The output is well-formed JSON (the formal tool-result channel
+        # requires it).
+        decoded = json.loads(text)
+        # The reminder lives inside the description field, not outside the
+        # JSON envelope.
+        assert "do not call the same tool" in decoded["description"]
+        assert "duplicate task" in decoded["description"]
+        # And the original description text is still present after the reminder.
+        assert "asynchronous task" in decoded["description"]
+        # Other payload fields are preserved.
+        assert decoded["type"] == "async_tool"
+        assert decoded["tool_call_id"] == "call_42"
+        assert decoded["status"] == "running"
+        # Started payloads have no result field.
+        assert "result" not in decoded
+
+    def test_intermediate_grafts_reminder_into_description(self):
+        msg = async_tool_messages.build_intermediate_result_message("call_42", '"step-1"')
+        info = async_tool_messages.parse_message(msg)
+        assert info is not None
+        text = async_tool_messages.prepare_message_payload_for_realtime(info)
+        decoded = json.loads(text)
+        assert "do not call the same tool" in decoded["description"]
+        assert decoded["type"] == "async_tool"
+        assert decoded["tool_call_id"] == "call_42"
+        assert decoded["status"] == "running"
+        assert decoded["result"] == '"step-1"'
+
+    def test_final_is_pass_through(self):
+        # The task is done at this point; the re-invocation reminder no
+        # longer applies, so the final payload is forwarded as-is (no
+        # reminder grafted onto the description).
+        msg = async_tool_messages.build_final_result_message("call_42", '"the answer"')
+        info = async_tool_messages.parse_message(msg)
+        assert info is not None
+        text = async_tool_messages.prepare_message_payload_for_realtime(info)
+        decoded = json.loads(text)
+        assert "do not call the same tool" not in decoded["description"]
+        assert decoded["type"] == "async_tool"
+        assert decoded["tool_call_id"] == "call_42"
+        assert decoded["status"] == "finished"
+        assert decoded["result"] == '"the answer"'
 
 
 if __name__ == "__main__":
