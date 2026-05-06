@@ -49,6 +49,11 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators.async_tool_messages import (
+    AsyncToolMessage,
+    format_async_tool_text_for_provider,
+    parse_async_tool_message,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.nova_sonic.session_continuation import (
@@ -414,6 +419,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
         self._wants_connection = False
         self._user_text_buffer = ""
         self._completed_tool_calls = set()
+        self._async_tool_text_dispatched: set[str] = set()
         self._audio_input_started = False
 
         # Session continuation helper. The service itself implements the
@@ -620,6 +626,13 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             # standard tool-result messages — skip them.
             if isinstance(message, LLMSpecificMessage):
                 continue
+
+            async_info = parse_async_tool_message(message)
+            if async_info is not None:
+                # Async-tool message — dispatch per the configured support tier.
+                await self._dispatch_async_tool_message(async_info, send_new_results)
+                continue
+
             if message.get("role") == "tool" and message.get("content") not in [
                 "IN_PROGRESS",
                 "CANCELLED",
@@ -630,6 +643,77 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                     if send_new_results:
                         await self._send_tool_result(tool_call_id, message.get("content"))
                     self._completed_tool_calls.add(tool_call_id)
+
+    async def _dispatch_async_tool_message(self, info: AsyncToolMessage, send_new_results: bool):
+        """Dispatch an async-tool message to Nova Sonic.
+
+        The placeholder is sent as a formal ``toolResult``; subsequent
+        intermediate/final results are injected as cross-modal user-role text
+        input events (supporting streaming async results).
+        """
+        logger.trace(
+            f"{self}: async_tool dispatch: kind={info.kind} "
+            f"tool_call_id={info.tool_call_id} status={info.status} "
+            f"send_new_results={send_new_results}"
+        )
+
+        if info.kind == "placeholder":
+            if info.tool_call_id in self._completed_tool_calls:
+                logger.trace(
+                    f"{self}: async_tool placeholder already sent: tool_call_id={info.tool_call_id}"
+                )
+                return
+            if send_new_results:
+                logger.debug(
+                    f"{self}: async_tool send placeholder as tool result: "
+                    f"tool_call_id={info.tool_call_id} payload={info.raw_content!r}"
+                )
+                await self._send_tool_result(info.tool_call_id, info.raw_content)
+            else:
+                logger.trace(
+                    f"{self}: async_tool placeholder mark-handled (no send): "
+                    f"tool_call_id={info.tool_call_id}"
+                )
+            self._completed_tool_calls.add(info.tool_call_id)
+            return
+
+        # info.kind in ("intermediate", "final")
+        signature = self._async_tool_message_signature(info)
+        if signature in self._async_tool_text_dispatched:
+            logger.trace(
+                f"{self}: async_tool {info.kind} already dispatched: "
+                f"tool_call_id={info.tool_call_id}"
+            )
+            return
+        if send_new_results:
+            text = format_async_tool_text_for_provider(info)
+            logger.debug(
+                f"{self}: async_tool send {info.kind} as text input: "
+                f"tool_call_id={info.tool_call_id} text={text!r}"
+            )
+            await self._send_async_tool_text(text)
+        else:
+            logger.trace(
+                f"{self}: async_tool {info.kind} mark-handled (no send): "
+                f"tool_call_id={info.tool_call_id}"
+            )
+        self._async_tool_text_dispatched.add(signature)
+
+    @staticmethod
+    def _async_tool_message_signature(info: AsyncToolMessage) -> str:
+        return f"{info.tool_call_id}|{info.status}|{info.result or ''}"
+
+    async def _send_async_tool_text(self, text: str):
+        """Inject mid-conversation text via Nova Sonic's cross-modal user text input.
+
+        Used to forward intermediate/final async-tool results to the provider.
+        Sends a USER-role text content block (contentStart/textInput/contentEnd)
+        with ``interactive=True``, the documented cross-modal pattern for mid-
+        conversation text injection.
+        """
+        if not self._stream or not self._prompt_name or not text:
+            return
+        await self._send_text_event(text=text, role=Role.USER, interactive=True)
 
     async def _finish_connecting_if_context_available(self):
         # We can only finish connecting once we've gotten our initial context and we're ready to
@@ -758,6 +842,7 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             self._connected_time = None
             self._user_text_buffer = ""
             self._completed_tool_calls = set()
+            self._async_tool_text_dispatched = set()
             self._audio_input_started = False
             self._pending_speculative_text = None
 
