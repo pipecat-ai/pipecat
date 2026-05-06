@@ -1245,6 +1245,9 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         try:
             await self._session.send_realtime_input(text=text)
+            # Was scoped to audio-first; would otherwise race with
+            # realtime_input.audio on the next user-stop.
+            self._needs_initial_turn_complete_message = False
         except Exception as e:
             await self._handle_send_error(e)
 
@@ -1406,6 +1409,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         try:
             await self._session.send_client_content(turns=messages, turn_complete=True)
+            # turn_complete=True above already satisfies this workaround.
+            self._needs_initial_turn_complete_message = False
             # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
             if self._is_gemini_3:
                 await self._session.send_realtime_input(text=" ")
