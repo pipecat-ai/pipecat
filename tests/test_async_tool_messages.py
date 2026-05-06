@@ -233,53 +233,88 @@ class TestBuilders(unittest.TestCase):
 
 
 class TestPrepareMessagePayloadForRealtime(unittest.TestCase):
-    def test_started_grafts_reminder_into_description(self):
+    """Verify the realtime preparation behavior across kinds and template usage."""
+
+    # --- Default (no template) → raw JSON pass-through -----------------------
+
+    def test_started_default_is_raw_json(self):
         msg = async_tool_messages.build_started_message("call_42")
         info = async_tool_messages.parse_message(msg)
         assert info is not None
         text = async_tool_messages.prepare_message_payload_for_realtime(info)
-        # The output is well-formed JSON (the formal tool-result channel
-        # requires it).
         decoded = json.loads(text)
-        # The reminder lives inside the description field, not outside the
-        # JSON envelope.
-        assert "do not call the same tool" in decoded["description"]
-        assert "duplicate task" in decoded["description"]
-        # And the original description text is still present after the reminder.
-        assert "asynchronous task" in decoded["description"]
-        # Other payload fields are preserved.
         assert decoded["type"] == "async_tool"
         assert decoded["tool_call_id"] == "call_42"
         assert decoded["status"] == "running"
         # Started payloads have no result field.
         assert "result" not in decoded
 
-    def test_intermediate_grafts_reminder_into_description(self):
+    def test_intermediate_default_is_raw_json(self):
         msg = async_tool_messages.build_intermediate_result_message("call_42", '"step-1"')
         info = async_tool_messages.parse_message(msg)
         assert info is not None
         text = async_tool_messages.prepare_message_payload_for_realtime(info)
         decoded = json.loads(text)
-        assert "do not call the same tool" in decoded["description"]
         assert decoded["type"] == "async_tool"
         assert decoded["tool_call_id"] == "call_42"
         assert decoded["status"] == "running"
         assert decoded["result"] == '"step-1"'
 
-    def test_final_is_pass_through(self):
-        # The task is done at this point; the re-invocation reminder no
-        # longer applies, so the final payload is forwarded as-is (no
-        # reminder grafted onto the description).
+    def test_final_default_is_raw_json(self):
         msg = async_tool_messages.build_final_result_message("call_42", '"the answer"')
         info = async_tool_messages.parse_message(msg)
         assert info is not None
         text = async_tool_messages.prepare_message_payload_for_realtime(info)
         decoded = json.loads(text)
-        assert "do not call the same tool" not in decoded["description"]
         assert decoded["type"] == "async_tool"
         assert decoded["tool_call_id"] == "call_42"
         assert decoded["status"] == "finished"
         assert decoded["result"] == '"the answer"'
+
+    # --- Caller-supplied template applied across kinds -----------------------
+
+    def test_template_applied_to_started(self):
+        msg = async_tool_messages.build_started_message("call_42")
+        info = async_tool_messages.parse_message(msg)
+        assert info is not None
+        text = async_tool_messages.prepare_message_payload_for_realtime(
+            info,
+            template="[{tool_call_id} {status}] {result}",
+        )
+        # Started has no result; substitution yields empty string after the bracket.
+        assert text == "[call_42 running] "
+
+    def test_template_applied_to_intermediate(self):
+        msg = async_tool_messages.build_intermediate_result_message("call_42", '"step-1"')
+        info = async_tool_messages.parse_message(msg)
+        assert info is not None
+        text = async_tool_messages.prepare_message_payload_for_realtime(
+            info,
+            template="[{tool_call_id} {status}] {result}",
+        )
+        assert text == '[call_42 running] "step-1"'
+
+    def test_template_applied_to_final(self):
+        msg = async_tool_messages.build_final_result_message("call_42", '"the answer"')
+        info = async_tool_messages.parse_message(msg)
+        assert info is not None
+        text = async_tool_messages.prepare_message_payload_for_realtime(
+            info,
+            template="[{tool_call_id} {status}] {result}",
+        )
+        assert text == '[call_42 finished] "the answer"'
+
+    def test_template_can_use_description_field(self):
+        msg = async_tool_messages.build_intermediate_result_message("call_42", '"step-1"')
+        info = async_tool_messages.parse_message(msg)
+        assert info is not None
+        text = async_tool_messages.prepare_message_payload_for_realtime(
+            info,
+            template="{description} >> {result}",
+        )
+        # The intermediate description text is preserved verbatim.
+        assert "intermediate result" in text
+        assert text.endswith('>> "step-1"')
 
 
 if __name__ == "__main__":

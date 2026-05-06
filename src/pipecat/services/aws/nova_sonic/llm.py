@@ -237,6 +237,26 @@ class AWSNovaSonicLLMSettings(LLMSettings):
     endpointing_sensitivity: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+# Bracketed plain-text template Nova Sonic uses when injecting async-tool
+# result updates onto the cross-modal user-text channel.
+#
+# Note that this template intentionally drops the payload's ``description``
+# field (the protocol-level explanation of what async-tool messages are and
+# how they work) and only carries ``tool_call_id``, ``status``, and
+# ``result``. Counterintuitively, this short framing — minus the verbose
+# protocol description, minus a JSON envelope altogether — empirically
+# yields much better Nova Sonic behavior: noticeably fewer spurious
+# re-invocations of the same tool than when the full JSON envelope (with
+# its description) was injected as text. We don't fully understand why; one
+# plausible explanation is that the model treats long, instruction-shaped
+# description text as content demanding a response, where a terse
+# bracketed status update reads more like ambient state. Worth revisiting
+# if Nova Sonic's text-channel handling changes.
+_ASYNC_TOOL_RESULT_TEXT_TEMPLATE = (
+    "[Async tool update for tool_call_id={tool_call_id}, status={status}] {result}"
+)
+
+
 class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     """AWS Nova Sonic speech-to-speech LLM service.
 
@@ -686,12 +706,14 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
             )
             return
         if send_new_results:
-            payload = async_tool_messages.prepare_message_payload_for_realtime(info)
+            text = async_tool_messages.prepare_message_payload_for_realtime(
+                info, template=_ASYNC_TOOL_RESULT_TEXT_TEMPLATE
+            )
             logger.debug(
                 f"{self}: async_tool send {info.kind} as text input: "
-                f"tool_call_id={info.tool_call_id} text={payload!r}"
+                f"tool_call_id={info.tool_call_id} text={text!r}"
             )
-            await self._send_async_tool_text(payload)
+            await self._send_async_tool_text(text)
         else:
             logger.trace(
                 f"{self}: async_tool {info.kind} mark-handled (no send): "

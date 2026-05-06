@@ -74,6 +74,7 @@ async def track_current_location(params: FunctionCallParams):
 
     # Second update: revised city estimate.
     await asyncio.sleep(10)
+    # await asyncio.sleep(20)
     gps = {"lat": 33.96003, "lng": -118.40639}
     await params.result_callback(
         {"gps": gps, "city": "Los Angeles"},
@@ -82,6 +83,7 @@ async def track_current_location(params: FunctionCallParams):
 
     # Final result: confirmed city.
     await asyncio.sleep(10)
+    # await asyncio.sleep(20)
     gps = {"lat": 32.743569, "lng": -117.20466}
     await params.result_callback({"gps": gps, "city": "San Diego"})
 

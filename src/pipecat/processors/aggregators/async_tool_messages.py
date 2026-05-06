@@ -289,95 +289,82 @@ def parse_message(message: LLMStandardMessage) -> AsyncToolMessagePayload | None
 # --- Realtime preparation ----------------------------------------------------
 
 
-# Natural-language reminder grafted onto the ``description`` field of in-flight
-# payloads (started / intermediate) when they're sent to a realtime LLM
-# service. Realtime services receive these mid-stream while the model is
-# still talking with the user, which is the moment the model is most likely
-# to mistakenly re-issue the same tool call. Keeping this reminder out of the
-# canonical payload descriptions (and confined to the realtime path) avoids
-# influencing non-realtime consumers of the same context. We don't graft it
-# onto ``final`` payloads, because at that point the task is done and
-# re-invocation by the model is no longer a mistake.
-#
-# The reminder is appended *after* the canonical description so the model
-# first reads the protocol-level explanation of what async-tool messages are
-# and how they work, and only then encounters the behavioral directive,
-# which now flows naturally from that context.
-_REALTIME_REINVOCATION_REMINDER = (
-    "While this task is in flight, do not call the same tool with the same "
-    "arguments again; you would just kick off a duplicate task."
-)
-
-
-def prepare_message_payload_for_realtime(payload: AsyncToolMessagePayload) -> str:
+def prepare_message_payload_for_realtime(
+    payload: AsyncToolMessagePayload,
+    *,
+    template: str | None = None,
+) -> str:
     """Prepare an async-tool message payload for sending to a realtime LLM service.
 
-    Returns a wire-ready JSON string. Realtime services that fully honor the
-    async-tool mechanism send the ``started`` payload via the formal
-    tool-result channel and the subsequent ``intermediate`` / ``final``
-    payloads as text injected mid-conversation; this function returns the
-    string to send in either case, and callers route it to the appropriate
-    channel.
-
-    The exact transformation depends on the payload kind. Each kind is
-    handled by its own private helper, so per-kind tweaks can be added later
-    without entangling the others. Today:
-
-    - ``started`` / ``intermediate``: a natural-language reminder
-      discouraging the model from re-invoking the in-flight tool is grafted
-      onto the ``description`` field, then the payload is re-serialized.
-      Grafting into ``description`` (rather than wrapping the JSON with extra
-      text) keeps the output well-formed JSON, which the formal tool-result
-      channel requires.
-    - ``final``: pass-through; the payload is serialized as-is. The task is
-      done at this point, so re-invocation by the model (if the user asks
-      again later) is no longer a mistake.
+    Realtime services that fully honor the async-tool mechanism send the
+    ``started`` payload via the formal tool-result channel and the subsequent
+    ``intermediate`` / ``final`` payloads as text injected mid-conversation;
+    this function returns the string to send in either case, and callers
+    route it to the appropriate channel.
 
     Args:
         payload: The parsed async-tool message payload.
+        template: Optional format string. If provided, the rendered output is
+            ``template.format(tool_call_id=…, status=…, result=…, description=…)``.
+            If ``None``, the payload is serialized to its canonical JSON
+            form. Per-kind helpers ultimately decide what to do with the
+            template, so future per-kind tweaks (e.g. raising for a kind
+            that shouldn't accept templates) can be added without changing
+            this signature.
 
     Returns:
-        The prepared JSON string, ready to be sent to the realtime service.
+        The prepared string, ready to be sent to the realtime service.
     """
     if payload.kind == "started":
-        return _prepare_started_message_payload_for_realtime(payload)
+        return _prepare_started_message_payload_for_realtime(payload, template=template)
     if payload.kind == "intermediate":
-        return _prepare_intermediate_result_message_payload_for_realtime(payload)
+        return _prepare_intermediate_result_message_payload_for_realtime(payload, template=template)
     if payload.kind == "final":
-        return _prepare_final_result_message_payload_for_realtime(payload)
+        return _prepare_final_result_message_payload_for_realtime(payload, template=template)
     raise ValueError(f"Unknown async-tool message payload kind: {payload.kind!r}")
 
 
-def _prepare_started_message_payload_for_realtime(payload: AsyncToolMessagePayload) -> str:
-    return _payload_to_json(_with_reinvocation_reminder_grafted_in(payload))
+def _prepare_started_message_payload_for_realtime(
+    payload: AsyncToolMessagePayload,
+    *,
+    template: str | None = None,
+) -> str:
+    if template is None:
+        return _payload_to_json(payload)
+    return _format_with_template(payload, template)
 
 
 def _prepare_intermediate_result_message_payload_for_realtime(
     payload: AsyncToolMessagePayload,
+    *,
+    template: str | None = None,
 ) -> str:
-    return _payload_to_json(_with_reinvocation_reminder_grafted_in(payload))
+    if template is None:
+        return _payload_to_json(payload)
+    return _format_with_template(payload, template)
 
 
-def _prepare_final_result_message_payload_for_realtime(payload: AsyncToolMessagePayload) -> str:
-    # Pass-through, for now
-    return _payload_to_json(payload)
-
-
-def _with_reinvocation_reminder_grafted_in(
+def _prepare_final_result_message_payload_for_realtime(
     payload: AsyncToolMessagePayload,
-) -> AsyncToolMessagePayload:
-    """Return a copy of ``payload`` with the re-invocation reminder appended to ``description``.
+    *,
+    template: str | None = None,
+) -> str:
+    if template is None:
+        return _payload_to_json(payload)
+    return _format_with_template(payload, template)
 
-    The reminder lives inside ``description`` so the surrounding JSON
-    envelope stays well-formed (which the formal tool-result channel
-    requires). It's appended (rather than prefixed) so the model first
-    reads the protocol-level explanation of what async-tool messages are
-    and only then encounters the behavioral directive.
+
+def _format_with_template(payload: AsyncToolMessagePayload, template: str) -> str:
+    """Render a payload via a caller-supplied template.
+
+    Available substitution keys: ``tool_call_id``, ``status``, ``result``,
+    ``description``. Note that ``result`` is empty for ``started`` payloads
+    (no result has been produced yet); callers building templates intended
+    for ``started`` should not rely on it.
     """
-    return AsyncToolMessagePayload(
-        kind=payload.kind,
+    return template.format(
         tool_call_id=payload.tool_call_id,
         status=payload.status,
-        description=f"{payload.description} {_REALTIME_REINVOCATION_REMINDER}",
-        result=payload.result,
+        result=payload.result or "",
+        description=payload.description,
     )
