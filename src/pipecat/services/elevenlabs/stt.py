@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+from urllib.parse import urlencode
 
 import aiohttp
 from loguru import logger
@@ -36,7 +37,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -187,9 +188,11 @@ class ElevenLabsSTTSettings(STTSettings):
     Parameters:
         tag_audio_events: Whether to include audio events like (laughter),
             (coughing) in the transcription.
+        keyterms: List of key terms or phrases to bias transcription towards.
     """
 
     tag_audio_events: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -199,12 +202,14 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
     See ``ElevenLabsRealtimeSTTService.InputParams`` for detailed descriptions.
 
     Parameters:
+        keyterms: List of key terms or phrases to bias transcription towards.
         vad_silence_threshold_secs: Seconds of silence before VAD commits (0.3-3.0).
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
         min_silence_duration_ms: Minimum silence duration for VAD (50-2000ms).
     """
 
+    keyterms: list[str] | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_silence_threshold_secs: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -231,10 +236,12 @@ class ElevenLabsSTTService(SegmentedSTTService):
         Parameters:
             language: Target language for transcription.
             tag_audio_events: Whether to include audio events like (laughter), (coughing), in the transcription.
+            keyterms: List of key terms or phrases to bias transcription towards.
         """
 
         language: Language | None = None
         tag_audio_events: bool = True
+        keyterms: list[str] | None = None
 
     def __init__(
         self,
@@ -277,6 +284,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             model="scribe_v2",
             language=Language.EN,
             tag_audio_events=None,
+            keyterms=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -291,6 +299,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
                 if params.language is not None:
                     default_settings.language = params.language
                 default_settings.tag_audio_events = params.tag_audio_events
+                default_settings.keyterms = params.keyterms
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -355,6 +364,10 @@ class ElevenLabsSTTService(SegmentedSTTService):
         data.add_field("language_code", self._settings.language)
         if self._settings.tag_audio_events is not None:
             data.add_field("tag_audio_events", str(self._settings.tag_audio_events).lower())
+        keyterms = self._settings.keyterms
+        if is_given(keyterms) and keyterms is not None:
+            for keyterm in keyterms:
+                data.add_field("keyterms", keyterm)
 
         async with self._session.post(url, data=data, headers=headers) as response:
             if response.status != 200:
@@ -472,6 +485,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 Only used when commit_strategy is VAD. None uses ElevenLabs default.
             min_silence_duration_ms: Minimum silence duration for VAD (50-2000ms).
                 Only used when commit_strategy is VAD. None uses ElevenLabs default.
+            keyterms: List of key terms or phrases to bias transcription towards.
             include_timestamps: Whether to include word-level timestamps in transcripts.
             enable_logging: Whether to enable logging on ElevenLabs' side.
             include_language_detection: Whether to include language detection in transcripts.
@@ -483,6 +497,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         vad_threshold: float | None = None
         min_speech_duration_ms: int | None = None
         min_silence_duration_ms: int | None = None
+        keyterms: list[str] | None = None
         include_timestamps: bool = False
         enable_logging: bool = False
         include_language_detection: bool = False
@@ -539,6 +554,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             vad_threshold=None,
             min_speech_duration_ms=None,
             min_silence_duration_ms=None,
+            keyterms=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -557,6 +573,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 default_settings.vad_threshold = params.vad_threshold
                 default_settings.min_speech_duration_ms = params.min_speech_duration_ms
                 default_settings.min_silence_duration_ms = params.min_silence_duration_ms
+                default_settings.keyterms = params.keyterms
                 include_timestamps = params.include_timestamps
                 enable_logging = params.enable_logging
                 include_language_detection = params.include_language_detection
@@ -770,6 +787,11 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
             params.append(f"audio_format={self._audio_format}")
             params.append(f"commit_strategy={self._commit_strategy.value}")
+
+            keyterms = self._settings.keyterms
+            if is_given(keyterms) and keyterms is not None:
+                for keyterm in keyterms:
+                    params.append(urlencode({"keyterms": keyterm}))
 
             # Add optional parameters
             if self._include_timestamps:
