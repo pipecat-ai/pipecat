@@ -968,10 +968,58 @@ def traced_openai_realtime(operation: str) -> Callable:
                                 try:
                                     context_tools = getattr(self._context, "tools", None)
                                     if context_tools and not operation_attrs.get("tools"):
-                                        operation_attrs["tools"] = context_tools
-                                        operation_attrs["tools_serialized"] = json.dumps(
-                                            context_tools
-                                        )
+                                        tools_list = []
+                                        tools_serialized = None
+
+                                        if hasattr(context_tools, "standard_tools"):
+                                            # ToolsSchema object
+                                            tools_list = context_tools.standard_tools
+                                            tools_serialized = json.dumps(
+                                                [
+                                                    {
+                                                        "name": tool.name
+                                                        if hasattr(tool, "name")
+                                                        else tool.get("name", "unknown"),
+                                                        "description": tool.description
+                                                        if hasattr(tool, "description")
+                                                        else tool.get("description", ""),
+                                                        "properties": tool.properties
+                                                        if hasattr(tool, "properties")
+                                                        else tool.get("properties", {}),
+                                                        "required": tool.required
+                                                        if hasattr(tool, "required")
+                                                        else tool.get("required", []),
+                                                    }
+                                                    for tool in tools_list
+                                                ]
+                                            )
+                                        elif isinstance(context_tools, list):
+                                            # List of tool dictionaries or objects
+                                            tools_list = context_tools
+                                            tools_serialized = json.dumps(
+                                                [
+                                                    {
+                                                        "name": tool.get("name", "unknown")
+                                                        if isinstance(tool, dict)
+                                                        else getattr(tool, "name", "unknown"),
+                                                        "description": tool.get("description", "")
+                                                        if isinstance(tool, dict)
+                                                        else getattr(tool, "description", ""),
+                                                        "properties": tool.get("properties", {})
+                                                        if isinstance(tool, dict)
+                                                        else getattr(tool, "properties", {}),
+                                                        "required": tool.get("required", [])
+                                                        if isinstance(tool, dict)
+                                                        else getattr(tool, "required", []),
+                                                    }
+                                                    for tool in tools_list
+                                                ]
+                                            )
+
+                                        if tools_list:
+                                            operation_attrs["tools"] = tools_list
+                                            operation_attrs["tools_serialized"] = tools_serialized
+
                                 except Exception as e:
                                     logging.warning(f"Error extracting context tools: {e}")
 
