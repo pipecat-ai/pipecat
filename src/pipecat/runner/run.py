@@ -313,7 +313,9 @@ def _setup_unified_start_route(
             session_id = str(uuid.uuid4())
             active_sessions[session_id] = request_data.get("body", {})
 
-            result = {"sessionId": session_id}
+            result = StartBotResult(
+                sessionId=session_id,
+            )
             if request_data.get("enableDefaultIceServers"):
                 result["iceConfig"] = IceConfig(
                     iceServers=[IceServer(urls=["stun:stun.l.google.com:19302"])]
@@ -371,11 +373,11 @@ def _setup_unified_start_route(
                     runner_args = DailyRunnerArguments(
                         room_url=room_url, token=token, body=body, session_id=session_id
                     )
-                    result = {
-                        "dailyRoom": room_url,
-                        "dailyToken": token,
-                        "sessionId": session_id,
-                    }
+                    result = StartBotResult(
+                        dailyRoom=room_url,
+                        dailyToken=token,
+                        sessionId=session_id,
+                    )
             else:
                 runner_args = RunnerArguments(body=body, session_id=session_id)
 
