@@ -313,7 +313,7 @@ def _setup_unified_start_route(
             session_id = str(uuid.uuid4())
             active_sessions[session_id] = request_data.get("body", {})
 
-            result: StartBotResult = {"sessionId": session_id}
+            result = {"sessionId": session_id}
             if request_data.get("enableDefaultIceServers"):
                 result["iceConfig"] = IceConfig(
                     iceServers=[IceServer(urls=["stun:stun.l.google.com:19302"])]
@@ -330,7 +330,7 @@ def _setup_unified_start_route(
 
             existing_room_url = os.getenv("DAILY_ROOM_URL")
             session_id = str(uuid.uuid4())
-            result = None
+            result: StartBotResult | None = None
 
             if create_daily_room or existing_room_url:
                 from pipecat.runner.daily import configure
