@@ -1,0 +1,57 @@
+{"ts_ns": 0, "event": "pipeline_started", "wall_clock_unix_ns": 1778156950877841700, "session_id": "9575d5d4"}
+{"ts_ns": 5625000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 5625000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 10890000000, "event": "bot_turn", "start_ts_ns": 5625000000, "end_ts_ns": 10890000000, "text": "I'm your friendly voice assistant, here to help with your questions and provide information or support whenever you need!"}
+{"ts_ns": 10890000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 10890000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 13171000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 1778156963826970300, "event": "turn_probability", "probability": 0.009129524230957031, "is_complete": false, "e2e_ms": 150.28170000005048, "source": "periodic"}
+{"ts_ns": 1778156964007223400, "event": "turn_probability", "probability": 0.03396362066268921, "is_complete": false, "e2e_ms": 142.51660000081756, "source": "periodic"}
+{"ts_ns": 1778156964234481300, "event": "turn_probability", "probability": 0.7987582683563232, "is_complete": true, "e2e_ms": 164.05739999754587, "source": "periodic"}
+{"ts_ns": 13937000000, "event": "turn_probability", "probability": 0.9557313919067383, "is_complete": true, "e2e_ms": 143.4951999981422}
+{"ts_ns": 13984000000, "event": "user_turn", "start_ts_ns": 13171000000, "end_ts_ns": 13984000000, "text": "Hi. What's your name?"}
+{"ts_ns": 13984000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 15125000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 15125000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 19593000000, "event": "bot_turn", "start_ts_ns": 15125000000, "end_ts_ns": 19593000000, "text": "I don\u2019t have a specific name, but you can call me Assistant. How can I help you today?"}
+{"ts_ns": 19593000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 19593000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 21531000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 1778156972132109700, "event": "turn_probability", "probability": 0.59721440076828, "is_complete": true, "e2e_ms": 129.74820000090403, "source": "periodic"}
+{"ts_ns": 1778156972414447000, "event": "turn_probability", "probability": 0.32117950916290283, "is_complete": false, "e2e_ms": 186.12620000203606, "source": "periodic"}
+{"ts_ns": 22218000000, "event": "turn_probability", "probability": 0.32117950916290283, "is_complete": false, "e2e_ms": 211.1270000023069}
+{"ts_ns": 1778156973826137000, "event": "turn_probability", "probability": 0.02316257357597351, "is_complete": false, "e2e_ms": 152.87639999951352, "source": "periodic"}
+{"ts_ns": 1778156974076747100, "event": "turn_probability", "probability": 0.6788204908370972, "is_complete": true, "e2e_ms": 198.01649999863002, "source": "periodic"}
+{"ts_ns": 1778156974210981300, "event": "turn_probability", "probability": 0.22776007652282715, "is_complete": false, "e2e_ms": 153.85450000030687, "source": "periodic"}
+{"ts_ns": 1778156974449904400, "event": "turn_probability", "probability": 0.03269481658935547, "is_complete": false, "e2e_ms": 145.41909999752534, "source": "periodic"}
+{"ts_ns": 24171000000, "event": "turn_probability", "probability": 0.22776007652282715, "is_complete": false, "e2e_ms": 134.26979999712785}
+{"ts_ns": 1778156977173055800, "event": "turn_probability", "probability": 0.15529656410217285, "is_complete": false, "e2e_ms": 244.83799999870826, "source": "periodic"}
+{"ts_ns": 1778156977354465900, "event": "turn_probability", "probability": 0.6344650983810425, "is_complete": true, "e2e_ms": 171.76420000032522, "source": "periodic"}
+{"ts_ns": 1778156977447115500, "event": "turn_probability", "probability": 0.43150579929351807, "is_complete": false, "e2e_ms": 108.96139999749721, "source": "periodic"}
+{"ts_ns": 1778156977680144600, "event": "turn_probability", "probability": 0.8228970766067505, "is_complete": true, "e2e_ms": 162.03959999984363, "source": "periodic"}
+{"ts_ns": 1778156977924401800, "event": "turn_probability", "probability": 0.8595805764198303, "is_complete": true, "e2e_ms": 164.8068000031344, "source": "periodic"}
+{"ts_ns": 27625000000, "event": "turn_probability", "probability": 0.7987582683563232, "is_complete": true, "e2e_ms": 153.0700999974215}
+{"ts_ns": 27750000000, "event": "user_turn", "start_ts_ns": 21531000000, "end_ts_ns": 27750000000, "text": "Can you tell me what you like? To do on the weekends?"}
+{"ts_ns": 27750000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 31218000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 31218000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 37734000000, "event": "bot_turn", "start_ts_ns": 31218000000, "end_ts_ns": 37734000000, "text": "I don\u2019t have weekends like you do, but I enjoy helping people with their questions and finding new information! What about you? What do you like to do on weekends?"}
+{"ts_ns": 37734000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 37734000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 39968000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 1778156990608196000, "event": "turn_probability", "probability": 0.016362518072128296, "is_complete": false, "e2e_ms": 163.660100002744, "source": "periodic"}
+{"ts_ns": 1778156990789763700, "event": "turn_probability", "probability": 0.029157280921936035, "is_complete": false, "e2e_ms": 124.44410000171047, "source": "periodic"}
+{"ts_ns": 1778156991086834500, "event": "turn_probability", "probability": 0.1142410933971405, "is_complete": false, "e2e_ms": 170.87950000131968, "source": "periodic"}
+{"ts_ns": 40734000000, "event": "turn_probability", "probability": 0.041052937507629395, "is_complete": false, "e2e_ms": 105.28070000145817}
+{"ts_ns": 1778156991606835000, "event": "turn_probability", "probability": 0.02228793501853943, "is_complete": false, "e2e_ms": 114.40349999975297, "source": "periodic"}
+{"ts_ns": 1778156991790016300, "event": "turn_probability", "probability": 0.6525336503982544, "is_complete": true, "e2e_ms": 116.32820000158972, "source": "periodic"}
+{"ts_ns": 1778156992026378000, "event": "turn_probability", "probability": 0.43150579929351807, "is_complete": false, "e2e_ms": 135.09139999951003, "source": "periodic"}
+{"ts_ns": 1778156992264706500, "event": "turn_probability", "probability": 0.9282535910606384, "is_complete": true, "e2e_ms": 144.26689999891096, "source": "periodic"}
+{"ts_ns": 41937000000, "event": "turn_probability", "probability": 0.9199748635292053, "is_complete": true, "e2e_ms": 119.57880000045407}
+{"ts_ns": 42000000000, "event": "user_turn", "start_ts_ns": 39968000000, "end_ts_ns": 42000000000, "text": "I like talking to my friends."}
+{"ts_ns": 42000000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 42687000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 42687000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 48578000000, "event": "bot_turn", "start_ts_ns": 42687000000, "end_ts_ns": 48578000000, "text": "That sounds great! Connecting with friends can be so much fun. Do you have a favorite activity you all enjoy doing together?"}
+{"ts_ns": 48578000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 48578000000, "event": "bot_speech_changed", "active": false}

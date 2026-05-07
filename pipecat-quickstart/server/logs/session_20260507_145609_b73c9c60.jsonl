@@ -1,0 +1,57 @@
+{"ts_ns": 0, "event": "pipeline_started", "wall_clock_unix_ns": 1778158569717251200, "session_id": "b73c9c60"}
+{"ts_ns": 4000000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 4000000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 8688000000, "event": "bot_turn", "start_ts_ns": 4000000000, "end_ts_ns": 8688000000, "text": "I'm here to help you with information and answer your questions! What can I assist you with today?"}
+{"ts_ns": 8688000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 8688000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 11594000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 11270265600, "event": "turn_probability", "probability": 0.9829913973808289, "is_complete": true, "e2e_ms": 102.30199999932665, "source": "periodic"}
+{"ts_ns": 11471087900, "event": "turn_probability", "probability": 0.9749865531921387, "is_complete": true, "e2e_ms": 123.81019999884302, "source": "periodic"}
+{"ts_ns": 11710208600, "event": "turn_probability", "probability": 0.834087073802948, "is_complete": true, "e2e_ms": 152.0526999993308, "source": "periodic"}
+{"ts_ns": 11952219600, "event": "turn_probability", "probability": 0.975929319858551, "is_complete": true, "e2e_ms": 178.44530000002123, "source": "periodic"}
+{"ts_ns": 12151959700, "event": "turn_probability", "probability": 0.9282535910606384, "is_complete": true, "e2e_ms": 153.63969999816618, "source": "periodic"}
+{"ts_ns": 12332253600, "event": "turn_probability", "probability": 0.9777120351791382, "is_complete": true, "e2e_ms": 121.29459999778192, "source": "periodic"}
+{"ts_ns": 12907000000, "event": "turn_probability", "probability": 0.9685282111167908, "is_complete": true, "e2e_ms": 128.57829999848036}
+{"ts_ns": 12985000000, "event": "user_turn", "start_ts_ns": 11594000000, "end_ts_ns": 12985000000, "text": "What is your name?"}
+{"ts_ns": 12985000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 14000000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 14000000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 18719000000, "event": "bot_turn", "start_ts_ns": 14000000000, "end_ts_ns": 18719000000, "text": "I don\u2019t have a personal name, but you can think of me as your helpful assistant! What else would you like to know?"}
+{"ts_ns": 18719000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 18719000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 22063000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 21810104900, "event": "turn_probability", "probability": 0.40278559923171997, "is_complete": false, "e2e_ms": 159.93609999713954, "source": "periodic"}
+{"ts_ns": 21970018600, "event": "turn_probability", "probability": 0.030293136835098267, "is_complete": false, "e2e_ms": 95.4658999980893, "source": "periodic"}
+{"ts_ns": 22150293500, "event": "turn_probability", "probability": 0.834087073802948, "is_complete": true, "e2e_ms": 110.93420000179322, "source": "periodic"}
+{"ts_ns": 22351585600, "event": "turn_probability", "probability": 0.6066516041755676, "is_complete": true, "e2e_ms": 109.98710000058054, "source": "periodic"}
+{"ts_ns": 22603250200, "event": "turn_probability", "probability": 0.01514175534248352, "is_complete": false, "e2e_ms": 121.91119999988587, "source": "periodic"}
+{"ts_ns": 22790336600, "event": "turn_probability", "probability": 0.008443742990493774, "is_complete": false, "e2e_ms": 123.08589999884134, "source": "periodic"}
+{"ts_ns": 22972605200, "event": "turn_probability", "probability": 0.012963265180587769, "is_complete": false, "e2e_ms": 109.45250000077067, "source": "periodic"}
+{"ts_ns": 23211215300, "event": "turn_probability", "probability": 0.22090676426887512, "is_complete": false, "e2e_ms": 102.93569999703323, "source": "periodic"}
+{"ts_ns": 23410532600, "event": "turn_probability", "probability": 0.9522762298583984, "is_complete": true, "e2e_ms": 97.3785999995016, "source": "periodic"}
+{"ts_ns": 23650396700, "event": "turn_probability", "probability": 0.1142410933971405, "is_complete": false, "e2e_ms": 122.5985999990371, "source": "periodic"}
+{"ts_ns": 23790811400, "event": "turn_probability", "probability": 0.743350088596344, "is_complete": true, "e2e_ms": 89.83900000021094, "source": "periodic"}
+{"ts_ns": 24041531300, "event": "turn_probability", "probability": 0.9108326435089111, "is_complete": true, "e2e_ms": 113.72200000187149, "source": "periodic"}
+{"ts_ns": 24594000000, "event": "turn_probability", "probability": 0.6788204908370972, "is_complete": true, "e2e_ms": 97.7950000014971}
+{"ts_ns": 24704000000, "event": "user_turn", "start_ts_ns": 22063000000, "end_ts_ns": 24704000000, "text": "I'd like to know what you think my is."}
+{"ts_ns": 24704000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 25579000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 25579000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 28032000000, "event": "bot_turn", "start_ts_ns": 25579000000, "end_ts_ns": 28032000000, "text": "I don\u2019t know your name yet! Would you like to share it with me?"}
+{"ts_ns": 28032000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 28032000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 29547000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 29355544900, "event": "turn_probability", "probability": 0.7201674580574036, "is_complete": true, "e2e_ms": 205.1971999972011, "source": "periodic"}
+{"ts_ns": 29490378900, "event": "turn_probability", "probability": 0.044268637895584106, "is_complete": false, "e2e_ms": 162.85299999799463, "source": "periodic"}
+{"ts_ns": 29730501300, "event": "turn_probability", "probability": 0.1142410933971405, "is_complete": false, "e2e_ms": 202.47870000093826, "source": "periodic"}
+{"ts_ns": 29830495100, "event": "turn_probability", "probability": 0.256649911403656, "is_complete": false, "e2e_ms": 94.1820000007283, "source": "periodic"}
+{"ts_ns": 30098468800, "event": "turn_probability", "probability": 0.03147178888320923, "is_complete": false, "e2e_ms": 155.72550000069896, "source": "periodic"}
+{"ts_ns": 30338659900, "event": "turn_probability", "probability": 0.6344650983810425, "is_complete": true, "e2e_ms": 152.90379999714787, "source": "periodic"}
+{"ts_ns": 30985000000, "event": "turn_probability", "probability": 0.9255857467651367, "is_complete": true, "e2e_ms": 173.42920000010054}
+{"ts_ns": 31000000000, "event": "user_turn", "start_ts_ns": 29547000000, "end_ts_ns": 31000000000, "text": "No. I think you should guess."}
+{"ts_ns": 31000000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 31907000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 31907000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 37266000000, "event": "bot_turn", "start_ts_ns": 31907000000, "end_ts_ns": 37266000000, "text": "That sounds fun! I'll take a wild guess and say your name is Alex. How close am I?"}
+{"ts_ns": 37266000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 37266000000, "event": "bot_speech_changed", "active": false}

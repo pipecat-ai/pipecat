@@ -1,0 +1,28 @@
+{"ts_ns": 0, "event": "pipeline_started", "wall_clock_unix_ns": 1778146922017201600, "session_id": "1e270e54"}
+{"ts_ns": 4047000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 4047000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 8094000000, "event": "bot_turn", "start_ts_ns": 4047000000, "end_ts_ns": 8094000000, "text": "I'm your assistant, to answer questions and support you need"}
+{"ts_ns": 8094000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 8094000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 12047000000, "event": "user_turn", "start_ts_ns": 0, "end_ts_ns": 12047000000, "text": "Hi, assistant."}
+{"ts_ns": 12047000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 12078000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 12641000000, "event": "turn_probability", "probability": 0.041052937507629395, "is_complete": false, "e2e_ms": 105.23040000043693}
+{"ts_ns": 14000000000, "event": "turn_probability", "probability": 0.1888766884803772, "is_complete": false, "e2e_ms": 123.13000000176544}
+{"ts_ns": 15375000000, "event": "turn_probability", "probability": 0.5781289935112, "is_complete": true, "e2e_ms": 136.4530000009836}
+{"ts_ns": 15500000000, "event": "user_turn", "start_ts_ns": 14156000000, "end_ts_ns": 15500000000, "text": "I would like to talk"}
+{"ts_ns": 15500000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 15781000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 19172000000, "event": "user_turn", "start_ts_ns": 15781000000, "end_ts_ns": 19172000000, "text": "docs."}
+{"ts_ns": 19172000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 20219000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 20219000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 26110000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 28078000000, "event": "turn_probability", "probability": 0.03806141018867493, "is_complete": false, "e2e_ms": 93.93009999985225}
+{"ts_ns": 32610000000, "event": "user_turn", "start_ts_ns": 29297000000, "end_ts_ns": 32610000000, "text": "animals."}
+{"ts_ns": 32610000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 39781000000, "event": "bot_turn", "start_ts_ns": 20219000000, "end_ts_ns": 39781000000, "text": "for on something dogs"}
+{"ts_ns": 39781000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 39781000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 46516000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 46516000000, "event": "bot_speech_changed", "active": true}

@@ -1,0 +1,62 @@
+{"ts_ns": 0, "event": "pipeline_started", "wall_clock_unix_ns": 1778157643450088100, "session_id": "2d3bf975"}
+{"ts_ns": 2704000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 2704000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 8891000000, "event": "bot_turn", "start_ts_ns": 2704000000, "end_ts_ns": 8891000000, "text": "I'm your helpful assistant, here to provide information and support with whatever you need. Just let me know how I can assist you!"}
+{"ts_ns": 8891000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 8891000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 11438000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 11238082700, "event": "turn_probability", "probability": 0.14524120092391968, "is_complete": false, "e2e_ms": 175.91689999972004, "source": "periodic"}
+{"ts_ns": 11397114100, "event": "turn_probability", "probability": 0.01574045419692993, "is_complete": false, "e2e_ms": 187.04829999842332, "source": "periodic"}
+{"ts_ns": 11625311900, "event": "turn_probability", "probability": 0.00949278473854065, "is_complete": false, "e2e_ms": 162.27339999750257, "source": "periodic"}
+{"ts_ns": 11777261800, "event": "turn_probability", "probability": 0.02316257357597351, "is_complete": false, "e2e_ms": 102.18190000159666, "source": "periodic"}
+{"ts_ns": 12422000000, "event": "turn_probability", "probability": 0.017008602619171143, "is_complete": false, "e2e_ms": 190.72659999801544}
+{"ts_ns": 14117171400, "event": "turn_probability", "probability": 0.01574045419692993, "is_complete": false, "e2e_ms": 168.44059999857564, "source": "periodic"}
+{"ts_ns": 14371269900, "event": "turn_probability", "probability": 0.08916738629341125, "is_complete": false, "e2e_ms": 190.40229999882285, "source": "periodic"}
+{"ts_ns": 14557743600, "event": "turn_probability", "probability": 0.04596525430679321, "is_complete": false, "e2e_ms": 195.6735000021581, "source": "periodic"}
+{"ts_ns": 14785405000, "event": "turn_probability", "probability": 0.017008602619171143, "is_complete": false, "e2e_ms": 186.97420000171405, "source": "periodic"}
+{"ts_ns": 14989845900, "event": "turn_probability", "probability": 0.013476967811584473, "is_complete": false, "e2e_ms": 182.75699999867356, "source": "periodic"}
+{"ts_ns": 15594000000, "event": "turn_probability", "probability": 0.012468844652175903, "is_complete": false, "e2e_ms": 144.66389999870444}
+{"ts_ns": 18360000000, "event": "user_turn", "start_ts_ns": 11438000000, "end_ts_ns": 18360000000, "text": "Hello? What is your name?"}
+{"ts_ns": 18360000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 19344000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 19344000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 23188000000, "event": "bot_turn", "start_ts_ns": 19344000000, "end_ts_ns": 23188000000, "text": "I don\u2019t have a specific name, but you can call me your assistant. How can I help you today?"}
+{"ts_ns": 23188000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 23188000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 25907000000, "event": "user_turn", "start_ts_ns": 11438000000, "end_ts_ns": 25907000000, "text": "Hello? What is your name? I'm"}
+{"ts_ns": 25907000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 25907000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 25617079600, "event": "turn_probability", "probability": 0.9573681354522705, "is_complete": true, "e2e_ms": 111.4969000009296, "source": "periodic"}
+{"ts_ns": 25798408800, "event": "turn_probability", "probability": 0.4901544749736786, "is_complete": false, "e2e_ms": 113.60699999931967, "source": "periodic"}
+{"ts_ns": 25999016700, "event": "turn_probability", "probability": 0.02700820565223694, "is_complete": false, "e2e_ms": 97.09540000039851, "source": "periodic"}
+{"ts_ns": 26238265300, "event": "turn_probability", "probability": 0.007809102535247803, "is_complete": false, "e2e_ms": 128.3307000012428, "source": "periodic"}
+{"ts_ns": 26782000000, "event": "turn_probability", "probability": 0.009129524230957031, "is_complete": false, "e2e_ms": 87.18759999828762}
+{"ts_ns": 29657000000, "event": "user_turn", "start_ts_ns": 25907000000, "end_ts_ns": 29657000000, "text": "wondering what"}
+{"ts_ns": 29657000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 29922000000, "event": "user_turn", "start_ts_ns": 25907000000, "end_ts_ns": 29922000000, "text": "wondering what I should have"}
+{"ts_ns": 30204000000, "event": "user_turn", "start_ts_ns": 25907000000, "end_ts_ns": 30204000000, "text": "wondering what I should have for"}
+{"ts_ns": 31204000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 30917119400, "event": "turn_probability", "probability": 0.9793655872344971, "is_complete": true, "e2e_ms": 138.54820000051404, "source": "periodic"}
+{"ts_ns": 31141156300, "event": "turn_probability", "probability": 0.95045405626297, "is_complete": true, "e2e_ms": 131.6763999966497, "source": "periodic"}
+{"ts_ns": 31688000000, "event": "turn_probability", "probability": 0.95045405626297, "is_complete": true, "e2e_ms": 101.29450000022189}
+{"ts_ns": 31844000000, "event": "user_turn", "start_ts_ns": 31204000000, "end_ts_ns": 31844000000, "text": "dinner."}
+{"ts_ns": 31844000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 32907000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 32907000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 39032000000, "event": "bot_turn", "start_ts_ns": 32907000000, "end_ts_ns": 39032000000, "text": "How about trying a stir-fry? It\u2019s quick, tasty, and you can customize it with your favorite veggies and protein. What do you think?"}
+{"ts_ns": 39032000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 39032000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 40797000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 40562515400, "event": "turn_probability", "probability": 0.9823201894760132, "is_complete": true, "e2e_ms": 182.9963999989559, "source": "periodic"}
+{"ts_ns": 40704646100, "event": "turn_probability", "probability": 0.9619386196136475, "is_complete": true, "e2e_ms": 86.17170000070473, "source": "periodic"}
+{"ts_ns": 40937821600, "event": "turn_probability", "probability": 0.87754225730896, "is_complete": true, "e2e_ms": 101.61620000144467, "source": "periodic"}
+{"ts_ns": 41180133000, "event": "turn_probability", "probability": 0.978554368019104, "is_complete": true, "e2e_ms": 134.81989999854704, "source": "periodic"}
+{"ts_ns": 41360085800, "event": "turn_probability", "probability": 0.9485659599304199, "is_complete": true, "e2e_ms": 122.13340000016615, "source": "periodic"}
+{"ts_ns": 41938000000, "event": "turn_probability", "probability": 0.9777120351791382, "is_complete": true, "e2e_ms": 93.35160000046017}
+{"ts_ns": 42094000000, "event": "user_turn", "start_ts_ns": 40797000000, "end_ts_ns": 42094000000, "text": "That sounds pretty good."}
+{"ts_ns": 42094000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 43500000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 43500000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 49641000000, "event": "bot_turn", "start_ts_ns": 43500000000, "end_ts_ns": 49641000000, "text": "Great! You can use chicken, tofu, or shrimp and add any veggies you have on hand. Do you have a sauce in mind?"}
+{"ts_ns": 49641000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 49641000000, "event": "bot_speech_changed", "active": false}

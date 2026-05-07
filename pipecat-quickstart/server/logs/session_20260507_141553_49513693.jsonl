@@ -1,0 +1,34 @@
+{"ts_ns": 0, "event": "pipeline_started", "wall_clock_unix_ns": 1778156153899911300, "session_id": "49513693"}
+{"ts_ns": 4266000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 4266000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 8031000000, "event": "bot_turn", "start_ts_ns": 4266000000, "end_ts_ns": 8031000000, "text": "I'm your helpful voice assistant, here to answer questions and assist you with whatever you need."}
+{"ts_ns": 8031000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 8031000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 10687000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 11406000000, "event": "turn_probability", "probability": 0.9199748635292053, "is_complete": true, "e2e_ms": 99.87520000140648}
+{"ts_ns": 11547000000, "event": "user_turn", "start_ts_ns": 10687000000, "end_ts_ns": 11547000000, "text": "Hi. What should I call you?"}
+{"ts_ns": 11547000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 12609000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 12609000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 13891000000, "event": "bot_turn", "start_ts_ns": 12609000000, "end_ts_ns": 13891000000, "text": "You can just call me Assistant!"}
+{"ts_ns": 13891000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 13891000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 15687000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 17062000000, "event": "turn_probability", "probability": 0.9647200703620911, "is_complete": true, "e2e_ms": 122.539300002245}
+{"ts_ns": 17187000000, "event": "user_turn", "start_ts_ns": 15687000000, "end_ts_ns": 17187000000, "text": "Really? That's a strange name."}
+{"ts_ns": 17187000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 17891000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 17891000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 21969000000, "event": "bot_turn", "start_ts_ns": 17891000000, "end_ts_ns": 21969000000, "text": "I get that! It\u2019s simple, but it reflects what I\u2019m here for\u2014to assist you."}
+{"ts_ns": 21969000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 21969000000, "event": "bot_speech_changed", "active": false}
+{"ts_ns": 23328000000, "event": "bot_state_changed", "state": "user_speaking"}
+{"ts_ns": 23891000000, "event": "turn_probability", "probability": 0.15529656410217285, "is_complete": false, "e2e_ms": 199.15279999986524}
+{"ts_ns": 25219000000, "event": "turn_probability", "probability": 0.09241843223571777, "is_complete": false, "e2e_ms": 213.29079999850364}
+{"ts_ns": 27969000000, "event": "user_turn", "start_ts_ns": 23328000000, "end_ts_ns": 27969000000, "text": "Alright. Can respect that."}
+{"ts_ns": 27969000000, "event": "bot_state_changed", "state": "processing"}
+{"ts_ns": 29141000000, "event": "bot_state_changed", "state": "speaking"}
+{"ts_ns": 29141000000, "event": "bot_speech_changed", "active": true}
+{"ts_ns": 31219000000, "event": "bot_turn", "start_ts_ns": 29141000000, "end_ts_ns": 31219000000, "text": "I appreciate that! What\u2019s on your mind today?"}
+{"ts_ns": 31219000000, "event": "bot_state_changed", "state": "listening"}
+{"ts_ns": 31219000000, "event": "bot_speech_changed", "active": false}
