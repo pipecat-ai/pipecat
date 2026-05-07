@@ -235,13 +235,20 @@ def _configure_server_app(args: argparse.Namespace):
 def _setup_unified_start_route(
     app: FastAPI, args: argparse.Namespace, active_sessions: dict[str, dict[str, Any]]
 ):
-    """Register the unified POST /start endpoint.
+    """Register the unified POST /start and GET /status endpoints.
 
     Handles WebRTC, Daily, and telephony transport start flows. Clients specify
     which transport they want via the ``transport`` field in the request body.
     When ``-t`` was passed on the command line, requests for any other transport
     are rejected with HTTP 400.
     """
+    ALL_TRANSPORTS = ["webrtc", "daily", *TELEPHONY_TRANSPORTS]
+
+    @app.get("/status")
+    async def status():
+        """Return the transports supported by this runner instance."""
+        transports = [args.transport] if args.transport is not None else ALL_TRANSPORTS
+        return {"status": "ready", "transports": transports}
 
     class IceServer(TypedDict, total=False):
         urls: str | list[str]
