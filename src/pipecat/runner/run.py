@@ -209,6 +209,31 @@ async def _run_telephony_bot(websocket: WebSocket, args: argparse.Namespace):
     await bot_module.bot(runner_args)
 
 
+async def _run_websocket_bot(websocket: WebSocket, args: argparse.Namespace):
+    """Run a bot for plain WebSocket transport."""
+    bot_module = _get_bot_module()
+
+    runner_args = WebSocketRunnerArguments(
+        websocket=websocket,
+        transport_type="websocket",
+        session_id=str(uuid.uuid4()),
+    )
+    runner_args.cli_args = args
+
+    await bot_module.bot(runner_args)
+
+
+def _setup_websocket_routes(app: FastAPI, args: argparse.Namespace):
+    """Set up the plain WebSocket route at ``/ws-client``."""
+
+    @app.websocket("/ws-client")
+    async def websocket_client_endpoint(websocket: WebSocket):
+        """Handle plain WebSocket connections (non-telephony)."""
+        await websocket.accept()
+        logger.debug("Plain WebSocket connection accepted")
+        await _run_websocket_bot(websocket, args)
+
+
 def _configure_server_app(args: argparse.Namespace):
     """Configure the module-level FastAPI app with routes for all transports."""
     app.add_middleware(
@@ -226,6 +251,7 @@ def _configure_server_app(args: argparse.Namespace):
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
     _setup_telephony_routes(app, args)
+    _setup_websocket_routes(app, args)
     _setup_unified_start_route(app, args, active_sessions)
 
     if args.whatsapp:
@@ -242,7 +268,7 @@ def _setup_unified_start_route(
     When ``-t`` was passed on the command line, requests for any other transport
     are rejected with HTTP 400.
     """
-    ALL_TRANSPORTS = ["webrtc", "daily", *TELEPHONY_TRANSPORTS]
+    ALL_TRANSPORTS = ["webrtc", "daily", *TELEPHONY_TRANSPORTS, "websocket"]
 
     @app.get("/status")
     async def status():
@@ -261,7 +287,7 @@ def _setup_unified_start_route(
         iceConfig: IceConfig | None
         dailyRoom: str | None
         dailyToken: str | None
-        websocketUrl: str | None
+        wsUrl: str | None
 
     @app.post("/start")
     async def start_agent(request: Request):
@@ -388,11 +414,16 @@ def _setup_unified_start_route(
         elif transport in TELEPHONY_TRANSPORTS:
             # Telephony: the bot starts when the provider connects to /ws.
             # Return the WebSocket URL so the caller knows where to point their provider.
-            session_id = str(uuid.uuid4())
             scheme = "wss" if args.host != "localhost" else "ws"
             return StartBotResult(
-                sessionId=session_id,
-                websocketUrl=f"{scheme}://{args.host}:{args.port}/ws",
+                wsUrl=f"{scheme}://{args.host}:{args.port}/ws",
+            )
+
+        elif transport == "websocket":
+            # Plain WebSocket: the bot starts when the client connects to /ws-client.
+            scheme = "wss" if args.host != "localhost" else "ws"
+            return StartBotResult(
+                wsUrl=f"{scheme}://{args.host}:{args.port}/ws-client",
             )
 
         else:

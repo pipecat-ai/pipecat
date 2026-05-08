@@ -105,10 +105,14 @@ class WebSocketRunnerArguments(RunnerArguments):
 
     Parameters:
         websocket: WebSocket connection for audio streaming
+        transport_type: Transport type identifier. Set to ``"websocket"`` for plain
+            WebSocket connections; ``None`` triggers auto-detection from the first
+            telephony provider message.
         body: Additional request data
     """
 
     websocket: WebSocket
+    transport_type: str | None = None
 
 
 @dataclass
