@@ -26,12 +26,13 @@ except ImportError:
 
 
 def is_tracing_available() -> bool:
-    """Check if OpenTelemetry tracing is available and configured.
+    """Check if OpenTelemetry tracing is available.
 
     Returns:
-        True if tracing is available, False otherwise.
+        True if the OpenTelemetry SDK is importable, False otherwise.
+        Per-task opt-in is controlled by ``PipelineTask(enable_tracing=...)``.
     """
-    return OPENTELEMETRY_AVAILABLE and os.environ.get("ENABLE_TRACING", "false").lower() == "true"
+    return OPENTELEMETRY_AVAILABLE
 
 
 def setup_tracing(
