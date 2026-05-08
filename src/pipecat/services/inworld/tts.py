@@ -94,7 +94,7 @@ class InworldHttpTTSService(TTSService):
     """Inworld AI HTTP-based TTS service.
 
     Supports both streaming and non-streaming modes via the `streaming` parameter.
-    Outputs LINEAR16 audio at configurable sample rates with word-level timestamps.
+    Outputs PCM audio at configurable sample rates with word-level timestamps.
     """
 
     Settings = InworldTTSSettings
@@ -125,7 +125,7 @@ class InworldHttpTTSService(TTSService):
         model: str | None = None,
         streaming: bool = True,
         sample_rate: int | None = None,
-        encoding: str = "LINEAR16",
+        encoding: str = "PCM",
         timestamp_transport_strategy: Literal["ASYNC", "SYNC"] | None = "ASYNC",
         params: InputParams | None = None,
         settings: Settings | None = None,
@@ -505,7 +505,7 @@ class InworldTTSService(WebsocketTTSService):
     """Inworld AI WebSocket-based TTS service.
 
     Uses bidirectional WebSocket for lower latency streaming. Supports multiple
-    independent audio contexts per connection (max 5). Outputs LINEAR16 audio
+    independent audio contexts per connection (max 5). Outputs PCM audio
     with word-level timestamps.
     """
 
@@ -548,7 +548,7 @@ class InworldTTSService(WebsocketTTSService):
         model: str | None = None,
         url: str = "wss://api.inworld.ai/tts/v1/voice:streamBidirectional",
         sample_rate: int | None = None,
-        encoding: str = "LINEAR16",
+        encoding: str = "PCM",
         auto_mode: bool | None = None,
         apply_text_normalization: str | None = None,
         timestamp_transport_strategy: Literal["ASYNC", "SYNC"] | None = "ASYNC",

@@ -105,6 +105,7 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 ## Code Style
 
 - **Docstrings**: Google-style. Classes describe purpose; `__init__` has `Args:` section; dataclasses use `Parameters:` section.
+- **Deprecations**: Use the `.. deprecated:: <version>` Sphinx directive in docstrings (never inline tags like `[DEPRECATED]`), and pair it with a runtime `warnings.warn(..., DeprecationWarning)` at the call site. See `CONTRIBUTING.md` for full conventions.
 - **Linting**: Ruff (line length 100). Pre-commit hooks enforce formatting.
 - **Type hints**: Required for complex async code.
 - **Dataclass vs Pydantic**: Use `@dataclass` for frames and internal pipeline data (high-frequency, no validation needed). Use Pydantic `BaseModel` for configuration, parameters, metrics, and external API data (benefits from validation and serialization). Specifically:
@@ -138,6 +139,22 @@ class MyService(LLMService):
             **kwargs: Additional arguments passed to parent.
         """
         super().__init__(**kwargs)
+
+
+# Pydantic params class with a deprecated field
+class MyParams(BaseModel):
+    """Configuration parameters for MyService.
+
+    Parameters:
+        new_setting: Replacement for ``old_setting``.
+        old_setting: Legacy setting, no longer used.
+
+            .. deprecated:: 1.2.0
+                Use ``new_setting`` instead. Will be removed in 2.0.0.
+    """
+
+    new_setting: str = "default"
+    old_setting: str | None = None
 ```
 
 ## Service Implementation

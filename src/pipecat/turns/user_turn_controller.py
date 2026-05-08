@@ -38,7 +38,11 @@ class UserTurnController(BaseObject):
     Event handlers available:
 
     - on_user_turn_started: Emitted when a user turn starts.
-    - on_user_turn_stopped: Emitted when a user turn stops.
+    - on_user_turn_inference_triggered: Emitted when enough signal exists to
+      start LLM inference. Fires together with `on_user_turn_stopped` for
+      most strategies; fires alone when a downstream strategy gates
+      finalization on the LLM's verdict.
+    - on_user_turn_stopped: Emitted when a user turn is semantically final.
     - on_user_turn_stop_timeout: Emitted if no stop strategy triggers before timeout.
     - on_push_frame: Emitted when a strategy wants to push a frame.
     - on_broadcast_frame: Emitted when a strategy wants to broadcast a frame.
@@ -47,6 +51,10 @@ class UserTurnController(BaseObject):
 
         @controller.event_handler("on_user_turn_started")
         async def on_user_turn_started(controller, strategy: BaseUserTurnStartStrategy, params: UserTurnStartedParams):
+            ...
+
+        @controller.event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(controller, strategy: BaseUserTurnStopStrategy):
             ...
 
         @controller.event_handler("on_user_turn_stopped")
@@ -95,6 +103,7 @@ class UserTurnController(BaseObject):
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_started", sync=True)
+        self._register_event_handler("on_user_turn_inference_triggered", sync=True)
         self._register_event_handler("on_user_turn_stopped", sync=True)
         self._register_event_handler("on_user_turn_stop_timeout", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
@@ -186,6 +195,9 @@ class UserTurnController(BaseObject):
             await s.setup(self.task_manager)
             s.add_event_handler("on_push_frame", self._on_push_frame)
             s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+            s.add_event_handler(
+                "on_user_turn_inference_triggered", self._on_user_turn_inference_triggered
+            )
             s.add_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
     async def _cleanup_strategies(self):
@@ -246,6 +258,9 @@ class UserTurnController(BaseObject):
     ):
         await self._trigger_user_turn_start(strategy, params)
 
+    async def _on_user_turn_inference_triggered(self, strategy: BaseUserTurnStopStrategy):
+        await self._trigger_user_turn_inference_triggered(strategy)
+
     async def _on_user_turn_stopped(
         self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
     ):
@@ -273,6 +288,20 @@ class UserTurnController(BaseObject):
             await s.reset()
 
         await self._call_event_handler("on_user_turn_started", strategy, params)
+
+    async def _trigger_user_turn_inference_triggered(
+        self, strategy: BaseUserTurnStopStrategy | None
+    ):
+        # Inference-triggered fires only while a turn is active. The turn
+        # remains active afterward — only `on_user_turn_stopped` flips state.
+        if not self._user_turn:
+            return
+
+        # Re-arm the stop watchdog so a stuck turn (inference fired but
+        # finalization never arrives) still times out and finalizes.
+        self._user_turn_stop_timeout_event.set()
+
+        await self._call_event_handler("on_user_turn_inference_triggered", strategy)
 
     async def _trigger_user_turn_stop(
         self, strategy: BaseUserTurnStopStrategy | None, params: UserTurnStoppedParams

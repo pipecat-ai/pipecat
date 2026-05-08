@@ -47,7 +47,13 @@ class TransportParams(BaseModel):
         video_out_is_live: Enable real-time video output streaming.
         video_out_width: Video output width in pixels.
         video_out_height: Video output height in pixels.
-        video_out_bitrate: [DEPRECATED] Video output bitrate in bits per second.
+        video_out_bitrate: Video output bitrate in bits per second.
+
+            .. deprecated:: 1.1.0
+                Use provider-specific settings instead (e.g.,
+                ``DailyParams.camera_out_send_settings``). This parameter will
+                be removed in 2.0.0.
+
         video_out_framerate: Video output frame rate in FPS.
         video_out_color_format: Video output color format string.
         video_out_codec: Preferred video codec for output (e.g., 'VP8', 'H264', 'H265').
