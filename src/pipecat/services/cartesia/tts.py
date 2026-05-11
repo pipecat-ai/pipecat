@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.cartesia.utils import process_word_timestamps_for_language
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -395,19 +396,6 @@ class CartesiaTTSService(WebsocketTTSService):
         """Convenience method to create a speed tag."""
         return f'<speed ratio="{speed}" />'
 
-    def _is_cjk_language(self, language: str) -> bool:
-        """Check if the given language is CJK (Chinese, Japanese, Korean).
-
-        Args:
-            language: The language code to check.
-
-        Returns:
-            True if the language is Chinese, Japanese, or Korean.
-        """
-        cjk_languages = {"zh", "ja", "ko"}
-        base_lang = language.split("-")[0].lower()
-        return base_lang in cjk_languages
-
     def _process_word_timestamps_for_language(
         self, words: list[str], starts: list[float]
     ) -> list[tuple[str, float]]:
@@ -415,8 +403,9 @@ class CartesiaTTSService(WebsocketTTSService):
 
         For CJK languages, Cartesia groups related characters in the same timestamp message.
         For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
-        We combine these into single words so the downstream aggregator can add natural
-        spacing between meaningful units rather than individual characters.
+        We combine these into single timestamp entries so the downstream aggregator can add
+        natural spacing between meaningful units rather than individual characters. Chinese
+        and Japanese do not use inter-word spaces, but Korean does.
 
         For non-CJK languages, words are already properly separated and are used as-is.
 
@@ -428,20 +417,7 @@ class CartesiaTTSService(WebsocketTTSService):
             List of (word, start_time) tuples processed for the language.
         """
         current_language = assert_given(self._settings.language)
-
-        # Check if this is a CJK language (if language is None, treat as non-CJK)
-        if current_language and self._is_cjk_language(current_language):
-            # For CJK languages, combine all characters in this message into one word
-            # using the first character's start time
-            if words and starts:
-                combined_word = "".join(words)
-                first_start = starts[0]
-                return [(combined_word, first_start)]
-            else:
-                return []
-        else:
-            # For non-CJK languages, use as-is
-            return list(zip(words, starts))
+        return process_word_timestamps_for_language(words, starts, current_language)
 
     def _build_msg(
         self,
