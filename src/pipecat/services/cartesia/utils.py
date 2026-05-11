@@ -7,29 +7,12 @@
 """Utilities for Cartesia service implementations."""
 
 
-def is_cjk_language(language: str) -> bool:
-    """Check if the given language is CJK (Chinese, Japanese, Korean).
-
-    Args:
-        language: The language code to check.
-
-    Returns:
-        True if the language is Chinese, Japanese, or Korean.
-    """
-    cjk_languages = {"zh", "ja", "ko"}
+def _is_cjk_language(language: str) -> bool:
     base_lang = language.split("-")[0].lower()
-    return base_lang in cjk_languages
+    return base_lang in {"zh", "ja", "ko"}
 
 
-def is_korean_language(language: str) -> bool:
-    """Check if the given language is Korean.
-
-    Args:
-        language: The language code to check.
-
-    Returns:
-        True if the language is Korean.
-    """
+def _is_korean_language(language: str) -> bool:
     base_lang = language.split("-")[0].lower()
     return base_lang == "ko"
 
@@ -39,33 +22,21 @@ def process_word_timestamps_for_language(
     starts: list[float],
     language: str | None,
 ) -> list[tuple[str, float]]:
-    """Process Cartesia word timestamps based on the current language.
-
-    For CJK languages, Cartesia groups related characters in the same timestamp message.
-    For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
-    We combine these into single timestamp entries so the downstream aggregator can add
-    natural spacing between meaningful units rather than individual characters. Chinese
-    and Japanese do not use inter-word spaces, but Korean does.
-
-    For non-CJK languages, words are already properly separated and are used as-is.
+    """Normalize Cartesia word timestamps for the current language.
 
     Args:
-        words: List of words/characters from Cartesia.
-        starts: List of start timestamps for each word/character.
-        language: Language code to process timestamps for.
+        words: Words or characters from Cartesia.
+        starts: Start timestamps for each item in ``words``.
+        language: Language code to normalize for.
 
     Returns:
-        List of (word, start_time) tuples processed for the language.
+        Word timestamp pairs normalized for downstream transcript aggregation.
     """
-    if language and is_cjk_language(language):
-        # For CJK languages, combine all characters in this message into one timestamp
-        # entry using the first character's start time. Korean uses spaces between
-        # words, while Chinese and Japanese do not.
+    if language and _is_cjk_language(language):
         if words and starts:
-            separator = " " if is_korean_language(language) else ""
+            separator = " " if _is_korean_language(language) else ""
             combined_word = separator.join(words)
-            first_start = starts[0]
-            return [(combined_word, first_start)]
+            return [(combined_word, starts[0])]
         else:
             return []
     else:

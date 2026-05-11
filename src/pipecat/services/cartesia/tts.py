@@ -399,23 +399,7 @@ class CartesiaTTSService(WebsocketTTSService):
     def _process_word_timestamps_for_language(
         self, words: list[str], starts: list[float]
     ) -> list[tuple[str, float]]:
-        """Process word timestamps based on the current language.
-
-        For CJK languages, Cartesia groups related characters in the same timestamp message.
-        For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
-        We combine these into single timestamp entries so the downstream aggregator can add
-        natural spacing between meaningful units rather than individual characters. Chinese
-        and Japanese do not use inter-word spaces, but Korean does.
-
-        For non-CJK languages, words are already properly separated and are used as-is.
-
-        Args:
-            words: List of words/characters from Cartesia.
-            starts: List of start timestamps for each word/character.
-
-        Returns:
-            List of (word, start_time) tuples processed for the language.
-        """
+        """Normalize word timestamps based on the configured language."""
         current_language = assert_given(self._settings.language)
         return process_word_timestamps_for_language(words, starts, current_language)
 
