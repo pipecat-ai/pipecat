@@ -67,6 +67,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
@@ -1278,23 +1279,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         is_async = not frame.cancel_on_interruption
         if is_async:
-            self._context.add_message(
-                {
-                    "role": "tool",
-                    "content": json.dumps(
-                        {
-                            "type": "async_tool",
-                            "status": "running",
-                            "tool_call_id": frame.tool_call_id,
-                            "description": "An asynchronous task associated with this tool_call_id has started running. "
-                            + "Expect results to arrive later as developer messages that look roughly like this one (with 'type=async_tool' and a matching tool_call_id) but with a 'result' field. "
-                            + "Note that there *may* be more than one result (i.e., a stream of results), but there doesn't have to be (there may be only one). "
-                            + "The last result will come in a message with 'status=finished'.",
-                        }
-                    ),
-                    "tool_call_id": frame.tool_call_id,
-                }
-            )
+            self._context.add_message(async_tool_messages.build_started_message(frame.tool_call_id))
         else:
             self._context.add_message(
                 {
@@ -1407,19 +1392,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         result = json.dumps(frame.result, ensure_ascii=False)
         self._context.add_message(
-            {
-                "role": "developer",
-                "content": json.dumps(
-                    {
-                        "type": "async_tool",
-                        "tool_call_id": frame.tool_call_id,
-                        "status": "running",
-                        "description": "This is an intermediate result for the asynchronous task associated with this tool_call_id. "
-                        + "The task is still running. More intermediate results may follow, or the next result may be the final one with 'status=finished'.",
-                        "result": result,
-                    }
-                ),
-            }
+            async_tool_messages.build_intermediate_result_message(frame.tool_call_id, result)
         )
 
     async def _handle_function_call_finished(
@@ -1440,19 +1413,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # notified of the completed result instead of updating the IN_PROGRESS
             # tool message.
             self._context.add_message(
-                {
-                    "role": "developer",
-                    "content": json.dumps(
-                        {
-                            "type": "async_tool",
-                            "tool_call_id": frame.tool_call_id,
-                            "status": "finished",
-                            "description": "This is the final result for the asynchronous task associated with this tool_call_id. "
-                            + "The task has completed. No further results will arrive for this tool_call_id.",
-                            "result": result,
-                        }
-                    ),
-                }
+                async_tool_messages.build_final_result_message(frame.tool_call_id, result)
             )
         else:
             self._update_function_call_result(frame.function_name, frame.tool_call_id, result)

@@ -17,7 +17,6 @@ from typing import Any
 from attr import dataclass
 
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 @dataclass
@@ -62,19 +61,16 @@ class TaskObserver(BaseObserver):
         self,
         *,
         observers: list[BaseObserver] | None = None,
-        task_manager: BaseTaskManager,
         **kwargs,
     ):
         """Initialize the TaskObserver.
 
         Args:
             observers: List of observers to manage. Defaults to empty list.
-            task_manager: Task manager for creating and managing observer tasks.
             **kwargs: Additional arguments passed to the base observer.
         """
         super().__init__(**kwargs)
         self._observers = observers or []
-        self._task_manager = task_manager
         self._proxies: dict[BaseObserver, Proxy] | None = (
             None  # Becomes a dict after start() is called
         )
@@ -106,7 +102,7 @@ class TaskObserver(BaseObserver):
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
             # Cancel the proxy task right away.
-            await self._task_manager.cancel_task(proxy.task)
+            await self.cancel_task(proxy.task)
 
         # Remove the observer from the list.
         if observer in self._observers:
@@ -122,7 +118,7 @@ class TaskObserver(BaseObserver):
             return
 
         for proxy in self._proxies.values():
-            await self._task_manager.cancel_task(proxy.task)
+            await self.cancel_task(proxy.task)
 
     async def cleanup(self):
         """Cleanup all proxy observers."""
@@ -157,9 +153,8 @@ class TaskObserver(BaseObserver):
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
         """Create a proxy for a single observer."""
         queue = asyncio.Queue()
-        task = self._task_manager.create_task(
-            self._proxy_task_handler(queue, observer),
-            f"TaskObserver::{observer}::_proxy_task_handler",
+        task = self.create_task(
+            self._proxy_task_handler(queue, observer), f"{observer}::_proxy_task_handler"
         )
         proxy = Proxy(queue=queue, task=task, observer=observer)
         return proxy

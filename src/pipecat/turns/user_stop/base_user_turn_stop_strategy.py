@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.turns.types import ProcessFrameResult
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -70,26 +69,10 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         super().__init__(**kwargs)
         self._enable_user_speaking_frames = enable_user_speaking_frames
-        self._task_manager: BaseTaskManager | None = None
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_inference_triggered", sync=True)
         self._register_event_handler("on_user_turn_stopped", sync=True)
-
-    @property
-    def task_manager(self) -> BaseTaskManager:
-        """Returns the configured task manager."""
-        if not self._task_manager:
-            raise RuntimeError(f"{self} user turn stop strategy was not properly setup")
-        return self._task_manager
-
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the strategy with the given task manager.
-
-        Args:
-            task_manager: The task manager to be associated with this instance.
-        """
-        self._task_manager = task_manager
 
     async def cleanup(self):
         """Cleanup the strategy."""

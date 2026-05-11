@@ -139,6 +139,36 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         return formatted_standard_tools + custom_gemini_tools
 
+    @staticmethod
+    def to_function_response_dict(content: Any) -> dict[str, Any]:
+        """Convert a tool-result content value to Gemini's FunctionResponse.response shape.
+
+        Gemini's ``FunctionResponse.response`` field requires a dict, so
+        non-dict values (e.g. plain strings, JSON-encoded scalars, or
+        sentinel strings like ``"COMPLETED"`` used when a function returned
+        no value) are wrapped as ``{"value": <value>}``. JSON strings that
+        decode to a dict are passed through as-is.
+
+        Args:
+            content: The tool-result content. Typically the JSON-encoded
+                return value of a function, but can also be a plain string
+                (e.g. ``"COMPLETED"``) or already-parsed dict.
+
+        Returns:
+            A dict suitable for ``FunctionResponse.response``.
+        """
+        if isinstance(content, dict):
+            return content
+        if not isinstance(content, str):
+            return {"value": content}
+        try:
+            decoded = json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            return {"value": content}
+        if isinstance(decoded, dict):
+            return decoded
+        return {"value": decoded}
+
     def get_messages_for_logging(self, context: LLMContext) -> list[dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about Gemini.
 
@@ -382,16 +412,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 )
         elif role == "tool":
             role = "user"
-            try:
-                response = json.loads(msg["content"])
-                if isinstance(response, dict):
-                    response_dict = response
-                else:
-                    response_dict = {"value": response}
-            except Exception as e:
-                # Response might not be JSON-deserializable.
-                # This occurs with a UserImageFrame, for example, where we get a plain "COMPLETED" string.
-                response_dict = {"value": msg["content"]}
+            response_dict = self.to_function_response_dict(msg["content"])
 
             # Get function name from mapping using tool_call_id, or fallback
             tool_call_id = msg.get("tool_call_id")

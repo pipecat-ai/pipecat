@@ -17,7 +17,7 @@ import asyncio
 import dataclasses
 import traceback
 import warnings
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
@@ -217,9 +217,6 @@ class FrameProcessor(BaseObject):
         # Clock
         self._clock: BaseClock | None = None
 
-        # Task Manager
-        self._task_manager: BaseTaskManager | None = None
-
         # Observer
         self._observer: BaseObserver | None = None
 
@@ -369,20 +366,6 @@ class FrameProcessor(BaseObject):
         return self._report_only_initial_ttfb
 
     @property
-    def task_manager(self) -> BaseTaskManager:
-        """Get the task manager for this processor.
-
-        Returns:
-            The task manager instance.
-
-        Raises:
-            Exception: If the task manager is not initialized.
-        """
-        if not self._task_manager:
-            raise Exception(f"{self} TaskManager is still not initialized.")
-        return self._task_manager
-
-    @property
     def pipeline_task(self) -> PipelineTask | None:
         """Get the :class:`PipelineTask` this processor is running in.
 
@@ -511,43 +494,14 @@ class FrameProcessor(BaseObject):
         await self.stop_processing_metrics()
         await self.stop_text_aggregation_metrics()
 
-    def create_task(self, coroutine: Coroutine, name: str | None = None) -> asyncio.Task:
-        """Create a new task managed by this processor.
-
-        Args:
-            coroutine: The coroutine to run in the task.
-            name: Optional name for the task.
-
-        Returns:
-            The created asyncio task.
-        """
-        if name:
-            name = f"{self}::{name}"
-        else:
-            name = f"{self}::{coroutine.cr_code.co_name}"
-        return self.task_manager.create_task(coroutine, name)
-
-    async def cancel_task(self, task: asyncio.Task, timeout: float | None = 1.0):
-        """Cancel a task managed by this processor.
-
-        A default timeout if 1 second is used in order to avoid potential
-        freezes caused by certain libraries that swallow
-        `asyncio.CancelledError`.
-
-        Args:
-            task: The task to cancel.
-            timeout: Optional timeout for task cancellation.
-        """
-        await self.task_manager.cancel_task(task, timeout)
-
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with required components.
 
         Args:
             setup: Configuration object containing setup parameters.
         """
+        await super().setup(setup.task_manager)
         self._clock = setup.clock
-        self._task_manager = setup.task_manager
         self._observer = setup.observer
         self._pipeline_task = setup.pipeline_task
 
@@ -555,7 +509,7 @@ class FrameProcessor(BaseObject):
         self.__create_input_task()
 
         if self._metrics is not None:
-            await self._metrics.setup(self._task_manager)
+            await self._metrics.setup(self.task_manager)
 
     async def cleanup(self):
         """Clean up processor resources."""

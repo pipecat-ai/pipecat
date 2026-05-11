@@ -19,7 +19,6 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -63,28 +62,11 @@ class UserIdleController(BaseObject):
 
         self._user_idle_timeout = user_idle_timeout
 
-        self._task_manager: BaseTaskManager | None = None
-
         self._user_turn_in_progress: bool = False
         self._function_calls_in_progress: int = 0
         self._idle_timer_task: asyncio.Task | None = None
 
         self._register_event_handler("on_user_turn_idle", sync=True)
-
-    @property
-    def task_manager(self) -> BaseTaskManager:
-        """Returns the configured task manager."""
-        if not self._task_manager:
-            raise RuntimeError(f"{self} user idle controller was not properly setup")
-        return self._task_manager
-
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the controller with the given task manager.
-
-        Args:
-            task_manager: The task manager to be associated with this instance.
-        """
-        self._task_manager = task_manager
 
     async def cleanup(self):
         """Cleanup the controller."""
@@ -138,17 +120,14 @@ class UserIdleController(BaseObject):
         if self._user_idle_timeout <= 0:
             return
         await self._cancel_idle_timer()
-        self._idle_timer_task = self.task_manager.create_task(
-            self._idle_timer_expired(),
-            f"{self}::idle_timer",
-        )
+        self._idle_timer_task = self.create_task(self._idle_timer_expired())
         # Make sure the task is scheduled.
         await asyncio.sleep(0)
 
     async def _cancel_idle_timer(self):
         """Cancel the idle timer if running."""
         if self._idle_timer_task:
-            await self.task_manager.cancel_task(self._idle_timer_task)
+            await self.cancel_task(self._idle_timer_task)
             self._idle_timer_task = None
 
     async def _idle_timer_expired(self):

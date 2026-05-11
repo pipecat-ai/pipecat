@@ -92,8 +92,6 @@ class UserTurnController(BaseObject):
         self._user_turn_strategies = user_turn_strategies
         self._user_turn_stop_timeout = user_turn_stop_timeout
 
-        self._task_manager: BaseTaskManager | None = None
-
         self._user_speaking = False
 
         self._user_turn = False
@@ -108,25 +106,17 @@ class UserTurnController(BaseObject):
         self._register_event_handler("on_user_turn_stop_timeout", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
 
-    @property
-    def task_manager(self) -> BaseTaskManager:
-        """Returns the configured task manager."""
-        if not self._task_manager:
-            raise RuntimeError(f"{self} user turn controller was not properly setup")
-        return self._task_manager
-
     async def setup(self, task_manager: BaseTaskManager):
         """Initialize the controller with the given task manager.
 
         Args:
             task_manager: The task manager to be associated with this instance.
         """
-        self._task_manager = task_manager
+        await super().setup(task_manager)
 
         if not self._user_turn_stop_timeout_task:
-            self._user_turn_stop_timeout_task = self.task_manager.create_task(
-                self._user_turn_stop_timeout_task_handler(),
-                f"{self}::_user_turn_stop_timeout_task_handler",
+            self._user_turn_stop_timeout_task = self.create_task(
+                self._user_turn_stop_timeout_task_handler()
             )
 
         await self._setup_strategies()
@@ -136,7 +126,7 @@ class UserTurnController(BaseObject):
         await super().cleanup()
 
         if self._user_turn_stop_timeout_task:
-            await self.task_manager.cancel_task(self._user_turn_stop_timeout_task)
+            await self.cancel_task(self._user_turn_stop_timeout_task)
             self._user_turn_stop_timeout_task = None
 
         await self._cleanup_strategies()

@@ -15,11 +15,13 @@ import asyncio
 import inspect
 import traceback
 from abc import ABC
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.utils import obj_count, obj_id
 
 
@@ -69,6 +71,10 @@ class BaseObject(ABC):
         # event tasks still being executed.
         self._event_tasks = set()
 
+        # Task manager. Populated by setup(); accessing the task_manager
+        # property before setup raises.
+        self._task_manager: BaseTaskManager | None = None
+
     @property
     def id(self) -> int:
         """Get the unique identifier for this object.
@@ -86,6 +92,66 @@ class BaseObject(ABC):
             The object's name, either custom-provided or auto-generated.
         """
         return self._name
+
+    @property
+    def task_manager(self) -> BaseTaskManager:
+        """Get the task manager for this object.
+
+        Returns:
+            The task manager instance.
+
+        Raises:
+            Exception: If the task manager is not initialized.
+        """
+        if not self._task_manager:
+            raise Exception(f"{self}: TaskManager is not initialized.")
+        return self._task_manager
+
+    async def setup(self, task_manager: BaseTaskManager):
+        """Wire the object up with a task manager.
+
+        Owners of a :class:`BaseObject` should call this on their child objects
+        to propagate the task manager down. Subclasses that own other
+        :class:`BaseObject` instances should override and forward::
+
+            async def setup(self, task_manager):
+                await super().setup(task_manager)
+                await self._child.setup(task_manager)
+
+        Args:
+            task_manager: The task manager to associate with this instance.
+        """
+        self._task_manager = task_manager
+
+    def create_task(self, coroutine: Coroutine, name: str | None = None) -> asyncio.Task:
+        """Create a new task managed by this object's task manager.
+
+        Args:
+            coroutine: The coroutine to run in the task.
+            name: Optional name for the task.
+
+        Returns:
+            The created asyncio task.
+        """
+        if not name:
+            # Native coroutines expose ``cr_code``; fall back to a generic
+            # name for any other awaitable subtype.
+            cr_code = getattr(coroutine, "cr_code", None)
+            name = getattr(cr_code, "co_name", "task")
+        return self.task_manager.create_task(coroutine, f"{self}::{name}")
+
+    async def cancel_task(self, task: asyncio.Task, timeout: float | None = 1.0):
+        """Cancel a task managed by this object's task manager.
+
+        A default timeout of 1 second is used in order to avoid potential
+        freezes caused by certain libraries that swallow
+        :class:`asyncio.CancelledError`.
+
+        Args:
+            task: The task to cancel.
+            timeout: Optional timeout for task cancellation.
+        """
+        await self.task_manager.cancel_task(task, timeout)
 
     async def cleanup(self):
         """Clean up resources and wait for running event handlers to complete.

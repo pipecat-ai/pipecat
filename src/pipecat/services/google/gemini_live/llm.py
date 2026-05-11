@@ -14,6 +14,7 @@ voice transcription, streaming responses, and tool usage.
 import asyncio
 import base64
 import io
+import json
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -56,7 +57,8 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators import async_tool_messages
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.google.utils import update_google_client_http_options
@@ -372,6 +374,15 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         """Check if the current model is a Gemini 3.x model."""
         return "gemini-3" in (assert_given(self._settings.model) or "")
 
+    @property
+    def _supports_non_blocking_tools(self) -> bool:
+        """Whether the current model supports the NON_BLOCKING tool behavior + scheduling hints.
+
+        Gemini 3.x has not yet shipped support for NON_BLOCKING function
+        declarations or for the ``scheduling`` field on FunctionResponse.
+        """
+        return not self._is_gemini_3
+
     def __init__(
         self,
         *,
@@ -557,6 +568,12 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         # Bookkeeping for tool calls
         self._completed_tool_calls = set()
+        # tool_call_id -> tool_name, populated as the model issues tool
+        # calls. Used to look up the function name when sending an async
+        # tool's final result back to the provider, since the async-tool
+        # message in the context only carries the id.
+        self._tool_call_id_to_name: dict[str, str] = {}
+        self._async_tool_warning_logged: bool = False
 
     def create_client(self):
         """Create the Gemini API client instance. Subclasses can override this."""
@@ -841,28 +858,92 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             await self._process_completed_function_calls(send_new_results=True)
 
     async def _process_completed_function_calls(self, send_new_results: bool):
+        # If the user registered a function with cancel_on_interruption=False,
+        # the aggregator emits async-tool-style messages into the context. On
+        # models that don't support NON_BLOCKING tool calls, the conversation
+        # freezes during tool execution, so the "keep talking while the tool
+        # runs" intent of the flag is structurally not achievable. Surface a
+        # one-time warning so users see they're not getting what they expect.
+        if not self._supports_non_blocking_tools and not self._async_tool_warning_logged:
+            for message in self._context.get_messages():
+                if isinstance(message, LLMSpecificMessage):
+                    continue
+                if async_tool_messages.parse_message(message) is not None:
+                    logger.error(
+                        f"{self}: cancel_on_interruption=False is not properly supported "
+                        f"by the current Gemini Live model. Use cancel_on_interruption=True "
+                        f"(the default), or use a non-realtime LLM service if your tool "
+                        f"needs the async semantics."
+                    )
+                    await self.push_error(
+                        error_msg=(
+                            "cancel_on_interruption=False is not properly supported by "
+                            "the current Gemini Live model."
+                        ),
+                    )
+                    self._async_tool_warning_logged = True
+                    break
+
         # Check for set of completed function calls in the context
-        adapter = self.get_llm_adapter()
-        messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
-        for message in messages:
-            if message.parts:
-                for part in message.parts:
-                    if part.function_response:
-                        tool_call_id = part.function_response.id
-                        tool_name = part.function_response.name
-                        response = part.function_response.response
-                        if (
-                            tool_call_id
-                            and tool_call_id not in self._completed_tool_calls
-                            and response
-                            and response.get("value") != "IN_PROGRESS"
-                        ):
-                            # Found a newly-completed function call - send the result to the service
-                            if send_new_results:
-                                await self._tool_result(
-                                    tool_call_id, tool_name, part.function_response.response
-                                )
-                            self._completed_tool_calls.add(tool_call_id)
+        for message in self._context.get_messages():
+            # LLMSpecificMessages are opaque provider-specific payloads, not
+            # standard tool-result messages — skip them.
+            if isinstance(message, LLMSpecificMessage):
+                continue
+
+            # Async-tool messages live alongside regular tool messages in the
+            # context; detect and route them before the regular logic so we
+            # don't try to send the async-tool envelope JSON as a tool result.
+            async_payload = async_tool_messages.parse_message(message)
+            if async_payload is not None:
+                if async_payload.tool_call_id in self._completed_tool_calls:
+                    continue
+                if async_payload.kind == "started":
+                    # The provider already issued the tool call and natively
+                    # awaits a result; nothing to send for the started marker.
+                    continue
+                if async_payload.kind == "intermediate":
+                    logger.error(
+                        f"{self}: Gemini Live does not support streamed async "
+                        f"tool results; dropping intermediate result for "
+                        f"tool_call_id={async_payload.tool_call_id}. Use a "
+                        f"non-realtime LLM service if your tool needs to "
+                        f"stream intermediate results."
+                    )
+                    await self.push_error(
+                        error_msg="Gemini Live does not support streamed async tool results.",
+                    )
+                    continue
+                if async_payload.kind == "final":
+                    # Deliver via the formal tool-response channel — same
+                    # path as a synchronous tool result, just delayed.
+                    tool_name = self._tool_call_id_to_name.get(
+                        async_payload.tool_call_id, "tool_call_result"
+                    )
+                    response_dict = GeminiLLMAdapter.to_function_response_dict(async_payload.result)
+                    if send_new_results:
+                        await self._tool_result(
+                            async_payload.tool_call_id, tool_name, response_dict
+                        )
+                    self._completed_tool_calls.add(async_payload.tool_call_id)
+                    continue
+                # Defensive: any async-tool message must not fall through
+                # to the regular tool-result block below, even if it
+                # carries a kind we don't recognize.
+                continue
+
+            # Look for newly-completed "regular" (as opposed to async-tool) results
+            if message.get("role") == "tool" and message.get("content") != "IN_PROGRESS":
+                tool_call_id = message.get("tool_call_id")
+                if tool_call_id and tool_call_id not in self._completed_tool_calls:
+                    # Found a newly-completed function call - send the result to the service
+                    tool_name = self._tool_call_id_to_name.get(tool_call_id, "tool_call_result")
+                    response_dict = GeminiLLMAdapter.to_function_response_dict(
+                        message.get("content")
+                    )
+                    if send_new_results:
+                        await self._tool_result(tool_call_id, tool_name, response_dict)
+                    self._completed_tool_calls.add(tool_call_id)
 
     async def _set_bot_is_responding(self, responding: bool):
         if self._bot_is_responding == responding:
@@ -1047,6 +1128,27 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                 logger.debug(f"Setting system instruction: {system_instruction}")
                 config.system_instruction = system_instruction
             if tools:
+                # Tag function declarations registered with
+                # cancel_on_interruption=False as NON_BLOCKING so Gemini
+                # doesn't stall the conversation while the tool runs.
+                # Synchronous (default) tools stay BLOCKING so the model
+                # finishes its turn before the result lands — otherwise
+                # we get the "let me look that up for you" filler the
+                # model produces when it knows the result is async.
+                # https://ai.google.dev/gemini-api/docs/live-api/tools#async-function-calling
+                if self._supports_non_blocking_tools:
+                    for tool in tools:
+                        if not isinstance(tool, dict):
+                            continue
+                        decls = tool.get("function_declarations")
+                        if not isinstance(decls, list):
+                            continue
+                        for decl in decls:
+                            if not isinstance(decl, dict):
+                                continue
+                            name = decl.get("name")
+                            if isinstance(name, str) and self._function_is_async(name):
+                                decl["behavior"] = "NON_BLOCKING"
                 logger.debug(f"Setting tools: {tools}")
                 config.tools = tools
 
@@ -1193,6 +1295,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                 await self._session.close()
                 self._session = None
             self._completed_tool_calls = set()
+            self._tool_call_id_to_name = {}
+            self._async_tool_warning_logged = False
             self._ready_for_realtime_input = False
             self._disconnecting = False
         except Exception as e:
@@ -1420,9 +1524,26 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         if self._disconnecting or not self._session:
             return
 
+        logger.debug(
+            f"Sending tool result to Gemini Live for tool_call_id={tool_call_id}, tool_result_message={tool_result_message}"
+        )
+
+        # Pair the NON_BLOCKING declaration on async tools with a
+        # scheduling hint on the response. WHEN_IDLE lets Gemini finish
+        # whatever it's currently saying before addressing the result, so
+        # we don't cut off mid-sentence when delayed results land. Only
+        # meaningful for NON_BLOCKING tools — synchronous tools never
+        # leave the model mid-turn — so we mirror the gating used at
+        # tool-declaration time.
+        # https://ai.google.dev/gemini-api/docs/live-api/tools#async-function-calling
+        if self._supports_non_blocking_tools and self._function_is_async(tool_name):
+            response_payload = {**tool_result_message, "scheduling": "WHEN_IDLE"}
+        else:
+            response_payload = tool_result_message
+
         # For now we're shoving the name into the tool_call_id field, so this
         # will work until we revisit that.
-        response = FunctionResponse(name=tool_name, id=tool_call_id, response=tool_result_message)
+        response = FunctionResponse(name=tool_name, id=tool_call_id, response=response_payload)
 
         try:
             await self._session.send_tool_response(function_responses=response)
@@ -1554,6 +1675,9 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             )
             for f in function_calls
         ]
+
+        for fc in function_calls_llm:
+            self._tool_call_id_to_name[fc.tool_call_id] = fc.function_name
 
         await self.run_function_calls(function_calls_llm)
 
