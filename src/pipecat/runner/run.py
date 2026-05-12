@@ -288,6 +288,7 @@ def _setup_unified_start_route(
         dailyRoom: str | None
         dailyToken: str | None
         wsUrl: str | None
+        token: str | None
 
     @app.post("/start")
     async def start_agent(request: Request):
@@ -422,8 +423,11 @@ def _setup_unified_start_route(
         elif transport == "websocket":
             # Plain WebSocket: the bot starts when the client connects to /ws-client.
             scheme = "wss" if args.host != "localhost" else "ws"
+            session_id = str(uuid.uuid4())
             return StartBotResult(
                 wsUrl=f"{scheme}://{args.host}:{args.port}/ws-client",
+                sessionId=session_id,
+                token="mock_token"
             )
 
         else:
