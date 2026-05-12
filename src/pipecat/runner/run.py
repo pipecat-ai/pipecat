@@ -427,7 +427,7 @@ def _setup_unified_start_route(
             return StartBotResult(
                 wsUrl=f"{scheme}://{args.host}:{args.port}/ws-client",
                 sessionId=session_id,
-                token="mock_token"
+                token="mock_token",
             )
 
         else:
