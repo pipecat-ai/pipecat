@@ -30,7 +30,6 @@ from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 
 import pytest
-
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     ControlFrame,
@@ -40,6 +39,7 @@ from pipecat.frames.frames import (
     LLMAssistantPushAggregationFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    StartFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -48,8 +48,12 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     UninterruptibleFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.text.base_text_aggregator import AggregationType
 
 # ---------------------------------------------------------------------------
 # Test-only frame
@@ -953,6 +957,88 @@ async def test_serialization_queue_preserves_uninterruptible_frames_on_interrupt
         f"but {len(uninterruptible_frames)} arrived downstream"
     )
     assert uninterruptible_frames[0].label == "must_survive"
+
+
+@pytest.mark.asyncio
+async def test_drain_already_spoken_clock_frames_delivers_past_pts_drops_future_pts():
+    """`MediaSender.drain_already_spoken_clock_frames` pushes elapsed-PTS frames downstream.
+
+    Regression for #4466: on `InterruptionFrame`,
+    `MediaSender._cancel_clock_task()` discards every `TTSTextFrame` still
+    in `_clock_queue`. Frames whose `pts <= current_time` represent words
+    the caller has already heard and must reach the assistant aggregator's
+    `_aggregation` before the queue is cancelled, otherwise
+    `on_assistant_turn_stopped.message.content` is empty for the
+    interrupted turn. Frames whose `pts > current_time` were not yet
+    voiced and stay dropped (matching the existing cancellation semantics).
+    """
+
+    class _FakeClock:
+        def __init__(self, time_ns: int) -> None:
+            self._time_ns = time_ns
+
+        def get_time(self) -> int:
+            return self._time_ns
+
+    class _FakeTransport:
+        def __init__(self, clock: "_FakeClock") -> None:
+            self._clock = clock
+            self.pushed_frames: list[Frame] = []
+
+        def get_clock(self) -> "_FakeClock":
+            return self._clock
+
+        async def push_frame(self, frame: Frame) -> None:
+            self.pushed_frames.append(frame)
+
+    clock = _FakeClock(time_ns=1_000_000_000)
+    transport = _FakeTransport(clock)
+    # `MediaSender.__init__` does a lot of unrelated setup (executor,
+    # resampler, mixer, …) that this unit test does not exercise. Build the
+    # instance directly with the fields the drain method actually touches.
+    sender = BaseOutputTransport.MediaSender.__new__(BaseOutputTransport.MediaSender)
+    sender._transport = transport
+    sender._clock_queue = asyncio.PriorityQueue()
+    sender._clock_task = object()  # truthy sentinel — drain only checks falsiness
+
+    past_a = TTSTextFrame("hello", aggregated_by=AggregationType.WORD)
+    past_a.pts = clock.get_time() - 2_000_000  # 2 ms in the past
+    past_b = TTSTextFrame("there", aggregated_by=AggregationType.WORD)
+    past_b.pts = clock.get_time() - 1_000_000  # 1 ms in the past
+    future = TTSTextFrame("later", aggregated_by=AggregationType.WORD)
+    future.pts = clock.get_time() + 5_000_000_000  # 5 s in the future
+
+    sender._clock_queue.put_nowait((past_a.pts, past_a.id, past_a))
+    sender._clock_queue.put_nowait((past_b.pts, past_b.id, past_b))
+    sender._clock_queue.put_nowait((future.pts, future.id, future))
+
+    await sender.drain_already_spoken_clock_frames()
+
+    pushed_texts = [
+        frame.text for frame in transport.pushed_frames if isinstance(frame, TTSTextFrame)
+    ]
+    # Past-PTS frames must reach downstream in PriorityQueue (chronological)
+    # order; future-PTS frames remain dropped.
+    assert pushed_texts == ["hello", "there"], (
+        f"Expected drained text frames ['hello', 'there'], got {pushed_texts}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_drain_already_spoken_clock_frames_noop_without_clock_task():
+    """Drain is a no-op when no clock task was ever created.
+
+    `_clock_queue` is created lazily inside `_create_clock_task` and does
+    not exist as an attribute until then, so the drain must short-circuit
+    on `_clock_task is None` before any queue access.
+    """
+    sender = BaseOutputTransport.MediaSender.__new__(BaseOutputTransport.MediaSender)
+    sender._clock_task = None
+    # Deliberately do not set `_clock_queue` — the drain must not touch it
+    # when `_clock_task` is None.
+
+    # No exception, no side effects.
+    await sender.drain_already_spoken_clock_frames()
 
 
 if __name__ == "__main__":

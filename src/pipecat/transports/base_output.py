@@ -339,6 +339,16 @@ class BaseOutputTransport(FrameProcessor):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InterruptionFrame):
+            # Deliver clock-queued frames whose presentation time has
+            # already elapsed before the interruption reaches downstream
+            # processors. Without this drain, `_cancel_clock_task()` would
+            # discard the entire `_clock_queue` — including per-word
+            # `TTSTextFrame`s whose `pts <= current_time` — so words the
+            # caller has already heard would never reach the assistant
+            # aggregator and `on_assistant_turn_stopped.message.content`
+            # would be empty for the interrupted turn. See #4466.
+            for sender in self._media_senders.values():
+                await sender.drain_already_spoken_clock_frames()
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
         elif isinstance(frame, OutputTransportMessageUrgentFrame):
@@ -531,6 +541,34 @@ class BaseOutputTransport(FrameProcessor):
             # Stop audio mixer so it doesn't keep generating frames after cancellation.
             if self._mixer:
                 await self._mixer.stop()
+
+        async def drain_already_spoken_clock_frames(self):
+            """Push clock-queued frames whose presentation time has already passed.
+
+            Called from `BaseOutputTransport.process_frame` before an
+            `InterruptionFrame` is forwarded downstream so frames whose
+            `pts <= current_time` — i.e. words the caller has already
+            heard — reach downstream processors (notably
+            `LLMAssistantAggregator._aggregation`) before
+            `_cancel_clock_task` discards the rest of the queue.
+
+            Future-PTS frames remain dropped, matching the existing
+            cancellation semantics. See #4466.
+            """
+            if not self._clock_task:
+                return
+            # Snapshot the queue synchronously (no awaits in this loop, so the
+            # event loop cannot interleave producers between iterations) and
+            # then push the elapsed frames as a separate, awaitable phase.
+            current_time = self._transport.get_clock().get_time()
+            elapsed_frames: list[Frame] = []
+            while not self._clock_queue.empty():
+                timestamp, _seq, frame = self._clock_queue.get_nowait()
+                self._clock_queue.task_done()
+                if timestamp <= current_time:
+                    elapsed_frames.append(frame)
+            for frame in elapsed_frames:
+                await self._transport.push_frame(frame)
 
         async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
