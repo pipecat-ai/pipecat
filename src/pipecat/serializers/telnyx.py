@@ -8,9 +8,8 @@
 
 import base64
 import json
-from typing import cast
+from typing import TYPE_CHECKING
 
-import aiohttp
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
@@ -32,6 +31,10 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.utils.enums import EndTaskReason
+
+if TYPE_CHECKING:
+    from pipecat.serializers.call_strategies import HangupStrategy, TransferStrategy
 
 
 class TelnyxFrameSerializer(FrameSerializer):
@@ -70,6 +73,8 @@ class TelnyxFrameSerializer(FrameSerializer):
         inbound_encoding: str,
         call_control_id: str | None = None,
         api_key: str | None = None,
+        transfer_strategy: "TransferStrategy | None" = None,
+        hangup_strategy: "HangupStrategy | None" = None,
         params: InputParams | None = None,
     ):
         """Initialize the TelnyxFrameSerializer.
@@ -80,6 +85,10 @@ class TelnyxFrameSerializer(FrameSerializer):
             inbound_encoding: The encoding type for inbound audio (e.g., "PCMU").
             call_control_id: The Call Control ID for the Telnyx call (optional, but required for auto hang-up).
             api_key: Your Telnyx API key (required for auto hang-up).
+            transfer_strategy: Strategy for handling call transfers. Invoked on
+                EndFrame/CancelFrame whose reason is EndTaskReason.TRANSFER_CALL.
+            hangup_strategy: Strategy for handling call hangups. Required when
+                auto_hang_up is True to actually terminate the call.
             params: Configuration parameters.
         """
         params = params or TelnyxFrameSerializer.InputParams()
@@ -102,6 +111,8 @@ class TelnyxFrameSerializer(FrameSerializer):
         self._stream_id = stream_id
         self._call_control_id = call_control_id
         self._api_key = api_key
+        self._transfer_strategy = transfer_strategy
+        self._hangup_strategy = hangup_strategy
         self._params.outbound_encoding = outbound_encoding
         self._params.inbound_encoding = inbound_encoding
 
@@ -111,6 +122,7 @@ class TelnyxFrameSerializer(FrameSerializer):
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
+        self._transfer_attempted = False
 
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
@@ -135,14 +147,38 @@ class TelnyxFrameSerializer(FrameSerializer):
         Raises:
             ValueError: If an unsupported encoding is specified.
         """
-        if (
-            self._params.auto_hang_up
-            and not self._hangup_attempted
-            and isinstance(frame, (EndFrame, CancelFrame))
-        ):
-            self._hangup_attempted = True
-            await self._hang_up_call()
-            return None
+        if isinstance(frame, (EndFrame, CancelFrame)):
+            frame_reason = getattr(frame, "reason", None)
+            if frame_reason == EndTaskReason.TRANSFER_CALL.value and not self._transfer_attempted:
+                self._transfer_attempted = True
+                if self._transfer_strategy:
+                    context = {
+                        "call_control_id": self._call_control_id,
+                        "api_key": self._api_key,
+                    }
+                    success = await self._transfer_strategy.execute_transfer(context)
+                    if not success:
+                        logger.error(f"Transfer strategy failed for call {self._call_control_id}")
+                else:
+                    logger.warning(
+                        f"No transfer strategy configured for call {self._call_control_id}"
+                    )
+                return None
+            elif self._params.auto_hang_up and not self._hangup_attempted:
+                self._hangup_attempted = True
+                if self._hangup_strategy:
+                    context = {
+                        "call_control_id": self._call_control_id,
+                        "api_key": self._api_key,
+                    }
+                    success = await self._hangup_strategy.execute_hangup(context)
+                    if not success:
+                        logger.error(f"Hangup strategy failed for call {self._call_control_id}")
+                else:
+                    logger.warning(
+                        f"No hangup strategy configured for call {self._call_control_id}"
+                    )
+                return None
         elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clear"}
             return json.dumps(answer)
@@ -175,59 +211,6 @@ class TelnyxFrameSerializer(FrameSerializer):
 
         # Return None for unhandled frames
         return None
-
-    async def _hang_up_call(self):
-        """Hang up the Telnyx call using Telnyx's REST API."""
-        try:
-            # __init__ guarantees these are non-None whenever auto_hang_up is True,
-            # which is the only path that reaches this method.
-            call_control_id = cast(str, self._call_control_id)
-            api_key = cast(str, self._api_key)
-
-            # Telnyx API endpoint for hanging up a call
-            endpoint = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/hangup"
-
-            # Set headers with API key
-            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-
-            # Make the POST request to hang up the call
-            async with aiohttp.ClientSession() as session:
-                async with session.post(endpoint, headers=headers) as response:
-                    if response.status == 200:
-                        logger.info(f"Successfully terminated Telnyx call {call_control_id}")
-                    elif response.status == 422:
-                        # Handle the case where the call has already ended
-                        # Error code 90018: "Call has already ended"
-                        # Source: https://developers.telnyx.com/api/errors/90018
-                        try:
-                            error_data = await response.json()
-                            if any(
-                                error.get("code") == "90018"
-                                for error in error_data.get("errors", [])
-                            ):
-                                logger.debug(
-                                    f"Telnyx call {call_control_id} was already terminated"
-                                )
-                                return
-                        except Exception:
-                            pass  # Fall through to log the raw error
-
-                        # Log other 422 errors
-                        error_text = await response.text()
-                        logger.error(
-                            f"Failed to terminate Telnyx call {call_control_id}: "
-                            f"Status {response.status}, Response: {error_text}"
-                        )
-                    else:
-                        # Log other errors
-                        error_text = await response.text()
-                        logger.error(
-                            f"Failed to terminate Telnyx call {call_control_id}: "
-                            f"Status {response.status}, Response: {error_text}"
-                        )
-
-        except Exception as e:
-            logger.error(f"Failed to hang up Telnyx call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Telnyx WebSocket data to Pipecat frames.
