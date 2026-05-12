@@ -304,6 +304,7 @@ class DeepgramSTTService(STTService):
         callback_method: str | None = None,
         tag: Any | None = None,
         mip_opt_out: bool | None = None,
+        filler_words: bool | None = None,
         live_options: LiveOptions | None = None,
         addons: dict | None = None,
         settings: Settings | None = None,
@@ -325,6 +326,9 @@ class DeepgramSTTService(STTService):
             callback_method: HTTP method for the callback (``"GET"`` or ``"POST"``).
             tag: Custom billing tag.
             mip_opt_out: Opt out of Deepgram model improvement program.
+            filler_words: When True, include filler words ("um", "uh", etc.)
+                in transcripts. Forwarded as a URL query parameter since the
+                Deepgram SDK does not expose it as a typed kwarg.
             live_options: Legacy configuration options.
 
                 .. deprecated:: 0.0.105
@@ -421,6 +425,7 @@ class DeepgramSTTService(STTService):
         self._callback_method = callback_method
         self._tag = tag
         self._mip_opt_out = mip_opt_out
+        self._filler_words = filler_words
 
         # Build client - support optional custom base URL via DeepgramClientEnvironment
         if base_url:
@@ -587,6 +592,19 @@ class DeepgramSTTService(STTService):
         if self._addons:
             for key, value in self._addons.items():
                 kwargs[key] = str(value)
+
+        # filler_words is a Deepgram URL param that the SDK's connect() does
+        # not expose as a typed kwarg, so route it through request_options
+        # additional_query_parameters where the SDK will forward it as a URL
+        # query param.
+        if self._filler_words is not None:
+            request_options = dict(kwargs.get("request_options") or {})
+            additional_query_parameters = dict(
+                request_options.get("additional_query_parameters") or {}
+            )
+            additional_query_parameters["filler_words"] = str(self._filler_words).lower()
+            request_options["additional_query_parameters"] = additional_query_parameters
+            kwargs["request_options"] = request_options
 
         return kwargs
 
