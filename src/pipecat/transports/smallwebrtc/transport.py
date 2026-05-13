@@ -35,6 +35,8 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     SpriteFrame,
     StartFrame,
+    TTSAudioRawFrame,
+    TTSStoppedFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
@@ -97,6 +99,7 @@ class RawAudioTrack(AudioStreamTrack):
         self._start = time.time()
         # Queue of (bytes, future), broken into 10ms sub chunks as needed
         self._chunk_queue = deque()
+        self._is_bot_speaking = False
 
     def add_audio_bytes(self, audio_bytes: bytes):
         """Add audio bytes to the buffer for transmission.
@@ -123,6 +126,14 @@ class RawAudioTrack(AudioStreamTrack):
 
         return future
 
+    def set_is_bot_speaking(self, value: bool):
+        """Set whether the bot is currently speaking.
+
+        Args:
+            value: True if the bot has started speaking, False when it has stopped.
+        """
+        self._is_bot_speaking = value
+
     async def recv(self):
         """Return the next audio frame for WebRTC transmission.
 
@@ -137,7 +148,12 @@ class RawAudioTrack(AudioStreamTrack):
                 await asyncio.sleep(wait)
 
         if not self._chunk_queue:
-            if self._auto_silence:
+            # Injecting silence while the bot is speaking can cause audible glitches:
+            # TTS audio arrives in bursts, and a silence frame inserted between two
+            # consecutive TTS chunks will produce a brief gap or pop in the output.
+            if self._auto_silence and not self._is_bot_speaking:
+                #if self._is_bot_speaking:
+                #    logger.warning("Injecting silence while bot is speaking can cause glitches in the audio.")
                 chunk = bytes(self._bytes_per_10ms)
             else:
                 while not self._chunk_queue:
@@ -425,6 +441,15 @@ class SmallWebRTCClient:
             await self._audio_output_track.add_audio_bytes(frame.audio)
             return True
         return False
+
+    def set_is_bot_speaking(self, value: bool):
+        """Propagate bot speaking state to the audio output track.
+
+        Args:
+            value: True if the bot has started speaking, False when it has stopped.
+        """
+        if self._audio_output_track:
+            self._audio_output_track.set_is_bot_speaking(value)
 
     async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the WebRTC connection.
@@ -861,6 +886,13 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         Returns:
             True if the audio frame was written successfully, False otherwise.
         """
+        # Track when the bot is speaking so the audio track can avoid injecting
+        # silence between TTS chunks, which would cause audible glitches.
+        # Using the TTSAudioRawFrame as reference since we can receive
+        # TTSStartedFrame a few hundred milliseconds before actually start
+        # receiving the audio
+        if isinstance(frame, TTSAudioRawFrame):
+            self._client.set_is_bot_speaking(True)
         return await self._client.write_audio_frame(frame)
 
     async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
@@ -873,6 +905,20 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
             True if the video frame was written successfully, False otherwise.
         """
         return await self._client.write_video_frame(frame)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle transport-specific logic.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        # Track when the bot is speaking so the audio track can avoid injecting
+        # silence between TTS chunks, which would cause audible glitches.
+        if isinstance(frame, TTSStoppedFrame):
+            self._client.set_is_bot_speaking(False)
 
 
 class SmallWebRTCTransport(BaseTransport):
