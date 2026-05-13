@@ -42,17 +42,42 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     the turn can be triggered immediately once the finalized transcript is
     received. Otherwise, an STT timeout (adjusted by VAD stop_secs) is used
     as a fallback.
+
+    Whether a transcript is required to end the turn is controlled by
+    ``require_transcript``:
+
+    - ``None`` (default): infer from the pipeline. If an ``STTMetadataFrame``
+      has been seen, a transcript is required; otherwise it is not. This is a
+      heuristic — the underlying question is whether the downstream LLM needs
+      the user's words recorded in context before responding, which we proxy
+      by "is there an STT service in the pipeline?". Works for typical
+      cascaded and speech-to-speech setups.
+    - ``True`` / ``False``: explicit override when the heuristic doesn't fit.
     """
 
-    def __init__(self, *, turn_analyzer: BaseTurnAnalyzer, **kwargs):
+    def __init__(
+        self,
+        *,
+        turn_analyzer: BaseTurnAnalyzer,
+        require_transcript: bool | None = None,
+        **kwargs,
+    ):
         """Initialize the user turn stop strategy.
 
         Args:
             turn_analyzer: The turn detection analyzer instance to detect end of user turn.
+            require_transcript: Whether to wait for a transcript before ending
+                the user turn. ``None`` (default) infers from the presence of
+                an ``STTMetadataFrame``. ``True``/``False`` overrides the
+                heuristic.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._turn_analyzer = turn_analyzer
+        self._require_transcript = require_transcript
+        # Set when an STTMetadataFrame is received. Used as the heuristic
+        # signal when require_transcript is None.
+        self._has_stt: bool = False
         self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
         self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
 
@@ -65,6 +90,13 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._transcript_finalized = False
         self._timeout_task: asyncio.Task | None = None
         self._timeout_expired: bool = False
+
+    @property
+    def _transcript_required(self) -> bool:
+        """Whether the current pipeline requires a transcript to end the turn."""
+        if self._require_transcript is not None:
+            return self._require_transcript
+        return self._has_stt
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -109,6 +141,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         if isinstance(frame, StartFrame):
             await self._start(frame)
         elif isinstance(frame, STTMetadataFrame):
+            self._has_stt = True
             self._stt_timeout = frame.ttfs_p99_latency
             self._stop_secs_warned = False
         elif isinstance(frame, VADUserStartedSpeakingFrame):
@@ -168,6 +201,13 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # The user stopped speaking and the turn is complete, we now need to
         # wait for transcriptions.
         self._turn_complete = state == EndOfTurnState.COMPLETE
+
+        if not self._transcript_required:
+            # No transcript to wait for. Trigger now if the turn is already
+            # complete; otherwise the analyzer's audio path will trigger once
+            # it indicates completion.
+            await self._maybe_trigger_user_turn_stopped()
+            return
 
         # Start the STT timeout (adjusted by VAD stop_secs since that time already elapsed)
         timeout = max(0, self._stt_timeout - self._stop_secs)
@@ -256,11 +296,13 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Trigger user turn stopped if conditions are met.
 
         Conditions:
-        - We have transcription text
+        - We have transcription text (skipped when a transcript isn't required)
         - Turn analyzer indicates turn is complete
         - Either the timeout has elapsed OR we have a finalized transcript
         """
-        if not self._text or not self._turn_complete:
+        if not self._turn_complete:
+            return
+        if self._transcript_required and not self._text:
             return
 
         # For finalized transcripts, trigger immediately

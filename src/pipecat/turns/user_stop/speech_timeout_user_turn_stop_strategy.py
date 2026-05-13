@@ -43,18 +43,43 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     (rearmed on each transcript). stt_timeout has no meaning here since it
     is defined relative to VAD stop, and STT has already emitted a
     transcript — so the stt wait is marked done immediately.
+
+    Whether a transcript is required to end the turn is controlled by
+    ``require_transcript``:
+
+    - ``None`` (default): infer from the pipeline. If an ``STTMetadataFrame``
+      has been seen, a transcript is required; otherwise it is not. This is a
+      heuristic — the underlying question is whether the downstream LLM needs
+      the user's words recorded in context before responding, which we proxy
+      by "is there an STT service in the pipeline?". Works for typical
+      cascaded and speech-to-speech setups.
+    - ``True`` / ``False``: explicit override when the heuristic doesn't fit.
     """
 
-    def __init__(self, *, user_speech_timeout: float = 0.6, **kwargs):
+    def __init__(
+        self,
+        *,
+        user_speech_timeout: float = 0.6,
+        require_transcript: bool | None = None,
+        **kwargs,
+    ):
         """Initialize the speech timeout-based user turn stop strategy.
 
         Args:
             user_speech_timeout: Time to wait for the user to potentially
                 say more after they pause speaking. Defaults to 0.6 seconds.
+            require_transcript: Whether to wait for a transcript before ending
+                the user turn. ``None`` (default) infers from the presence of
+                an ``STTMetadataFrame``. ``True``/``False`` overrides the
+                heuristic.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._user_speech_timeout = user_speech_timeout
+        self._require_transcript = require_transcript
+        # Set when an STTMetadataFrame is received. Used as the heuristic
+        # signal when require_transcript is None.
+        self._has_stt: bool = False
         self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
         self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
         self._stop_secs_warned: bool = False
@@ -68,6 +93,13 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._stt_timeout_task: asyncio.Task | None = None
         self._user_speech_wait_done: bool = False
         self._stt_wait_done: bool = False
+
+    @property
+    def _transcript_required(self) -> bool:
+        """Whether the current pipeline requires a transcript to end the turn."""
+        if self._require_transcript is not None:
+            return self._require_transcript
+        return self._has_stt
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -106,6 +138,7 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
             Always returns CONTINUE so subsequent stop strategies are evaluated.
         """
         if isinstance(frame, STTMetadataFrame):
+            self._has_stt = True
             self._stt_timeout = frame.ttfs_p99_latency
             self._stop_secs_warned = False
         elif isinstance(frame, VADUserStartedSpeakingFrame):
@@ -158,11 +191,12 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # fallback-mode run of the same timer is superseded here.
         await self._restart_user_speech_timer()
 
-        # stt_timeout is a safety net. Short-circuit it if the transcript is
-        # already finalized, or if the VAD stop_secs already covered it.
+        # stt_timeout is a safety net. Short-circuit it if no transcript is
+        # required (no STT to wait for), the transcript is already finalized,
+        # or if the VAD stop_secs already covered it.
         self._stt_wait_done = False
         effective_stt_wait = max(0.0, self._stt_timeout - self._stop_secs)
-        if self._transcript_finalized or effective_stt_wait <= 0:
+        if not self._transcript_required or self._transcript_finalized or effective_stt_wait <= 0:
             self._stt_wait_done = True
         else:
             self._stt_timeout_task = self.task_manager.create_task(
@@ -253,9 +287,11 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         Both timers must be done (stt is marked done immediately on the
         fallback path and when finalization short-circuits the safety net),
         the user must not be currently speaking, and at least one transcript
-        must have been received.
+        must have been received (skipped when a transcript isn't required).
         """
-        if self._vad_user_speaking or not self._text:
+        if self._vad_user_speaking:
+            return
+        if self._transcript_required and not self._text:
             return
 
         if self._user_speech_wait_done and self._stt_wait_done:
