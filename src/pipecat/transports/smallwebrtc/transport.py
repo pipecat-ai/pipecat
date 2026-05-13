@@ -324,8 +324,11 @@ class SmallWebRTCClient:
                     # self._webrtc_connection.ask_to_renegotiate()
                 frame = None
             except MediaStreamError:
-                logger.warning("Received an unexpected media stream error while reading the video.")
-                frame = None
+                # Track is permanently dead — every subsequent `recv()` will
+                # raise the same error. Exit the generator so the caller's
+                # `async for` returns and the receive task can finish.
+                logger.warning("Media stream error while reading the video; ending iterator.")
+                break
 
             if frame is None or not isinstance(frame, VideoFrame):
                 # If no valid frame, sleep for a bit
@@ -378,8 +381,11 @@ class SmallWebRTCClient:
                     logger.warning("Timeout: No audio frame received within the specified time.")
                 frame = None
             except MediaStreamError:
-                logger.warning("Received an unexpected media stream error while reading the audio.")
-                frame = None
+                # Track is permanently dead — every subsequent `recv()` will
+                # raise the same error. Exit the generator so the caller's
+                # `async for` returns and the receive task can finish.
+                logger.warning("Media stream error while reading the audio; ending iterator.")
+                break
 
             if frame is None or not isinstance(frame, AudioFrame):
                 # If we don't read any audio let's sleep for a little bit (i.e. busy wait).
