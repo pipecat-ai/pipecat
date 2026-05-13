@@ -292,6 +292,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         messages = params["messages"]
         system = params["system"]  # [{"text": "system message"}] or None
 
+        # Claude 4.6+ rejects requests ending with an assistant message.
+        if self._model_disables_prefill():
+            adapter.ensure_last_message_is_user(messages)
+
         # Prepare request parameters using the same method as streaming
         inference_config = self._build_inference_config()
 
@@ -373,11 +377,27 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             }
         }
 
+    # Claude 4.6+ models do not support assistant message prefilling.
+    _NO_PREFILL_PATTERNS = ("claude-sonnet-4-6", "claude-opus-4-6")
+
+    def _model_disables_prefill(self) -> bool:
+        """Return True if the current model does not support assistant message prefilling.
+
+        Bedrock model identifiers typically look like
+        ``us.anthropic.claude-sonnet-4-6-v1:0`` or
+        ``anthropic.claude-opus-4-6-v1:0``.
+        """
+        model = self._settings.model or ""
+        return any(p in model for p in self._NO_PREFILL_PATTERNS)
+
     def _get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
             context, system_instruction=assert_given(self._settings.system_instruction)
         )
+        # Claude 4.6+ rejects requests ending with an assistant message.
+        if self._model_disables_prefill():
+            adapter.ensure_last_message_is_user(params["messages"])
         return params
 
     @traced_llm

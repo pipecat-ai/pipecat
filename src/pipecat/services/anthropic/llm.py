@@ -303,6 +303,10 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         system = invocation_params["system"]
         tools = invocation_params["tools"]
 
+        # Claude 4.6+ rejects requests ending with an assistant message.
+        if self._model_disables_prefill():
+            adapter.ensure_last_message_is_user(messages)
+
         # Build params using the same method as streaming completions
         params = {
             "model": self._settings.model,
@@ -327,6 +331,14 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
         return next((block.text for block in response.content if hasattr(block, "text")), None)
 
+    # Claude 4.6+ models do not support assistant message prefilling.
+    _NO_PREFILL_PATTERNS = ("claude-sonnet-4-6", "claude-opus-4-6")
+
+    def _model_disables_prefill(self) -> bool:
+        """Return True if the current model does not support assistant message prefilling."""
+        model = self._settings.model or ""
+        return any(model.startswith(p) for p in self._NO_PREFILL_PATTERNS)
+
     def _get_llm_invocation_params(self, context: LLMContext) -> AnthropicLLMInvocationParams:
         adapter = self.get_llm_adapter()
         params = adapter.get_llm_invocation_params(
@@ -334,6 +346,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=assert_given(self._settings.system_instruction),
         )
+        # Claude 4.6+ rejects requests ending with an assistant message.
+        if self._model_disables_prefill():
+            adapter.ensure_last_message_is_user(params["messages"])
         return params
 
     @traced_llm
