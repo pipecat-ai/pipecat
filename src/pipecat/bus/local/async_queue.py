@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""In-process agent bus backed by asyncio queues."""
+"""In-process task bus backed by asyncio queues."""
 
 from loguru import logger
 

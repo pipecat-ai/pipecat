@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Bus message types for inter-agent communication.
+"""Bus message types for inter-task communication.
 
 Defines the message hierarchy used by the `TaskBus` for pub/sub messaging
-between agents, the session, and the runner.
+between tasks, the session, and the runner.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 class BusMessage:
     """Mixin carrying source/target metadata for bus messages.
 
-    Not a frame itself. Combined with ``DataFrame`` or ``SystemFrame``
+    Not a frame itself. Combined with `DataFrame` or `SystemFrame`
     to create concrete message types with appropriate priority.
     """
 
@@ -53,8 +53,8 @@ class BusDataMessage(BusMessage, DataFrame):
     """Normal-priority bus message.
 
     Parameters:
-        source: Name of the agent or component that sent this message.
-        target: Name of the intended recipient agent, or None for broadcast.
+        source: Name of the task or component that sent this message.
+        target: Name of the intended recipient task, or None for broadcast.
     """
 
     source: str
@@ -66,8 +66,8 @@ class BusSystemMessage(BusMessage, SystemFrame):
     """High-priority bus message that preempts normal messages in subscriber queues.
 
     Parameters:
-        source: Name of the agent or component that sent this message.
-        target: Name of the intended recipient agent, or None for broadcast.
+        source: Name of the task or component that sent this message.
+        target: Name of the intended recipient task, or None for broadcast.
     """
 
     source: str
@@ -95,16 +95,16 @@ class BusFrameMessage(BusDataMessage):
 
 
 # ---------------------------------------------------------------------------
-# Agent lifecycle
+# Task lifecycle
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class BusActivateTaskMessage(BusDataMessage):
-    """Tells a targeted agent to become active and start processing.
+    """Tells a targeted task to become active and start processing.
 
     Parameters:
-        args: Optional activation arguments forwarded to ``on_activated``.
+        args: Optional activation arguments forwarded to `on_activated`.
     """
 
     args: dict | None = None
@@ -112,7 +112,7 @@ class BusActivateTaskMessage(BusDataMessage):
 
 @dataclass
 class BusDeactivateTaskMessage(BusDataMessage):
-    """Tells a targeted agent to become inactive and stop processing."""
+    """Tells a targeted task to become inactive and stop processing."""
 
     pass
 
@@ -121,8 +121,8 @@ class BusDeactivateTaskMessage(BusDataMessage):
 class BusEndMessage(BusDataMessage):
     """Request a graceful end of the session.
 
-    Sent by an agent to the runner, which responds by sending
-    `BusEndTaskMessage` to each agent.
+    Sent by a task to the runner, which responds by sending
+    `BusEndTaskMessage` to each task.
 
     Parameters:
         reason: Optional human-readable reason for ending.
@@ -133,9 +133,9 @@ class BusEndMessage(BusDataMessage):
 
 @dataclass
 class BusEndTaskMessage(BusDataMessage):
-    """Tells a targeted agent to end its pipeline gracefully.
+    """Tells a targeted task to end its pipeline gracefully.
 
-    Sent by the runner to individual agents during shutdown.
+    Sent by the runner to individual tasks during shutdown.
 
     Parameters:
         reason: Optional human-readable reason for ending.
@@ -148,8 +148,8 @@ class BusEndTaskMessage(BusDataMessage):
 class BusCancelMessage(BusSystemMessage):
     """Request a hard cancel of the session.
 
-    Sent by an agent to the runner, which responds by sending
-    `BusCancelTaskMessage` to each agent.
+    Sent by a task to the runner, which responds by sending
+    `BusCancelTaskMessage` to each task.
 
     Parameters:
         reason: Optional human-readable reason for the cancellation.
@@ -160,9 +160,9 @@ class BusCancelMessage(BusSystemMessage):
 
 @dataclass
 class BusCancelTaskMessage(BusSystemMessage):
-    """Tells a targeted agent to cancel its pipeline task.
+    """Tells a targeted task to cancel its pipeline.
 
-    Sent by the runner to individual agents during cancellation.
+    Sent by the runner to individual tasks during cancellation.
 
     Parameters:
         reason: Optional human-readable reason for the cancellation.
@@ -172,7 +172,7 @@ class BusCancelTaskMessage(BusSystemMessage):
 
 
 # ---------------------------------------------------------------------------
-# Agent registry and errors
+# Task registry and errors
 # ---------------------------------------------------------------------------
 
 
@@ -208,18 +208,18 @@ class BusTaskRegistryMessage(BusSystemMessage):
 
 @dataclass
 class BusTaskReadyMessage(BusDataMessage):
-    """Announces that an agent is ready.
+    """Announces that a task is ready.
 
-    Sent when any agent (root or child) becomes ready. Carries the
-    agent's parent name so observers can reconstruct the full hierarchy.
+    Sent when any task (root or child) becomes ready. Carries the
+    task's parent name so observers can reconstruct the full hierarchy.
 
     Parameters:
-        runner: Name of the runner managing this agent.
-        parent: Name of the parent agent, or None for root agents.
-        active: Whether the agent started active.
-        bridged: Whether the agent is bridged (receives pipeline frames
+        runner: Name of the runner managing this task.
+        parent: Name of the parent task, or None for root tasks.
+        active: Whether the task started active.
+        bridged: Whether the task is bridged (receives pipeline frames
             from the bus).
-        started_at: Unix timestamp when the agent became ready.
+        started_at: Unix timestamp when the task became ready.
     """
 
     runner: str
@@ -231,10 +231,10 @@ class BusTaskReadyMessage(BusDataMessage):
 
 @dataclass
 class BusTaskErrorMessage(BusSystemMessage):
-    """Reports an error from a root agent.
+    """Reports an error from a root task.
 
-    Sent over the network so remote agents can react. For child agent
-    errors, see ``BusTaskLocalErrorMessage``.
+    Sent over the network so remote tasks can react. For child task
+    errors, see `BusTaskLocalErrorMessage`.
 
     Parameters:
         error: Description of the error.
@@ -245,10 +245,10 @@ class BusTaskErrorMessage(BusSystemMessage):
 
 @dataclass
 class BusTaskLocalErrorMessage(BusSystemMessage, BusLocalMessage):
-    """Reports an error from a child agent to its parent.
+    """Reports an error from a child task to its parent.
 
     Local-only: never crosses the network. The parent receives it
-    via ``on_task_failed()``.
+    via `on_task_failed()`.
 
     Parameters:
         error: Description of the error.
@@ -258,17 +258,17 @@ class BusTaskLocalErrorMessage(BusSystemMessage, BusLocalMessage):
 
 
 # ---------------------------------------------------------------------------
-# Tasks
+# Jobs
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class BusJobRequestMessage(BusDataMessage):
-    """Requests a task agent to start work.
+    """Requests a worker task to start work.
 
     Parameters:
-        job_id: Unique identifier for this task.
-        job_name: Optional task name for routing to named handlers.
+        job_id: Unique identifier for this job.
+        job_name: Optional job name for routing to named `@job` handlers.
         payload: Optional structured data describing the work.
     """
 
@@ -279,10 +279,10 @@ class BusJobRequestMessage(BusDataMessage):
 
 @dataclass
 class BusJobResponseMessage(BusDataMessage):
-    """Response from a task agent when it completes.
+    """Response from a worker task when its job completes.
 
     Parameters:
-        job_id: The task identifier.
+        job_id: The job identifier.
         status: Completion status.
         response: Optional result data.
     """
@@ -294,13 +294,13 @@ class BusJobResponseMessage(BusDataMessage):
 
 @dataclass
 class BusJobResponseUrgentMessage(BusSystemMessage):
-    """High-priority response from a task agent.
+    """High-priority job response.
 
-    Same semantics as ``BusJobResponseMessage`` but delivered with
+    Same semantics as `BusJobResponseMessage` but delivered with
     system priority, preempting queued data messages.
 
     Parameters:
-        job_id: The task identifier.
+        job_id: The job identifier.
         status: Completion status.
         response: Optional result data.
     """
@@ -312,10 +312,10 @@ class BusJobResponseUrgentMessage(BusSystemMessage):
 
 @dataclass
 class BusJobUpdateMessage(BusDataMessage):
-    """Progress update from a task agent.
+    """Progress update from a worker task.
 
     Parameters:
-        job_id: The task identifier.
+        job_id: The job identifier.
         update: Optional progress data.
     """
 
@@ -325,13 +325,13 @@ class BusJobUpdateMessage(BusDataMessage):
 
 @dataclass
 class BusJobUpdateUrgentMessage(BusSystemMessage):
-    """High-priority progress update from a task agent.
+    """High-priority job progress update.
 
-    Same semantics as ``BusJobUpdateMessage`` but delivered with
+    Same semantics as `BusJobUpdateMessage` but delivered with
     system priority, preempting queued data messages.
 
     Parameters:
-        job_id: The task identifier.
+        job_id: The job identifier.
         update: Optional progress data.
     """
 
@@ -341,10 +341,10 @@ class BusJobUpdateUrgentMessage(BusSystemMessage):
 
 @dataclass
 class BusJobUpdateRequestMessage(BusDataMessage):
-    """Request a progress update from a task agent.
+    """Request a progress update from a worker task.
 
     Parameters:
-        job_id: The task identifier.
+        job_id: The job identifier.
     """
 
     job_id: str
@@ -352,10 +352,10 @@ class BusJobUpdateRequestMessage(BusDataMessage):
 
 @dataclass
 class BusJobCancelMessage(BusSystemMessage):
-    """Cancel a running task.
+    """Cancel a running job.
 
     Parameters:
-        job_id: The task identifier.
+        job_id: The job identifier.
         reason: Optional human-readable reason for cancellation.
     """
 
@@ -364,16 +364,16 @@ class BusJobCancelMessage(BusSystemMessage):
 
 
 # ---------------------------------------------------------------------------
-# Task streaming
+# Job streaming
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class BusJobStreamStartMessage(BusDataMessage):
-    """Signals the start of a streaming task response.
+    """Signals the start of a streaming job response.
 
     Parameters:
-        job_id: The task identifier.
+        job_id: The job identifier.
         data: Optional metadata (e.g. content type).
     """
 
@@ -383,10 +383,10 @@ class BusJobStreamStartMessage(BusDataMessage):
 
 @dataclass
 class BusJobStreamDataMessage(BusDataMessage):
-    """A chunk of streaming task data.
+    """A chunk of streaming job data.
 
     Parameters:
-        job_id: The task identifier.
+        job_id: The job identifier.
         data: The chunk payload.
     """
 
@@ -396,10 +396,10 @@ class BusJobStreamDataMessage(BusDataMessage):
 
 @dataclass
 class BusJobStreamEndMessage(BusDataMessage):
-    """Signals the end of a streaming task response.
+    """Signals the end of a streaming job response.
 
     Parameters:
-        job_id: The task identifier.
+        job_id: The job identifier.
         data: Optional final metadata.
     """
 

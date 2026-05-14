@@ -328,14 +328,12 @@ class PipelineRunner(BaseObject, BusSubscriber):
         await asyncio.gather(*remaining, return_exceptions=True)
 
     async def _load_setup_files(self) -> None:
-        """Load setup files from ``PIPECAT_SUBAGENTS_SETUP_FILES``.
+        """Load setup files from ``PIPECAT_RUNNER_SETUP_FILES``.
 
         Each file should contain an async ``setup_runner(runner)`` function
         that receives the runner instance.
         """
-        setup_files = [
-            f for f in os.environ.get("PIPECAT_SUBAGENTS_SETUP_FILES", "").split(":") if f
-        ]
+        setup_files = [f for f in os.environ.get("PIPECAT_RUNNER_SETUP_FILES", "").split(":") if f]
         for f in setup_files:
             try:
                 path = Path(f).resolve()

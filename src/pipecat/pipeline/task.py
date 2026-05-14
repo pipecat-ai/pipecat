@@ -266,7 +266,7 @@ class PipelineTask(BaseTask):
             idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
                 None. If a pipeline is idle the pipeline task will be cancelled
                 automatically.
-            name: Optional task name (used for agent-style addressing on the bus).
+            name: Optional task name (used for task-style addressing on the bus).
             observers: List of observers for monitoring pipeline execution.
             params: Configuration parameters for the pipeline.
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.

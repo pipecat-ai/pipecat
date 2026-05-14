@@ -4,18 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Agent bus package -- pub/sub messaging between agents and the runner.
+"""Task bus package -- pub/sub messaging between tasks and the runner.
 
-Provides the pub/sub infrastructure that connects agents to each other and to
+Provides the pub/sub infrastructure that connects tasks to each other and to
 the runner. Key components:
 
 - `TaskBus` -- abstract base class defining the send/receive interface.
 - `AsyncQueueBus` -- in-process implementation backed by ``asyncio.Queue``.
 - `BusBridgeProcessor` -- bidirectional mid-pipeline bridge for
-  transport/session agents that exchanges frames with other agents
+  transport/session tasks that exchanges frames with other tasks
   through the bus.
 - `BusMessage` and its subclasses -- the typed message hierarchy used for
-  agent lifecycle events (activation, cancellation, shutdown), task
+  task lifecycle events (activation, cancellation, shutdown), job
   coordination, and frame transport.
 """
 
