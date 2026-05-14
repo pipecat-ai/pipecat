@@ -327,7 +327,10 @@ class LLMTask(PipelineTask):
             messages: Optional LLM messages to inject before completing.
         """
         if messages:
-            await self.queue_frame(LLMMessagesAppendFrame(messages=messages, run_llm=True))
+            # Bypass our deferral override: this runs inside a tool call, so
+            # self.queue_frame would defer the frame and the flush below would
+            # return before the LLM output is delivered.
+            await super().queue_frame(LLMMessagesAppendFrame(messages=messages, run_llm=True))
             await self._flush_pipeline()
 
         if not result_callback:
