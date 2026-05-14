@@ -15,6 +15,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
+    TYPE_CHECKING,
     Any,
     Generic,
     Protocol,
@@ -69,6 +70,10 @@ from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
 )
+
+if TYPE_CHECKING:
+    from pipecat.pipeline.task import PipelineTask
+
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -126,6 +131,7 @@ class FunctionCallParams:
     # treat it invariantly, rejecting `LLMService[XAdapter]` at the call
     # sites that build FunctionCallParams.
     llm: LLMService[Any]
+    pipeline_task: PipelineTask
     context: LLMContext
     result_callback: FunctionCallResultCallback
     app_resources: Any = None
@@ -947,9 +953,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # it starts would leave the coroutine in a "never awaited" state.
         await asyncio.sleep(0)
 
-        # _pipeline_task may be unset when the service is driven without a PipelineTask.
-        app_resources = self._pipeline_task.app_resources if self._pipeline_task else None
-
         try:
             if isinstance(item.handler, DirectFunctionWrapper):
                 # Handler is a DirectFunctionWrapper
@@ -960,9 +963,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                         tool_call_id=runner_item.tool_call_id,
                         arguments=runner_item.arguments,
                         llm=self,
+                        pipeline_task=self.pipeline_task,
                         context=runner_item.context,
                         result_callback=function_call_result_callback,
-                        app_resources=app_resources,
+                        app_resources=self.pipeline_task.app_resources,
                     ),
                 )
             else:
@@ -972,9 +976,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                     tool_call_id=runner_item.tool_call_id,
                     arguments=runner_item.arguments,
                     llm=self,
+                    pipeline_task=self.pipeline_task,
                     context=runner_item.context,
                     result_callback=function_call_result_callback,
-                    app_resources=app_resources,
+                    app_resources=self.pipeline_task.app_resources,
                 )
                 await item.handler(params)
         except Exception as e:

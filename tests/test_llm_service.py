@@ -5,6 +5,7 @@
 #
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
@@ -45,6 +46,8 @@ class MockLLMService(LLMService):
             user_turn_completion_config=None,
         )
         super().__init__(settings=settings, **kwargs)
+        # Stub the pipeline task so FunctionCallParams can be constructed.
+        self._pipeline_task = SimpleNamespace(app_resources=None)
 
 
 class TestUnparameterizedSubclass(unittest.TestCase):
