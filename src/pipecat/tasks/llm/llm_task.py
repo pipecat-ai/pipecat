@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.bus import TaskBus
 from pipecat.frames.frames import (
     ControlFrame,
     Frame,
@@ -79,8 +78,8 @@ class LLMTask(PipelineTask):
         self,
         name: str,
         *,
-        bus: TaskBus,
         llm: LLMService,
+        pipeline: Pipeline | None = None,
         active: bool = False,
         bridged: tuple[str, ...] | None = None,
         defer_tool_frames: bool = True,
@@ -89,9 +88,12 @@ class LLMTask(PipelineTask):
 
         Args:
             name: Unique name for this task.
-            bus: The `TaskBus` for inter-task communication.
             llm: The LLM service. ``@tool`` decorated methods are
                 automatically registered on it.
+            pipeline: Optional pipeline override. When ``None``,
+                defaults to ``Pipeline([llm])``. Subclasses can pass a
+                custom pipeline that wraps the LLM with additional
+                processors.
             active: Whether the task starts active. Defaults to False.
             bridged: Bridge configuration forwarded to ``PipelineTask``.
                 Pass ``()`` to wrap the LLM pipeline with bus edge
@@ -111,12 +113,11 @@ class LLMTask(PipelineTask):
         self._llm = llm
         self._register_tools(llm)
 
-        pipeline = Pipeline([self._llm])
+        pipeline = pipeline if pipeline is not None else Pipeline([self._llm])
 
         super().__init__(
             pipeline,
             name=name,
-            bus=bus,
             bridged=bridged,
             exclude_frames=(PipelineFlushFrame,),
             enable_rtvi=False,
