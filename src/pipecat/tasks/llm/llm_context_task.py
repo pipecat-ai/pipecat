@@ -11,7 +11,6 @@ self-contained conversation context, removing the need for subclasses
 to manually wire `LLMContextAggregatorPair`.
 """
 
-from pipecat.bus import TaskBus
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -38,7 +37,6 @@ class LLMContextTask(LLMTask):
 
         task = LLMContextTask(
             "worker",
-            bus=bus,
             llm=OpenAILLMService(...),
         )
 
@@ -51,7 +49,6 @@ class LLMContextTask(LLMTask):
         self,
         name: str,
         *,
-        bus: TaskBus,
         llm: LLMService,
         active: bool = False,
         bridged: tuple[str, ...] | None = None,
@@ -64,7 +61,6 @@ class LLMContextTask(LLMTask):
 
         Args:
             name: Unique name for this task.
-            bus: The `TaskBus` for inter-task communication.
             llm: The LLM service.
             active: Whether the task starts active. Defaults to False.
             bridged: Bridge configuration forwarded to ``PipelineTask``.
@@ -95,7 +91,6 @@ class LLMContextTask(LLMTask):
 
         super().__init__(
             name,
-            bus=bus,
             llm=llm,
             pipeline=pipeline,
             active=active,

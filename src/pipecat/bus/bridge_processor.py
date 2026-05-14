@@ -161,7 +161,6 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
     def __init__(
         self,
         *,
-        bus: TaskBus,
         task: "BaseTask",
         direction: FrameDirection,
         bridges: tuple[str, ...] = (),
@@ -171,9 +170,11 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         """Initialize the edge processor.
 
         Args:
-            bus: The ``TaskBus`` to exchange frames with.
-            task: The owning task; ``task.name`` is the message source
-                and ``task.active`` gates inbound frames.
+            task: The owning task; the edge reads ``task.bus`` lazily
+                so the bus only needs to be set (via
+                :meth:`BaseTask.attach`) by the time the processor is
+                set up. ``task.name`` is the message source and
+                ``task.active`` gates inbound frames.
             direction: Direction this edge captures and forwards to the
                 bus. Inbound frames from the bus travelling in the
                 opposite direction are injected here.
@@ -184,7 +185,6 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
             **kwargs: Additional arguments passed to ``FrameProcessor``.
         """
         super().__init__(**kwargs)
-        self._bus = bus
         self._task = task
         self._direction = direction
         self._bridges = bridges
@@ -193,12 +193,12 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
     async def setup(self, setup: FrameProcessorSetup):
         """Subscribe to the bus during processor setup."""
         await super().setup(setup)
-        await self._bus.subscribe(self)
+        await self._task.bus.subscribe(self)
 
     async def cleanup(self):
         """Unsubscribe from the bus on cleanup."""
         await super().cleanup()
-        await self._bus.unsubscribe(self)
+        await self._task.bus.unsubscribe(self)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Pass the frame through locally and forward matching ones to the bus."""
@@ -212,7 +212,7 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         if self._exclude_frames and isinstance(frame, self._exclude_frames):
             return
 
-        await self._bus.send(
+        await self._task.bus.send(
             BusFrameMessage(source=self._task.name, frame=frame, direction=direction)
         )
 
