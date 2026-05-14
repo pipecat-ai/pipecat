@@ -4,14 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Proxy agents for forwarding bus messages over network transports."""
+"""Proxy tasks for forwarding bus messages over network transports."""
 
 from pipecat.tasks.proxy.websocket import (
-    WebSocketProxyClientAgent,
-    WebSocketProxyServerAgent,
+    WebSocketProxyClientTask,
+    WebSocketProxyServerTask,
 )
 
 __all__ = [
-    "WebSocketProxyClientAgent",
-    "WebSocketProxyServerAgent",
+    "WebSocketProxyClientTask",
+    "WebSocketProxyServerTask",
 ]
