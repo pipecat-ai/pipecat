@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Decorator for marking agent methods as tools."""
+"""Decorator for marking methods as LLM tools."""
 
 
 def tool(fn=None, *, cancel_on_interruption=True, timeout=None):
@@ -34,7 +34,7 @@ def tool(fn=None, *, cancel_on_interruption=True, timeout=None):
     """
 
     def decorator(fn):
-        fn.is_agent_tool = True
+        fn.is_llm_tool = True
         fn.cancel_on_interruption = cancel_on_interruption
         fn.timeout = timeout
         return fn
@@ -57,6 +57,6 @@ def _collect_tools(obj) -> list:
             if name in seen:
                 continue
             seen.add(name)
-            if callable(val) and getattr(val, "is_agent_tool", False):
+            if callable(val) and getattr(val, "is_llm_tool", False):
                 tools.append(getattr(obj, name))
     return tools

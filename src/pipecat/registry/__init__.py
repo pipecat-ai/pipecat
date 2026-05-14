@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Agent registry for tracking discovered agents across runners."""
+"""Task registry for tracking known tasks across runners."""
 
 from pipecat.registry.registry import TaskRegistry
 

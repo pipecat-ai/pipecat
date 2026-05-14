@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Abstract agent bus for inter-agent pub/sub messaging.
+"""Abstract task bus for inter-task pub/sub messaging.
 
 Provides the abstract `TaskBus` base class. Concrete implementations
 (e.g. `AsyncQueueBus`) live in separate modules.
@@ -45,7 +45,7 @@ class BusSubscription:
 
 
 class TaskBus(BaseObject):
-    """Abstract base for inter-agent and runner-agent communication.
+    """Abstract base for inter-task and runner-task communication.
 
     Provides pub/sub messaging where each subscriber receives messages
     independently through its own priority queue. System messages

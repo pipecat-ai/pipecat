@@ -41,8 +41,8 @@ _PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
 class BusBridgeProcessor(FrameProcessor, BusSubscriber):
     """Bidirectional mid-pipeline bridge between a Pipecat pipeline and the bus.
 
-    Placed in a transport or session agent's pipeline to exchange frames
-    with other agents via the `TaskBus`. Lifecycle and excluded frames
+    Placed in a transport or session task's pipeline to exchange frames
+    with other tasks via the `TaskBus`. Lifecycle and excluded frames
     pass through locally without crossing the bus.
     """
 
@@ -50,8 +50,8 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         self,
         *,
         bus: TaskBus,
-        agent_name: str,
-        target_agent: str | None = None,
+        task_name: str,
+        target_task: str | None = None,
         bridge: str | None = None,
         exclude_frames: tuple[type[Frame], ...] | None = None,
         **kwargs,
@@ -59,20 +59,20 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         """Initialize the BusBridgeProcessor.
 
         Args:
-            bus: The ``TaskBus`` to exchange frames with.
-            agent_name: Name of this agent, used as message source.
-            target_agent: When set, only exchange frames with this agent.
+            bus: The `TaskBus` to exchange frames with.
+            task_name: Name of the owning task, used as message source.
+            target_task: When set, only exchange frames with this task.
             bridge: Optional bridge name for routing. When set, outgoing
                 frames are tagged with this name and only incoming frames
                 with the same bridge name are accepted.
             exclude_frames: Extra frame types that should never cross the bus
                 (on top of lifecycle frames which are always excluded).
-            **kwargs: Additional arguments passed to ``FrameProcessor``.
+            **kwargs: Additional arguments passed to `FrameProcessor`.
         """
         super().__init__(**kwargs)
         self._bus = bus
-        self._agent_name = agent_name
-        self._target_agent = target_agent
+        self._task_name = task_name
+        self._target_task = target_task
         self._bridge = bridge
         self._exclude_frames = exclude_frames or ()
 
@@ -101,7 +101,7 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
             return
 
         # Urgent transport frames pass through directly. They need to
-        # reach the transport even when no child agent is active yet.
+        # reach the transport even when no child task is active yet.
         if isinstance(frame, _PASSTHROUGH_FRAMES):
             await self.push_frame(frame, direction)
             return
@@ -113,7 +113,7 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
 
         # Send to bus
         msg = BusFrameMessage(
-            source=self._agent_name,
+            source=self._task_name,
             frame=frame,
             direction=direction,
             bridge=self._bridge,
@@ -130,19 +130,19 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
             return
 
         # Skip own frames
-        if message.source == self._agent_name:
+        if message.source == self._task_name:
             return
 
         # Filter by bridge name
         if self._bridge and message.bridge != self._bridge:
             return
 
-        # If target_agent set, only accept from that agent
-        if self._target_agent and message.source != self._target_agent:
+        # If target_task set, only accept from that task
+        if self._target_task and message.source != self._target_task:
             return
 
         # If message targeted at someone else, skip
-        if message.target and message.target != self._agent_name:
+        if message.target and message.target != self._task_name:
             return
 
         await self.push_frame(message.frame, message.direction)
