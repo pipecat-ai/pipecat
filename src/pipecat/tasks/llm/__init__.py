@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""LLM agent and tool decorator."""
+"""LLM task package -- `LLMTask`, `LLMContextTask`, and the `@tool` decorator."""
 
 from pipecat.tasks.llm.llm_context_task import LLMContextTask
 from pipecat.tasks.llm.llm_task import LLMTask, LLMTaskActivationArgs

@@ -50,10 +50,10 @@ class JobGroupError(Exception):
 
 @dataclass
 class JobGroupResponse:
-    """Collected results from a completed task group.
+    """Collected results from a completed job group.
 
     Parameters:
-        job_id: The shared task identifier.
+        job_id: The shared job identifier.
         responses: Collected responses keyed by worker name.
     """
 
@@ -81,7 +81,7 @@ class JobEvent:
 
 @dataclass
 class JobGroupEvent:
-    """An event received from a worker during task group execution.
+    """An event received from a worker during job group execution.
 
     Parameters:
         type: The event type.
@@ -156,16 +156,16 @@ class JobGroup:
 
 
 class JobGroupContext:
-    """Async context manager and iterator for structured task group execution.
+    """Async context manager and iterator for structured job group execution.
 
-    Sends task requests on enter, waits for all responses on exit.
+    Sends job requests on enter, waits for all responses on exit.
     Supports ``async for`` to receive intermediate events (updates
     and streaming data) from workers while waiting for completion.
 
     On normal completion, results are available via ``responses``.
     On worker error (with ``cancel_on_error=True``) or timeout, raises
     ``JobGroupError``. If the ``async with`` block raises, remaining
-    tasks are cancelled.
+    jobs are cancelled.
 
     Example::
 
@@ -192,10 +192,10 @@ class JobGroupContext:
         Args:
             task: The parent `BaseTask` that owns this job group.
             task_names: Names of the workers to send the job to.
-            name: Optional task name for routing to named handlers.
+            name: Optional job name for routing to named ``@job`` handlers.
             payload: Optional structured data describing the work.
             timeout: Optional timeout in seconds covering both the
-                ready-wait and task execution.
+                ready-wait and job execution.
             cancel_on_error: Whether to cancel the group if a worker
                 errors. Defaults to True.
         """
@@ -209,16 +209,16 @@ class JobGroupContext:
 
     @property
     def job_id(self) -> str:
-        """The shared task identifier for this group."""
+        """The shared job identifier for this group."""
         if not self._group:
-            raise RuntimeError("Task group has not been started")
+            raise RuntimeError("Job group has not been started")
         return self._group.job_id
 
     @property
     def responses(self) -> dict[str, dict]:
         """Collected responses keyed by worker name."""
         if not self._group:
-            raise RuntimeError("Task group has not been started")
+            raise RuntimeError("Job group has not been started")
         return self._group.responses
 
     def __aiter__(self):
@@ -263,13 +263,13 @@ class JobGroupContext:
 class JobContext:
     """Async context manager and iterator for a single-worker job.
 
-    Sends a task request on enter, waits for the response on exit.
+    Sends a job request on enter, waits for the response on exit.
     Supports ``async for`` to receive intermediate events (updates
     and streaming data) from the worker while waiting for completion.
 
     On normal completion, the result is available via ``response``.
     On worker error or timeout, raises ``JobError``. If the
-    ``async with`` block raises, the task is cancelled.
+    ``async with`` block raises, the job is cancelled.
 
     Example::
 
@@ -294,10 +294,10 @@ class JobContext:
         Args:
             task: The parent `BaseTask` that owns this job.
             task_name: Name of the worker to send the job to.
-            name: Optional task name for routing to a named handler.
+            name: Optional job name for routing to a named ``@job`` handler.
             payload: Optional structured data describing the work.
             timeout: Optional timeout in seconds covering both the
-                ready-wait and task execution.
+                ready-wait and job execution.
         """
         self._task = task
         self._task_name = task_name
@@ -308,16 +308,16 @@ class JobContext:
 
     @property
     def job_id(self) -> str:
-        """The task identifier."""
+        """The job identifier."""
         if not self._group:
-            raise RuntimeError("Task has not been started")
+            raise RuntimeError("Job has not been started")
         return self._group.job_id
 
     @property
     def response(self) -> dict:
         """The worker's response payload."""
         if not self._group:
-            raise RuntimeError("Task has not been started")
+            raise RuntimeError("Job has not been started")
         return self._group.responses.get(self._task_name, {})
 
     def __aiter__(self):

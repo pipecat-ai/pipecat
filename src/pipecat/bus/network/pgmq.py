@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""PGMQ (PostgreSQL Message Queue) agent bus for distributed agents."""
+"""PGMQ (PostgreSQL Message Queue) task bus for distributed tasks."""
 
 import asyncio
 import json
@@ -23,7 +23,7 @@ try:
     from pgmq.async_queue import PGMQueue
 except ModuleNotFoundError as e:  # pragma: no cover - exercised only when extra is missing
     logger.error(f"Exception: {e}")
-    logger.error("In order to use PgmqBus, you need to `pip install pipecat-ai-subagents[pgmq]`.")
+    logger.error("In order to use PgmqBus, you need to `pip install pipecat-ai[pgmq]`.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -54,7 +54,7 @@ def _sanitize_channel(channel: str) -> str:
 
 
 class PgmqBus(TaskBus):
-    """Distributed agent bus backed by PGMQ (PostgreSQL Message Queue).
+    """Distributed task bus backed by PGMQ (PostgreSQL Message Queue).
 
     Implements pub/sub fan-out on top of PGMQ's point-to-point queue semantics
     by giving each ``PgmqBus`` instance its own queue and broadcasting on
@@ -65,7 +65,7 @@ class PgmqBus(TaskBus):
     local subscribers.
 
     Requires the ``pgmq`` and ``asyncpg`` packages. Install with
-    ``pip install pipecat-ai-subagents[pgmq]``.
+    ``pip install pipecat-ai[pgmq]``.
 
     The provided ``PGMQueue`` must already have its connection pool
     initialized via ``await pgmq.init()`` before being passed. The adapter

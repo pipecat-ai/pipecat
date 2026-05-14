@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Redis pub/sub agent bus for distributed agents."""
+"""Redis pub/sub task bus for distributed tasks."""
 
 import asyncio
 
@@ -20,12 +20,12 @@ try:
     from redis.asyncio.client import PubSub
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use RedisBus, you need to `pip install pipecat-ai-subagents[redis]`.")
+    logger.error("In order to use RedisBus, you need to `pip install pipecat-ai[redis]`.")
     raise Exception(f"Missing module: {e}")
 
 
 class RedisBus(TaskBus):
-    """Distributed agent bus backed by Redis pub/sub.
+    """Distributed task bus backed by Redis pub/sub.
 
     Publishes serialized messages to a Redis channel for cross-process
     communication. ``BusLocalMessage`` messages bypass Redis and are
