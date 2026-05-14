@@ -183,25 +183,24 @@ class PipelineRunner(BaseObject, BusSubscriber):
             task: The pipeline task to run, or None.
         """
         logger.debug(f"PipelineRunner '{self}': started running {task}")
-
-        await self._setup_session()
-
         self._shutdown_event.clear()
 
-        # Register the main task like any spawned task so it shares the
-        # same start/cancel path.
+        # Treat the main task as a spawned task: ``spawn`` attaches it
+        # to the bus and registry, and ``_setup_session`` then starts
+        # every entry (main and pre-spawned) through the same code path.
         if task is not None:
             await self.spawn(task)
 
+        await self._setup_session()
         await self._call_event_handler("on_ready")
 
         # Wait for the main task's background runner task to finish
         # (or for an explicit shutdown when there's no main task).
         try:
             if task is not None:
-                main_entry = self._entries.get(task.name)
-                if main_entry and main_entry.runner_task:
-                    await main_entry.runner_task
+                runner_task = self._entries[task.name].runner_task
+                if runner_task is not None:
+                    await runner_task
             else:
                 await self._shutdown_event.wait()
         except asyncio.CancelledError:
