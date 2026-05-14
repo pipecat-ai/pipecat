@@ -183,10 +183,12 @@ class WebSocketProxyClientTask(BaseTask):
 
     async def _receive_loop(self) -> None:
         """Read messages from the WebSocket and put them on the local bus."""
+        assert self._ws is not None, "on_activated() must run before _receive_loop"
         try:
             async for data in self._ws:
                 try:
-                    message = self._serializer.deserialize(data)
+                    payload = data if isinstance(data, bytes) else data.encode()
+                    message = self._serializer.deserialize(payload)
                     if not message:
                         continue
 

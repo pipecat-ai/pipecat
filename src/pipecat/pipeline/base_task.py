@@ -441,7 +441,9 @@ class BaseTask(BaseObject, BusSubscriber):
         """Called when all workers in a job group have responded."""
         pass
 
-    async def on_job_error(self, message: BusJobResponseMessage) -> None:
+    async def on_job_error(
+        self, message: BusJobResponseMessage | BusJobResponseUrgentMessage
+    ) -> None:
         """Called when a job group is cancelled due to a worker error.
 
         Fires when a worker responds with ``ERROR`` or ``FAILED`` status

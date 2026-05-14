@@ -256,6 +256,7 @@ class JobGroupContext:
                 )
             return False
 
+        assert self._group is not None
         await self._group.wait()
         return False
 
@@ -355,6 +356,7 @@ class JobContext:
                 )
             return False
 
+        assert self._group is not None
         try:
             await self._group.wait()
         except JobGroupError as e:
