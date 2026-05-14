@@ -13,6 +13,7 @@ Provides the abstract `TaskBus` base class. Concrete implementations
 import asyncio
 from abc import abstractmethod
 from dataclasses import dataclass, field
+from typing import cast
 
 from pipecat.bus.messages import BusLocalMessage, BusMessage
 from pipecat.bus.queue import BusMessageQueue
@@ -167,7 +168,7 @@ class TaskBus(BaseObject):
             while True:
                 message = await sub.queue.get()
                 if isinstance(message, SystemFrame):
-                    await sub.subscriber.on_bus_message(message)
+                    await sub.subscriber.on_bus_message(cast(BusMessage, message))
                 else:
                     sub.data_queue.put_nowait(message)
         except asyncio.CancelledError:

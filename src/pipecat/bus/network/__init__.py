@@ -11,6 +11,12 @@ package can be loaded with only the extras you need; importing a specific
 bus without its extra raises a clear error from that submodule.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pipecat.bus.network.pgmq import PgmqBus
+    from pipecat.bus.network.redis import RedisBus
+
 __all__ = ["PgmqBus", "RedisBus"]
 
 

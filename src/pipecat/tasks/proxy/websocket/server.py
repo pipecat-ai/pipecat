@@ -200,6 +200,7 @@ class WebSocketProxyServerTask(BaseTask):
 
     async def _receive_loop(self) -> None:
         """Read messages from the WebSocket and put them on the local bus."""
+        assert self._ws is not None, "start() must run before _receive_loop"
         try:
             while True:
                 data = await self._ws.receive_bytes()

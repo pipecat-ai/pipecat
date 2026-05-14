@@ -68,8 +68,9 @@ class RedisBus(TaskBus):
     async def start(self):
         """Subscribe to Redis channel and start the reader task."""
         await super().start()
-        self._pubsub = self._redis.pubsub()
-        await self._pubsub.subscribe(self._channel)
+        pubsub = self._redis.pubsub()
+        await pubsub.subscribe(self._channel)
+        self._pubsub = pubsub
         self._reader_task = self.create_task(self._reader_loop(), f"{self}::redis_reader")
         await asyncio.sleep(0)
 
@@ -96,6 +97,7 @@ class RedisBus(TaskBus):
 
     async def _reader_loop(self) -> None:
         """Read messages from Redis pub/sub and deliver to subscribers."""
+        assert self._pubsub is not None, "start() must be called before _reader_loop"
         async for raw_message in self._pubsub.listen():
             if raw_message["type"] != "message":
                 continue
