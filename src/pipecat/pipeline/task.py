@@ -208,7 +208,6 @@ class PipelineTask(BaseTask):
         *,
         additional_span_attributes: dict | None = None,
         app_resources: Any = None,
-        bus: TaskBus | None = None,
         bridged: tuple[str, ...] | None = None,
         cancel_on_idle_timeout: bool = True,
         cancel_timeout_secs: float = CANCEL_TIMEOUT_SECS,
@@ -243,14 +242,12 @@ class PipelineTask(BaseTask):
                 ``FunctionCallParams.app_resources``. The framework never
                 copies or clears this object; the caller retains their handle
                 and can read any mutations after the task finishes.
-            bus: Optional :class:`~pipecat.bus.TaskBus` for inter-task
-                communication. ``None`` means this task doesn't
-                participate in inter-task messaging.
             bridged: Bridge configuration. ``None`` means the pipeline
                 is not bridged. An empty tuple ``()`` wraps the pipeline
                 with bus edge processors that accept frames from all
                 bridges. A tuple of names like ``("voice",)`` accepts
-                only frames from those bridges. Requires ``bus``.
+                only frames from those bridges. The bus comes from
+                :meth:`attach` (called by the runner).
             cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
                 the idle timeout is reached.
             cancel_timeout_secs: Timeout (in seconds) to wait for cancellation to happen
@@ -281,10 +278,8 @@ class PipelineTask(BaseTask):
                     Use ``app_resources`` instead. ``tool_resources`` will be
                     removed in a future version.
         """
-        super().__init__(name=name, bus=bus)
+        super().__init__(name=name)
         self._bridged = bridged
-        if bridged is not None and bus is None:
-            raise ValueError(f"PipelineTask '{self}': ``bridged`` requires a ``bus`` to be set.")
         if tool_resources is not None:
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
@@ -406,11 +401,11 @@ class PipelineTask(BaseTask):
 
         # When bridged, wrap the user pipeline with bus edge processors
         # so frames tee onto the bus at the source/sink and incoming bus
-        # frames are injected back into the local pipeline.
+        # frames are injected back into the local pipeline. The edges
+        # read the task's bus lazily, so the bus only needs to be set
+        # (via ``attach()``) before ``run()`` is called.
         if bridged is not None:
-            assert bus is not None  # validated above
             edge_source = _BusEdgeProcessor(
-                bus=bus,
                 task=self,
                 direction=FrameDirection.UPSTREAM,
                 bridges=bridged,
@@ -418,7 +413,6 @@ class PipelineTask(BaseTask):
                 name=f"{self}::EdgeSource",
             )
             edge_sink = _BusEdgeProcessor(
-                bus=bus,
                 task=self,
                 direction=FrameDirection.DOWNSTREAM,
                 bridges=bridged,

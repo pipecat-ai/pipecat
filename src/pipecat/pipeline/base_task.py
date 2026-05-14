@@ -152,7 +152,6 @@ class BaseTask(BaseObject, BusSubscriber):
         self,
         name: str | None = None,
         *,
-        bus: TaskBus | None = None,
         active: bool = True,
     ):
         """Initialize the BaseTask.
@@ -161,15 +160,15 @@ class BaseTask(BaseObject, BusSubscriber):
             name: Unique name for this task. If ``None``, an auto-generated
                 name is used (useful for instances that don't participate
                 in inter-task communication).
-            bus: The `TaskBus` for inter-task communication. ``None``
-                means this task doesn't participate in inter-task
-                messaging; methods that require a bus will fail at
-                call time.
             active: Whether the task starts active. Defaults to True.
         """
         super().__init__(name=name)
 
-        self._bus = bus
+        # Runner-provided context. Populated by ``attach()`` before
+        # ``run()`` is called. Accessing ``self.bus`` / ``self.registry``
+        # before ``attach()`` raises.
+        self._bus: TaskBus | None = None
+        self._registry: TaskRegistry | None = None
 
         # Activation. Pending activation is deferred until the task
         # starts, then on_activated fires.
@@ -183,9 +182,6 @@ class BaseTask(BaseObject, BusSubscriber):
         self._children: list[BaseTask] = []
         self._started_at: float | None = None
         self._finished_event: asyncio.Event = asyncio.Event()
-
-        # Registry is set by the runner via set_registry().
-        self._registry: TaskRegistry | None = None
 
         # Job coordination. Worker state tracks active job requests
         # keyed by job_id, supporting multiple jobs in flight
@@ -223,8 +219,14 @@ class BaseTask(BaseObject, BusSubscriber):
         self._register_event_handler("on_task_failed")
 
     @property
-    def bus(self) -> TaskBus | None:
-        """The bus instance for task communication."""
+    def bus(self) -> TaskBus:
+        """The bus this task is attached to.
+
+        Raises:
+            RuntimeError: If accessed before :meth:`attach` has been called.
+        """
+        if self._bus is None:
+            raise RuntimeError(f"Task '{self}': bus is not set; call attach() first.")
         return self._bus
 
     @property
@@ -243,8 +245,14 @@ class BaseTask(BaseObject, BusSubscriber):
         return self._parent
 
     @property
-    def registry(self) -> TaskRegistry | None:
-        """The shared task registry, if set by a runner."""
+    def registry(self) -> TaskRegistry:
+        """The shared task registry this task is attached to.
+
+        Raises:
+            RuntimeError: If accessed before :meth:`attach` has been called.
+        """
+        if self._registry is None:
+            raise RuntimeError(f"Task '{self}': registry is not set; call attach() first.")
         return self._registry
 
     @property
@@ -276,13 +284,19 @@ class BaseTask(BaseObject, BusSubscriber):
         """Active job groups launched by this task, keyed by job_id."""
         return self._job_groups
 
-    def set_registry(self, registry: TaskRegistry) -> None:
-        """Set the shared task registry.
+    def attach(self, *, registry: TaskRegistry, bus: TaskBus) -> None:
+        """Attach the task to a runner-provided registry and bus.
+
+        Called by the runner (typically from ``spawn()``) before the
+        task is run. After this call, :attr:`registry` and :attr:`bus`
+        return the provided instances.
 
         Args:
-            registry: The shared registry instance.
+            registry: The shared task registry.
+            bus: The shared task bus.
         """
         self._registry = registry
+        self._bus = bus
 
     async def cleanup(self) -> None:
         """Clean up the task and release resources.

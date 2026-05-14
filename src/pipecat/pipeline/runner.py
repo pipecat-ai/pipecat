@@ -159,7 +159,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         if task.name in self._entries:
             logger.error(f"PipelineRunner '{self}': task '{task.name}' already exists, skipping")
             return
-        task.set_registry(self._registry)
+        task.attach(registry=self._registry, bus=self._bus)
         await self._registry.watch(task.name, self._on_local_task_ready)
         entry = _TaskEntry(task=task)
         self._entries[task.name] = entry
