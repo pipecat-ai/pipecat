@@ -11,6 +11,8 @@ self-contained conversation context, removing the need for subclasses
 to manually wire `LLMContextAggregatorPair`.
 """
 
+from typing import Any
+
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -49,7 +51,7 @@ class LLMContextTask(LLMTask):
         self,
         name: str,
         *,
-        llm: LLMService,
+        llm: LLMService[Any],
         active: bool = False,
         bridged: tuple[str, ...] | None = None,
         defer_tool_frames: bool = True,

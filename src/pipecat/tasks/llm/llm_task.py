@@ -78,7 +78,7 @@ class LLMTask(PipelineTask):
         self,
         name: str,
         *,
-        llm: LLMService,
+        llm: LLMService[Any],
         pipeline: Pipeline | None = None,
         active: bool = False,
         bridged: tuple[str, ...] | None = None,
