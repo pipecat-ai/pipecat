@@ -10,7 +10,12 @@ import asyncio
 
 from loguru import logger
 
-from pipecat.bus import BusMessage, BusTaskRegistryMessage, TaskBus
+from pipecat.bus import (
+    BusCancelTaskMessage,
+    BusEndTaskMessage,
+    BusMessage,
+    BusTaskRegistryMessage,
+)
 from pipecat.bus.messages import BusLocalMessage
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.bus.serializers.base import MessageSerializer
@@ -21,19 +26,17 @@ try:
     from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use WebSocketProxyServerAgent, you need to `pip install pipecat-ai-subagents[websocket]`."
-    )
+    logger.error("In order to use WebSocketProxyServerTask, you need to `pip install starlette`.")
     raise Exception(f"Missing module: {e}")
 
 
-class WebSocketProxyServerAgent(BaseTask):
+class WebSocketProxyServerTask(BaseTask):
     """Receives bus messages from a remote client over WebSocket.
 
     Accepts a FastAPI/Starlette WebSocket connection and forwards
-    messages between the remote client and a local agent. Only messages
-    from the local agent targeted at the remote agent are sent. Only
-    inbound messages targeted at the local agent are accepted.
+    messages between the remote client and a local task. Only messages
+    from the local task targeted at the remote task are sent. Only
+    inbound messages targeted at the local task are accepted.
 
     Event handlers available:
 
@@ -45,58 +48,55 @@ class WebSocketProxyServerAgent(BaseTask):
         @app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()
-            proxy = WebSocketProxyServerAgent(
+            proxy = WebSocketProxyServerTask(
                 "gateway",
-                bus=runner.bus,
                 websocket=websocket,
-                agent_name="worker",
-                remote_agent_name="voice",
+                task_name="worker",
+                remote_task_name="voice",
             )
 
             @proxy.event_handler("on_client_connected")
-            async def on_client_connected(agent, websocket):
+            async def on_client_connected(task, websocket):
                 logger.info("Client connected")
 
             @proxy.event_handler("on_client_disconnected")
-            async def on_client_disconnected(agent, websocket):
+            async def on_client_disconnected(task, websocket):
                 logger.info("Client disconnected")
 
-            await runner.add_task(proxy)
+            await runner.spawn(proxy)
     """
 
     def __init__(
         self,
         name: str,
         *,
-        bus: TaskBus,
         websocket: WebSocket,
-        agent_name: str,
-        remote_agent_name: str,
+        task_name: str,
+        remote_task_name: str,
         forward_messages: tuple[type[BusMessage], ...] = (),
         serializer: MessageSerializer | None = None,
     ):
-        """Initialize the WebSocketProxyServerAgent.
+        """Initialize the WebSocketProxyServerTask.
 
         Args:
-            name: Unique name for this agent.
-            bus: The `TaskBus` for inter-agent communication.
+            name: Unique name for this task.
             websocket: An accepted FastAPI/Starlette WebSocket connection.
-            agent_name: Name of the local agent to route messages to/from.
-                Only messages from this agent are forwarded to the client.
-            remote_agent_name: Name of the agent on the remote client.
-                Only outbound messages targeted at this agent are sent.
-                Only inbound messages targeted at the local agent are accepted.
+            task_name: Name of the local task to route messages to/from.
+                Only messages from this task are forwarded to the client.
+            remote_task_name: Name of the task on the remote client.
+                Only outbound messages targeted at this task are sent.
+                Only inbound messages targeted at the local task are accepted.
             forward_messages: Additional message types to forward from
-                the local agent (e.g. ``(BusFrameMessage,)`` for frame
-                routing). These are forwarded based on source agent name
+                the local task (e.g. ``(BusFrameMessage,)`` for frame
+                routing). These are forwarded based on source task name
                 only, regardless of target.
             serializer: Serializer for bus messages. Defaults to
                 `JSONMessageSerializer`.
         """
-        super().__init__(name, bus=bus)
-        self._ws = websocket
-        self._agent_name = agent_name
-        self._remote_agent_name = remote_agent_name
+        super().__init__(name)
+        self._ws: WebSocket | None = websocket
+        self._task_name = task_name
+        self._remote_task_name = remote_task_name
         self._forward_messages = forward_messages
         self._serializer = serializer or JSONMessageSerializer()
         self._receive_task: asyncio.Task | None = None
@@ -104,19 +104,11 @@ class WebSocketProxyServerAgent(BaseTask):
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
 
-    async def cleanup(self):
-        """Cancel the receive loop task and release resources."""
-        await super().cleanup()
+    async def start(self) -> None:
+        """Start the WebSocket receive loop and watch the local task."""
+        await super().start()
 
-        if self._receive_task:
-            await self.cancel_task(self._receive_task)
-            self._receive_task = None
-
-    async def on_ready(self) -> None:
-        """Start receiving messages from the WebSocket and watch the local agent."""
-        await super().on_ready()
-
-        logger.debug(f"Agent '{self}': WebSocket proxy server ready")
+        logger.debug(f"Task '{self}': WebSocket proxy server ready")
 
         await self._call_event_handler("on_client_connected", self._ws)
 
@@ -125,32 +117,41 @@ class WebSocketProxyServerAgent(BaseTask):
         # Schedule task right away.
         await asyncio.sleep(0)
 
-        # Watch the local agent so we can notify the remote side when it's ready
-        await self.watch_task(self._agent_name)
+        # Watch the local task so we can notify the remote side when it's ready.
+        await self.watch_task(self._task_name)
+
+    async def stop(self) -> None:
+        """Cancel the receive loop and close the WebSocket connection."""
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+        if self._ws and self._ws.client_state == WebSocketState.CONNECTED:
+            await self._ws.close()
+            logger.debug(f"Task '{self}': WebSocket connection closed")
+        await super().stop()
 
     async def on_task_ready(self, data: TaskReadyData) -> None:
-        """Notify the remote client that the local agent is ready."""
+        """Notify the remote client that the local task is ready."""
         if not self._ws:
             return
 
-        if data.agent_name != self._agent_name:
+        if data.task_name != self._task_name:
             return
 
-        logger.debug(f"Agent '{self}': local agent '{self._agent_name}' ready, notifying remote")
+        logger.debug(f"Task '{self}': local task '{self._task_name}' ready, notifying remote")
 
         try:
             msg = BusTaskRegistryMessage(
                 source=self.name,
                 runner=data.runner,
-                agents=[TaskRegistryEntry(name=self._agent_name)],
+                tasks=[TaskRegistryEntry(name=self._task_name)],
             )
-
             await self._send_ws(msg)
         except Exception:
-            logger.exception(f"Agent '{self}': failed to send registry to remote")
+            logger.exception(f"Task '{self}': failed to send registry to remote")
 
     async def on_bus_message(self, message: BusMessage) -> None:
-        """Forward messages from the local agent to the remote client.
+        """Forward messages from the local task to the remote client.
 
         Args:
             message: The bus message to process.
@@ -163,22 +164,25 @@ class WebSocketProxyServerAgent(BaseTask):
         if isinstance(message, BusLocalMessage):
             return
 
-        if message.source != self._agent_name:
+        if message.source != self._task_name:
             return
 
-        # Forward targeted messages from the local agent to the remote agent
-        if message.target == self._remote_agent_name:
+        # Forward targeted messages from the local task to the remote task.
+        if message.target == self._remote_task_name:
             await self._send_ws(message)
-        # Forward additional message types from the local agent
+        # Forward additional message types from the local task.
         elif isinstance(message, self._forward_messages):
             await self._send_ws(message)
 
-    async def _stop(self) -> None:
-        """Close the WebSocket connection and stop."""
-        if self._ws and self._ws.client_state == WebSocketState.CONNECTED:
-            await self._ws.close()
-            logger.debug(f"Agent '{self}': WebSocket connection closed")
-        await super()._stop()
+    async def _handle_task_end(self, message: BusEndTaskMessage) -> None:
+        """Signal the run loop to finish on a graceful end."""
+        await super()._handle_task_end(message)
+        self._finished_event.set()
+
+    async def _handle_task_cancel(self, message: BusCancelTaskMessage) -> None:
+        """Signal the run loop to finish on cancellation."""
+        await super()._handle_task_cancel(message)
+        self._finished_event.set()
 
     async def _send_ws(self, message: BusMessage) -> None:
         """Serialize and send a message over the WebSocket."""
@@ -187,9 +191,9 @@ class WebSocketProxyServerAgent(BaseTask):
         try:
             data = self._serializer.serialize(message)
             await self._ws.send_bytes(data)
-            logger.trace(f"Agent '{self}': sent {message}")
-        except (WebSocketDisconnect, Exception):
-            logger.warning(f"Agent '{self}': connection closed, stopping forwarding")
+            logger.trace(f"Task '{self}': sent {message}")
+        except WebSocketDisconnect:
+            logger.warning(f"Task '{self}': connection closed, stopping forwarding")
             ws = self._ws
             self._ws = None
             await self._call_event_handler("on_client_disconnected", ws)
@@ -204,26 +208,26 @@ class WebSocketProxyServerAgent(BaseTask):
                     if not message:
                         continue
 
-                    # Accept additional message types (e.g. BusFrameMessage)
+                    # Accept additional message types (e.g. BusFrameMessage).
                     if self._forward_messages and isinstance(message, self._forward_messages):
-                        logger.trace(f"Agent '{self}': received {message} from client")
+                        logger.trace(f"Task '{self}': received {message} from client")
                         await self.send_message(message)
                         continue
 
-                    # Only accept other messages targeted at the local agent
-                    if message.target != self._agent_name:
+                    # Only accept other messages targeted at the local task.
+                    if message.target != self._task_name:
                         logger.warning(
-                            f"Agent '{self}': dropped inbound message with "
+                            f"Task '{self}': dropped inbound message with "
                             f"unexpected target '{message.target}'"
                         )
                         continue
 
-                    logger.trace(f"Agent '{self}': received {message} from client")
+                    logger.trace(f"Task '{self}': received {message} from client")
                     await self.send_message(message)
                 except Exception:
-                    logger.exception(f"Agent '{self}': failed to deserialize client message")
+                    logger.exception(f"Task '{self}': failed to deserialize client message")
         except WebSocketDisconnect:
-            logger.warning(f"Agent '{self}': client disconnected")
+            logger.warning(f"Task '{self}': client disconnected")
             ws = self._ws
             self._ws = None
             await self._call_event_handler("on_client_disconnected", ws)
