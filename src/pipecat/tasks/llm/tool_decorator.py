@@ -1,0 +1,62 @@
+#
+# Copyright (c) 2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Decorator for marking agent methods as tools."""
+
+
+def tool(fn=None, *, cancel_on_interruption=True, timeout=None):
+    """Mark a method as a tool.
+
+    On ``LLMTask`` subclasses, decorated methods are automatically
+    registered with the LLM via ``register_direct_function`` and
+    included in ``build_tools()``.
+
+    Can be used with or without arguments::
+
+        @tool
+        async def my_tool(self, params, arg: str):
+            ...
+
+        @tool(cancel_on_interruption=False, timeout=60)
+        async def my_tool(self, params, arg: str):
+            ...
+
+    Args:
+        fn: The function to decorate (when used without arguments).
+        cancel_on_interruption: Whether to cancel this tool call when
+            an interruption occurs. Defaults to True. Only applies to
+            ``LLMTask`` tools.
+        timeout: Optional timeout in seconds for this tool call.
+            Defaults to None (uses the LLM service default).
+    """
+
+    def decorator(fn):
+        fn.is_agent_tool = True
+        fn.cancel_on_interruption = cancel_on_interruption
+        fn.timeout = timeout
+        return fn
+
+    if fn is not None:
+        return decorator(fn)
+    return decorator
+
+
+def _collect_tools(obj) -> list:
+    """Collect all ``@tool`` decorated bound methods from an object.
+
+    Walks the MRO so that overridden methods in subclasses take
+    precedence over base-class definitions.
+    """
+    seen: set[str] = set()
+    tools = []
+    for cls in type(obj).__mro__:
+        for name, val in cls.__dict__.items():
+            if name in seen:
+                continue
+            seen.add(name)
+            if callable(val) and getattr(val, "is_agent_tool", False):
+                tools.append(getattr(obj, name))
+    return tools
