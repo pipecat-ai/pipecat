@@ -6,6 +6,8 @@
 
 """Decorator for marking methods as task-ready handlers."""
 
+from collections.abc import Callable
+
 
 def task_ready(*, name: str):
     """Mark a method as a handler for a specific task becoming ready.
@@ -41,7 +43,7 @@ def _collect_task_ready_handlers(obj) -> dict:
         ValueError: If two handlers watch the same task name.
     """
     seen: set[str] = set()
-    handlers: dict[str, object] = {}
+    handlers: dict[str, Callable] = {}
     for cls in type(obj).__mro__:
         for attr_name, val in cls.__dict__.items():
             if attr_name in seen:
