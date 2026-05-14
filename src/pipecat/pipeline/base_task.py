@@ -417,14 +417,16 @@ class BaseTask(BaseObject, BusSubscriber):
         """
         pass
 
-    async def on_job_response(self, message: BusJobResponseMessage) -> None:
+    async def on_job_response(
+        self, message: BusJobResponseMessage | BusJobResponseUrgentMessage
+    ) -> None:
         """Called when a worker sends a response.
 
         Override to process individual results as they arrive.
         """
         pass
 
-    async def on_job_update(self, message: BusJobUpdateMessage) -> None:
+    async def on_job_update(self, message: BusJobUpdateMessage | BusJobUpdateUrgentMessage) -> None:
         """Called when a worker sends a progress update."""
         pass
 
@@ -498,21 +500,21 @@ class BaseTask(BaseObject, BusSubscriber):
         elif isinstance(message, BusCancelTaskMessage):
             await self._handle_task_cancel(message)
         elif isinstance(message, BusJobRequestMessage):
-            await self._handle_task_request(message)
+            await self._handle_job_request(message)
         elif isinstance(message, (BusJobResponseMessage, BusJobResponseUrgentMessage)):
-            await self._handle_task_response(message)
+            await self._handle_job_response(message)
         elif isinstance(message, (BusJobUpdateMessage, BusJobUpdateUrgentMessage)):
-            await self._handle_task_update(message)
+            await self._handle_job_update(message)
         elif isinstance(message, BusJobUpdateRequestMessage):
-            await self._handle_task_update_request(message)
+            await self._handle_job_update_request(message)
         elif isinstance(message, BusJobCancelMessage):
-            await self._handle_task_cancel(message)
+            await self._handle_job_cancel(message)
         elif isinstance(message, BusJobStreamStartMessage):
-            await self._handle_task_stream_start(message)
+            await self._handle_job_stream_start(message)
         elif isinstance(message, BusJobStreamDataMessage):
-            await self._handle_task_stream_data(message)
+            await self._handle_job_stream_data(message)
         elif isinstance(message, BusJobStreamEndMessage):
-            await self._handle_task_stream_end(message)
+            await self._handle_job_stream_end(message)
 
         await self._call_event_handler("on_bus_message", message)
 
@@ -1085,11 +1087,11 @@ class BaseTask(BaseObject, BusSubscriber):
         group = self._create_job_group(task_names, timeout=timeout, cancel_on_error=cancel_on_error)
 
         for task_name in task_names:
-            await self._send_task_request(task_name, group.job_id, job_name=name, payload=payload)
+            await self._send_job_request(task_name, group.job_id, job_name=name, payload=payload)
 
         return group
 
-    async def _send_task_request(
+    async def _send_job_request(
         self,
         task_name: str,
         job_id: str,
@@ -1179,7 +1181,7 @@ class BaseTask(BaseObject, BusSubscriber):
                 BusCancelTaskMessage(source=self.name, target=child.name, reason=message.reason)
             )
 
-    async def _handle_task_request(self, message: BusJobRequestMessage) -> None:
+    async def _handle_job_request(self, message: BusJobRequestMessage) -> None:
         """Handle an incoming job request.
 
         Dispatches to @job handlers if any match, otherwise falls back
@@ -1199,14 +1201,14 @@ class BaseTask(BaseObject, BusSubscriber):
             lock = self._job_locks.setdefault(message.job_name, asyncio.Lock())
 
         task = self.create_task(
-            self._run_task_handler(message.job_id, handler, message, lock),
+            self._run_job_handler(message.job_id, handler, message, lock),
             f"{self.name}::job_{message.job_name or 'default'}",
         )
         self._job_handler_tasks[message.job_id] = task
 
         await self._call_event_handler("on_job_request", message)
 
-    async def _run_task_handler(
+    async def _run_job_handler(
         self,
         job_id: str,
         handler,
@@ -1224,7 +1226,7 @@ class BaseTask(BaseObject, BusSubscriber):
         finally:
             self._job_handler_tasks.pop(job_id, None)
 
-    async def _handle_task_response(
+    async def _handle_job_response(
         self, message: BusJobResponseMessage | BusJobResponseUrgentMessage
     ) -> None:
         """Handle a job response and track group completion."""
@@ -1245,7 +1247,7 @@ class BaseTask(BaseObject, BusSubscriber):
 
         await self._track_job_group_response(message.job_id, message.source, message.response)
 
-    async def _handle_task_update(
+    async def _handle_job_update(
         self, message: BusJobUpdateMessage | BusJobUpdateUrgentMessage
     ) -> None:
         """Handle a job progress update."""
@@ -1255,13 +1257,13 @@ class BaseTask(BaseObject, BusSubscriber):
             message.job_id, JobGroupEvent(JobGroupEvent.UPDATE, message.source, message.update)
         )
 
-    async def _handle_task_update_request(self, message: BusJobUpdateRequestMessage) -> None:
+    async def _handle_job_update_request(self, message: BusJobUpdateRequestMessage) -> None:
         """Handle a job update request from the requester."""
         if message.job_id in self._active_jobs:
             await self.on_job_update_requested(message)
             await self._call_event_handler("on_job_update_requested", message)
 
-    async def _handle_task_cancel(self, message: BusJobCancelMessage) -> None:
+    async def _handle_job_cancel(self, message: BusJobCancelMessage) -> None:
         """Handle a job cancellation.
 
         Cancels the running handler task (if any), calls the
@@ -1278,7 +1280,7 @@ class BaseTask(BaseObject, BusSubscriber):
             await self._call_event_handler("on_job_cancelled", message)
             await self.send_job_response(message.job_id, status=JobStatus.CANCELLED)
 
-    async def _handle_task_stream_start(self, message: BusJobStreamStartMessage) -> None:
+    async def _handle_job_stream_start(self, message: BusJobStreamStartMessage) -> None:
         """Handle the start of a streaming job response."""
         await self.on_job_stream_start(message)
         await self._call_event_handler("on_job_stream_start", message)
@@ -1287,7 +1289,7 @@ class BaseTask(BaseObject, BusSubscriber):
             JobGroupEvent(JobGroupEvent.STREAM_START, message.source, message.data),
         )
 
-    async def _handle_task_stream_data(self, message: BusJobStreamDataMessage) -> None:
+    async def _handle_job_stream_data(self, message: BusJobStreamDataMessage) -> None:
         """Handle a streaming job data chunk."""
         await self.on_job_stream_data(message)
         await self._call_event_handler("on_job_stream_data", message)
@@ -1296,7 +1298,7 @@ class BaseTask(BaseObject, BusSubscriber):
             JobGroupEvent(JobGroupEvent.STREAM_DATA, message.source, message.data),
         )
 
-    async def _handle_task_stream_end(self, message: BusJobStreamEndMessage) -> None:
+    async def _handle_job_stream_end(self, message: BusJobStreamEndMessage) -> None:
         """Handle the end of a streaming job response."""
         await self.on_job_stream_end(message)
         await self._call_event_handler("on_job_stream_end", message)
