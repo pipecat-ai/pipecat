@@ -120,7 +120,7 @@ class WebSocketProxyClientTask(BaseTask):
 
         await self._call_event_handler("on_connected", self._ws)
 
-        self._receive_task = self.create_task(self._receive_loop(), f"{self.name}::ws_receive")
+        self._receive_task = self.create_task(self._receive_loop())
 
         # Schedule task right away.
         await asyncio.sleep(0)
