@@ -396,9 +396,6 @@ class PipelineTask(BaseTask):
         # StopFrame) has been received at the end of the pipeline.
         self._pipeline_end_event = asyncio.Event()
 
-        # This event is set when the pipeline truly finishes.
-        self._pipeline_finished_event = asyncio.Event()
-
         # When bridged, wrap the user pipeline with bus edge processors
         # so frames tee onto the bus at the source/sink and incoming bus
         # frames are injected back into the local pipeline. The edges
@@ -805,12 +802,12 @@ class PipelineTask(BaseTask):
 
         self._pipeline_end_event.clear()
 
-        # We are really done.
-        self._pipeline_finished_event.set()
+        # We are really done. Setting ``_finished_event`` makes
+        # ``BaseTask.wait()`` resolve for callers awaiting this task.
+        self._finished_event.set()
 
     async def _wait_for_pipeline_finished(self):
-        await self._pipeline_finished_event.wait()
-        self._pipeline_finished_event.clear()
+        await self._finished_event.wait()
         # Make sure we wait for the main task to complete.
         if self._process_push_task:
             await self._process_push_task
