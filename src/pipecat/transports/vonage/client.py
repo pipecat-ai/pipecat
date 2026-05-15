@@ -864,7 +864,8 @@ class VonageClient:
                 except Exception as exc:
                     logger.error(f"Exception in SDK callback task: {exc}")
                 finally:
-                    active_tasks.discard(asyncio.current_task())
+                    if (current := asyncio.current_task()) is not None:
+                        active_tasks.discard(current)
                     queue.task_done()
 
             try:

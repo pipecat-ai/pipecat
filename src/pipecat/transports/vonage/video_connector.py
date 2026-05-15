@@ -25,9 +25,9 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.vonage.client import (
-    Session,
-    Stream,
-    Subscriber,
+    Session,  # type: ignore[attr-defined]
+    Stream,  # type: ignore[attr-defined]
+    Subscriber,  # type: ignore[attr-defined]
     VonageClient,
     VonageClientListener,
 )
