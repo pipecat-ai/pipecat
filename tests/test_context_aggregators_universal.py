@@ -763,6 +763,302 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
         self.assertEqual([m["content"] for m in user_messages], ["I'm thinking", "about pizza"])
 
+    async def test_no_wait_for_transcript_basic_flow(self):
+        """``wait_for_transcript_to_end_user_turn=False`` splits the lifecycle:
+
+        - ``on_user_turn_stopped`` fires on the audible end of the turn,
+          with empty content (the transcript hasn't arrived yet).
+        - The late transcript is captured into ``_aggregation``.
+        - When the backstop timer fires (no further transcripts),
+          ``on_user_turn_message_finalized`` fires with the populated
+          transcript and the user message lands in context.
+        """
+        from unittest.mock import patch
+
+        from pipecat.processors.aggregators import llm_response_universal
+
+        # Shrink the backstop so the test runs quickly.
+        with patch.object(llm_response_universal, "DEFAULT_TTFS_P99", TRANSCRIPTION_TIMEOUT):
+            context = LLMContext()
+            user_aggregator = LLMUserAggregator(
+                context,
+                params=LLMUserAggregatorParams(
+                    user_turn_strategies=UserTurnStrategies(
+                        stop=[
+                            SpeechTimeoutUserTurnStopStrategy(
+                                user_speech_timeout=TRANSCRIPTION_TIMEOUT
+                            )
+                        ],
+                    ),
+                    wait_for_transcript_to_end_user_turn=False,
+                ),
+            )
+
+            events: list[tuple[str, str]] = []
+
+            @user_aggregator.event_handler("on_user_turn_stopped")
+            async def on_stopped(aggregator, strategy, message):
+                events.append(("stopped", message.content))
+
+            @user_aggregator.event_handler("on_user_turn_message_finalized")
+            async def on_finalized(aggregator, strategy, message):
+                events.append(("finalized", message.content))
+
+            pipeline = Pipeline([user_aggregator])
+
+            frames_to_send = [
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                # Let the user_speech_timeout fire so the strategy
+                # fires turn-stopped.
+                SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+                # Late transcript arrives after the audible stop.
+                TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+                # Wait for the backstop to fire.
+                SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+            ]
+            await run_test(pipeline, frames_to_send=frames_to_send)
+
+        # Two events fired in order: audible stop first (empty),
+        # message finalized later (populated).
+        self.assertEqual(events, [("stopped", ""), ("finalized", "Hello!")])
+
+        # Context contains the user message.
+        user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
+        self.assertEqual([m["content"] for m in user_messages], ["Hello!"])
+
+    async def test_no_wait_for_transcript_backstop_no_transcript_arrives(self):
+        """When no transcript arrives, the backstop timer still finalizes
+        the turn — ``on_user_turn_message_finalized`` fires with empty
+        content and nothing is written to context.
+        """
+        from unittest.mock import patch
+
+        from pipecat.processors.aggregators import llm_response_universal
+
+        with patch.object(llm_response_universal, "DEFAULT_TTFS_P99", TRANSCRIPTION_TIMEOUT):
+            context = LLMContext()
+            user_aggregator = LLMUserAggregator(
+                context,
+                params=LLMUserAggregatorParams(
+                    user_turn_strategies=UserTurnStrategies(
+                        stop=[
+                            SpeechTimeoutUserTurnStopStrategy(
+                                user_speech_timeout=TRANSCRIPTION_TIMEOUT
+                            )
+                        ],
+                    ),
+                    wait_for_transcript_to_end_user_turn=False,
+                ),
+            )
+
+            events: list[tuple[str, str]] = []
+
+            @user_aggregator.event_handler("on_user_turn_stopped")
+            async def on_stopped(aggregator, strategy, message):
+                events.append(("stopped", message.content))
+
+            @user_aggregator.event_handler("on_user_turn_message_finalized")
+            async def on_finalized(aggregator, strategy, message):
+                events.append(("finalized", message.content))
+
+            pipeline = Pipeline([user_aggregator])
+
+            frames_to_send = [
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                # Strategy fires turn-stopped.
+                SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+                # Backstop fires without any transcript arriving.
+                SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+            ]
+            await run_test(pipeline, frames_to_send=frames_to_send)
+
+        self.assertEqual(events, [("stopped", ""), ("finalized", "")])
+
+        # No user message added to context (empty aggregation).
+        user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
+        self.assertEqual(user_messages, [])
+
+    async def test_no_wait_for_transcript_next_turn_force_flushes_previous(self):
+        """If a new user turn starts while the previous turn's transcript
+        is still pending (precondition violation), the previous turn's
+        finalization fires before the new turn's start. Whatever
+        transcript was captured by then is what lands in context.
+        """
+        from unittest.mock import patch
+
+        from pipecat.processors.aggregators import llm_response_universal
+
+        with patch.object(
+            llm_response_universal,
+            "DEFAULT_TTFS_P99",
+            TRANSCRIPTION_TIMEOUT * 10,  # backstop should NOT fire during the test
+        ):
+            context = LLMContext()
+            user_aggregator = LLMUserAggregator(
+                context,
+                params=LLMUserAggregatorParams(
+                    user_turn_strategies=UserTurnStrategies(
+                        stop=[
+                            SpeechTimeoutUserTurnStopStrategy(
+                                user_speech_timeout=TRANSCRIPTION_TIMEOUT
+                            )
+                        ],
+                    ),
+                    wait_for_transcript_to_end_user_turn=False,
+                ),
+            )
+
+            events: list[tuple[str, str]] = []
+
+            @user_aggregator.event_handler("on_user_turn_stopped")
+            async def on_stopped(aggregator, strategy, message):
+                events.append(("stopped", message.content))
+
+            @user_aggregator.event_handler("on_user_turn_message_finalized")
+            async def on_finalized(aggregator, strategy, message):
+                events.append(("finalized", message.content))
+
+            @user_aggregator.event_handler("on_user_turn_started")
+            async def on_started(aggregator, strategy):
+                events.append(("started", ""))
+
+            pipeline = Pipeline([user_aggregator])
+
+            frames_to_send = [
+                # Turn 1
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+                # Late transcript for turn 1 arrives.
+                TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+                SleepFrame(),
+                # Turn 2 starts before turn 1's backstop fires — precondition
+                # violation. The aggregator should force-flush turn 1 first.
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+            ]
+            await run_test(pipeline, frames_to_send=frames_to_send)
+
+        # The sequence must show turn 1's audible stop and finalization
+        # firing before turn 2's start event.
+        self.assertEqual(
+            events,
+            [
+                ("started", ""),  # turn 1 starts
+                ("stopped", ""),  # turn 1 audible stop
+                ("finalized", "Hello!"),  # forced flush before turn 2 starts
+                ("started", ""),  # turn 2 starts
+            ],
+        )
+
+        user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
+        self.assertEqual([m["content"] for m in user_messages], ["Hello!"])
+
+    async def test_no_wait_for_transcript_context_order_with_assistant_response(self):
+        """End-to-end ordering test: with both aggregators, verify the user
+        message lands in context *before* the assistant message, even though
+        the user transcript arrives after the audible turn end.
+
+        Models the documented precondition: the transcript arrives before
+        the assistant content begins streaming. The user aggregator must
+        flush before the assistant aggregator does.
+        """
+        from unittest.mock import patch
+
+        from pipecat.processors.aggregators import llm_response_universal
+
+        # Short backstop so the user flush fires while the assistant
+        # response is still streaming.
+        with patch.object(llm_response_universal, "DEFAULT_TTFS_P99", 0.05):
+            context = LLMContext()
+            user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+                context,
+                user_params=LLMUserAggregatorParams(
+                    user_turn_strategies=UserTurnStrategies(
+                        stop=[
+                            SpeechTimeoutUserTurnStopStrategy(
+                                user_speech_timeout=TRANSCRIPTION_TIMEOUT
+                            )
+                        ],
+                    ),
+                    wait_for_transcript_to_end_user_turn=False,
+                ),
+            )
+
+            pipeline = Pipeline([user_aggregator, assistant_aggregator])
+
+            frames_to_send = [
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                # Strategy fires turn-stopped (audible).
+                SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+                # User transcript arrives after audible stop (the realtime
+                # service has finally emitted it).
+                TranscriptionFrame(text="What's the weather?", user_id="", timestamp="now"),
+                # Bot starts responding. By the precondition, transcripts
+                # arrive before assistant content begins streaming.
+                LLMFullResponseStartFrame(),
+                LLMTextFrame("It's sunny."),
+                # Allow time for the user backstop to fire (flushing the
+                # user message to context) before the assistant turn ends.
+                SleepFrame(sleep=0.1),
+                LLMFullResponseEndFrame(),
+                SleepFrame(),
+            ]
+            await run_test(pipeline, frames_to_send=frames_to_send)
+
+        # Context must contain the user message before the assistant message.
+        roles_and_content = [(m.get("role"), m.get("content")) for m in context.get_messages()]
+        self.assertEqual(
+            roles_and_content,
+            [
+                ("user", "What's the weather?"),
+                ("assistant", "It's sunny."),
+            ],
+        )
+
+    async def test_no_wait_for_transcript_strategies_are_mutated(self):
+        """``wait_for_transcript_to_end_user_turn=False`` mutates the
+        provided strategies: drops ``TranscriptionUserTurnStartStrategy``
+        from start, flips ``wait_for_transcript=False`` on stop.
+        """
+        from pipecat.turns.user_start import (
+            TranscriptionUserTurnStartStrategy,
+            VADUserTurnStartStrategy,
+        )
+
+        context = LLMContext()
+        stop = SpeechTimeoutUserTurnStopStrategy(
+            user_speech_timeout=TRANSCRIPTION_TIMEOUT,
+            wait_for_transcript=True,  # explicitly True; bundle should flip to False
+        )
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    start=[
+                        VADUserTurnStartStrategy(),
+                        TranscriptionUserTurnStartStrategy(),
+                    ],
+                    stop=[stop],
+                ),
+                wait_for_transcript_to_end_user_turn=False,
+            ),
+        )
+
+        # Start strategies: TranscriptionUserTurnStartStrategy dropped.
+        start_types = [type(s) for s in (user_aggregator._params.user_turn_strategies.start or [])]
+        self.assertEqual(start_types, [VADUserTurnStartStrategy])
+
+        # Stop strategy: wait_for_transcript flipped to False.
+        self.assertFalse(stop._wait_for_transcript)
+
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_empty(self):
