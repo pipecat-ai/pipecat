@@ -12,20 +12,29 @@ also acts as the host for spawned :class:`~pipecat.pipeline.base_task.BaseTask`
 instances — owning the shared :class:`~pipecat.bus.TaskBus`,
 the task registry, and the task manager that backs the entire session.
 
-For a typical single-pipeline bot, use :meth:`PipelineRunner.run`:
+For a typical single-pipeline bot, use :meth:`PipelineRunner.run` with the
+task:
 
 .. code-block:: python
 
     runner = PipelineRunner()
     await runner.run(task)
 
-For multi-task setups, additionally spawn workers:
+``run()`` returns when ``task`` finishes.
+
+For multi-task setups, spawn the additional tasks alongside the main one:
 
 .. code-block:: python
 
     runner = PipelineRunner()
-    await runner.spawn(CodeWorker("code_worker", bus=runner.bus, ...))
-    await runner.run(main_task)
+    await runner.spawn(CodeWorker("code_worker", ...))
+    await runner.run(task)
+
+Optionally, ``spawn`` every task (including the main pipeline) and call
+``run()`` with no argument. In that form ``run()`` blocks until
+:meth:`PipelineRunner.end` / :meth:`PipelineRunner.cancel` is called (or an
+incoming ``BusEndMessage`` / ``BusCancelMessage`` triggers the same path) —
+spawned tasks finishing on their own does **not** unblock it.
 """
 
 import asyncio
@@ -176,8 +185,13 @@ class PipelineRunner(BaseObject, BusSubscriber):
         when the main task finishes.
 
         If ``task`` is None, blocks until :meth:`end` or :meth:`cancel`
-        is called. Useful for hosts that only spawn tasks and have no
-        single "main" pipeline.
+        is called (or until an incoming ``BusEndMessage`` /
+        ``BusCancelMessage`` triggers the same path). Spawned tasks
+        finishing on their own does **not** unblock the runner — use
+        this form for hosts that have no single "main" pipeline and
+        want to stay up across many spawned sessions (e.g. a FastAPI
+        server). If you want the runner to finish when a specific
+        pipeline finishes, pass that pipeline as ``task``.
 
         Args:
             task: The pipeline task to run, or None.
