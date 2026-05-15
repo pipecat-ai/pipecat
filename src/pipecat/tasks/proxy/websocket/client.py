@@ -69,6 +69,7 @@ class WebSocketProxyClientTask(BaseTask):
         forward_messages: tuple[type[BusMessage], ...] = (),
         headers: dict[str, str] | None = None,
         serializer: MessageSerializer | None = None,
+        active: bool = False,
     ):
         """Initialize the WebSocketProxyClientTask.
 
@@ -88,8 +89,13 @@ class WebSocketProxyClientTask(BaseTask):
                 handshake (e.g. for authentication).
             serializer: Serializer for bus messages. Defaults to
                 `JSONMessageSerializer`.
+            active: Whether the task starts active. Defaults to ``False``
+                because ``on_activated`` opens the WebSocket connection,
+                which is almost always a deliberate action triggered by an
+                upstream event (e.g. the local client connecting). Pass
+                ``True`` to connect as soon as the task starts.
         """
-        super().__init__(name)
+        super().__init__(name, active=active)
         self._url = url
         self._remote_task_name = remote_task_name
         self._local_task_name = local_task_name
