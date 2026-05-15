@@ -23,13 +23,17 @@ import unittest
 from dataclasses import dataclass
 
 from pipecat.bus import BusDataMessage
-from pipecat.bus.network.pgmq import PgmqBus
-from pipecat.bus.network.pgmq_backends import (
-    BackendMessage,
-    IsolatedPgmqBackend,
-    PgmqBackend,
-)
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+
+try:
+    from pipecat.bus.network.pgmq import PgmqBus
+    from pipecat.bus.network.pgmq_backends import (
+        BackendMessage,
+        IsolatedPgmqBackend,
+        PgmqBackend,
+    )
+except Exception:
+    raise unittest.SkipTest("pgmq extra not installed (`pip install pipecat-ai[pgmq]`)")
 
 # ---------------------------------------------------------------------------
 # IsolatedPgmqBackend: assert it speaks the right SQL to asyncpg.
