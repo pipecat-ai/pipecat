@@ -36,6 +36,7 @@ Additional, example-specific variables are listed below.
 - [Handoff between LLM tasks](#handoff-between-llm-tasks)
 - [Parallel debate](#parallel-debate)
 - [Voice code assistant with Claude Agent SDK](#voice-code-assistant)
+- [Sensor controller](#sensor-controller)
 
 **[Distributed](#distributed)** (multi-process)
 
@@ -145,6 +146,43 @@ Main task (transport + LLM + `ask_code` tool)
 
 - **`code-assistant.py`** — Main task: STT, LLM (with system prompt + `ask_code` direct function), TTS, and transport. The `ask_code` tool dispatches a job to the worker via `task.job("code_worker", payload=...)`.
 - **`code_worker.py`** — `CodeWorker`: a bus-only `BaseTask` spawned on the runner. It accepts `@job`-style requests through the bus and runs them sequentially through a persistent Claude SDK session so follow-up questions share context.
+
+## Sensor controller
+
+Two `PipelineTask`s side by side, communicating only over job RPC. A voice agent has a single `ask_controller(question)` tool that forwards every temperature-related request to a worker; the worker owns a simulated thermometer and its own tool-calling LLM that decides how to answer (read the current value, inspect rolling stats, change the target, change the response rate). The worker is a plain `PipelineTask` — it does not subclass `LLMTask` and is not bridged.
+
+### Running
+
+```bash
+uv run sensor-controller/sensor-controller.py
+```
+
+Open <http://localhost:7860/client> in your browser to talk to your bot.
+
+To use Daily transport:
+
+```bash
+uv run sensor-controller/sensor-controller.py --transport daily
+```
+
+### Example questions
+
+- "What's the temperature?"
+- "Make it warmer."
+- "Is it stable yet?"
+- "Why is it slow?" / "Speed up the response."
+- "What was the highest reading?"
+
+### Architecture
+
+```
+Voice agent (transport + STT + LLM + TTS, tool: ask_controller)
+  └── job → Controller (PipelineTask)
+              └── SensorReader -> SensorStats -> user_agg -> llm -> assistant_agg
+```
+
+- **[`sensor-controller.py`](sensor-controller/sensor-controller.py)** — `build_sensor_controller()` returns a plain `PipelineTask`. Jobs arrive via `@worker.event_handler("on_job_request")`, the question is queued onto the worker LLM, and the LLM's reply is paired back to the job via the assistant aggregator's `on_assistant_turn_stopped` event.
+- **[`sensor.py`](sensor-controller/sensor.py)** — Two custom `FrameProcessor` subclasses: `SensorReader` runs an autonomous tick loop that emits a `SensorReadingFrame` each second (first-order lag toward target plus Gaussian noise; mutable target and response rate); `SensorStats` maintains rolling min/max/avg/trend.
 
 # Distributed
 
