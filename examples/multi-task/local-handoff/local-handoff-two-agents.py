@@ -108,7 +108,7 @@ class AcmeLLMTask(LLMTask):
         )
 
 
-def _build_greeter() -> AcmeLLMTask:
+def build_greeter() -> AcmeLLMTask:
     """Greeter: routes the user to support when they pick a product."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -128,7 +128,7 @@ def _build_greeter() -> AcmeLLMTask:
     return AcmeLLMTask("greeter", llm=llm, bridged=())
 
 
-def _build_support() -> AcmeLLMTask:
+def build_support() -> AcmeLLMTask:
     """Support: answers product questions, can hand back to the greeter."""
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -223,8 +223,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await runner.cancel()
 
-    await runner.spawn(_build_greeter())
-    await runner.spawn(_build_support())
+    await runner.spawn(build_greeter())
+    await runner.spawn(build_support())
     await runner.spawn(task)
 
     await runner.run()
