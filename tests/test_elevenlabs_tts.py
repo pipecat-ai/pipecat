@@ -6,9 +6,14 @@
 
 """Tests for ElevenLabs TTS alignment handling."""
 
+import json
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from pipecat.services.elevenlabs.tts import (
+    ElevenLabsTTSService,
     _select_alignment,
     _strip_utterance_leading_spaces,
     calculate_word_times,
@@ -155,6 +160,88 @@ def test_select_alignment_falls_back_when_preferred_null():
     )
     assert selected is not None
     assert selected["chars"] == list(" Hello")
+
+
+def _init_messages(send_mock: AsyncMock) -> list[dict[str, Any]]:
+    """Return the context-init messages (those with text=' ') sent over the WS."""
+    return [
+        json.loads(call.args[0])
+        for call in send_mock.await_args_list
+        if json.loads(call.args[0]).get("text") == " "
+    ]
+
+
+def _make_service_with_voice_settings(
+    voice_settings: dict[str, float | bool] | None,
+) -> ElevenLabsTTSService:
+    """Build a service with voice_settings preset and mocked context bookkeeping."""
+    service = ElevenLabsTTSService.__new__(ElevenLabsTTSService)
+    service._name = "ElevenLabsTTSService"
+    service._voice_settings = voice_settings
+    service._voice_settings_sent_on_current_ws = False
+    service._pronunciation_dictionary_locators = None
+    service._cumulative_time = 0
+    service._partial_word = ""
+    service._partial_word_start_time = 0.0
+    service.audio_context_available = MagicMock(return_value=False)
+    service.create_audio_context = AsyncMock()
+    service.start_ttfb_metrics = AsyncMock()
+    service.start_tts_usage_metrics = AsyncMock()
+    return service
+
+
+@pytest.mark.asyncio
+async def test_voice_settings_only_in_first_context_init():
+    """voice_settings must only ride on the first context init per WS connection.
+
+    ElevenLabs' multi-context WebSocket protocol rejects subsequent
+    context-init messages that include voice_settings with WS close 1008
+    (``voice_settings field must be provided in the first message and then
+    either be not provided or not change``).
+    """
+    service = _make_service_with_voice_settings({"stability": 0.8, "speed": 1.0})
+    ws = MagicMock()
+    ws.send = AsyncMock()
+    service._websocket = ws
+
+    async for _ in service.run_tts("hello", "ctx-1"):
+        pass
+    async for _ in service.run_tts("world", "ctx-2"):
+        pass
+    async for _ in service.run_tts("again", "ctx-3"):
+        pass
+
+    inits = _init_messages(ws.send)
+    assert len(inits) == 3
+    assert inits[0].get("voice_settings") == {"stability": 0.8, "speed": 1.0}
+    assert "voice_settings" not in inits[1]
+    assert "voice_settings" not in inits[2]
+
+
+@pytest.mark.asyncio
+async def test_voice_settings_resent_after_ws_reconnect():
+    """A fresh WS connection must (re)send voice_settings on its first context init."""
+    service = _make_service_with_voice_settings({"stability": 0.8, "speed": 1.0})
+    ws1 = MagicMock()
+    ws1.send = AsyncMock()
+    service._websocket = ws1
+
+    async for _ in service.run_tts("hello", "ctx-1"):
+        pass
+
+    # Simulate _connect_websocket completing on a brand-new WS — the patched
+    # _connect_websocket clears the flag at this exact point.
+    ws2 = MagicMock()
+    ws2.send = AsyncMock()
+    service._websocket = ws2
+    service._voice_settings_sent_on_current_ws = False
+
+    async for _ in service.run_tts("after reconnect", "ctx-2"):
+        pass
+
+    inits_ws2 = _init_messages(ws2.send)
+    assert len(inits_ws2) == 1
+    assert inits_ws2[0].get("voice_settings") == {"stability": 0.8, "speed": 1.0}
 
 
 def test_select_alignment_returns_none_when_both_missing():

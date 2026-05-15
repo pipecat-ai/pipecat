@@ -586,6 +586,13 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        # ElevenLabs' multi-context WS rejects ``voice_settings`` on any
+        # context-init message after the first one on a connection (close
+        # code 1008: "voice_settings field must be provided in the first
+        # message and then either be not provided or not change"). Track
+        # whether we've already sent it on the current WS so subsequent
+        # context inits omit the field.
+        self._voice_settings_sent_on_current_ws = False
         self._pronunciation_dictionary_locators = _pronunciation_dictionary_locators
 
         self._cumulative_time = 0
@@ -771,6 +778,8 @@ class ElevenLabsTTSService(WebsocketTTSService):
             self._websocket = await websocket_connect(
                 url, max_size=16 * 1024 * 1024, additional_headers={"xi-api-key": self._api_key}
             )
+            # Fresh WS — voice_settings must be (re)sent on the next context init.
+            self._voice_settings_sent_on_current_ws = False
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -971,10 +980,13 @@ class ElevenLabsTTSService(WebsocketTTSService):
                     self._partial_word = ""
                     self._partial_word_start_time = 0.0
 
-                    # Initialize context with voice settings and pronunciation dictionaries
+                    # Initialize context with voice settings and pronunciation dictionaries.
+                    # voice_settings is only valid on the first message of a WS connection
+                    # (ElevenLabs returns 1008 otherwise), so omit it on subsequent context inits.
                     msg: dict[str, Any] = {"text": " ", "context_id": context_id}
-                    if self._voice_settings:
+                    if self._voice_settings and not self._voice_settings_sent_on_current_ws:
                         msg["voice_settings"] = self._voice_settings
+                        self._voice_settings_sent_on_current_ws = True
                     if self._pronunciation_dictionary_locators:
                         msg["pronunciation_dictionary_locators"] = [
                             locator.model_dump()
