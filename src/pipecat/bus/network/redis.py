@@ -71,7 +71,7 @@ class RedisBus(TaskBus):
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(self._channel)
         self._pubsub = pubsub
-        self._reader_task = self.create_task(self._reader_loop(), f"{self}::redis_reader")
+        self._reader_task = self.create_task(self._reader_loop())
         await asyncio.sleep(0)
 
     async def stop(self):
