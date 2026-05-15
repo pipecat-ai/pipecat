@@ -1153,31 +1153,43 @@ class BaseTask(BaseObject, BusSubscriber):
         await self._call_event_handler("on_deactivated")
 
     async def _handle_task_end(self, message: BusEndTaskMessage) -> None:
-        """Propagate end to children and wait for them.
+        """Propagate end to children, wait for them, then stop this task.
 
-        Subclasses (e.g. `PipelineTask`) override to additionally shut
-        down their own runtime after children have finished.
+        Subclasses with their own runtime (e.g. `PipelineTask`) call
+        :meth:`_propagate_end_to_children` directly and drive their own
+        shutdown so ``_finished_event`` fires at the right moment.
 
         Args:
             message: The ``BusEndTaskMessage`` requesting a graceful end.
         """
         logger.debug(f"Task '{self}': received end")
+        await self._propagate_end_to_children(message)
+        await self.stop()
+
+    async def _handle_task_cancel(self, message: BusCancelTaskMessage) -> None:
+        """Propagate cancel to children, then stop this task.
+
+        Subclasses with their own runtime (e.g. `PipelineTask`) call
+        :meth:`_propagate_cancel_to_children` directly and drive their own
+        shutdown so ``_finished_event`` fires at the right moment.
+
+        Args:
+            message: The ``BusCancelTaskMessage`` requesting cancellation.
+        """
+        logger.debug(f"Task '{self}': received cancel")
+        await self._propagate_cancel_to_children(message)
+        await self.stop()
+
+    async def _propagate_end_to_children(self, message: BusEndTaskMessage) -> None:
+        """Forward a ``BusEndTaskMessage`` to each child and wait for them."""
         for child in self._children:
             await self.send_message(
                 BusEndTaskMessage(source=self.name, target=child.name, reason=message.reason)
             )
         await asyncio.gather(*(child.wait() for child in self._children))
 
-    async def _handle_task_cancel(self, message: BusCancelTaskMessage) -> None:
-        """Propagate cancel to children.
-
-        Subclasses (e.g. `PipelineTask`) override to additionally cancel
-        their own runtime.
-
-        Args:
-            message: The ``BusCancelTaskMessage`` requesting cancellation.
-        """
-        logger.debug(f"Task '{self}': received cancel")
+    async def _propagate_cancel_to_children(self, message: BusCancelTaskMessage) -> None:
+        """Forward a ``BusCancelTaskMessage`` to each child."""
         for child in self._children:
             await self.send_message(
                 BusCancelTaskMessage(source=self.name, target=child.name, reason=message.reason)
