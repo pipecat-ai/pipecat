@@ -105,12 +105,12 @@ class VonageRunnerArguments(RunnerArguments):
 
     Parameters:
         application_id: Vonage application ID
-        session_id: Vonage session ID
+        vonage_session_id: Vonage session ID
         token: Vonage Session Token
     """
 
     application_id: str
-    session_id: str
+    vonage_session_id: str
     token: str
 
 

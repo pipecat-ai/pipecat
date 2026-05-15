@@ -991,14 +991,14 @@ async def _run_vonage():
 
     application_id, session_id, token = await configure_vonage()
     runner_args = VonageRunnerArguments(
-        application_id=application_id, session_id=session_id, token=token
+        application_id=application_id, vonage_session_id=session_id, token=token
     )
     runner_args.handle_sigint = True
 
     # Get the bot module and run it directly
     bot_module = _get_bot_module()
 
-    print(f"Joining Vonage session: {runner_args.session_id}")
+    print(f"Joining Vonage session: {runner_args.vonage_session_id}")
     print()
 
     await bot_module.bot(runner_args)

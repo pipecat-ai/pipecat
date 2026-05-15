@@ -640,7 +640,7 @@ async def create_transport(
 
         return VonageVideoConnectorTransport(
             runner_args.application_id,
-            runner_args.session_id,
+            runner_args.vonage_session_id,
             runner_args.token,
             params=params,
         )

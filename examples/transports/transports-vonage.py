@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Example of using AWS Nova Sonic LLM service with Vonage Video Connector transport."""
+"""Example of using OpenAI Realtime voice LLM service with Vonage Video Connector transport."""
 
 import asyncio
 import os
@@ -17,16 +17,25 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
+from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
 from pipecat.runner.vonage import configure
-from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
+from pipecat.services.openai.realtime.events import (
+    AudioConfiguration,
+    AudioInput,
+    InputAudioNoiseReduction,
+    InputAudioTranscription,
+    SemanticTurnDetection,
+    SessionProperties,
+)
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.vonage.video_connector import (
     VonageVideoConnectorTransport,
     VonageVideoConnectorTransportParams,
@@ -39,15 +48,9 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def main() -> None:
-    """Main entry point for the nova sonic vonage video connector example."""
+    """Main entry point for the OpenAI Realtime vonage video connector example."""
     (application_id, session_id, token) = await configure()
 
-    system_instruction = (
-        "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
-        "the transcripts of a natural real-time conversation. Keep your responses short, generally "
-        "two or three sentences for chatty scenarios. "
-        f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
-    )
     transport = VonageVideoConnectorTransport(
         application_id,
         session_id,
@@ -59,24 +62,41 @@ async def main() -> None:
         ),
     )
 
-    llm = AWSNovaSonicLLMService(
-        secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", ""),
-        access_key_id=os.getenv("AWS_ACCESS_KEY_ID", ""),
-        region=os.getenv("AWS_REGION", ""),
-        session_token=os.getenv("AWS_SESSION_TOKEN", ""),
-        voice_id="tiffany",
+    llm = OpenAIRealtimeLLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAIRealtimeLLMService.Settings(
+            system_instruction="""You are a helpful and friendly AI.
+
+Act like a human, but remember that you aren't a human and that you can't do human
+things in the real world. Your voice and personality should be warm and engaging, with a lively and
+playful tone.
+
+If interacting in a non-English language, start by using the standard accent or dialect familiar to
+the user. Talk quickly.
+
+You are participating in a voice conversation. Keep your responses concise, short, and to the point
+unless specifically asked to elaborate on a topic.
+
+Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
+            session_properties=SessionProperties(
+                audio=AudioConfiguration(
+                    input=AudioInput(
+                        transcription=InputAudioTranscription(),
+                        turn_detection=SemanticTurnDetection(),
+                        noise_reduction=InputAudioNoiseReduction(type="near_field"),
+                    )
+                ),
+            ),
+        ),
     )
+
     context = LLMContext(
-        messages=[
-            {"role": "system", "content": f"{system_instruction}"},
-            {
-                "role": "user",
-                "content": "Tell me a fun fact!",
-            },
-        ],
+        [{"role": "developer", "content": "Say hello!"}],
     )
+
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
@@ -89,19 +109,25 @@ async def main() -> None:
         ]
     )
 
-    task = PipelineTask(pipeline)
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        observers=[TranscriptionLogObserver()],
+    )
 
-    # Handle client connection event
     event_handler: Callable[[str], Callable[[Any], Any]] = transport.event_handler
 
     @event_handler("on_client_connected")
     async def on_client_connected(transport: VonageVideoConnectorTransport, client: object) -> None:
-        logger.info(f"Client connected")
+        logger.info("Client connected")
         await task.queue_frames([LLMRunFrame()])
 
     runner = PipelineRunner()
 
-    await asyncio.gather(runner.run(task))
+    await runner.run(task)
 
 
 if __name__ == "__main__":
