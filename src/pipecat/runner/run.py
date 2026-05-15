@@ -248,6 +248,7 @@ def _configure_server_app(args: argparse.Namespace):
     # flow and the /sessions/{session_id}/... proxy routes.
     active_sessions: dict[str, dict[str, Any]] = {}
 
+    _setup_frontend_routes(app)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
     _setup_telephony_routes(app, args)
@@ -448,13 +449,27 @@ def _resolve_download_path(folder: str, filename: str) -> Path:
     return file_path
 
 
+def _setup_frontend_routes(app: FastAPI):
+    """Mount the prebuilt frontend UI and root redirect for all transports."""
+    try:
+        from pipecat_ai_prebuilt.frontend import PipecatPrebuiltUI
+    except ImportError as e:
+        logger.error(f"Prebuilt frontend not available: {e}")
+        return
+
+    app.mount("/client", PipecatPrebuiltUI)
+
+    @app.get("/", include_in_schema=False)
+    async def root_redirect():
+        """Redirect root requests to client interface."""
+        return RedirectResponse(url="/client/")
+
+
 def _setup_webrtc_routes(
     app: FastAPI, args: argparse.Namespace, active_sessions: dict[str, dict[str, Any]]
 ):
     """Set up WebRTC-specific routes."""
     try:
-        from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
-
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
         from pipecat.transports.smallwebrtc.request_handler import (
             IceCandidate,
@@ -465,14 +480,6 @@ def _setup_webrtc_routes(
     except ImportError as e:
         logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
-
-    # Mount the frontend
-    app.mount("/client", SmallWebRTCPrebuiltUI)
-
-    @app.get("/", include_in_schema=False)
-    async def root_redirect():
-        """Redirect root requests to client interface."""
-        return RedirectResponse(url="/client/")
 
     @app.get("/files/{filename:path}")
     async def download_file(filename: str):
