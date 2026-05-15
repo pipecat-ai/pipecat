@@ -104,8 +104,10 @@ async def websocket_endpoint(websocket: WebSocket):
     assistant = AcmeAssistant()
 
     await runner.spawn(proxy)
+    await runner.spawn(assistant)
+
     logger.info("Assistant server ready, waiting for activation")
-    await runner.run(assistant)
+    await runner.run()
     logger.info("Assistant server session ended")
 
 
