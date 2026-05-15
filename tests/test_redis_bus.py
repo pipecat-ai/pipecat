@@ -16,12 +16,16 @@ from pipecat.bus import (
     BusJobRequestMessage,
     BusSubscriber,
 )
-from pipecat.bus.network.redis import RedisBus
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+
+try:
+    from pipecat.bus.network.redis import RedisBus
+except Exception:
+    raise unittest.SkipTest("redis extra not installed (`pip install pipecat-ai[redis]`)")
 
 _sub_counter = itertools.count()
 
