@@ -964,9 +964,11 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         message lands in context *before* the assistant message, even though
         the user transcript arrives after the audible turn end.
 
-        Models the documented precondition: the transcript arrives before
-        the assistant content begins streaming. The user aggregator must
-        flush before the assistant aggregator does.
+        Correct ordering requires the user aggregator's deferred
+        ``push_aggregation`` to run before the assistant aggregator's
+        ``push_aggregation`` (which fires on ``LLMFullResponseEndFrame``).
+        The patched-short backstop plus the sleep between LLM start and end
+        make that constraint hold here.
         """
         from unittest.mock import patch
 
@@ -1001,8 +1003,8 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 # User transcript arrives after audible stop (the realtime
                 # service has finally emitted it).
                 TranscriptionFrame(text="What's the weather?", user_id="", timestamp="now"),
-                # Bot starts responding. By the precondition, transcripts
-                # arrive before assistant content begins streaming.
+                # Bot starts responding. Ordering correctness depends on the
+                # user backstop firing before LLMFullResponseEndFrame below.
                 LLMFullResponseStartFrame(),
                 LLMTextFrame("It's sunny."),
                 # Allow time for the user backstop to fire (flushing the

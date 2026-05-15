@@ -130,28 +130,21 @@ class LLMUserAggregatorParams:
         vad_analyzer: Voice Activity Detection analyzer instance.
         wait_for_transcript_to_end_user_turn: Defaults to True. Set to
             False when using local turn detection to drive a realtime
-            service like Gemini Live, where the LLM consumes user audio
-            directly and doesn't need the transcript in context to respond
-            — so waiting for the transcript before ending the turn is pure
-            latency. When False, the aggregator:
+            service (e.g. Gemini Live), where waiting for the transcript
+            before ending the turn is pure latency. When False:
 
-            - drops ``TranscriptionUserTurnStartStrategy`` from the start
-              strategies (so late-arriving realtime transcripts don't
-              trigger new turns),
-            - sets ``wait_for_transcript=False`` on any stop strategy that
-              supports it (so the turn ends without waiting for a
-              transcript), and
-            - defers the context flush and public ``on_user_turn_stopped``
-              event until the (late) transcript arrives or a backstop timer
-              fires (so the user's words still land in the LLM context).
+            - the user turn ends as soon as the user stops speaking,
+              without waiting for transcripts: ``on_user_turn_stopped``
+              fires immediately with empty content
+            - the user-text flush to context and the
+              ``on_user_turn_message_finalized`` event are deferred
+              until a backstop timer expires
 
-            Adjustments to user-provided strategies are logged. The
-            precondition for the deferred-context path: every user turn
-            produces one transcript in conversational order — turn N's
-            transcript arrives before any of turn N's assistant content, and
-            before turn N+1 starts. Violations are logged and
-            best-effort-recovered by force-flushing the pending turn before
-            starting the next one.
+            As part of configuring this behavior, the aggregator drops
+            ``TranscriptionUserTurnStartStrategy`` from start strategies
+            (so late transcripts don't spuriously start new turns) and
+            flips ``wait_for_transcript=False`` on supporting stop
+            strategies.
         filter_incomplete_user_turns: [DEPRECATED] Use
             ``user_turn_strategies=FilterIncompleteUserTurnStrategies()``
             instead. When enabled, the LLM outputs a turn-completion
