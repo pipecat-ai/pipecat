@@ -17,6 +17,7 @@ from typing import Any, Optional, TypeVar
 
 import numpy as np
 from loguru import logger
+from pydantic import BaseModel
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
@@ -70,7 +71,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        f"In order to use Vonage Video Connector, you need to have the Vonage Video Connector python library installed."
+        "In order to use Vonage Video Connector, you need to `pip install pipecat-ai[vonage-video-connector]`."
     )
     raise Exception(f"Missing module: {e}")
 
@@ -101,13 +102,12 @@ class VonageVideoConnectorTransportParams(TransportParams):
     clear_buffers_on_interruption: bool = True
 
 
-@dataclass
-class SubscribeSettings:
+class SubscribeSettings(BaseModel):
     """Parameters for stream input subscription.
 
     Parameters:
-        capture_audio: Whether to subscribe to audio.
-        capture_video: Whether to subscribe to video.
+        subscribe_to_audio: Whether to subscribe to audio.
+        subscribe_to_video: Whether to subscribe to video.
         preferred_resolution: Preferred resolution for video subscription.
         preferred_framerate: Preferred framerate for video subscription.
     """
