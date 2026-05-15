@@ -10,14 +10,30 @@ import unittest
 
 import pipecat.bus.network as network
 
+try:
+    import pgmq  # noqa: F401
+
+    PGMQ_AVAILABLE = True
+except ImportError:
+    PGMQ_AVAILABLE = False
+
+try:
+    import redis  # noqa: F401
+
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+
 
 class TestNetworkPackageLazyImports(unittest.TestCase):
+    @unittest.skipUnless(PGMQ_AVAILABLE, "pgmq extra not installed")
     def test_pgmq_bus_lazy_import(self):
         """``PgmqBus`` is resolved on first attribute access."""
         from pipecat.bus.network.pgmq import PgmqBus as Direct
 
         self.assertIs(network.PgmqBus, Direct)
 
+    @unittest.skipUnless(REDIS_AVAILABLE, "redis extra not installed")
     def test_redis_bus_lazy_import(self):
         """``RedisBus`` is resolved on first attribute access."""
         from pipecat.bus.network.redis import RedisBus as Direct
