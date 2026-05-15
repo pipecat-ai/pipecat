@@ -409,6 +409,53 @@ class BaseTask(BaseObject, BusSubscriber):
         """
         pass
 
+    async def on_bus_message(self, message: BusMessage) -> None:
+        """Called for every bus message after built-in lifecycle handling.
+
+        Override to handle custom message types. Built-in message types
+        (activation, end, cancel, job) are already dispatched to their
+        respective hooks before this method is called.
+
+        Args:
+            message: The `BusMessage` to process.
+        """
+        # Frame messages are not handled by the base task.
+        if isinstance(message, BusFrameMessage):
+            return
+
+        # Ignore targeted messages for other tasks
+        if message.target and message.target != self.name:
+            return
+
+        if isinstance(message, (BusTaskErrorMessage, BusTaskLocalErrorMessage)):
+            await self._handle_task_error(message)
+        elif isinstance(message, BusActivateTaskMessage):
+            await self._handle_task_activate(message)
+        elif isinstance(message, BusDeactivateTaskMessage):
+            await self._handle_task_deactivate(message)
+        elif isinstance(message, BusEndTaskMessage):
+            await self._handle_task_end(message)
+        elif isinstance(message, BusCancelTaskMessage):
+            await self._handle_task_cancel(message)
+        elif isinstance(message, BusJobRequestMessage):
+            await self._handle_job_request(message)
+        elif isinstance(message, (BusJobResponseMessage, BusJobResponseUrgentMessage)):
+            await self._handle_job_response(message)
+        elif isinstance(message, (BusJobUpdateMessage, BusJobUpdateUrgentMessage)):
+            await self._handle_job_update(message)
+        elif isinstance(message, BusJobUpdateRequestMessage):
+            await self._handle_job_update_request(message)
+        elif isinstance(message, BusJobCancelMessage):
+            await self._handle_job_cancel(message)
+        elif isinstance(message, BusJobStreamStartMessage):
+            await self._handle_job_stream_start(message)
+        elif isinstance(message, BusJobStreamDataMessage):
+            await self._handle_job_stream_data(message)
+        elif isinstance(message, BusJobStreamEndMessage):
+            await self._handle_job_stream_end(message)
+
+        await self._call_event_handler("on_bus_message", message)
+
     async def on_job_request(self, message: BusJobRequestMessage) -> None:
         """Called when this task receives a job request.
 
@@ -472,53 +519,6 @@ class BaseTask(BaseObject, BusSubscriber):
         Override to clean up resources or stop in-progress work.
         """
         pass
-
-    async def on_bus_message(self, message: BusMessage) -> None:
-        """Called for every bus message after built-in lifecycle handling.
-
-        Override to handle custom message types. Built-in message types
-        (activation, end, cancel, job) are already dispatched to their
-        respective hooks before this method is called.
-
-        Args:
-            message: The `BusMessage` to process.
-        """
-        # Frame messages are not handled by the base task.
-        if isinstance(message, BusFrameMessage):
-            return
-
-        # Ignore targeted messages for other tasks
-        if message.target and message.target != self.name:
-            return
-
-        if isinstance(message, (BusTaskErrorMessage, BusTaskLocalErrorMessage)):
-            await self._handle_task_error(message)
-        elif isinstance(message, BusActivateTaskMessage):
-            await self._handle_task_activate(message)
-        elif isinstance(message, BusDeactivateTaskMessage):
-            await self._handle_task_deactivate(message)
-        elif isinstance(message, BusEndTaskMessage):
-            await self._handle_task_end(message)
-        elif isinstance(message, BusCancelTaskMessage):
-            await self._handle_task_cancel(message)
-        elif isinstance(message, BusJobRequestMessage):
-            await self._handle_job_request(message)
-        elif isinstance(message, (BusJobResponseMessage, BusJobResponseUrgentMessage)):
-            await self._handle_job_response(message)
-        elif isinstance(message, (BusJobUpdateMessage, BusJobUpdateUrgentMessage)):
-            await self._handle_job_update(message)
-        elif isinstance(message, BusJobUpdateRequestMessage):
-            await self._handle_job_update_request(message)
-        elif isinstance(message, BusJobCancelMessage):
-            await self._handle_job_cancel(message)
-        elif isinstance(message, BusJobStreamStartMessage):
-            await self._handle_job_stream_start(message)
-        elif isinstance(message, BusJobStreamDataMessage):
-            await self._handle_job_stream_data(message)
-        elif isinstance(message, BusJobStreamEndMessage):
-            await self._handle_job_stream_end(message)
-
-        await self._call_event_handler("on_bus_message", message)
 
     async def send_message(self, message: BusMessage) -> None:
         """Send a message on the bus.
@@ -706,25 +706,6 @@ class BaseTask(BaseObject, BusSubscriber):
             timeout=timeout,
         )
 
-    async def cancel_job_group(self, job_id: str, *, reason: str | None = None) -> None:
-        """Cancel a running job group.
-
-        Args:
-            job_id: The job identifier to cancel.
-            reason: Optional human-readable reason for cancellation.
-        """
-        group = self._job_groups.pop(job_id, None)
-        if group:
-            if group.timeout_task:
-                await self.cancel_task(group.timeout_task)
-            for task_name in group.task_names:
-                await self.send_message(
-                    BusJobCancelMessage(
-                        source=self.name, target=task_name, job_id=job_id, reason=reason
-                    )
-                )
-            group.fail(reason)
-
     async def request_job_group(
         self,
         *task_names: str,
@@ -820,6 +801,25 @@ class BaseTask(BaseObject, BusSubscriber):
             cancel_on_error=cancel_on_error,
         )
 
+    async def cancel_job_group(self, job_id: str, *, reason: str | None = None) -> None:
+        """Cancel a running job group.
+
+        Args:
+            job_id: The job identifier to cancel.
+            reason: Optional human-readable reason for cancellation.
+        """
+        group = self._job_groups.pop(job_id, None)
+        if group:
+            if group.timeout_task:
+                await self.cancel_task(group.timeout_task)
+            for task_name in group.task_names:
+                await self.send_message(
+                    BusJobCancelMessage(
+                        source=self.name, target=task_name, job_id=job_id, reason=reason
+                    )
+                )
+            group.fail(reason)
+
     async def request_job_update(self, job_id: str, task_name: str) -> None:
         """Request a progress update from a worker.
 
@@ -830,6 +830,50 @@ class BaseTask(BaseObject, BusSubscriber):
         await self.send_message(
             BusJobUpdateRequestMessage(source=self.name, target=task_name, job_id=job_id)
         )
+
+    async def create_job_group_and_request_job(
+        self,
+        task_names: list[str],
+        *,
+        name: str | None = None,
+        payload: dict | None = None,
+        timeout: float | None = None,
+        cancel_on_error: bool = True,
+    ) -> JobGroup:
+        """Wait for tasks to be ready, create a job group, and send requests.
+
+        Waits for all tasks to be registered as ready, then creates
+        the group and sends a job request to each task. Does not wait
+        for the group to complete; call ``group.wait()`` or use
+        ``job_group()`` for that.
+
+        Args:
+            task_names: Names of the tasks to send the job to.
+            name: Optional job name for routing to named handlers.
+            payload: Optional structured data describing the work.
+            timeout: Optional timeout in seconds. Covers both the
+                ready-wait and job execution.
+            cancel_on_error: Whether to cancel the group if a worker
+                errors. Defaults to True.
+
+        Returns:
+            The created ``JobGroup``.
+
+        Raises:
+            JobGroupError: If tasks are not ready within the timeout.
+        """
+        all_ready = await self._wait_tasks_ready(task_names)
+        try:
+            await asyncio.wait_for(all_ready, timeout=timeout)
+        except TimeoutError:
+            raise JobGroupError("tasks not ready within timeout")
+
+        group = self._create_job_group(task_names, timeout=timeout, cancel_on_error=cancel_on_error)
+
+        for task_name in task_names:
+            await self._send_job_request(task_name, group.job_id, job_name=name, payload=payload)
+
+        return group
 
     async def send_job_response(
         self,
@@ -989,6 +1033,15 @@ class BaseTask(BaseObject, BusSubscriber):
                 )
             )
 
+    async def _maybe_activate(self) -> None:
+        """Activate the task, call on_activated, and fire event handlers."""
+        if self._started_at is not None and self._pending_activation:
+            logger.debug(f"Task '{self}': activated")
+            self._active = True
+            self._pending_activation = False
+            await self.on_activated(self._activation_args)
+            await self._call_event_handler("on_activated", self._activation_args)
+
     async def _watch_decorated_tasks(self) -> None:
         """Register watches for all ``@task_ready`` decorated handlers."""
         for task_name in self._task_ready_handlers:
@@ -1006,116 +1059,6 @@ class BaseTask(BaseObject, BusSubscriber):
             await handler(data)
         await self.on_task_ready(data)
         await self._call_event_handler("on_task_ready", data)
-
-    def _create_job_group(
-        self,
-        task_names: list[str],
-        *,
-        timeout: float | None = None,
-        cancel_on_error: bool = True,
-    ) -> JobGroup:
-        job_id = str(uuid.uuid4())
-        group = JobGroup(job_id=job_id, task_names=set(task_names), cancel_on_error=cancel_on_error)
-        self._job_groups[job_id] = group
-
-        if timeout is not None:
-            group.timeout_task = self.create_task(
-                self._task_timeout(job_id, timeout), f"task_timeout_{job_id[:8]}"
-            )
-
-        return group
-
-    async def _wait_tasks_ready(self, task_names: list[str]) -> asyncio.Future:
-        """Return a future that resolves when all named tasks are ready.
-
-        Callers can race the returned future against a timeout or group
-        done signal.
-
-        Raises:
-            RuntimeError: If the registry is not available.
-        """
-        if not self._registry:
-            raise RuntimeError(f"Task '{self}': registry not available")
-
-        ready_events: dict[str, asyncio.Event] = {}
-        for name in task_names:
-            event = asyncio.Event()
-            ready_events[name] = event
-
-            async def _on_ready(data, ev=event):
-                ev.set()
-
-            await self._registry.watch(name, _on_ready)
-
-        return asyncio.ensure_future(asyncio.gather(*(ev.wait() for ev in ready_events.values())))
-
-    async def create_job_group_and_request_job(
-        self,
-        task_names: list[str],
-        *,
-        name: str | None = None,
-        payload: dict | None = None,
-        timeout: float | None = None,
-        cancel_on_error: bool = True,
-    ) -> JobGroup:
-        """Wait for tasks to be ready, create a job group, and send requests.
-
-        Waits for all tasks to be registered as ready, then creates
-        the group and sends a job request to each task. Does not wait
-        for the group to complete; call ``group.wait()`` or use
-        ``job_group()`` for that.
-
-        Args:
-            task_names: Names of the tasks to send the job to.
-            name: Optional job name for routing to named handlers.
-            payload: Optional structured data describing the work.
-            timeout: Optional timeout in seconds. Covers both the
-                ready-wait and job execution.
-            cancel_on_error: Whether to cancel the group if a worker
-                errors. Defaults to True.
-
-        Returns:
-            The created ``JobGroup``.
-
-        Raises:
-            JobGroupError: If tasks are not ready within the timeout.
-        """
-        all_ready = await self._wait_tasks_ready(task_names)
-        try:
-            await asyncio.wait_for(all_ready, timeout=timeout)
-        except TimeoutError:
-            raise JobGroupError("tasks not ready within timeout")
-
-        group = self._create_job_group(task_names, timeout=timeout, cancel_on_error=cancel_on_error)
-
-        for task_name in task_names:
-            await self._send_job_request(task_name, group.job_id, job_name=name, payload=payload)
-
-        return group
-
-    async def _send_job_request(
-        self,
-        task_name: str,
-        job_id: str,
-        job_name: str | None = None,
-        payload: dict | None = None,
-    ) -> None:
-        await self.send_message(
-            BusJobRequestMessage(
-                source=self.name,
-                target=task_name,
-                job_id=job_id,
-                job_name=job_name,
-                payload=payload,
-            )
-        )
-
-    async def _task_timeout(self, job_id: str, timeout: float) -> None:
-        try:
-            await asyncio.sleep(timeout)
-        except asyncio.CancelledError:
-            return
-        await self.cancel_job_group(job_id, reason="timeout")
 
     async def _handle_task_error(
         self, message: BusTaskErrorMessage | BusTaskLocalErrorMessage
@@ -1321,6 +1264,72 @@ class BaseTask(BaseObject, BusSubscriber):
         )
         await self._track_job_group_response(message.job_id, message.source, message.data)
 
+    def _create_job_group(
+        self,
+        task_names: list[str],
+        *,
+        timeout: float | None = None,
+        cancel_on_error: bool = True,
+    ) -> JobGroup:
+        job_id = str(uuid.uuid4())
+        group = JobGroup(job_id=job_id, task_names=set(task_names), cancel_on_error=cancel_on_error)
+        self._job_groups[job_id] = group
+
+        if timeout is not None:
+            group.timeout_task = self.create_task(
+                self._task_timeout(job_id, timeout), f"task_timeout_{job_id[:8]}"
+            )
+
+        return group
+
+    async def _wait_tasks_ready(self, task_names: list[str]) -> asyncio.Future:
+        """Return a future that resolves when all named tasks are ready.
+
+        Callers can race the returned future against a timeout or group
+        done signal.
+
+        Raises:
+            RuntimeError: If the registry is not available.
+        """
+        if not self._registry:
+            raise RuntimeError(f"Task '{self}': registry not available")
+
+        ready_events: dict[str, asyncio.Event] = {}
+        for name in task_names:
+            event = asyncio.Event()
+            ready_events[name] = event
+
+            async def _on_ready(data, ev=event):
+                ev.set()
+
+            await self._registry.watch(name, _on_ready)
+
+        return asyncio.ensure_future(asyncio.gather(*(ev.wait() for ev in ready_events.values())))
+
+    async def _send_job_request(
+        self,
+        task_name: str,
+        job_id: str,
+        job_name: str | None = None,
+        payload: dict | None = None,
+    ) -> None:
+        await self.send_message(
+            BusJobRequestMessage(
+                source=self.name,
+                target=task_name,
+                job_id=job_id,
+                job_name=job_name,
+                payload=payload,
+            )
+        )
+
+    async def _task_timeout(self, job_id: str, timeout: float) -> None:
+        try:
+            await asyncio.sleep(timeout)
+        except asyncio.CancelledError:
+            return
+        await self.cancel_job_group(job_id, reason="timeout")
+
     def _push_job_group_event(self, job_id: str, event: JobGroupEvent) -> None:
         group = self._job_groups.get(job_id)
         if group and group.event_queue:
@@ -1341,12 +1350,3 @@ class BaseTask(BaseObject, BusSubscriber):
                 await self.on_job_completed(result)
                 await self._call_event_handler("on_job_completed", result)
                 group.complete()
-
-    async def _maybe_activate(self) -> None:
-        """Activate the task, call on_activated, and fire event handlers."""
-        if self._started_at is not None and self._pending_activation:
-            logger.debug(f"Task '{self}': activated")
-            self._active = True
-            self._pending_activation = False
-            await self.on_activated(self._activation_args)
-            await self._call_event_handler("on_activated", self._activation_args)
