@@ -860,13 +860,25 @@ class PipelineTask(BaseTask):
             await self._pipeline.cleanup()
 
     async def _handle_task_end(self, message: BusEndTaskMessage) -> None:
-        """End the pipeline after propagating end to children."""
-        await super()._handle_task_end(message)
+        """End the pipeline after propagating end to children.
+
+        Drives shutdown through the pipeline (``EndFrame``) so
+        ``_finished_event`` fires once the frame drains through the
+        sink, rather than calling ``stop()`` directly.
+        """
+        logger.debug(f"Task '{self}': received end")
+        await self._propagate_end_to_children(message)
         await self.queue_frame(EndFrame(reason=message.reason))
 
     async def _handle_task_cancel(self, message: BusCancelTaskMessage) -> None:
-        """Cancel the pipeline after propagating cancel to children."""
-        await super()._handle_task_cancel(message)
+        """Cancel the pipeline after propagating cancel to children.
+
+        Drives shutdown through the pipeline (``CancelFrame``) so
+        ``_finished_event`` fires once the frame drains, rather than
+        calling ``stop()`` directly.
+        """
+        logger.debug(f"Task '{self}': received cancel")
+        await self._propagate_cancel_to_children(message)
         await self.cancel(reason=message.reason)
 
     async def _process_push_queue(self):

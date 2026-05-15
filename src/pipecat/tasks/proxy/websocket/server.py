@@ -10,12 +10,7 @@ import asyncio
 
 from loguru import logger
 
-from pipecat.bus import (
-    BusCancelTaskMessage,
-    BusEndTaskMessage,
-    BusMessage,
-    BusTaskRegistryMessage,
-)
+from pipecat.bus import BusMessage, BusTaskRegistryMessage
 from pipecat.bus.messages import BusLocalMessage
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.bus.serializers.base import MessageSerializer
@@ -173,16 +168,6 @@ class WebSocketProxyServerTask(BaseTask):
         # Forward additional message types from the local task.
         elif isinstance(message, self._forward_messages):
             await self._send_ws(message)
-
-    async def _handle_task_end(self, message: BusEndTaskMessage) -> None:
-        """Signal the run loop to finish on a graceful end."""
-        await super()._handle_task_end(message)
-        self._finished_event.set()
-
-    async def _handle_task_cancel(self, message: BusCancelTaskMessage) -> None:
-        """Signal the run loop to finish on cancellation."""
-        await super()._handle_task_cancel(message)
-        self._finished_event.set()
 
     async def _send_ws(self, message: BusMessage) -> None:
         """Serialize and send a message over the WebSocket."""
