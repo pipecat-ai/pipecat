@@ -139,7 +139,7 @@ class PgmqBus(TaskBus):
         await super().start()
         self._queue_name = await self._backend.join(self._channel)
         logger.debug(f"{self}: joined channel via backend; queue='{self._queue_name}'")
-        self._reader_task = self.create_task(self._reader_loop(), f"{self}::pgmq_reader")
+        self._reader_task = self.create_task(self._reader_loop())
         await asyncio.sleep(0)
 
     async def stop(self):
