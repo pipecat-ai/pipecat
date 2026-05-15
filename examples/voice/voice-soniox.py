@@ -58,6 +58,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             # Add strict mode to enforce the language hints
             language_hints=[Language.EN],
             language_hints_strict=True,
+            enable_language_identification=True,
         ),
     )
 

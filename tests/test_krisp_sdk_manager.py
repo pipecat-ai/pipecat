@@ -11,11 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Mock package version check before importing pipecat
-# This allows tests to run in development mode without installed package
-_version_patcher = patch("importlib.metadata.version", return_value="0.0.0-dev")
-_version_patcher.start()
-
 # Mock krisp_audio module BEFORE any pipecat imports
 # This allows tests to run without krisp_audio installed
 mock_krisp_audio = MagicMock()
@@ -48,12 +43,15 @@ sys.modules["pipecat_ai_krisp"] = mock_pipecat_krisp
 sys.modules["pipecat_ai_krisp.audio"] = MagicMock()
 sys.modules["pipecat_ai_krisp.audio.krisp_processor"] = MagicMock()
 
-# Now we can safely import
-from pipecat.audio.krisp_instance import (
-    KRISP_SAMPLE_RATES,
-    KrispVivaSDKManager,
-    int_to_krisp_sample_rate,
-)
+# Now we can safely import. The version patch is scoped to just the import so
+# it doesn't leak across the test session and corrupt importlib.metadata.version
+# for other tests (e.g. transformers' import-time dependency checks).
+with patch("importlib.metadata.version", return_value="0.0.0-dev"):
+    from pipecat.audio.krisp_instance import (
+        KRISP_SAMPLE_RATES,
+        KrispVivaSDKManager,
+        int_to_krisp_sample_rate,
+    )
 
 
 class TestKrispVivaSDKManager:

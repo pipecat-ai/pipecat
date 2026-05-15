@@ -509,35 +509,29 @@ async def create_transport(
             "daily": lambda: DailyParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
             ),
             "webrtc": lambda: TransportParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
             ),
             "twilio": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
             "telnyx": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
             "plivo": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
             "exotel": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
         }

@@ -89,6 +89,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         mip_opt_out: bool | None = None,
         tag: list | None = None,
         should_interrupt: bool = True,
+        watchdog_min_timeout: float = 0.5,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -105,6 +106,8 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             tag: Tags to label requests for identification during usage reporting.
             should_interrupt: Whether to interrupt the bot when Flux detects that
                 the user is speaking. Defaults to True.
+            watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
+                sends silence to prevent dangling turns. Defaults to 0.5.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to the parent STTService.
         """
@@ -129,6 +132,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             mip_opt_out=mip_opt_out,
             tag=tag,
             should_interrupt=should_interrupt,
+            watchdog_min_timeout=watchdog_min_timeout,
             settings=default_settings,
             sample_rate=sample_rate,
             **kwargs,
@@ -145,9 +149,17 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
     # ------------------------------------------------------------------
 
     async def _transport_send_audio(self, audio: bytes):
+        if (
+            self._client is None
+        ):  # should never happen — caller should gate on _transport_is_active()
+            return
         await self._client.send_audio_chunk(audio)
 
     async def _transport_send_json(self, message: dict):
+        if (
+            self._client is None
+        ):  # should never happen — caller should gate on _transport_is_active()
+            return
         await self._client.send_json(message)
 
     def _transport_is_active(self) -> bool:
@@ -237,6 +249,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         if self._client and self._client.is_active:
             try:
                 self._last_stt_time = time.monotonic()
+                self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)
                 await self._client.send_audio_chunk(audio)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")

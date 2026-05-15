@@ -184,7 +184,7 @@ class SonioxTTSService(WebsocketTTSService):
         """
         # Initialize default_settings
         default_settings = self.Settings(
-            model="tts-rt-v1-preview",
+            model="tts-rt-v1",
             voice="Adrian",
             language=Language.EN,
         )

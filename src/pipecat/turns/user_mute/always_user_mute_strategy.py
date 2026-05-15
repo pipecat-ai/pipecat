@@ -18,10 +18,6 @@ class AlwaysUserMuteStrategy(BaseUserMuteStrategy):
         super().__init__()
         self._bot_speaking = False
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        self._bot_speaking = False
-
     async def process_frame(self, frame: Frame) -> bool:
         """Process an incoming frame.
 

@@ -226,7 +226,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
         # Notify disconnection
         await self._callbacks.on_client_disconnected(websocket)
 
-        await self._websocket.close()
+        await websocket.close()
         self._websocket = None
 
         logger.info(f"Client {websocket.remote_address} disconnected")

@@ -32,7 +32,9 @@ jobs:
         run: uv python install 3.12
 
       - name: Install development dependencies
-        run: uv sync --group dev --extra daily --extra tracing
+        # `--all-extras` (matching the dev setup in README.md) so pyright can
+        # resolve types from various optional dependencies.
+        run: uv sync --group dev --all-extras --no-extra gstreamer --no-extra local
 
       - name: Ruff formatter
         id: ruff-format

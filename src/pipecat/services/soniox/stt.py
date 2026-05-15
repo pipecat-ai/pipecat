@@ -8,6 +8,7 @@
 
 import json
 import time
+from collections import Counter
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
@@ -199,6 +200,24 @@ def _prepare_language_hints(
     prepared_languages = [language_to_soniox_language(lang) for lang in language_hints]
     # Remove duplicates (in case of language_hints with multiple regions).
     return list(set(prepared_languages))
+
+
+def _language_from_tokens(tokens: list[dict]) -> Language | None:
+    language_counts: Counter[Language] = Counter()
+
+    for token in tokens:
+        language = token.get("language")
+        if not language:
+            continue
+        try:
+            language_counts[Language(language)] += 1
+        except ValueError:
+            pass
+
+    if not language_counts:
+        return None
+
+    return language_counts.most_common(1)[0][0]
 
 
 @dataclass
@@ -557,6 +576,7 @@ class SonioxSTTService(WebsocketSTTService):
         async def send_endpoint_transcript():
             if self._final_transcription_buffer:
                 text = "".join(map(lambda token: token["text"], self._final_transcription_buffer))
+                language = _language_from_tokens(self._final_transcription_buffer)
                 # Soniox only pushes TranscriptionFrame when an end token is received,
                 # so every TranscriptionFrame is inherently finalized
                 await self.push_frame(
@@ -564,11 +584,12 @@ class SonioxSTTService(WebsocketSTTService):
                         text=text,
                         user_id=self._user_id,
                         timestamp=time_now_iso8601(),
+                        language=language,
                         result=self._final_transcription_buffer,
                         finalized=True,
                     )
                 )
-                await self._handle_transcription(text, is_final=True)
+                await self._handle_transcription(text, is_final=True, language=language)
                 await self.stop_processing_metrics()
                 self._final_transcription_buffer = []
 
@@ -648,4 +669,7 @@ class SonioxSTTService(WebsocketSTTService):
         Args:
             silence: Silent PCM audio bytes (unused, Soniox uses a protocol message).
         """
+        if self._websocket is None:
+            logger.warning(f"{self}: websocket unavailable, skipping keepalive")
+            return
         await self._websocket.send(KEEPALIVE_MESSAGE)

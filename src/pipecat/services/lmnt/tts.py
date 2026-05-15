@@ -37,14 +37,17 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_lmnt_language(language: Language) -> str | None:
+def language_to_lmnt_language(language: Language) -> str:
     """Convert a Language enum to LMNT language code.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding LMNT language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AR: "ar",
@@ -267,10 +270,11 @@ class LmntTTSService(InterruptibleTTSService):
             }
 
             # Connect to LMNT's websocket directly
-            self._websocket = await websocket_connect("wss://api.lmnt.com/v1/ai/speech/stream")
+            websocket = await websocket_connect("wss://api.lmnt.com/v1/ai/speech/stream")
+            self._websocket = websocket
 
             # Send initialization message
-            await self._websocket.send(json.dumps(init_msg))
+            await websocket.send(json.dumps(init_msg))
 
             await self._call_event_handler("on_connected")
         except Exception as e:

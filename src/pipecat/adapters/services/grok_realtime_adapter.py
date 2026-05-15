@@ -13,7 +13,7 @@ Grok's Voice Agent API.
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from loguru import logger
 
@@ -85,7 +85,10 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             List of messages with sensitive data redacted.
         """
-        return self.get_messages(context, truncate_large_values=True)
+        return cast(
+            list[dict[str, Any]],
+            self.get_messages(context, truncate_large_values=True),
+        )
 
     @dataclass
     class ConvertedMessages:
@@ -111,11 +114,20 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         if not universal_context_messages:
             return self.ConvertedMessages(messages=[])
 
-        messages = copy.deepcopy(universal_context_messages)
+        # NOTE: This adapter does not yet handle ``LLMSpecificMessage`` —
+        # those are filtered out below. Other adapters (e.g. Anthropic)
+        # dispatch LLMSpecific items through a per-provider passthrough.
+        # The pack-into-single-text-message strategy here doesn't compose
+        # with opaque per-provider payloads.
+        messages: list[dict[str, Any]] = [
+            cast(dict[str, Any], m)
+            for m in copy.deepcopy(universal_context_messages)
+            if isinstance(m, dict)
+        ]
         system_instruction = None
 
         # Extract system message as session instructions
-        if messages[0].get("role") == "system":
+        if messages and messages[0].get("role") == "system":
             system = messages.pop(0)
             content = system.get("content")
             if isinstance(content, str):
@@ -133,7 +145,9 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         # Single user message can be sent normally
         if len(messages) == 1 and messages[0].get("role") == "user":
             return self.ConvertedMessages(
-                messages=[self._from_universal_context_message(messages[0])],
+                messages=[
+                    self._from_universal_context_message(cast(LLMContextMessage, messages[0]))
+                ],
                 system_instruction=system_instruction,
             )
 
@@ -181,26 +195,29 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             ConversationItem formatted for Grok Realtime API.
         """
-        if message.get("role") == "user":
-            content = message.get("content")
+        # NOTE: ``LLMSpecificMessage`` is not yet handled here — see the
+        # corresponding note in `_from_universal_context_messages`.
+        msg = cast(dict[str, Any], message)
+        if msg.get("role") == "user":
+            content = msg.get("content")
             if isinstance(content, list):
-                text_content = ""
+                text_parts = []
                 for c in content:
                     if c.get("type") == "text":
-                        text_content += " " + c.get("text")
+                        text_parts.append(c.get("text"))
                     else:
                         logger.error(
-                            f"Unhandled content type in context message: {c.get('type')} - {message}"
+                            f"Unhandled content type in context message: {c.get('type')} - {msg}"
                         )
-                content = text_content.strip()
+                content = " ".join(t for t in text_parts if t).strip()
             return events.ConversationItem(
                 role="user",
                 type="message",
                 content=[events.ItemContent(type="input_text", text=content)],
             )
 
-        if message.get("role") == "assistant" and message.get("tool_calls"):
-            tc = message.get("tool_calls")[0]
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            tc = msg["tool_calls"][0]
             return events.ConversationItem(
                 type="function_call",
                 call_id=tc["id"],
@@ -208,7 +225,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
                 arguments=tc["function"]["arguments"],
             )
 
-        logger.error(f"Unhandled message type in _from_universal_context_message: {message}")
+        raise ValueError(f"Unhandled message type in _from_universal_context_message: {msg}")
 
     @staticmethod
     def _to_grok_function_format(function: FunctionSchema) -> dict[str, Any]:

@@ -63,8 +63,8 @@ class SageMakerBidiClient:
         self,
         endpoint_name: str,
         region: str,
-        model_invocation_path: str = "",
-        model_query_string: str = "",
+        model_invocation_path: str | None = "",
+        model_query_string: str | None = "",
     ):
         """Initialize the SageMaker BiDi client.
 

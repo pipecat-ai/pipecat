@@ -9,7 +9,7 @@
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict, TypeGuard, TypeVar
+from typing import Any, TypedDict, TypeGuard, TypeVar, cast
 
 from anthropic import NOT_GIVEN, NotGiven
 from anthropic.types.message_param import MessageParam
@@ -121,16 +121,20 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         messages = self._from_universal_context_messages(self.get_messages(context)).messages
 
         # Sanitize messages for logging
-        messages_for_logging = []
+        messages_for_logging: list[dict[str, Any]] = []
         for message in messages:
-            msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    for item in msg["content"]:
-                        if item["type"] == "image":
-                            item["source"]["data"] = "..."
-                        if item["type"] == "thinking" and item.get("signature"):
-                            item["signature"] = "..."
+            msg: dict[str, Any] = copy.deepcopy(dict(message))
+            content = msg.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("type") == "image":
+                        source = item.get("source")
+                        if isinstance(source, dict):
+                            source["data"] = "..."
+                    if item.get("type") == "thinking" and item.get("signature"):
+                        item["signature"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 
@@ -185,8 +189,13 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     ]
                 if isinstance(next_message["content"], str):
                     next_message["content"] = [{"type": "text", "text": next_message["content"]}]
-                # Concatenate the content
-                current_message["content"].extend(next_message["content"])
+                # Concatenate the content. MessageParam types content as
+                # `str | Iterable[...]`, but this codebase assumes it's
+                # either a str or a list. The str case is handled above, so
+                # we assume that both are lists here.
+                cast(list[Any], current_message["content"]).extend(
+                    cast(list[Any], next_message["content"])
+                )
                 # Remove the next message from the list
                 messages.pop(i + 1)
             else:
@@ -239,7 +248,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             }
 
         # Fall back to assuming that the message is already in Anthropic format
-        return copy.deepcopy(message.message)
+        return cast(MessageParam, copy.deepcopy(message.message))
 
     def _from_standard_message(self, message: LLMStandardMessage) -> MessageParam:
         """Convert standard universal context message to Anthropic format.
@@ -280,20 +289,26 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     ]
                 }
         """
-        message = copy.deepcopy(message)
-        if message["role"] == "tool":
-            return {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": message["tool_call_id"],
-                        "content": message["content"],
-                    },
-                ],
-            }
-        if message.get("tool_calls"):
-            tc = message["tool_calls"]
+        # ChatCompletionMessageParam (input) and MessageParam (output) are
+        # different TypedDicts — work with the message as a plain dict for the
+        # transformations below and cast back to MessageParam at return sites.
+        msg = cast(dict[str, Any], copy.deepcopy(message))
+        if msg["role"] == "tool":
+            return cast(
+                MessageParam,
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": msg["tool_call_id"],
+                            "content": msg["content"],
+                        },
+                    ],
+                },
+            )
+        if msg.get("tool_calls"):
+            tc = msg["tool_calls"]
             ret = {"role": "assistant", "content": []}
             for tool_call in tc:
                 function = tool_call["function"]
@@ -305,8 +320,8 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     "input": arguments,
                 }
                 ret["content"].append(new_tool_use)
-            return ret
-        content = message.get("content")
+            return cast(MessageParam, ret)
+        content = msg.get("content")
         if isinstance(content, str):
             # fix empty text
             if content == "":
@@ -354,7 +369,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     image_item = content.pop(img_idx)
                     content.insert(first_txt_idx, image_item)
 
-        return message
+        return cast(MessageParam, msg)
 
     def _with_cache_control_markers(self, messages: list[MessageParam]) -> list[MessageParam]:
         """Add cache control markers to messages for prompt caching.
@@ -369,7 +384,16 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         def add_cache_control_marker(message: MessageParam):
             if isinstance(message["content"], str):
                 message["content"] = [{"type": "text", "text": message["content"]}]
-            message["content"][-1]["cache_control"] = {"type": "ephemeral"}
+            # Assumptions on the next line:
+            #   - content is a list (str case handled above; this codebase only
+            #     ever constructs content as a str or a list)
+            #   - the list is non-empty (guaranteed by the empty-content
+            #     replacement in `_from_universal_context_messages`)
+            #   - the last item is a dict. The standard-message path enforces
+            #     this via TypedDicts (which are dicts at runtime); the
+            #     LLMSpecificMessage passthrough doesn't, but in practice
+            #     callers use dicts.
+            cast(list[Any], message["content"])[-1]["cache_control"] = {"type": "ephemeral"}
 
         try:
             # Add cache control markers to the most recent two user messages.

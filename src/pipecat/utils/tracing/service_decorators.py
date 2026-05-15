@@ -11,25 +11,40 @@ rich information about service execution including configuration,
 parameters, and performance metrics.
 """
 
-import contextlib
 import functools
 import inspect
 import json
 import logging
 from collections.abc import Callable
-from multiprocessing import Value
-from typing import TYPE_CHECKING, Any, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from loguru import logger
-
-from pipecat.processors.frame_processor import FrameDirection
 
 # Type imports for type checking only
 if TYPE_CHECKING:
     from opentelemetry import context as context_api
     from opentelemetry import trace
 
+from pipecat.frames.frames import (
+    MetricsFrame,
+    TranscriptionFrame,
+    TTSStoppedFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+)
+from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.tracing.langfuse_helpers import (
+    build_llm_output_payload,
+    mark_trace_public,
+    set_stt_output_attributes,
+    set_tts_input_attributes,
+    standardize_messages_to_chatml,
+    standardize_tools_to_chatml,
+    strip_thought_from_id,
+    strip_thought_ids_from_messages,
+)
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -64,49 +79,6 @@ def _get_model_name(service) -> str:
         or getattr(service, "_model_name", None)
         or "unknown"
     )
-
-
-def _strip_thought_from_id(value):
-    """Strip __thought__ suffix and its encoded content from tool call IDs.
-
-    Some models (e.g., Gemini) append thought/reasoning content to tool call IDs
-    using __thought__ as a delimiter (e.g., ``call_abc__thought__<base64>``).
-    """
-    if not value or not isinstance(value, str) or "__thought__" not in value:
-        return value
-    return value.split("__thought__", 1)[0]
-
-
-def _strip_thought_ids_from_messages(messages):
-    """Strip __thought__ suffixes from tool_call_id fields in traced messages.
-
-    Cleans both tool-role messages (tool_call_id) and assistant-role messages
-    (id inside each entry of tool_calls).
-    """
-    if not messages:
-        return messages
-    cleaned = []
-    for msg in messages:
-        if not isinstance(msg, dict):
-            cleaned.append(msg)
-            continue
-        # Tool result messages: {role: "tool", tool_call_id: "..."}
-        if "tool_call_id" in msg:
-            msg = {**msg, "tool_call_id": _strip_thought_from_id(msg["tool_call_id"])}
-        # Assistant messages with tool_calls: [{id: "...", ...}, ...]
-        if "tool_calls" in msg and isinstance(msg["tool_calls"], list):
-            msg = {
-                **msg,
-                "tool_calls": [
-                    {**tc, "id": _strip_thought_from_id(tc.get("id", ""))}
-                    if isinstance(tc, dict) and "id" in tc
-                    else tc
-                    for tc in msg["tool_calls"]
-                ],
-            }
-        cleaned.append(msg)
-    return cleaned
-
 
 def _noop_decorator(func):
     """No-op fallback decorator when tracing is unavailable.
@@ -222,6 +194,13 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
     - Character count and text content
     - Performance metrics like TTFB
 
+    The span is scoped to the full synthesis operation, from
+    ``create_audio_context`` until ``TTSStoppedFrame`` (or
+    ``remove_audio_context`` as a safety net), so TTFB and any other
+    runtime-computed metrics land on the correct span even when audio
+    chunks are delivered after ``run_tts`` returns (e.g. WebSocket
+    streaming TTS services).
+
     Works with both async functions and generators.
 
     Args:
@@ -237,105 +216,223 @@ def traced_tts(func: Callable | None = None, *, name: str | None = None) -> Call
     def decorator(f):
         is_async_generator = inspect.isasyncgenfunction(f)
 
-        @contextlib.asynccontextmanager
-        async def tracing_context(self, text):
-            """Async context manager for TTS tracing.
+        def end_tts_span(service, context_id, *, interrupted=False):
+            """End the TTS span for ``context_id`` if still open. Idempotent."""
+            entry = service._tts_spans.pop(context_id, None)
+            if not entry:
+                return
+            try:
+                span = entry["span"]
+                if interrupted:
+                    span.set_attribute("tts.interrupted", True)
+                span.end()
+            except Exception as e:
+                logging.warning(f"Error closing TTS span: {e}")
 
-            Args:
-                self: The TTS service instance.
-                text: The text being synthesized.
+        def install_audio_context_patches(service):
+            """Install per-instance wrappers on the audio-context methods.
 
-            Yields:
-                The active span for the TTS operation.
+            The wrappers own the lifetime of the TTS span:
+
+            - ``create_audio_context``: opens the span and records
+              baseline attributes.
+            - ``append_to_audio_context``: ends the span on
+              ``TTSStoppedFrame``.
+            - ``push_frame``: records ``metrics.ttfb`` from the
+              canonical ``TTFBMetricsData`` payload of any
+              ``MetricsFrame`` pushed by ``stop_ttfb_metrics``. Reading
+              the value from the metrics event (instead of polling
+              ``_metrics.ttfb`` when the first audio is queued) avoids
+              the ``ttfb`` property's in-progress fallback, which would
+              otherwise report an under-estimate whenever a context's
+              audio waits behind earlier queued audio before
+              ``_handle_audio_context`` actually stops the TTFB
+              measurement.
+            - ``remove_audio_context``: ends any still-open span as a
+              safety net for error and cancellation paths.
+            - ``on_audio_context_completed``: ends the span on natural
+              completion. Needed because services that rely on the
+              base class to auto-push ``TTSStoppedFrame`` (via
+              ``push_frame`` in ``_handle_audio_context``) bypass the
+              ``append_to_audio_context`` hook entirely.
+            - ``reset_active_audio_context``: ends the currently
+              playing context's span if still open. Always called from
+              ``_handle_interruption``, so this is the interruption
+              hook.
+
+            The patches check ``_tracing_enabled`` at invocation time,
+            so they are safe to install regardless of whether tracing
+            is enabled.
             """
-            # Check if tracing is enabled for this service instance
-            if not getattr(self, "_tracing_enabled", False):
-                yield None
+            if getattr(service, "__tts_tracing_patches_installed__", False):
+                return
+            service.__tts_tracing_patches_installed__ = True
+            service._tts_spans = {}
+
+            orig_create = service.create_audio_context
+            orig_append = service.append_to_audio_context
+            orig_remove = service.remove_audio_context
+            orig_completed = service.on_audio_context_completed
+            orig_reset_active = service.reset_active_audio_context
+            orig_push_frame = service.push_frame
+
+            async def traced_create_audio_context(context_id):
+                if getattr(service, "_tracing_enabled", False):
+                    try:
+                        parent = _get_turn_context(service) or _get_parent_service_context(service)
+                        tracer = trace.get_tracer("pipecat")
+                        span = tracer.start_span("tts", context=parent)
+                        mark_trace_public(span)
+                        service._tts_spans[context_id] = {"span": span, "ttfb_recorded": False}
+
+                        settings = getattr(service, "_settings", None)
+                        add_tts_span_attributes(
+                            span=span,
+                            service_name=service.__class__.__name__,
+                            model=_get_model_name(service),
+                            voice_id=getattr(settings, "voice", "unknown"),
+                            settings=settings,
+                            operation_name="tts",
+                        )
+                    except Exception as e:
+                        logging.warning(f"Error opening TTS span: {e}")
+                return await orig_create(context_id)
+
+            async def traced_append_to_audio_context(context_id, frame):
+                entry = service._tts_spans.get(context_id)
+                if entry and frame is not None:
+                    try:
+                        if isinstance(frame, TTSStoppedFrame):
+                            entry["span"].end()
+                            service._tts_spans.pop(context_id, None)
+                    except Exception as e:
+                        logging.warning(f"Error updating TTS span: {e}")
+                return await orig_append(context_id, frame)
+
+            async def traced_push_frame(frame, direction=FrameDirection.DOWNSTREAM):
+                await orig_push_frame(frame, direction)
+                if not getattr(service, "_tracing_enabled", False):
+                    return
+                if not isinstance(frame, MetricsFrame):
+                    return
+                try:
+                    playing_id = getattr(service, "_playing_context_id", None)
+                    if playing_id is None:
+                        return
+                    entry = service._tts_spans.get(playing_id)
+                    if not entry or entry["ttfb_recorded"]:
+                        return
+                    for data in frame.data:
+                        if isinstance(data, TTFBMetricsData):
+                            entry["span"].set_attribute("metrics.ttfb", data.value)
+                            entry["ttfb_recorded"] = True
+                            break
+                except Exception as e:
+                    logging.warning(f"Error recording TTS ttfb from MetricsFrame: {e}")
+
+            async def traced_remove_audio_context(context_id):
+                entry = service._tts_spans.pop(context_id, None)
+                if entry:
+                    try:
+                        entry["span"].end()
+                    except Exception as e:
+                        logging.warning(f"Error closing TTS span: {e}")
+                return await orig_remove(context_id)
+
+            async def traced_on_audio_context_completed(context_id):
+                end_tts_span(service, context_id)
+                return await orig_completed(context_id)
+
+            def traced_reset_active_audio_context():
+                playing_id = getattr(service, "_playing_context_id", None)
+                if playing_id is not None:
+                    end_tts_span(service, playing_id, interrupted=True)
+                return orig_reset_active()
+
+            service.create_audio_context = traced_create_audio_context
+            service.append_to_audio_context = traced_append_to_audio_context
+            service.push_frame = traced_push_frame
+            service.remove_audio_context = traced_remove_audio_context
+            service.on_audio_context_completed = traced_on_audio_context_completed
+            service.reset_active_audio_context = traced_reset_active_audio_context
+
+        def patch_setup(owner):
+            """Wrap ``owner.setup`` so audio-context patches install per-instance.
+
+            Idempotent: if a parent class has already been wrapped,
+            skip. The patches check ``_tracing_enabled`` at invocation
+            time, so wrapping is always safe.
+            """
+            original_setup = owner.setup
+            if getattr(original_setup, "__tts_tracing_setup_wrapped__", False):
                 return
 
-            service_class_name = self.__class__.__name__
-            span_name = "tts"
+            @functools.wraps(original_setup)
+            async def patched_setup(self, setup):
+                await original_setup(self, setup)
+                install_audio_context_patches(self)
 
-            # Get parent context
-            parent_context = _get_turn_context(self) or _get_parent_service_context(self)
+            setattr(patched_setup, "__tts_tracing_setup_wrapped__", True)
+            owner.setup = patched_setup
 
-            # Create span
-            tracer = trace.get_tracer("pipecat")
-            with tracer.start_as_current_span(span_name, context=parent_context) as span:
-                try:
-                    # Enable sharing public traces
-                    span.set_attribute("langfuse.trace.public", True)
+        def attach_run_tts_attributes(service, text, args, kwargs):
+            """Attach text-specific attributes to the in-flight TTS span."""
+            if not getattr(service, "_tracing_enabled", False):
+                return
+            try:
+                context_id = args[0] if args else kwargs.get("context_id")
+                entry = getattr(service, "_tts_spans", {}).get(context_id)
+                if entry:
+                    set_tts_input_attributes(entry["span"], text)
+            except Exception as e:
+                logging.warning(f"Error attaching TTS text to span: {e}")
 
-                    settings = getattr(self, "_settings", None)
-                    add_tts_span_attributes(
-                        span=span,
-                        service_name=service_class_name,
-                        model=_get_model_name(self),
-                        voice_id=getattr(settings, "voice", "unknown"),
-                        text=text,
-                        settings=settings,
-                        character_count=len(text),
-                        operation_name="tts",
-                        cartesia_version=getattr(self, "_cartesia_version", None),
-                        context_id=getattr(self, "_context_id", None),
-                    )
+        def make_run_tts_wrapper():
+            """Build the wrapper around ``run_tts`` that adds per-call attributes.
 
-                    yield span
+            Span lifetime is owned by the audio-context patches. This
+            wrapper only attaches the text and character count to the
+            span that was opened by ``create_audio_context`` just
+            before ``run_tts`` was invoked.
+            """
+            if is_async_generator:
 
-                except Exception as e:
-                    logger.warning(f"Error in TTS tracing: {e}")
-                    raise
-                finally:
-                    # Update TTFB metric at the end
-                    ttfb: float | None = getattr(getattr(self, "_metrics", None), "ttfb", None)
-                    if ttfb is not None:
-                        span.set_attribute("metrics.ttfb", ttfb)
-
-        if is_async_generator:
-
-            @functools.wraps(f)
-            async def gen_wrapper(self, text, *args, **kwargs):
-                if not getattr(self, "_tracing_enabled", False):
-                    async for item in f(self, text, *args, **kwargs):
-                        yield item
-                    return
-
-                fn_called = False
-                try:
-                    async with tracing_context(self, text):
-                        fn_called = True
-                        async for item in f(self, text, *args, **kwargs):
-                            yield item
-                except Exception as e:
-                    if fn_called:
-                        raise
-                    logger.error(f"Error in TTS tracing (continuing without tracing): {e}")
+                @functools.wraps(f)
+                async def gen_wrapper(self, text, *args, **kwargs):
+                    attach_run_tts_attributes(self, text, args, kwargs)
                     async for item in f(self, text, *args, **kwargs):
                         yield item
 
-            return gen_wrapper
-        else:
+                return gen_wrapper
 
             @functools.wraps(f)
-            async def wrapper(self, text, *args, **kwargs):
-                if not getattr(self, "_tracing_enabled", False):
-                    return await f(self, text, *args, **kwargs)
+            async def coro_wrapper(self, text, *args, **kwargs):
+                attach_run_tts_attributes(self, text, args, kwargs)
+                return await f(self, text, *args, **kwargs)
 
-                fn_called = False
-                try:
-                    async with tracing_context(self, text):
-                        fn_called = True
-                        return await f(self, text, *args, **kwargs)
-                except Exception as e:
-                    if fn_called:
-                        raise
-                    logger.error(f"Error in TTS tracing (continuing without tracing): {e}")
-                    return await f(self, text, *args, **kwargs)
+            return coro_wrapper
 
-            return wrapper
+        class _TracedTTSDescriptor:
+            """Class-level descriptor that wires up TTS tracing at class definition time.
+
+            ``__set_name__`` fires when the class body finishes evaluating,
+            giving us a chance to wrap the owner's ``setup()`` so that the
+            audio-context patches install on every instance before any
+            ``create_audio_context`` call (including the very first one).
+            """
+
+            def __set_name__(self, owner, attr_name):
+                patch_setup(owner)
+                setattr(owner, attr_name, make_run_tts_wrapper())
+
+        return _TracedTTSDescriptor()
 
     if func is not None:
-        return decorator(func)
+        # ``decorator(func)`` returns a descriptor placeholder that
+        # Python replaces with the real wrapped function once
+        # ``__set_name__`` runs at class definition time. Pyright sees
+        # only the descriptor instance, hence the ignore.
+        return decorator(func)  # type: ignore[return-value]
     return decorator
 
 
@@ -349,173 +446,287 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
     - Language information
     - Performance metrics like TTFB
 
+    The span is scoped to one STT segment, from
+    ``VADUserStartedSpeakingFrame`` (or the first ``TranscriptionFrame``
+    when VAD did not fire, e.g. whispered speech) until a finalized
+    ``TranscriptionFrame``. Multiple finalized transcripts in a single
+    user turn produce multiple sequential spans, each anchored at the
+    point speech for that segment began. ``metrics.ttfb`` is read after
+    the base ``push_frame`` runs ``stop_ttfb_metrics`` for the
+    finalized frame, so the value is correct for the closing span.
+
     Args:
         func: The STT method to trace.
         name: Custom span name. Defaults to function name.
 
     Returns:
-        Wrapped method with STT-specific tracing.
+        The original method unchanged. The decorator's class-definition-
+        time work is to install a ``push_frame`` wrapper on the owning
+        class that owns the span lifetime.
     """
     if not is_tracing_available():
         return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
-        @functools.wraps(f)
-        async def wrapper(self, transcript, is_final, language=None):
-            if not getattr(self, "_tracing_enabled", False):
-                return await f(self, transcript, is_final, language)
+        def patch_push_frame(owner):
+            """Wrap ``owner.push_frame`` to drive the STT span lifecycle.
 
-            fn_called = False
-            try:
-                service_class_name = self.__class__.__name__
-                span_name = "stt"
+            Idempotent: if a parent class has already been wrapped, skip.
+            The wrapper checks ``_tracing_enabled`` at invocation time,
+            so it is safe to install regardless of whether tracing is
+            enabled.
+            """
+            original_push_frame = owner.push_frame
+            if getattr(original_push_frame, "__stt_tracing_push_frame_wrapped__", False):
+                return
 
-                # Get the turn context first, then fall back to service context
-                parent_context = _get_turn_context(self) or _get_parent_service_context(self)
+            def update_transcript(state, new_text):
+                """Append or extend the current segment in ``state['segments']``.
 
-                # Create a new span as child of the turn span or service span
+                If ``new_text`` starts with the last recorded segment,
+                treat it as a continuation (interim accumulation) and
+                replace the last segment. Otherwise treat it as a new
+                segment and append. Some STT services (Deepgram with
+                utterance_end_ms enabled, for example) emit several
+                ``TranscriptionFrame``s per turn where each carries a
+                different segment rather than a cumulative update —
+                without this logic the span's transcript would only
+                show the last segment and the beginning would be lost.
+                """
+                if not new_text:
+                    return
+                segments = state["segments"]
+                if not segments:
+                    segments.append(new_text)
+                elif new_text.startswith(segments[-1]):
+                    segments[-1] = new_text
+                else:
+                    segments.append(new_text)
+
+            def open_span(service, state):
+                """Open the STT span, anchored at ``segment_start_time`` if set."""
+                parent = _get_turn_context(service) or _get_parent_service_context(service)
                 tracer = trace.get_tracer("pipecat")
-                with tracer.start_as_current_span(
-                    span_name, context=parent_context
-                ) as current_span:
+                start_time_ns = (
+                    int(state["segment_start_time"] * 1e9)
+                    if state["segment_start_time"] is not None
+                    else None
+                )
+                span = tracer.start_span("stt", context=parent, start_time=start_time_ns)
+                try:
+                    mark_trace_public(span)
+                    settings = getattr(service, "_settings", None)
+                    add_stt_span_attributes(
+                        span=span,
+                        service_name=service.__class__.__name__,
+                        model=_get_model_name(service),
+                        settings=settings,
+                        vad_enabled=getattr(service, "vad_enabled", False),
+                    )
+                except Exception as e:
+                    logging.warning(f"Error setting STT span baseline attributes: {e}")
+                state["span"] = span
+
+            def handle_pre_push(service, frame, state):
+                """Record speech-start anchor; lazy-open span on first transcript.
+
+                Lazy-opening on ``TranscriptionFrame`` (rather than on
+                ``VADUserStartedSpeakingFrame`` or
+                ``UserStartedSpeakingFrame``) avoids racing with
+                ``TurnTraceObserver._handle_turn_started``, which runs
+                in a background task fired by ``_call_event_handler``
+                (``base_object.py:232``) and may not have set the new
+                turn's context yet — that produces STT spans parented
+                to the previous turn. By the time STT actually emits
+                a transcript, the turn observer has run.
+
+                Opening happens in pre-push (rather than post-push) so
+                that the recursive ``push_frame`` that
+                ``STTService.push_frame`` triggers for the
+                ``MetricsFrame`` (via ``stop_ttfb_metrics`` at
+                ``stt_service.py:465``) sees the span already open and
+                can attribute ``metrics.ttfb`` to it.
+                """
+                if isinstance(frame, VADUserStartedSpeakingFrame):
+                    # Anchor the next span at the moment speech began.
+                    # Skip if we already have an anchor (intra-turn VAD
+                    # re-trigger) or a span open.
+                    if state["span"] is None and state["segment_start_time"] is None:
+                        state["segment_start_time"] = frame.timestamp - frame.start_secs
+                elif isinstance(frame, TranscriptionFrame) and state["span"] is None:
+                    open_span(service, state)
+
+            async def handle_post_push(service, frame, state):
+                """Attach per-frame attrs; close on finalized; record TTFB from MetricsFrame.
+
+                ``metrics.ttfb`` is read off the ``TTFBMetricsData``
+                payload of any ``MetricsFrame`` pushed by
+                ``stop_ttfb_metrics`` — the canonical value the rest
+                of the system uses — rather than from
+                ``_metrics.ttfb``, which has an in-progress fallback
+                branch (``frame_processor_metrics.py:48-62``) that
+                would return an under-estimate if read at the wrong
+                time.
+
+                One STT span per finalized transcript: the span opens
+                lazily on the first ``TranscriptionFrame`` (pre-push,
+                anchored at speech start via ``segment_start_time``)
+                and closes on ``finalized=True``. Multiple finalized
+                transcripts in a single turn produce multiple spans.
+
+                For services that never set ``frame.finalized=True``
+                (e.g. Deepgram, which only marks it via
+                ``confirm_finalize()``), the span closes on
+                ``UserStoppedSpeakingFrame``. To capture
+                ``metrics.ttfb`` for those spans we force-stop any
+                pending TTFB measurement before closing — that pushes
+                a ``MetricsFrame``, our post-push attributes the
+                value, and ``patched_stop_ttfb_metrics`` closes the
+                span. The ``stt.incomplete=true`` flag is only set if
+                neither a finalized transcript nor a TTFB measurement
+                ever finalized for the span.
+                """
+                if isinstance(frame, UserStoppedSpeakingFrame):
+                    prev_span = state["span"]
+                    if prev_span is None:
+                        return
+                    metrics = getattr(service, "_metrics", None)
+                    if metrics is not None and getattr(metrics, "_start_ttfb_time", 0) > 0:
+                        last_transcript_time = getattr(service, "_last_transcript_time", 0) or None
+                        try:
+                            await service.stop_ttfb_metrics(end_time=last_transcript_time)
+                        except Exception as e:
+                            logging.warning(f"Error force-stopping STT TTFB on user turn end: {e}")
+                    # patched_stop_ttfb_metrics may have closed the span
+                    # via the timeout path; re-check.
+                    if state["span"] is None:
+                        state["segments"] = []
+                        return
+                    state["span"].set_attribute("stt.incomplete", True)
+                    state["span"].end()
+                    state["span"] = None
+                    state["segment_start_time"] = None
+                    state["segments"] = []
+                elif isinstance(frame, MetricsFrame):
+                    span = state["span"]
+                    if span is None:
+                        return
+                    for data in frame.data:
+                        if isinstance(data, TTFBMetricsData):
+                            span.set_attribute("metrics.ttfb", data.value)
+                            break
+                elif isinstance(frame, TranscriptionFrame):
+                    span = state["span"]
+                    if span is None:
+                        return
+                    if frame.text:
+                        update_transcript(state, frame.text)
+                        set_stt_output_attributes(span, " ".join(state["segments"]).strip())
+                    span.set_attribute("is_final", bool(frame.finalized))
+                    if frame.language:
+                        span.set_attribute("language", str(frame.language))
+                    if frame.user_id:
+                        span.set_attribute("user_id", frame.user_id)
+                    if frame.finalized:
+                        span.end()
+                        state["span"] = None
+                        state["segment_start_time"] = None
+                        state["segments"] = []
+
+            @functools.wraps(original_push_frame)
+            async def patched_push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
+                state = getattr(self, "_stt_span_state", None)
+                if state is None:
+                    state = {"span": None, "segment_start_time": None, "segments": []}
+                    self._stt_span_state = state
+
+                if getattr(self, "_tracing_enabled", False):
                     try:
-                        # Enable sharing public traces
-                        current_span.set_attribute("langfuse.trace.public", True)
-
-                        # Get TTFB metric if available
-                        ttfb: float | None = getattr(getattr(self, "_metrics", None), "ttfb", None)
-
-                        # Use settings from the service if available
-                        settings = getattr(self, "_settings", None)
-
-                        add_stt_span_attributes(
-                            span=current_span,
-                            service_name=service_class_name,
-                            model=_get_model_name(self),
-                            transcript=transcript,
-                            is_final=is_final,
-                            language=str(language) if language else None,
-                            user_id=getattr(self, "_user_id", None),
-                            vad_enabled=getattr(self, "vad_enabled", False),
-                            settings=settings,
-                            ttfb=ttfb,
-                        )
-
-                        # Call the original function
-                        fn_called = True
-                        return await f(self, transcript, is_final, language)
+                        handle_pre_push(self, frame, state)
                     except Exception as e:
-                        # Log any exception but don't disrupt the main flow
-                        logger.warning(f"Error in STT transcription tracing: {e}")
-                        raise
-            except Exception as e:
-                if fn_called:
-                    raise
-                logger.error(f"Error in STT tracing (continuing without tracing): {e}")
-                return await f(self, transcript, is_final, language)
+                        logging.warning(f"Error in STT pre-push tracing: {e}")
 
-        return wrapper
+                await original_push_frame(self, frame, direction)
+
+                if getattr(self, "_tracing_enabled", False):
+                    try:
+                        await handle_post_push(self, frame, state)
+                    except Exception as e:
+                        logging.warning(f"Error in STT post-push tracing: {e}")
+
+            setattr(patched_push_frame, "__stt_tracing_push_frame_wrapped__", True)
+            owner.push_frame = patched_push_frame
+
+        def patch_stop_ttfb_metrics(owner):
+            """Wrap ``owner.stop_ttfb_metrics`` to close the span on the timeout path.
+
+            When ``stop_ttfb_metrics`` is invoked with ``end_time`` set,
+            that signals the TTFB-timeout handler firing
+            (`stt_service.py:566`), or our own force-stop from the
+            ``UserStoppedSpeakingFrame`` handler. In either case we
+            anchor the span's end at ``end_time``
+            (= ``_last_transcript_time``) rather than at whenever the
+            coroutine resumed.
+
+            ``metrics.ttfb`` attribution is not done here — the
+            ``MetricsFrame`` that ``stop_ttfb_metrics`` pushes flows
+            through ``push_frame`` and gets recorded by
+            ``handle_post_push``, which reads the canonical
+            ``TTFBMetricsData.value`` rather than the in-progress
+            ``_metrics.ttfb`` property.
+            """
+            original_stop = owner.stop_ttfb_metrics
+            if getattr(original_stop, "__stt_tracing_stop_ttfb_wrapped__", False):
+                return
+
+            @functools.wraps(original_stop)
+            async def patched_stop(self, *, end_time=None):
+                await original_stop(self, end_time=end_time)
+                if end_time is None:
+                    return
+                if not getattr(self, "_tracing_enabled", False):
+                    return
+                state = getattr(self, "_stt_span_state", None)
+                if not state or state["span"] is None:
+                    return
+                try:
+                    span = state["span"]
+                    span.end(end_time=int(end_time * 1e9))
+                    state["span"] = None
+                    state["segment_start_time"] = None
+                    state["segments"] = []
+                except Exception as e:
+                    logging.warning(f"Error in STT stop_ttfb_metrics tracing: {e}")
+
+            setattr(patched_stop, "__stt_tracing_stop_ttfb_wrapped__", True)
+            owner.stop_ttfb_metrics = patched_stop
+
+        class _TracedSTTDescriptor:
+            """Class-level descriptor that wires up STT tracing at class definition time.
+
+            ``__set_name__`` fires when the class body finishes evaluating,
+            giving us a chance to wrap the owner's ``push_frame`` so that
+            VAD, transcription, and finalization events drive the span
+            lifecycle, and to wrap ``stop_ttfb_metrics`` so the
+            TTFB-timeout path can attach metrics and close the span when
+            no finalized transcript ever arrives. The decorated method
+            itself runs unchanged.
+            """
+
+            def __set_name__(self, owner, attr_name):
+                patch_push_frame(owner)
+                patch_stop_ttfb_metrics(owner)
+                setattr(owner, attr_name, f)
+
+        return _TracedSTTDescriptor()
 
     if func is not None:
-        return decorator(func)
+        # ``decorator(func)`` returns a descriptor placeholder that
+        # Python replaces with the real wrapped function once
+        # ``__set_name__`` runs at class definition time. Pyright sees
+        # only the descriptor instance, hence the ignore.
+        return decorator(func)  # type: ignore[return-value]
     return decorator
-
-
-def _standardise_messages_to_chatml(messages):
-    """Standardise provider-native messages to ChatML format.
-
-    Messages already in ChatML format (no 'parts' key) pass through unchanged.
-    Currently handles Gemini format (parts/role:model).
-    """
-    if not messages:
-        return messages
-
-    chatml_messages = []
-    for msg in messages:
-        if not isinstance(msg, dict) or "parts" not in msg:
-            chatml_messages.append(msg)
-            continue
-
-        role = msg.get("role", "user")
-        parts = msg.get("parts", [])
-        chatml_role = "assistant" if role == "model" else role
-
-        text_parts = []
-        tool_calls = []
-
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
-            if "text" in part:
-                text_parts.append(part["text"])
-            elif "function_call" in part:
-                fc = part["function_call"]
-                tool_calls.append(
-                    {
-                        "id": fc.get("id", ""),
-                        "type": "function",
-                        "function": {
-                            "name": fc.get("name", ""),
-                            "arguments": json.dumps(fc.get("args", {})),
-                        },
-                    }
-                )
-            elif "function_response" in part:
-                fr = part["function_response"]
-                chatml_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": fr.get("id", ""),
-                        "content": json.dumps(fr.get("response", {})),
-                    }
-                )
-                continue
-            elif "inline_data" in part:
-                text_parts.append("[inline_data]")
-            elif "file_data" in part:
-                text_parts.append("[file_data]")
-
-        if tool_calls:
-            chatml_msg = {"role": chatml_role, "tool_calls": tool_calls}
-            if text_parts:
-                chatml_msg["content"] = " ".join(text_parts)
-            chatml_messages.append(chatml_msg)
-        elif text_parts:
-            content = text_parts[0] if len(text_parts) == 1 else " ".join(text_parts)
-            chatml_messages.append({"role": chatml_role, "content": content})
-
-    return chatml_messages
-
-
-def _standardise_tools_to_chatml(tools):
-    """Standardise provider-native tools to ChatML format.
-
-    Tools already in ChatML format pass through unchanged.
-    Currently handles Gemini format (function_declarations).
-    """
-    if not tools:
-        return tools
-
-    chatml_tools = []
-    for tool in tools:
-        if not isinstance(tool, dict):
-            continue
-        if "type" in tool and tool["type"] == "function":
-            chatml_tools.append(tool)
-            continue
-        for decl in tool.get("function_declarations", []):
-            chatml_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": decl.get("name", ""),
-                        "description": decl.get("description", ""),
-                        "parameters": decl.get("parameters", {}),
-                    },
-                }
-            )
-
-    return chatml_tools
 
 
 def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Callable:
@@ -577,19 +788,19 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                     span_name, context=parent_context
                 ) as current_span:
                     try:
-                        # Enable sharing public traces
-                        current_span.set_attribute("langfuse.trace.public", True)
+                        mark_trace_public(current_span)
 
                         # Store original method and output aggregator
                         original_push_frame = self.push_frame
-                        output_text = ""  # Simple string accumulation
+                        output_text = ""
 
-                        # Accumulator for function call information emitted during the
-                        # generation (captured from FunctionCallsStartedFrame frames)
                         function_calls_info = []
+                        seen_function_call_keys = set()
 
                         async def traced_push_frame(frame, direction=None):
                             nonlocal output_text, function_calls_info
+                            frame_direction = direction or FrameDirection.DOWNSTREAM
+
                             # Capture text from LLMTextFrame during streaming
                             if (
                                 hasattr(frame, "__class__")
@@ -598,26 +809,29 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                             ):
                                 output_text += frame.text
 
-                            # Capture function calls from FunctionCallsFromLLMInfoFrame
+                            # Capture function calls from the regular execution path
+                            # (FunctionCallsStartedFrame) and from the deferred
+                            # execution path (FunctionCallsFromLLMInfoFrame).
                             if (
                                 hasattr(frame, "__class__")
-                                and frame.__class__.__name__ == "FunctionCallsFromLLMInfoFrame"
-                                and direction == FrameDirection.DOWNSTREAM
+                                and frame.__class__.__name__
+                                in ("FunctionCallsFromLLMInfoFrame", "FunctionCallsStartedFrame")
+                                and frame_direction == FrameDirection.DOWNSTREAM
                             ):
                                 try:
-                                    # frame.function_calls is a sequence of FunctionCallFromLLM
                                     for call in getattr(frame, "function_calls", []):
-                                        function_calls_info.append(
-                                            {
-                                                "function_name": getattr(
-                                                    call, "function_name", None
-                                                ),
-                                                "tool_call_id": _strip_thought_from_id(
-                                                    getattr(call, "tool_call_id", None)
-                                                ),
-                                                "arguments": getattr(call, "arguments", None),
-                                            }
-                                        )
+                                        call_info = {
+                                            "function_name": getattr(call, "function_name", None),
+                                            "tool_call_id": strip_thought_from_id(
+                                                getattr(call, "tool_call_id", None)
+                                            ),
+                                            "arguments": getattr(call, "arguments", None),
+                                        }
+                                        call_key = json.dumps(call_info, sort_keys=True, default=str)
+                                        if call_key in seen_function_call_keys:
+                                            continue
+                                        seen_function_call_keys.add(call_key)
+                                        function_calls_info.append(call_info)
                                 except Exception as e:
                                     logger.warning(f"Error serializing function call: {e}")
 
@@ -656,7 +870,7 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                             if hasattr(self, "get_llm_adapter"):
                                 adapter = self.get_llm_adapter()
                                 messages = adapter.get_messages_for_logging(context)
-                                messages = _standardise_messages_to_chatml(messages)
+                                messages = standardize_messages_to_chatml(messages)
 
                             # Get tools
                             # Use adapter's from_standard_tools() to convert ToolsSchema
@@ -665,7 +879,7 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                             if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
                                 adapter = self.get_llm_adapter()
                                 tools = adapter.from_standard_tools(context.tools)
-                                tools = _standardise_tools_to_chatml(tools)
+                                tools = standardize_tools_to_chatml(tools)
 
                             # Handle system message for different services
                             # settings.system_instruction takes priority (matches service behavior)
@@ -723,7 +937,7 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                             # Add optional attributes only if they exist
                             # Strip __thought__ from tool_call_ids in messages
                             attribute_kwargs["messages"] = (
-                                _strip_thought_ids_from_messages(messages) if messages else messages
+                                strip_thought_ids_from_messages(messages) if messages else messages
                             )
                             attribute_kwargs["tools"] = tools
 
@@ -737,18 +951,6 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                         # Run function with modified push_frame to capture the output
                         fn_called = True
                         result = await f(self, context, *args, **kwargs)
-
-                        # Append JSON dump of function calls to the output text so that
-                        # the consumer can see both in a single attribute.
-                        span_output: dict[str, Any] = {"content": output_text}
-                        if function_calls_info:
-                            span_output["tool_calls"] = function_calls_info
-
-                        try:
-                            current_span.set_attribute("output", json.dumps(span_output))
-                        except Exception:
-                            logger.error(f"Unable to serialize span output: {span_output}")
-
                         return result
 
                     finally:
@@ -760,6 +962,15 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                             and original_start_llm_usage_metrics
                         ):
                             self.start_llm_usage_metrics = original_start_llm_usage_metrics
+
+                        # Attach output in finally so partial generations
+                        # still show up in traces if ``f`` raises or is
+                        # cancelled. When tool calls are present we emit a
+                        # single JSON payload so Langfuse can display both
+                        # text and tool calls together.
+                        span_output = build_llm_output_payload(output_text, function_calls_info)
+                        if span_output is not None:
+                            current_span.set_attribute("output", span_output)
 
                         # Update TTFB metric
                         ttfb: float | None = getattr(getattr(self, "_metrics", None), "ttfb", None)
@@ -818,7 +1029,7 @@ def traced_gemini_live(operation: str) -> Callable:
                 ) as current_span:
                     try:
                         # Enable sharing public traces
-                        current_span.set_attribute("langfuse.trace.public", True)
+                        mark_trace_public(current_span)
 
                         # Base service attributes
                         model_name = _get_model_name(self)
@@ -947,7 +1158,7 @@ def traced_gemini_live(operation: str) -> Callable:
                                             arguments = str(c.args)
                                         tool_calls_payload.append(
                                             {
-                                                "id": _strip_thought_from_id(c.id),
+                                                "id": strip_thought_from_id(c.id),
                                                 "type": "function",
                                                 "function": {
                                                     "name": c.name,
@@ -971,7 +1182,7 @@ def traced_gemini_live(operation: str) -> Callable:
                             result_content = args[2] if len(args) > 2 else None
 
                             if tool_call_id:
-                                operation_attrs["tool.call_id"] = _strip_thought_from_id(
+                                operation_attrs["tool.call_id"] = strip_thought_from_id(
                                     tool_call_id
                                 )
                             if tool_call_name:
@@ -1018,7 +1229,7 @@ def traced_gemini_live(operation: str) -> Callable:
                             output_content = operation_attrs.get("tool.result")
                             if output_content is not None:
                                 try:
-                                    stripped_id = _strip_thought_from_id(tool_call_id) or ""
+                                    stripped_id = strip_thought_from_id(tool_call_id) or ""
                                     output_payload = {
                                         "role": "tool",
                                         "tool_call_id": stripped_id,
@@ -1160,7 +1371,7 @@ def traced_openai_realtime(operation: str) -> Callable:
                 ) as current_span:
                     try:
                         # Enable sharing public traces
-                        current_span.set_attribute("langfuse.trace.public", True)
+                        mark_trace_public(current_span)
 
                         # Base service attributes
                         model_name = _get_model_name(self)

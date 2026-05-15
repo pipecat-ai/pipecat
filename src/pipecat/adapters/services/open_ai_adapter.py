@@ -127,12 +127,15 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         )
 
         if system_instruction:
-            # Detect initial system message for warning purposes (don't extract)
-            initial_content = (
-                messages[0].get("content", "")
-                if messages and messages[0].get("role") == "system"
-                else None
-            )
+            # Detect initial system message for warning purposes (don't extract).
+            # ChatCompletionMessageParam.content is `str | Iterable[...]`; we
+            # only forward it for warning purposes, so coerce non-strings to
+            # None — the resolver handles None.
+            initial_content: str | None = None
+            if messages and messages[0].get("role") == "system":
+                raw_content = messages[0].get("content", "")
+                if isinstance(raw_content, str):
+                    initial_content = raw_content
             self._resolve_system_instruction(
                 initial_content,
                 system_instruction,
@@ -140,12 +143,15 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             )
             messages = [{"role": "system", "content": system_instruction}] + messages
 
-        return {
-            "messages": messages,
-            # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-            "tools": self.from_standard_tools(context.tools),
-            "tool_choice": _openai_from_llm_context_tool_choice(context.tool_choice),
-        }
+        return cast(
+            OpenAILLMInvocationParams,
+            {
+                "messages": messages,
+                # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
+                "tools": self.from_standard_tools(context.tools),
+                "tool_choice": _openai_from_llm_context_tool_choice(context.tool_choice),
+            },
+        )
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[ChatCompletionToolParam]:
         """Convert function schemas to OpenAI's function-calling format.
@@ -158,13 +164,19 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             with ChatCompletion API.
         """
         functions_schema = tools_schema.standard_tools
-        formatted_standard_tools = [
-            ChatCompletionToolParam(type="function", function=func.to_default_dict())
+        # `function=...` expects a `FunctionDefinition` TypedDict; the dict
+        # produced by `to_default_dict()` is structurally compatible. Cast at
+        # the boundary.
+        formatted_standard_tools: list[ChatCompletionToolParam] = [
+            ChatCompletionToolParam(type="function", function=cast(Any, func.to_default_dict()))
             for func in functions_schema
         ]
-        custom_openai_tools = []
+        custom_openai_tools: list[ChatCompletionToolParam] = []
         if tools_schema.custom_tools:
-            custom_openai_tools = tools_schema.custom_tools.get(AdapterType.OPENAI, [])
+            custom_openai_tools = cast(
+                list[ChatCompletionToolParam],
+                tools_schema.custom_tools.get(AdapterType.OPENAI, []),
+            )
         return formatted_standard_tools + custom_openai_tools
 
     def get_messages_for_logging(self, context: LLMContext) -> list[dict[str, Any]]:
@@ -178,7 +190,10 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         Returns:
             List of messages in a format ready for logging about OpenAI.
         """
-        return self.get_messages(context, truncate_large_values=True)
+        return cast(
+            list[dict[str, Any]],
+            self.get_messages(context, truncate_large_values=True),
+        )
 
     def _from_universal_context_messages(
         self,

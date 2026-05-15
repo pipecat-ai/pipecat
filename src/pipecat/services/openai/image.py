@@ -13,7 +13,7 @@ for creating images from text prompts.
 import io
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, cast
 
 import aiohttp
 from loguru import logger
@@ -27,6 +27,28 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.image_service import ImageGenService
 from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, assert_given
+
+# Hint set for the `size` argument to `images.generate`. The values mirror the
+# Literal that `openai.resources.images.Images.generate` accepts on its `size`
+# parameter (also visible as the `size` field of
+# `openai.types.image_generate_params.ImageGenerateParams`). The OpenAI SDK
+# does not export this as a named alias, so we redeclare it here.
+#
+# We cast `_settings.image_size` (a plain `str`) to this Literal at the API
+# boundary so callers can still pass any size string (e.g. a newer value the
+# SDK accepts before this list is updated). Invalid values surface as an
+# OpenAI API error at runtime. Keep in sync on a best-effort basis when
+# bumping the openai dep.
+OpenAIImageSize = Literal[
+    "auto",
+    "1024x1024",
+    "1536x1024",
+    "1024x1536",
+    "256x256",
+    "512x512",
+    "1792x1024",
+    "1024x1792",
+]
 
 
 @dataclass
@@ -116,15 +138,19 @@ class OpenAIImageGenService(ImageGenService):
         """
         logger.debug(f"Generating image from prompt: {prompt}")
 
+        size = cast(OpenAIImageSize | None, assert_given(self._settings.image_size))
         image = await self._client.images.generate(
             prompt=prompt,
             model=assert_given(self._settings.model),
             n=1,
-            size=assert_given(self._settings.image_size),
+            size=size,
         )
 
-        image_url = image.data[0].url
+        if not image.data:
+            yield ErrorFrame("Image generation failed: no data returned")
+            return
 
+        image_url = image.data[0].url
         if not image_url:
             yield ErrorFrame("Image generation failed")
             return

@@ -30,7 +30,7 @@ from pipecat.services.image_service import ImageGenService
 from pipecat.services.settings import NOT_GIVEN, ImageGenSettings, _NotGiven, assert_given
 
 try:
-    from google import genai
+    import google.genai as genai
     from google.genai import types
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -153,8 +153,12 @@ class GoogleImageGenService(ImageGenService):
         await self.start_ttfb_metrics()
 
         try:
+            model = assert_given(self._settings.model)
+            if model is None:
+                yield ErrorFrame("Google image generation model must be specified")
+                return
             response = await self._client.aio.models.generate_images(
-                model=self._settings.model,
+                model=model,
                 prompt=prompt,
                 config=types.GenerateImagesConfig(
                     number_of_images=assert_given(self._settings.number_of_images),
@@ -169,8 +173,9 @@ class GoogleImageGenService(ImageGenService):
 
             for img_response in response.generated_images:
                 # Google returns the image data directly
-                image_bytes = img_response.image.image_bytes
-                image = Image.open(io.BytesIO(image_bytes))
+                if img_response.image is None or img_response.image.image_bytes is None:
+                    continue
+                image = Image.open(io.BytesIO(img_response.image.image_bytes))
 
                 frame = URLImageRawFrame(
                     url=None,  # Google doesn't provide URLs, only image data

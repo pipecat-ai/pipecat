@@ -45,7 +45,8 @@ from pipecat.frames.frames import (
     UserAudioRawFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators import async_tool_messages
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
@@ -57,6 +58,24 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Ultravox, you need to `pip install pipecat-ai[ultravox]`.")
     raise Exception(f"Missing module: {e}")
+
+
+# Result shipped as the client_tool_result when we see an async-tool
+# "started" message — i.e. when an async-registered function call
+# (cancel_on_interruption=False) is invoked. Sending it immediately
+# unfreezes the conversation so the model can keep talking while the
+# real tool runs; the actual result is injected later as user-side text
+# once the tool finishes.
+_ASYNC_TOOL_STARTED_RESULT = (
+    "The actual result for this tool call is not yet ready. A follow-up "
+    "message will arrive shortly with the actual result. In the meantime, "
+    "keep the conversation going naturally."
+)
+
+# Template for the user-side text we inject when the async-tool "final"
+# message arrives. Bracketed framing helps the model treat this as a
+# tool-result update rather than fresh user input.
+_ASYNC_TOOL_FINAL_RESULT_TEMPLATE = "[Async tool result for tool_call_id={tool_call_id}] {result}"
 
 
 @dataclass
@@ -218,6 +237,11 @@ class UltravoxRealtimeLLMService(LLMService):
         self._disconnecting = False
         self._bot_responding: Literal[None, "text", "voice"] = None
         self._last_user_id: str | None = None
+        self._completed_tool_calls: set[str] = set()
+        # Tracks tool_call_ids for which we've already shipped the
+        # async-tool placeholder client_tool_result that unfreezes the
+        # conversation while the real tool runs. See _handle_tool_invocation.
+        self._started_placeholder_sent: set[str] = set()
 
         self._sample_rate = 48000
         self._resampler = create_stream_resampler()
@@ -373,6 +397,8 @@ class UltravoxRealtimeLLMService(LLMService):
         if self._receive_task:
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
+        self._completed_tool_calls = set()
+        self._started_placeholder_sent = set()
 
     async def _update_settings(self, delta: Settings):
         changed = await super()._update_settings(delta)
@@ -413,20 +439,80 @@ class UltravoxRealtimeLLMService(LLMService):
             await self.push_frame(frame, direction)
 
     async def _handle_context(self, context: LLMContext):
-        # Ultravox handles all context server-side, so the only context we may
-        # need to handle here is new function call results.
-        for message in reversed(context.messages):
-            if message.get("role") != "tool":
-                break
-            content = message.get("content")
-            socket_message = {
+        # Ultravox handles all context server-side, so the only context we
+        # need to handle here is function-call results.
+        for message in context.get_messages():
+            # LLMSpecificMessages are opaque provider-specific payloads, not
+            # standard tool-result messages — skip them.
+            if isinstance(message, LLMSpecificMessage):
+                continue
+
+            # Async-tool messages live alongside regular tool messages in the
+            # context; detect and route them before the regular logic so we
+            # don't try to send the async-tool envelope JSON as a tool result.
+            async_payload = async_tool_messages.parse_message(message)
+            if async_payload is not None:
+                if async_payload.kind == "started":
+                    # The placeholder client_tool_result that unfreezes the
+                    # conversation was already shipped from
+                    # _handle_tool_invocation when the model issued the
+                    # call. Nothing more to do here.
+                    continue
+                if async_payload.kind == "intermediate":
+                    logger.error(
+                        f"{self}: Ultravox does not support streamed async "
+                        f"tool results; dropping intermediate result for "
+                        f"tool_call_id={async_payload.tool_call_id}. Use a "
+                        f"non-realtime LLM service if your tool needs to "
+                        f"stream intermediate results."
+                    )
+                    await self.push_error(
+                        error_msg="Ultravox does not support streamed async tool results.",
+                    )
+                    continue
+                if async_payload.kind == "final":
+                    if async_payload.tool_call_id in self._completed_tool_calls:
+                        continue
+                    # The placeholder client_tool_result has already
+                    # "completed" the tool call from Ultravox's perspective,
+                    # so the actual result is delivered as user-side text
+                    # (see _ASYNC_TOOL_FINAL_RESULT_TEMPLATE).
+                    await self._send_user_text(
+                        _ASYNC_TOOL_FINAL_RESULT_TEMPLATE.format(
+                            tool_call_id=async_payload.tool_call_id,
+                            result=async_payload.result,
+                        )
+                    )
+                    self._completed_tool_calls.add(async_payload.tool_call_id)
+                    continue
+                # Defensive: any async-tool message must not fall through
+                # to the regular tool-result block below, even if it
+                # carries a kind we don't recognize.
+                continue
+
+            # Look for newly-completed "regular" (as opposed to async-tool) results
+            if message.get("role") == "tool" and message.get("content") != "IN_PROGRESS":
+                tool_call_id = message.get("tool_call_id")
+                if tool_call_id and tool_call_id not in self._completed_tool_calls:
+                    content = message.get("content")
+                    result = (
+                        content
+                        if isinstance(content, str)
+                        else "".join(t.get("text") for t in content)
+                    )
+                    await self._send_tool_result(tool_call_id, result)
+                    self._completed_tool_calls.add(tool_call_id)
+
+    async def _send_tool_result(self, tool_call_id: str, result: str):
+        """Send a tool call result to Ultravox."""
+        logger.debug(f"Sending tool result to Ultravox for tool_call_id={tool_call_id}")
+        await self._send(
+            {
                 "type": "client_tool_result",
-                "invocationId": message.get("tool_call_id"),
-                "result": content
-                if isinstance(content, str)
-                else "".join(t.get("text") for t in content),
+                "invocationId": tool_call_id,
+                "result": result,
             }
-            await self._send(socket_message)
+        )
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle VAD user stopped speaking frame.
@@ -567,6 +653,19 @@ class UltravoxRealtimeLLMService(LLMService):
     async def _handle_tool_invocation(
         self, tool_name: str, invocation_id: str, parameters: dict[str, Any]
     ):
+        # Ultravox freezes the conversation between client_tool_invocation
+        # and the matching client_tool_result. For functions registered
+        # with cancel_on_interruption=False the actual result won't be
+        # available for some time, so ship a placeholder result now to
+        # unfreeze the conversation. The real result will be injected
+        # later as user-side text from _handle_context.
+        if (
+            self._function_is_async(tool_name)
+            and invocation_id not in self._started_placeholder_sent
+        ):
+            await self._send_tool_result(invocation_id, _ASYNC_TOOL_STARTED_RESULT)
+            self._started_placeholder_sent.add(invocation_id)
+
         await self.run_function_calls(
             [
                 FunctionCallFromLLM(

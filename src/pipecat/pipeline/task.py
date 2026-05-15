@@ -14,6 +14,7 @@ including heartbeats, idle detection, and observer integration.
 import asyncio
 import importlib.util
 import os
+import warnings
 from collections.abc import AsyncIterable, Iterable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -193,6 +194,7 @@ class PipelineTask(BasePipelineTask):
         *,
         params: PipelineParams | None = None,
         additional_span_attributes: dict | None = None,
+        app_resources: Any = None,
         cancel_on_idle_timeout: bool = True,
         cancel_timeout_secs: float = CANCEL_TIMEOUT_SECS,
         check_dangling_tasks: bool = True,
@@ -216,6 +218,14 @@ class PipelineTask(BasePipelineTask):
             params: Configuration parameters for the pipeline.
             additional_span_attributes: Optional dictionary of attributes to propagate as
                 OpenTelemetry conversation span attributes.
+            app_resources: Optional application-defined bag of anything your
+                application code may want to share across this session (DB
+                handles, HTTP clients, etc.), passed by reference. Pipecat
+                passes it through untouched and exposes it on the task itself
+                as ``task.app_resources`` and passes it to tool handlers as
+                ``FunctionCallParams.app_resources``. The framework never
+                copies or clears this object; the caller retains their handle
+                and can read any mutations after the task finishes.
             cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
                 the idle timeout is reached.
             cancel_timeout_secs: Timeout (in seconds) to wait for cancellation to happen
@@ -235,13 +245,24 @@ class PipelineTask(BasePipelineTask):
             rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
             rtvi_processor: The RTVI processor to add if RTVI is enabled.
             task_manager: Optional task manager for handling asyncio tasks.
-            tool_resources: Optional application-defined bag of resources (DB handles,
-                clients, state, etc.) passed by reference to every tool handler via
-                ``FunctionCallParams.tool_resources``. The framework never copies or
-                clears this object; the caller retains their handle and can read any
-                mutations after the task finishes.
+            tool_resources: Deprecated alias for ``app_resources``.
+
+                .. deprecated:: 1.2.0
+                    Use ``app_resources`` instead. ``tool_resources`` will be
+                    removed in a future version.
         """
         super().__init__()
+        if tool_resources is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`PipelineTask(tool_resources=...)` is deprecated since 1.2.0, "
+                    "use `app_resources` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            if app_resources is None:
+                app_resources = tool_resources
         self._params = params or PipelineParams()
         self._additional_span_attributes = additional_span_attributes or {}
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
@@ -252,7 +273,7 @@ class PipelineTask(BasePipelineTask):
         self._enable_tracing = enable_tracing and is_tracing_available()
         self._enable_turn_tracking = enable_turn_tracking
         self._idle_timeout_secs = idle_timeout_secs
-        self._tool_resources = tool_resources
+        self._app_resources = app_resources
         observers = observers or []
         self._turn_tracking_observer: TurnTrackingObserver | None = None
         self._user_bot_latency_observer: UserBotLatencyObserver | None = None
@@ -282,7 +303,7 @@ class PipelineTask(BasePipelineTask):
 
         # This task maneger will handle all the asyncio tasks created by this
         # PipelineTask and its frame processors.
-        self._task_manager = task_manager or TaskManager()
+        self._pipeline_task_manager = task_manager or TaskManager()
 
         # This queue is the queue used to push frames to the pipeline.
         self._push_queue = asyncio.Queue()
@@ -365,7 +386,7 @@ class PipelineTask(BasePipelineTask):
         # The task observer acts as a proxy to the provided observers. This way,
         # we only need to pass a single observer (using the StartFrame) which
         # then just acts as a proxy.
-        self._observer = TaskObserver(observers=observers, task_manager=self._task_manager)
+        self._observer = TaskObserver(observers=observers)
 
         # These events can be used to check which frames make it to the source
         # or sink processors. Instead of calling the event handlers for every
@@ -390,6 +411,21 @@ class PipelineTask(BasePipelineTask):
             The pipeline parameters configuration.
         """
         return self._params
+
+    @property
+    def app_resources(self) -> Any:
+        """Get the application-defined resources passed to this task.
+
+        This is the same object passed to the constructor as
+        ``app_resources``. Tool handlers can also access it via
+        ``FunctionCallParams.app_resources``. The framework returns the
+        original reference; mutations are visible to all callers.
+
+        Returns:
+            The application-defined resources, or ``None`` if none were
+            passed.
+        """
+        return self._app_resources
 
     @property
     def pipeline(self) -> BasePipeline:
@@ -627,32 +663,24 @@ class PipelineTask(BasePipelineTask):
 
     async def _create_tasks(self):
         """Create and start all pipeline processing tasks."""
-        self._process_push_task = self._task_manager.create_task(
-            self._process_push_queue(), f"{self}::_process_push_queue"
-        )
+        self._process_push_task = self.create_task(self._process_push_queue())
         return self._process_push_task
 
     def _maybe_start_heartbeat_tasks(self):
         """Start heartbeat tasks if heartbeats are enabled and not already running."""
         if self._params.enable_heartbeats and self._heartbeat_push_task is None:
-            self._heartbeat_push_task = self._task_manager.create_task(
-                self._heartbeat_push_handler(), f"{self}::_heartbeat_push_handler"
-            )
-            self._heartbeat_monitor_task = self._task_manager.create_task(
-                self._heartbeat_monitor_handler(), f"{self}::_heartbeat_monitor_handler"
-            )
+            self._heartbeat_push_task = self.create_task(self._heartbeat_push_handler())
+            self._heartbeat_monitor_task = self.create_task(self._heartbeat_monitor_handler())
 
     def _maybe_start_idle_task(self):
         """Start idle monitoring task if idle timeout is configured."""
         if self._idle_timeout_secs:
-            self._idle_monitor_task = self._task_manager.create_task(
-                self._idle_monitor_handler(), f"{self}::_idle_monitor_handler"
-            )
+            self._idle_monitor_task = self.create_task(self._idle_monitor_handler())
 
     async def _cancel_tasks(self):
         """Cancel all running pipeline tasks."""
         if self._process_push_task:
-            await self._task_manager.cancel_task(self._process_push_task)
+            await self.cancel_task(self._process_push_task)
             self._process_push_task = None
 
         await self._maybe_cancel_heartbeat_tasks()
@@ -664,17 +692,17 @@ class PipelineTask(BasePipelineTask):
             return
 
         if self._heartbeat_push_task:
-            await self._task_manager.cancel_task(self._heartbeat_push_task)
+            await self.cancel_task(self._heartbeat_push_task)
             self._heartbeat_push_task = None
 
         if self._heartbeat_monitor_task:
-            await self._task_manager.cancel_task(self._heartbeat_monitor_task)
+            await self.cancel_task(self._heartbeat_monitor_task)
             self._heartbeat_monitor_task = None
 
     async def _maybe_cancel_idle_task(self):
         """Cancel idle monitoring task if it is running."""
         if self._idle_monitor_task:
-            await self._task_manager.cancel_task(self._idle_monitor_task)
+            await self.cancel_task(self._idle_monitor_task)
             self._idle_monitor_task = None
 
     def _initial_metrics_frame(self) -> MetricsFrame:
@@ -732,14 +760,22 @@ class PipelineTask(BasePipelineTask):
 
     async def _setup(self, params: PipelineTaskParams):
         """Set up the pipeline task and all processors."""
+        await super().setup(self._pipeline_task_manager)
+
         mgr_params = TaskManagerParams(loop=params.loop)
-        self._task_manager.setup(mgr_params)
+        self.task_manager.setup(mgr_params)
 
         setup = FrameProcessorSetup(
             clock=self._clock,
-            task_manager=self._task_manager,
+            task_manager=self.task_manager,
             observer=self._observer,
-            tool_resources=self._tool_resources,
+            pipeline_task=self,
+            # Populate the deprecated `tool_resources` field for backwards
+            # compatibility with custom FrameProcessor subclasses whose
+            # ``setup()`` overrides still read it. Reading the field emits a
+            # DeprecationWarning; new code should read
+            # ``setup.pipeline_task.app_resources`` instead.
+            tool_resources=self._app_resources,
         )
         await self._pipeline.setup(setup)
 
@@ -747,6 +783,7 @@ class PipelineTask(BasePipelineTask):
         await self._load_setup_files()
 
         # Start task observer.
+        await self._observer.setup(self.task_manager)
         await self._observer.start()
 
     async def _cleanup(self, cleanup_pipeline: bool):
@@ -986,7 +1023,7 @@ class PipelineTask(BasePipelineTask):
 
     def _print_dangling_tasks(self):
         """Log any dangling tasks that haven't been properly cleaned up."""
-        tasks = [t.get_name() for t in self._task_manager.current_tasks()]
+        tasks = [t.get_name() for t in self.task_manager.current_tasks()]
         if tasks:
             logger.warning(f"{self} dangling tasks detected: {tasks}")
 

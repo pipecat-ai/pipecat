@@ -49,13 +49,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = OpenAIRealtimeSTTService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAIRealtimeSTTService.Settings(
-            model="gpt-4o-transcribe",
-            prompt="Expect words related to dogs, such as breed names.",
-        ),
-    )
+    stt = OpenAIRealtimeSTTService(api_key=os.environ["OPENAI_API_KEY"])
 
     tl = TranscriptionLogger()
     vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())

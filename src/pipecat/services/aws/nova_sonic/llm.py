@@ -49,7 +49,8 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators import async_tool_messages
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationHelper,
@@ -235,7 +236,7 @@ class AWSNovaSonicLLMSettings(LLMSettings):
     endpointing_sensitivity: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class AWSNovaSonicLLMService(LLMService):
+class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
     """AWS Nova Sonic speech-to-speech LLM service.
 
     Provides bidirectional audio streaming, real-time transcription, text generation,
@@ -501,12 +502,18 @@ class AWSNovaSonicLLMService(LLMService):
         service, and reconnects with the preserved context.
         """
         logger.debug("Resetting conversation")
-        if self._assistant_is_responding:
-            self._assistant_is_responding = False
-            await self._report_assistant_response_ended()
 
         # Grab context to carry through disconnect/reconnect
         context = self._context
+        if context is None:
+            logger.warning(
+                "reset_conversation called before an initial context was received; nothing to reset"
+            )
+            return
+
+        if self._assistant_is_responding:
+            self._assistant_is_responding = False
+            await self._report_assistant_response_ended()
 
         await self._disconnect()
         await self._start_connecting()
@@ -606,9 +613,57 @@ class AWSNovaSonicLLMService(LLMService):
             await self._disconnect()
 
     async def _process_completed_function_calls(self, send_new_results: bool):
+        if not self._context:  # should never happen
+            return
         # Check for set of completed function calls in the context
         for message in self._context.get_messages():
-            if message.get("role") and message.get("content") not in ["IN_PROGRESS", "CANCELLED"]:
+            # LLMSpecificMessages are opaque provider-specific payloads, not
+            # standard tool-result messages — skip them.
+            if isinstance(message, LLMSpecificMessage):
+                continue
+
+            # Async-tool messages live alongside regular tool messages in the
+            # context; detect and route them before the regular logic so we
+            # don't try to send the async-tool envelope JSON as a tool result.
+            async_payload = async_tool_messages.parse_message(message)
+            if async_payload is not None:
+                if async_payload.tool_call_id in self._completed_tool_calls:
+                    continue
+                if async_payload.kind == "started":
+                    # The provider already issued the tool call and natively
+                    # awaits a result; nothing to send for the started marker.
+                    continue
+                if async_payload.kind == "intermediate":
+                    logger.error(
+                        f"{self}: Nova Sonic does not support streamed async "
+                        f"tool results; dropping intermediate result for "
+                        f"tool_call_id={async_payload.tool_call_id}. Use a "
+                        f"non-realtime LLM service if your tool needs to "
+                        f"stream intermediate results."
+                    )
+                    await self.push_error(
+                        error_msg="Nova Sonic does not support streamed async tool results.",
+                    )
+                    continue
+                if async_payload.kind == "final":
+                    # Deliver via the formal toolResult channel — same path
+                    # as a synchronous tool result, just delayed.
+                    if send_new_results:
+                        await self._send_tool_result(
+                            async_payload.tool_call_id, async_payload.result
+                        )
+                    self._completed_tool_calls.add(async_payload.tool_call_id)
+                    continue
+                # Defensive: any async-tool message must not fall through
+                # to the regular tool-result block below, even if it
+                # carries a kind we don't recognize.
+                continue
+
+            # Look for newly-completed "regular" (as opposed to async-tool) results
+            if message.get("role") == "tool" and message.get("content") not in [
+                "IN_PROGRESS",
+                "CANCELLED",
+            ]:
                 tool_call_id = message.get("tool_call_id")
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     # Found a newly-completed function call - send the result to the service
@@ -629,7 +684,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self._process_completed_function_calls(send_new_results=False)
 
         # Read context
-        adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         llm_connection_params = adapter.get_llm_invocation_params(
             self._context, system_instruction=assert_given(self._settings.system_instruction)
         )
@@ -639,7 +694,7 @@ class AWSNovaSonicLLMService(LLMService):
         tools = (
             llm_connection_params["tools"]
             if llm_connection_params["tools"]
-            else adapter.from_standard_tools(self._tools)
+            else (adapter.from_standard_tools(self._tools) or [])
         )
         logger.debug(f"Using tools: {tools}")
         await self._send_prompt_start_event(tools)
@@ -860,6 +915,8 @@ class AWSNovaSonicLLMService(LLMService):
         if not self._stream or not self._prompt_name:
             return
 
+        logger.debug(f"Sending tool result to Nova Sonic for tool_call_id={tool_call_id}")
+
         content_name = str(uuid.uuid4())
 
         result_content_start = f'''
@@ -959,7 +1016,9 @@ class AWSNovaSonicLLMService(LLMService):
     async def open_stream(self, client):
         """Open a bidirectional stream on the given client."""
         return await client.invoke_model_with_bidirectional_stream(
-            InvokeModelWithBidirectionalStreamOperationInput(model_id=self._settings.model)
+            InvokeModelWithBidirectionalStreamOperationInput(
+                model_id=assert_given(self._settings.model)
+            )
         )
 
     async def send_event(self, event_json: str, stream):
@@ -1106,16 +1165,18 @@ class AWSNovaSonicLLMService(LLMService):
         '''
         await self.send_event(event_json, stream)
 
-    def get_setup_params(self):
+    def get_setup_params(self) -> tuple[str | None, list]:
         """Return ``(system_instruction, tools)`` for the next session setup."""
         if not self._context:
             return None, []
-        adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         llm_params = adapter.get_llm_invocation_params(
-            self._context, system_instruction=self._settings.system_instruction
+            self._context, system_instruction=assert_given(self._settings.system_instruction)
         )
         tools = (
-            llm_params["tools"] if llm_params["tools"] else adapter.from_standard_tools(self._tools)
+            llm_params["tools"]
+            if llm_params["tools"]
+            else (adapter.from_standard_tools(self._tools) or [])
         )
         return llm_params["system_instruction"], tools
 

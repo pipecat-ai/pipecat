@@ -64,9 +64,18 @@ class WebsocketClientCallbacks(BaseModel):
         on_message: Called when a message is received from the WebSocket.
     """
 
-    on_connected: Callable[[websockets.WebSocketClientProtocol], Awaitable[None]]
-    on_disconnected: Callable[[websockets.WebSocketClientProtocol], Awaitable[None]]
-    on_message: Callable[[websockets.WebSocketClientProtocol, websockets.Data], Awaitable[None]]
+    on_connected: Callable[
+        [websockets.WebSocketClientProtocol],  # pyright: ignore[reportAttributeAccessIssue]
+        Awaitable[None],
+    ]
+    on_disconnected: Callable[
+        [websockets.WebSocketClientProtocol],  # pyright: ignore[reportAttributeAccessIssue]
+        Awaitable[None],
+    ]
+    on_message: Callable[
+        [websockets.WebSocketClientProtocol, websockets.Data],  # pyright: ignore[reportAttributeAccessIssue]
+        Awaitable[None],
+    ]
 
 
 class WebsocketClientSession:
@@ -98,7 +107,7 @@ class WebsocketClientSession:
 
         self._leave_counter = 0
         self._task_manager: BaseTaskManager | None = None
-        self._websocket: websockets.WebSocketClientProtocol | None = None
+        self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
 
     @property
     def task_manager(self) -> BaseTaskManager:
@@ -192,6 +201,10 @@ class WebsocketClientSession:
 
     async def _client_task_handler(self):
         """Handle incoming messages from the WebSocket connection."""
+        # `connect()` only starts this task after `_websocket` is assigned, and
+        # `disconnect()` cancels the task before clearing `_websocket`, so this
+        # invariant should always hold when this method runs.
+        assert self._websocket is not None
         try:
             # Handle incoming messages
             async for message in self._websocket:

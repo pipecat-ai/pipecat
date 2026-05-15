@@ -12,8 +12,12 @@ from pipecat.services.deepgram.sagemaker.stt import DeepgramSageMakerSTTSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.inworld.realtime import events as inworld_events
 from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMSettings
+from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL
 from pipecat.services.openai.realtime import events
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMSettings
+from pipecat.services.openai.realtime.llm import (
+    OpenAIRealtimeLLMService,
+    OpenAIRealtimeLLMSettings,
+)
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -745,6 +749,48 @@ class TestOpenAIRealtimeSettingsApplyUpdate:
         # SP should be untouched (same object)
         assert store.session_properties is original_sp
         assert store.session_properties.instructions == "Keep me."
+
+
+class TestOpenAIRealtimeSessionProperties:
+    def test_realtime_whisper_prompt_is_omitted(self):
+        """gpt-realtime-whisper does not support input transcription prompt."""
+        session_properties = events.SessionProperties(
+            audio=events.AudioConfiguration(
+                input=events.AudioInput(
+                    transcription=events.InputAudioTranscription(
+                        model=OPENAI_REALTIME_WHISPER_MODEL,
+                        prompt="Keywords: metoprolol",
+                    )
+                )
+            )
+        )
+
+        changed = OpenAIRealtimeLLMService._omit_unsupported_input_audio_transcription_prompt(
+            session_properties
+        )
+
+        assert changed is True
+        assert session_properties.audio.input.transcription.prompt is None
+
+    def test_supported_transcription_model_keeps_prompt(self):
+        """Other input transcription models can keep prompt settings."""
+        session_properties = events.SessionProperties(
+            audio=events.AudioConfiguration(
+                input=events.AudioInput(
+                    transcription=events.InputAudioTranscription(
+                        model="gpt-4o-transcribe",
+                        prompt="Keywords: metoprolol",
+                    )
+                )
+            )
+        )
+
+        changed = OpenAIRealtimeLLMService._omit_unsupported_input_audio_transcription_prompt(
+            session_properties
+        )
+
+        assert changed is False
+        assert session_properties.audio.input.transcription.prompt == "Keywords: metoprolol"
 
 
 # ---------------------------------------------------------------------------

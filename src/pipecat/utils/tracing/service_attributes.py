@@ -188,8 +188,8 @@ def add_llm_span_attributes(
     service_name: str,
     model: str,
     stream: bool = True,
-    messages: dict[str, Any] | str | None = None,
-    tools: dict[str, Any] | str | None = None,
+    messages: Any | None = None,
+    tools: Any | None = None,
     output: str | None = None,
     tool_choice: str | None = None,
     parameters: dict[str, Any] | None = None,
@@ -220,7 +220,7 @@ def add_llm_span_attributes(
     span.set_attribute("gen_ai.output.type", "text")
     span.set_attribute("stream", stream)
 
-    span_input = {}
+    span_input: dict[str, Any] = {}
 
     # Add optional attributes
     if messages:
@@ -232,8 +232,9 @@ def add_llm_span_attributes(
     if tools:
         span_input["tools"] = tools
 
-    # Set input in ChatML format
-    span.set_attribute("input", json.dumps(span_input))
+    # Set input in ChatML format when available
+    if span_input:
+        span.set_attribute("input", json.dumps(span_input, default=str))
 
     if tool_choice:
         span.set_attribute("tool_choice", tool_choice)

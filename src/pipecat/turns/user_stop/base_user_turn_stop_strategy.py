@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.turns.types import ProcessFrameResult
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -45,7 +44,16 @@ class BaseUserTurnStopStrategy(BaseObject):
     Events triggered by strategies:
 
       - `on_push_frame`: Indicates the strategy wants to push a frame.
-      - `on_user_turn_stopped`: Signals that the user stopped speaking.
+      - `on_user_turn_inference_triggered`: Signals that enough evidence
+        exists to start LLM inference for the current user turn. In most
+        cases this fires together with `on_user_turn_stopped`. Strategies
+        that gate finalization on the LLM (e.g.
+        ``LLMTurnCompletionUserTurnStopStrategy``) fire only this event
+        upstream and a separate strategy fires `on_user_turn_stopped` once
+        the LLM confirms the turn is complete.
+      - `on_user_turn_stopped`: Signals that the user turn is semantically
+        final. Observers, transcript appenders, and UI indicators should
+        bind this event.
 
     """
 
@@ -61,25 +69,10 @@ class BaseUserTurnStopStrategy(BaseObject):
         """
         super().__init__(**kwargs)
         self._enable_user_speaking_frames = enable_user_speaking_frames
-        self._task_manager: BaseTaskManager | None = None
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
+        self._register_event_handler("on_user_turn_inference_triggered", sync=True)
         self._register_event_handler("on_user_turn_stopped", sync=True)
-
-    @property
-    def task_manager(self) -> BaseTaskManager:
-        """Returns the configured task manager."""
-        if not self._task_manager:
-            raise RuntimeError(f"{self} user turn stop strategy was not properly setup")
-        return self._task_manager
-
-    async def setup(self, task_manager: BaseTaskManager):
-        """Initialize the strategy with the given task manager.
-
-        Args:
-            task_manager: The task manager to be associated with this instance.
-        """
-        self._task_manager = task_manager
 
     async def cleanup(self):
         """Cleanup the strategy."""
@@ -123,7 +116,23 @@ class BaseUserTurnStopStrategy(BaseObject):
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
     async def trigger_user_turn_stopped(self):
-        """Trigger the `on_user_turn_stopped` event."""
+        """Fire both ``on_user_turn_inference_triggered`` and ``on_user_turn_stopped``.
+
+        Most strategies call this when they decide a turn has ended. To
+        defer finalization to another strategy (so this strategy fires
+        only the inference-triggered event), wrap this strategy with
+        :func:`~pipecat.turns.user_stop.deferred` instead of changing
+        the trigger call.
+        """
+        await self.trigger_user_turn_inference_triggered()
+        await self.trigger_user_turn_finalized()
+
+    async def trigger_user_turn_inference_triggered(self):
+        """Trigger only the `on_user_turn_inference_triggered` event."""
+        await self._call_event_handler("on_user_turn_inference_triggered")
+
+    async def trigger_user_turn_finalized(self):
+        """Trigger only the `on_user_turn_stopped` event."""
         await self._call_event_handler(
             "on_user_turn_stopped",
             UserTurnStoppedParams(enable_user_speaking_frames=self._enable_user_speaking_frames),

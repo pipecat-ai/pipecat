@@ -28,6 +28,7 @@ the messages are sent to Perplexity's API.
 """
 
 import copy
+from typing import Any, cast
 
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -116,7 +117,11 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
         if not messages:
             return messages
 
-        messages = copy.deepcopy(messages)
+        # ChatCompletionMessageParam is a union of TypedDicts; the
+        # transformations below mutate by key/index in ways those TypedDicts
+        # don't permit. Work against a plain-dict view for the duration of
+        # the transformation and cast back at the return site.
+        msgs: list[dict[str, Any]] = cast(list[dict[str, Any]], copy.deepcopy(messages))
 
         # Note: "developer" → "user" conversion is handled by the parent adapter
         # via the convert_developer_to_user parameter.
@@ -125,10 +130,10 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
         # Perplexity allows system messages at the start, but rejects them
         # after any non-system message.
         in_initial_system_block = True
-        for i in range(len(messages)):
-            if messages[i].get("role") == "system":
+        for i in range(len(msgs)):
+            if msgs[i].get("role") == "system":
                 if not in_initial_system_block:
-                    messages[i]["role"] = "user"
+                    msgs[i]["role"] = "user"
             else:
                 in_initial_system_block = False
 
@@ -137,9 +142,9 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
         # messages that violate Perplexity's strict alternation requirement.
         # Skip consecutive system messages at the start — Perplexity allows those.
         i = 0
-        while i < len(messages) - 1:
-            current = messages[i]
-            next_msg = messages[i + 1]
+        while i < len(msgs) - 1:
+            current = msgs[i]
+            next_msg = msgs[i + 1]
             if current["role"] == next_msg["role"] == "system":
                 # Perplexity allows multiple initial system messages, don't merge
                 i += 1
@@ -154,7 +159,7 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
                     next_msg.get("content"), list
                 ):
                     current["content"].extend(next_msg["content"])
-                messages.pop(i + 1)
+                msgs.pop(i + 1)
             else:
                 i += 1
 
@@ -162,7 +167,7 @@ class PerplexityLLMAdapter(OpenAILLMAdapter):
         # Perplexity requires the last message to be "user" or "tool".
         # OpenAI appears to silently ignore trailing assistant messages
         # server-side, so removing them preserves equivalent behavior.
-        while messages and messages[-1].get("role") == "assistant":
-            messages.pop()
+        while msgs and msgs[-1].get("role") == "assistant":
+            msgs.pop()
 
-        return messages
+        return cast(list[ChatCompletionMessageParam], msgs)

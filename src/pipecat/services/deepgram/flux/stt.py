@@ -115,6 +115,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         tag: list | None = None,
         params: InputParams | None = None,
         should_interrupt: bool = True,
+        watchdog_min_timeout: float = 0.5,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -140,6 +141,8 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                     Use ``settings=DeepgramFluxSTTService.Settings(...)`` instead.
 
             should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
+            watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
+                sends silence to prevent dangling turns. Defaults to 0.5.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent classes.
@@ -224,6 +227,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             mip_opt_out=mip_opt_out,
             tag=tag,
             should_interrupt=should_interrupt,
+            watchdog_min_timeout=watchdog_min_timeout,
             settings=default_settings,
             sample_rate=sample_rate,
             **kwargs,
@@ -240,9 +244,17 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     # ------------------------------------------------------------------
 
     async def _transport_send_audio(self, audio: bytes):
+        if (
+            self._websocket is None
+        ):  # should never happen — caller should gate on _transport_is_active()
+            return
         await self._websocket.send(audio)
 
     async def _transport_send_json(self, message: dict):
+        if (
+            self._websocket is None
+        ):  # should never happen — caller should gate on _transport_is_active()
+            return
         await self._websocket.send(json.dumps(message))
 
     def _transport_is_active(self) -> bool:
@@ -291,14 +303,19 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
             self._connection_established_event.clear()
             self._user_is_speaking = False
-            self._websocket = await websocket_connect(
+            # `_connect` sets `_websocket_url` before calling us; the assert
+            # narrows for pyright.
+            assert self._websocket_url is not None
+            websocket = await websocket_connect(
                 self._websocket_url,
                 additional_headers={"Authorization": f"Token {self._api_key}"},
             )
+            self._websocket = websocket
 
-            headers = {
-                k: v for k, v in self._websocket.response.headers.items() if k.startswith("dg-")
-            }
+            # `response` is populated after the handshake completes (which it
+            # has, since `websocket_connect` already returned).
+            response_headers = websocket.response.headers if websocket.response else {}
+            headers = {k: v for k, v in response_headers.items() if k.startswith("dg-")}
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
 
             # Creating the receiver task
@@ -377,6 +394,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
         try:
             self._last_stt_time = time.monotonic()
+            self._last_audio_chunk_duration = len(audio) / (self.sample_rate * 2)
             await self.send_with_retry(audio, self._report_error)
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")

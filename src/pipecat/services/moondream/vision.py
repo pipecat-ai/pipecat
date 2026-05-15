@@ -153,9 +153,14 @@ class MoondreamService(VisionService):
         logger.debug(f"Analyzing image (bytes length: {len(frame.image)})")
 
         def get_image_description(image_bytes: bytes, text: str | None) -> str:
+            if frame.format is None:
+                raise ValueError("Cannot decode image bytes without a format")
             image = Image.frombytes(frame.format, frame.size, image_bytes)
-            image_embeds = self._model.encode_image(image)
-            description = self._model.query(image_embeds, text)["answer"]
+            # `encode_image` and `query` are custom methods provided by the
+            # moondream2 model code (via `trust_remote_code=True`) that pyright
+            # can't see on `AutoModelForCausalLM`'s base type.
+            image_embeds = self._model.encode_image(image)  # pyright: ignore[reportCallIssue]
+            description = self._model.query(image_embeds, text)["answer"]  # pyright: ignore[reportCallIssue]
             return description
 
         description = await asyncio.to_thread(get_image_description, frame.image, frame.text)

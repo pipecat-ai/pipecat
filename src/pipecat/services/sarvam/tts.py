@@ -216,14 +216,16 @@ def get_speakers_for_model(model: str) -> list[str]:
     return list(TTS_MODEL_CONFIGS["bulbul:v2"].speakers)
 
 
-def language_to_sarvam_language(language: Language) -> str | None:
+def language_to_sarvam_language(language: Language) -> str:
     """Convert Pipecat Language enum to Sarvam AI language codes.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding Sarvam AI language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the full language code string and
+        logs a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         Language.BN: "bn-IN",  # Bengali

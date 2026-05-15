@@ -4,15 +4,25 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Example: async function call with the Gemini Live LLM service.
 
+The ``get_current_weather`` tool is registered with
+``cancel_on_interruption=False`` and simulates a slow API call (10s sleep).
+While the call is in flight the conversation continues; the result arrives
+later via the async-tool mechanism and is forwarded to Gemini Live as a
+FunctionResponse so the model can integrate it naturally into its next turn.
+"""
+
+import asyncio
 import os
+import random
 from datetime import datetime
 
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -31,33 +41,55 @@ load_dotenv(override=True)
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
-    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+    # Simulate a long-running API call so we can demonstrate that the
+    # conversation continues while the tool is in flight.
+    await asyncio.sleep(10)
+    temperature = (
+        random.randint(60, 85)
+        if params.arguments["format"] == "fahrenheit"
+        else random.randint(15, 30)
+    )
     await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
+            "location": params.arguments["location"],
             "format": params.arguments["format"],
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
-    await params.result_callback({"name": "The Golden Dragon"})
+weather_function = FunctionSchema(
+    name="get_current_weather",
+    description="Get the current weather",
+    properties={
+        "location": {
+            "type": "string",
+            "description": "The city and state, e.g. San Francisco, CA",
+        },
+        "format": {
+            "type": "string",
+            "enum": ["celsius", "fahrenheit"],
+            "description": "The temperature unit to use. Infer this from the user's location.",
+        },
+    },
+    required=["location", "format"],
+)
+
+tools = ToolsSchema(standard_tools=[weather_function])
 
 
-system_instruction = """
-You are a helpful assistant who can answer questions and use tools.
+system_instruction = (
+    "You are a friendly assistant. The user and you will engage in a spoken "
+    "dialog exchanging the transcripts of a natural real-time conversation. "
+    "Keep your responses short, generally two or three sentences for chatty "
+    "scenarios. When the user asks for the weather, call get_current_weather. "
+    "While you wait for the result, keep chatting with the user. When the "
+    "result arrives, share it with the user naturally."
+)
 
-You have three tools available to you:
-1. get_current_weather: Use this tool to get the current weather in a specific location.
-2. get_restaurant_recommendation: Use this tool to get a restaurant recommendation in a specific location.
-3. google_search: Use this tool to search the web for information.
-"""
 
-
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -77,42 +109,6 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
-    )
-    restaurant_function = FunctionSchema(
-        name="get_restaurant_recommendation",
-        description="Get a restaurant recommendation",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-        },
-        required=["location"],
-    )
-    search_tool = {"google_search": {}}
-    # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
-    # you cannot use the "google_search" tool alongside other tools.
-    # See https://github.com/googleapis/python-genai/issues/941.
-    tools = ToolsSchema(
-        standard_tools=[weather_function, restaurant_function],
-        custom_tools={AdapterType.GEMINI: [search_tool]},
-    )
-
     llm = GeminiLiveLLMService(
         api_key=os.environ["GOOGLE_API_KEY"],
         settings=GeminiLiveLLMService.Settings(
@@ -121,13 +117,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tools=tools,
     )
 
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+    llm.register_function(
+        "get_current_weather",
+        fetch_weather_from_api,
+        cancel_on_interruption=False,
+    )
 
-    # You can provide the system instructions and tools in the context rather
-    # than as arguments to GeminiLiveLLMService, but note that doing so will
-    # trigger a (fast) reconnection when the GeminiLiveLLMService first
-    # receives the context (i.e. when we send the LLMRunFrame below).
     context = LLMContext()
     # Server-side VAD is enabled by default; no local VAD is added.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
@@ -154,7 +149,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Kick off the conversation.
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
@@ -166,7 +160,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-
     await runner.run(task)
 
 

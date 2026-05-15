@@ -44,7 +44,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_xai_stt_language(language: Language) -> str | None:
+def language_to_xai_stt_language(language: Language) -> str:
     """Convert a Language enum to the xAI STT language code.
 
     xAI STT accepts two-letter language codes (e.g. ``en``, ``fr``, ``de``,
@@ -54,7 +54,10 @@ def language_to_xai_stt_language(language: Language) -> str | None:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding xAI STT language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AR: "ar",

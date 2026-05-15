@@ -105,7 +105,7 @@ class AnthropicLLMSettings(LLMSettings):
         return instance
 
 
-class AnthropicLLMService(LLMService):
+class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
     """LLM service for Anthropic's Claude models.
 
     Provides inference capabilities with Claude models including support for
@@ -293,7 +293,7 @@ class AnthropicLLMService(LLMService):
         effective_instruction = system_instruction or assert_given(
             self._settings.system_instruction
         )
-        adapter: AnthropicLLMAdapter = self.get_llm_adapter()
+        adapter = self.get_llm_adapter()
         invocation_params = adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
@@ -328,8 +328,8 @@ class AnthropicLLMService(LLMService):
         return next((block.text for block in response.content if hasattr(block, "text")), None)
 
     def _get_llm_invocation_params(self, context: LLMContext) -> AnthropicLLMInvocationParams:
-        adapter: AnthropicLLMAdapter = self.get_llm_adapter()
-        params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(
+        adapter = self.get_llm_adapter()
+        params = adapter.get_llm_invocation_params(
             context,
             enable_prompt_caching=assert_given(self._settings.enable_prompt_caching),
             system_instruction=assert_given(self._settings.system_instruction),

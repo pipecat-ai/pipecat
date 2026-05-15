@@ -154,8 +154,17 @@ class WhatsAppClient:
 
         return int(challenge)
 
-    async def _validate_whatsapp_webhook_request(self, raw_body: bytes, sha256_signature: str):
+    async def _validate_whatsapp_webhook_request(
+        self, raw_body: bytes | None, sha256_signature: str | None
+    ):
         """Common handler for both /start and /connect endpoints."""
+        # Callers gate on `self._whatsapp_secret`, so the assert holds.
+        assert self._whatsapp_secret is not None
+        if raw_body is None:
+            raise Exception("Missing raw request body")
+        if not sha256_signature:
+            raise Exception("Missing X-Hub-Signature-256 header")
+
         # Compute HMAC SHA256 using your App Secret
         expected_signature = hmac.new(
             key=self._whatsapp_secret.encode("utf-8"),
@@ -164,8 +173,6 @@ class WhatsAppClient:
         ).hexdigest()
 
         # Extract signature from header (strip 'sha256=' prefix)
-        if not sha256_signature:
-            raise Exception("Missing X-Hub-Signature-256 header")
         received_signature = sha256_signature.split("sha256=")[-1]
 
         # Compare signatures securely
@@ -306,7 +313,12 @@ class WhatsAppClient:
             # Create and initialize WebRTC connection
             pipecat_connection = SmallWebRTCConnection(self._ice_servers)
             await pipecat_connection.initialize(sdp=call.session.sdp, type=call.session.sdp_type)
-            sdp_answer = pipecat_connection.get_answer().get("sdp")
+            answer = pipecat_connection.get_answer()
+            if answer is None:
+                raise RuntimeError("SmallWebRTC connection produced no SDP answer")
+            sdp_answer = answer.get("sdp")
+            if sdp_answer is None:
+                raise RuntimeError("SmallWebRTC SDP answer missing 'sdp' field")
             sdp_answer = self._filter_sdp_for_whatsapp(sdp_answer)
 
             logger.debug(f"SDP answer generated for call {call.id}")

@@ -20,7 +20,6 @@ from pipecat.metrics.metrics import (
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
-from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -40,35 +39,11 @@ class FrameProcessorMetrics(BaseObject):
         processing times, and usage statistics.
         """
         super().__init__()
-        self._task_manager = None
         self._start_ttfb_time = 0
         self._start_processing_time = 0
         self._start_text_aggregation_time = 0
         self._last_ttfb_time = 0
         self._should_report_ttfb = True
-
-    async def setup(self, task_manager: BaseTaskManager):
-        """Set up the metrics collector with a task manager.
-
-        Args:
-            task_manager: The task manager for handling async operations.
-        """
-        self._task_manager = task_manager
-
-    async def cleanup(self):
-        """Clean up metrics collection resources."""
-        await super().cleanup()
-
-    @property
-    def task_manager(self) -> BaseTaskManager:
-        """Get the associated task manager.
-
-        Returns:
-            The task manager instance for async operations.
-        """
-        if self._task_manager is None:
-            raise RuntimeError("task_manager not set; call setup() first")
-        return self._task_manager
 
     @property
     def ttfb(self) -> float | None:

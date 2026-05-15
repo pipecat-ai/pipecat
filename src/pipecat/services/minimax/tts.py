@@ -31,14 +31,16 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
-def language_to_minimax_language(language: Language) -> str | None:
+def language_to_minimax_language(language: Language) -> str:
     """Convert a Language enum to MiniMax language format.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding MiniMax language name, or None if not supported.
+        The corresponding MiniMax language name. If ``language`` is not in
+        the verified mapping, falls back to the full language code string and
+        logs a warning (via ``resolve_language(..., use_base_code=False)``).
     """
     LANGUAGE_MAP = {
         Language.AF: "Afrikaans",

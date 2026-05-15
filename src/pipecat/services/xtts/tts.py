@@ -37,14 +37,17 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 # https://github.com/coqui-ai/xtts-streaming-server
 
 
-def language_to_xtts_language(language: Language) -> str | None:
+def language_to_xtts_language(language: Language) -> str:
     """Convert a Language enum to XTTS language code.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding XTTS language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.CS: "cs",
@@ -211,7 +214,11 @@ class XTTSService(TTSService):
             logger.error(f"{self} no studio speakers available")
             return
 
-        embeddings = self._studio_speakers[assert_given(self._settings.voice)]
+        voice = assert_given(self._settings.voice)
+        if voice is None:
+            yield ErrorFrame(error="XTTS voice must be specified")
+            return
+        embeddings = self._studio_speakers[voice]
 
         url = self._base_url + "/tts_stream"
 

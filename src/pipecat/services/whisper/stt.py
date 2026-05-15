@@ -97,14 +97,17 @@ class MLXModel(Enum):
     LARGE_V3_TURBO_Q4 = "mlx-community/whisper-large-v3-turbo-q4"
 
 
-def language_to_whisper_language(language: Language) -> str | None:
+def language_to_whisper_language(language: Language) -> str:
     """Maps pipecat Language enum to Whisper language codes.
 
     Args:
         language: A Language enum value representing the input language.
 
     Returns:
-        str or None: The corresponding Whisper language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
 
     Note:
         Only includes languages officially supported by Whisper.
@@ -300,7 +303,7 @@ class WhisperSTTService(SegmentedSTTService):
             language: The Language enum value to convert.
 
         Returns:
-            str or None: The corresponding Whisper language code, or None if not supported.
+            The corresponding Whisper language code, or None if not supported.
         """
         return language_to_whisper_language(language)
 

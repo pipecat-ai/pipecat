@@ -281,7 +281,8 @@ class FishAudioTTSService(InterruptibleTTSService):
             model = assert_given(self._settings.model)
             if model is not None:
                 headers["model"] = model
-            self._websocket = await websocket_connect(self._base_url, additional_headers=headers)
+            websocket = await websocket_connect(self._base_url, additional_headers=headers)
+            self._websocket = websocket
 
             # Send initial start message with ormsgpack
             request_settings = {
@@ -300,7 +301,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             if self._settings.top_p is not None:
                 request_settings["top_p"] = self._settings.top_p
             start_message = {"event": "start", "request": {"text": "", **request_settings}}
-            await self._websocket.send(ormsgpack.packb(start_message))
+            await websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start message to Fish Audio")
 
             await self._call_event_handler("on_connected")

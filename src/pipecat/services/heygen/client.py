@@ -291,6 +291,8 @@ class HeyGenClient:
         """Handle incoming WebSocket messages."""
         try:
             while self._connected:
+                if self._websocket is None:  # should never happen while _connected is True
+                    break
                 try:
                     message = await self._websocket.recv()
                     parsed_message = json.loads(message)

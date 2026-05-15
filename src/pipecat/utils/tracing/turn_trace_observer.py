@@ -22,6 +22,7 @@ from pipecat.frames.frames import StartFrame
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
+from pipecat.utils.tracing.langfuse_helpers import mark_trace_public
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
 
@@ -151,7 +152,7 @@ class TurnTraceObserver(BaseObserver):
         # because BatchSpanProcessor exports spans when they END, so child spans may arrive
         # at Langfuse before the parent conversation span. Whichever span arrives first
         # creates the trace, so all spans need this attribute.
-        self._conversation_span.set_attribute("langfuse.trace.public", True)
+        mark_trace_public(self._conversation_span)
 
         # Set custom otel attributes if provided
         for k, v in (self._additional_span_attributes or {}).items():

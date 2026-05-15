@@ -19,6 +19,7 @@ from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterruptionFrame,
     StartFrame,
@@ -289,10 +290,14 @@ class HumeTTSService(TTSService):
         """
         logger.debug(f"{self}: Generating Hume TTS: [{text}]")
 
+        voice_id = assert_given(self._settings.voice)
+        if voice_id is None:
+            yield ErrorFrame(error="Hume TTS voice must be specified")
+            return
         # Build the request payload
         utterance_kwargs: dict[str, Any] = {
             "text": text,
-            "voice": PostedUtteranceVoiceWithId(id=assert_given(self._settings.voice)),
+            "voice": PostedUtteranceVoiceWithId(id=voice_id),
         }
         if self._settings.description is not None:
             utterance_kwargs["description"] = self._settings.description

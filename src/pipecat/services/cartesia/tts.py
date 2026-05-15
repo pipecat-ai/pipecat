@@ -62,14 +62,17 @@ class GenerationConfig(BaseModel):
     emotion: str | None = None
 
 
-def language_to_cartesia_language(language: Language) -> str | None:
+def language_to_cartesia_language(language: Language) -> str:
     """Convert a Language enum to Cartesia language code.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding Cartesia language code, or None if not supported.
+        The corresponding service language code. If ``language`` is not in
+        the verified mapping, falls back to the base language code (e.g.,
+        ``en`` from ``en-US``) and logs a warning (via
+        ``resolve_language(..., use_base_code=True)``).
     """
     LANGUAGE_MAP = {
         Language.AR: "ar",
@@ -232,12 +235,13 @@ class CartesiaTTSService(WebsocketTTSService):
         *,
         api_key: str,
         voice_id: str | None = None,
-        cartesia_version: str = "2025-04-16",
+        cartesia_version: str = "2026-03-01",
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str | None = None,
         sample_rate: int | None = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
+        max_buffer_delay_ms: int | None = None,
         params: InputParams | None = None,
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
@@ -263,6 +267,12 @@ class CartesiaTTSService(WebsocketTTSService):
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
             container: Audio container format.
+            max_buffer_delay_ms: Server-side buffering window before generation
+                starts. ``0`` disables server buffering (custom buffering); any
+                value in (0, 5000] enables managed buffering. If ``None``,
+                derived from ``text_aggregation_mode``: ``0`` for ``SENTENCE``
+                (avoids stacking client and server buffering), unset for
+                ``TOKEN`` (uses Cartesia's 3000ms default).
             params: Additional input parameters for voice customization.
 
                 .. deprecated:: 0.0.105
@@ -294,7 +304,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="sonic-3",
+            model="sonic-3.5",
             voice=None,
             language=Language.EN,
             generation_config=None,
@@ -353,6 +363,15 @@ class CartesiaTTSService(WebsocketTTSService):
         self._output_encoding = encoding
         self._output_sample_rate = 0  # Set in start() from self.sample_rate
 
+        # Cartesia warns against the "middle ground" of client-side sentence
+        # aggregation plus the server's default 3000ms buffer. When the user
+        # doesn't pick a value, send 0 in SENTENCE mode (custom buffering) and
+        # leave it unset in TOKEN mode so the server default applies (managed
+        # buffering).
+        if max_buffer_delay_ms is None and not self._is_streaming_tokens:
+            max_buffer_delay_ms = 0
+        self._max_buffer_delay_ms = max_buffer_delay_ms
+
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
@@ -375,50 +394,55 @@ class CartesiaTTSService(WebsocketTTSService):
         return language_to_cartesia_language(language)
 
     # A set of Cartesia-specific helpers for text transformations
+    @staticmethod
     def SPELL(text: str) -> str:
         """Wrap text in Cartesia spell tag."""
         return f"<spell>{text}</spell>"
 
+    @staticmethod
     def EMOTION_TAG(emotion: CartesiaEmotion) -> str:
         """Convenience method to create an emotion tag."""
         return f'<emotion value="{emotion}" />'
 
+    @staticmethod
     def PAUSE_TAG(seconds: float) -> str:
         """Convenience method to create a pause tag."""
         return f'<break time="{seconds}s" />'
 
+    @staticmethod
     def VOLUME_TAG(volume: float) -> str:
         """Convenience method to create a volume tag."""
         return f'<volume ratio="{volume}" />'
 
+    @staticmethod
     def SPEED_TAG(speed: float) -> str:
         """Convenience method to create a speed tag."""
         return f'<speed ratio="{speed}" />'
 
-    def _is_cjk_language(self, language: str) -> bool:
-        """Check if the given language is CJK (Chinese, Japanese, Korean).
+    def _is_chinese_or_japanese_language(self, language: str) -> bool:
+        """Check if the given language is Chinese or Japanese.
 
         Args:
             language: The language code to check.
 
         Returns:
-            True if the language is Chinese, Japanese, or Korean.
+            True if the language is Chinese or Japanese.
         """
-        cjk_languages = {"zh", "ja", "ko"}
         base_lang = language.split("-")[0].lower()
-        return base_lang in cjk_languages
+        return base_lang in {"zh", "ja"}
 
     def _process_word_timestamps_for_language(
         self, words: list[str], starts: list[float]
     ) -> list[tuple[str, float]]:
         """Process word timestamps based on the current language.
 
-        For CJK languages, Cartesia groups related characters in the same timestamp message.
+        For Chinese and Japanese, Cartesia groups related characters in the same timestamp
+        message.
         For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
         We combine these into single words so the downstream aggregator can add natural
         spacing between meaningful units rather than individual characters.
 
-        For non-CJK languages, words are already properly separated and are used as-is.
+        For other languages, words are already properly separated and are used as-is.
 
         Args:
             words: List of words/characters from Cartesia.
@@ -429,10 +453,10 @@ class CartesiaTTSService(WebsocketTTSService):
         """
         current_language = assert_given(self._settings.language)
 
-        # Check if this is a CJK language (if language is None, treat as non-CJK)
-        if current_language and self._is_cjk_language(current_language):
-            # For CJK languages, combine all characters in this message into one word
-            # using the first character's start time
+        # Check if this is a Chinese/Japanese language (if language is None, treat as other)
+        if current_language and self._is_chinese_or_japanese_language(current_language):
+            # For Chinese/Japanese, combine all characters in this message into one word
+            # using the first character's start time.
             if words and starts:
                 combined_word = "".join(words)
                 first_start = starts[0]
@@ -442,6 +466,11 @@ class CartesiaTTSService(WebsocketTTSService):
         else:
             # For non-CJK languages, use as-is
             return list(zip(words, starts))
+
+    def _word_timestamps_include_inter_frame_spaces(self) -> bool:
+        """Whether timestamp text should be treated as carrying its own spacing."""
+        current_language = assert_given(self._settings.language)
+        return bool(current_language and self._is_chinese_or_japanese_language(current_language))
 
     def _build_msg(
         self,
@@ -466,8 +495,11 @@ class CartesiaTTSService(WebsocketTTSService):
                 "sample_rate": self._output_sample_rate,
             },
             "add_timestamps": add_timestamps,
-            "use_original_timestamps": False if self._settings.model == "sonic" else True,
+            "use_normalized_timestamps": False,
         }
+
+        if self._max_buffer_delay_ms is not None:
+            msg["max_buffer_delay_ms"] = self._max_buffer_delay_ms
 
         if self._settings.language:
             msg["language"] = self._settings.language
@@ -633,7 +665,13 @@ class CartesiaTTSService(WebsocketTTSService):
                 processed_timestamps = self._process_word_timestamps_for_language(
                     msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
                 )
-                await self.add_word_timestamps(processed_timestamps, ctx_id)
+                await self.add_word_timestamps(
+                    processed_timestamps,
+                    ctx_id,
+                    includes_inter_frame_spaces=(
+                        True if self._word_timestamps_include_inter_frame_spaces() else None
+                    ),
+                )
             elif msg["type"] == "chunk":
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["data"]),
@@ -647,6 +685,13 @@ class CartesiaTTSService(WebsocketTTSService):
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Error: {msg}")
                 self.reset_active_audio_context()
+            elif msg["type"] == "flush_done":
+                # Cartesia emits flush_done as a per-transcript boundary marker
+                # within a context (e.g. when max_buffer_delay_ms=0 causes the
+                # server to flush each submission). We don't need it: each turn
+                # already has its own context_id and audio chunks are tagged
+                # with it. Acknowledge silently.
+                pass
             else:
                 await self.push_error(error_msg=f"Error, unknown message type: {msg}")
 
@@ -767,7 +812,7 @@ class CartesiaHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="sonic-3",
+            model="sonic-3.5",
             voice=None,
             language=Language.EN,
             generation_config=None,
@@ -885,6 +930,9 @@ class CartesiaHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
+            if self._session is None:
+                raise RuntimeError("HTTP session is not initialized; call start() before run_tts()")
+
             voice_config = {"mode": "id", "id": self._settings.voice}
 
             output_format = {
@@ -921,8 +969,10 @@ class CartesiaHttpTTSService(TTSService):
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    yield ErrorFrame(error=f"Cartesia API error: {error_text}")
-                    raise Exception(f"Cartesia API returned status {response.status}: {error_text}")
+                    yield ErrorFrame(
+                        error=f"Cartesia API error (status {response.status}): {error_text}"
+                    )
+                    return
 
                 audio_data = await response.read()
 
