@@ -229,6 +229,7 @@ class PiperHttpTTSService(TTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
+            speed: Speed in samples per second.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
