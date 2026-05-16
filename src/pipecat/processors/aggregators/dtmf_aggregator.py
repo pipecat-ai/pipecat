@@ -37,6 +37,12 @@ class DTMFAggregator(FrameProcessor):
     - EndFrame or CancelFrame is received
 
     Emits TranscriptionFrame for compatibility with existing LLM context aggregators.
+
+    By default the emitted ``TranscriptionFrame`` is not finalized to preserve
+    the original behavior. Pass ``finalize_transcripts=True`` so user turn-stop
+    strategies close the turn from the DTMF transcript alone — necessary when
+    the caller has already spoken in the session, because turn-stop strategies
+    otherwise wait for VAD events that DTMF does not produce.
     """
 
     def __init__(
@@ -44,6 +50,7 @@ class DTMFAggregator(FrameProcessor):
         timeout: float = 2.0,
         termination_digit: KeypadEntry = KeypadEntry.POUND,
         prefix: str = "DTMF: ",
+        finalize_transcripts: bool = False,
         **kwargs,
     ):
         """Initialize the DTMF aggregator.
@@ -52,6 +59,16 @@ class DTMFAggregator(FrameProcessor):
             timeout: Idle timeout in seconds before flushing
             termination_digit: Digit that triggers immediate flush
             prefix: Prefix added to DTMF sequence in transcription
+            finalize_transcripts: When True, emit the flushed ``TranscriptionFrame``
+                with ``finalized=True``. By the time the aggregator flushes
+                (terminator, idle timeout, or pipeline end) the DTMF sequence is
+                definitionally complete, so the transcript can be marked final.
+                This lets the user turn-stop strategy close the turn from the
+                DTMF transcript alone — without it, callers who have already
+                spoken once in the session must speak again before the LLM is
+                invoked on a DTMF-only input, because turn-stop strategies key
+                on VAD events that DTMF does not produce. Defaults to ``False``
+                to preserve existing behavior.
             **kwargs: Additional arguments passed to FrameProcessor
         """
         super().__init__(**kwargs)
@@ -59,6 +76,7 @@ class DTMFAggregator(FrameProcessor):
         self._idle_timeout = timeout
         self._termination_digit = termination_digit
         self._prefix = prefix
+        self._finalize_transcripts = finalize_transcripts
 
         self._digit_event = asyncio.Event()
         self._aggregation_task: asyncio.Task | None = None
@@ -142,7 +160,10 @@ class DTMFAggregator(FrameProcessor):
         transcription_text = f"{self._prefix}{sequence}"
 
         transcription_frame = TranscriptionFrame(
-            text=transcription_text, user_id="", timestamp=time_now_iso8601()
+            text=transcription_text,
+            user_id="",
+            timestamp=time_now_iso8601(),
+            finalized=self._finalize_transcripts,
         )
         await self.push_frame(transcription_frame)
 
