@@ -156,6 +156,6 @@ class AzureImageGenServiceREST(ImageGenService):
                 image_stream = io.BytesIO(await response.content.read())
                 image = Image.open(image_stream)
                 frame = URLImageRawFrame(
-                    url=image_url, image=image.tobytes(), size=image.size, format=image.format
+                    url=image_url, image=image.tobytes(), size=image.size, format=image.mode
                 )
                 yield frame

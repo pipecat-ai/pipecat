@@ -945,7 +945,7 @@ class BaseOutputTransport(FrameProcessor):
                     resized_image = image.resize(desired_size)
                     # logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
                     frame = OutputImageRawFrame(
-                        resized_image.tobytes(), resized_image.size, resized_image.format
+                        resized_image.tobytes(), resized_image.size, resized_image.mode
                     )
 
                 return frame
