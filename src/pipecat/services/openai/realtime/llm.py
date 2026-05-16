@@ -22,6 +22,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_realtime_adapter import (
     OpenAIRealtimeLLMAdapter,
 )
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AggregationType,
     BotStoppedSpeakingFrame,
@@ -320,6 +321,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         self._current_assistant_response = None
         self._current_audio_response = None
+        self._input_resampler = create_stream_resampler()
 
         self._messages_added_manually = {}
         self._pending_function_calls = {}  # Track function calls by call_id
@@ -449,6 +451,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             frame: The start frame triggering service initialization.
         """
         await super().start(frame)
+        self._ensure_audio_config()
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -511,6 +514,24 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
     async def _handle_bot_stopped_speaking(self):
         self._current_audio_response = None
+
+    def _ensure_audio_config(self):
+        """Populate default OpenAI Realtime audio formats when absent.
+
+        OpenAI Realtime PCM mode expects explicit 24 kHz PCM. Preserve any
+        user-provided format, but make the default contract visible and stable.
+        """
+        session_properties = assert_given(self._settings.session_properties)
+        if not session_properties.audio:
+            session_properties.audio = events.AudioConfiguration()
+        if not session_properties.audio.input:
+            session_properties.audio.input = events.AudioInput()
+        if not session_properties.audio.output:
+            session_properties.audio.output = events.AudioOutput()
+        if not session_properties.audio.input.format:
+            session_properties.audio.input.format = events.PCMAudioFormat()
+        if not session_properties.audio.output.format:
+            session_properties.audio.output.format = events.PCMAudioFormat()
 
     def _calculate_audio_duration_ms(
         self, total_bytes: int, sample_rate: int = OPENAI_SAMPLE_RATE, bytes_per_sample: int = 2
@@ -892,7 +913,12 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
-        pass
+        text = transcript.strip()
+        if not text:
+            return
+
+        if is_final:
+            logger.debug(f"[Transcription:user] [{text}]")
 
     async def handle_evt_input_audio_transcription_completed(self, evt):
         """Handle completion of input audio transcription.
@@ -1180,7 +1206,25 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             await self._create_response()
 
     async def _send_user_audio(self, frame):
-        payload = base64.b64encode(frame.audio).decode("utf-8")
+        session_properties = assert_given(self._settings.session_properties)
+        input_audio = (
+            session_properties.audio.input
+            if session_properties.audio and session_properties.audio.input
+            else None
+        )
+        input_format = input_audio.format if input_audio else None
+        configured_format = input_format.type if input_format else "audio/pcm"
+        payload_audio = frame.audio
+
+        if configured_format == "audio/pcm" and frame.sample_rate != OPENAI_SAMPLE_RATE:
+            payload_audio = await self._input_resampler.resample(
+                frame.audio, frame.sample_rate, OPENAI_SAMPLE_RATE
+            )
+
+        if len(payload_audio) == 0:
+            return
+
+        payload = base64.b64encode(payload_audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
     async def _send_user_video(self, frame: InputImageRawFrame):
