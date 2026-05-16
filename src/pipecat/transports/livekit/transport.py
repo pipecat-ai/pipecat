@@ -42,7 +42,11 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
-from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.base_transport import (
+    BaseTransport,
+    InterruptionReleaseMode,
+    TransportParams,
+)
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 try:
@@ -831,16 +835,23 @@ class LiveKitOutputTransport(BaseOutputTransport):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, clearing the LiveKit AudioSource buffer on interruption.
 
-        When an InterruptionFrame arrives, any audio already submitted to the
-        LiveKit AudioSource (but not yet played out) is cleared immediately so
-        the bot stops speaking without delay.
+        When an InterruptionFrame arrives, the LiveKit AudioSource queue is
+        cleared. For ``BOUNDED_DRAIN``, the queue is cleared before the base
+        output transport so only the drained tail is published; for
+        ``IMMEDIATE_CUT`` it is cleared after.
 
         Args:
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
+        mode = self._params.interruption_release_mode
+        has_audio_source = (
+            isinstance(frame, InterruptionFrame) and self._client._audio_source is not None
+        )
+        if has_audio_source and mode == InterruptionReleaseMode.BOUNDED_DRAIN:
+            self._client._audio_source.clear_queue()
         await super().process_frame(frame, direction)
-        if isinstance(frame, InterruptionFrame) and self._client._audio_source is not None:
+        if has_audio_source and mode == InterruptionReleaseMode.IMMEDIATE_CUT:
             self._client._audio_source.clear_queue()
 
     async def setup(self, setup: FrameProcessorSetup):
