@@ -718,6 +718,9 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, FunctionCallsStartedFrame):
+            await self.push_frame(frame, direction)
+            await self._handle_function_calls_started(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -824,6 +827,24 @@ class LLMUserAggregator(LLMContextAggregator):
         self.transform_messages(frame.transform)
         if frame.run_llm:
             await self.push_context_frame()
+
+    async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
+        if not self._user_turn_controller.has_active_user_turn:
+            return
+
+        logger.debug(f"{self}: Function call started while user turn is active, forcing stop.")
+
+        segment = self.aggregation_string()
+        if segment:
+            if self._full_user_turn_aggregation:
+                self._full_user_turn_aggregation = (
+                    f"{self._full_user_turn_aggregation} {segment}".strip()
+                )
+            else:
+                self._full_user_turn_aggregation = segment
+            await self.reset()
+
+        await self._user_turn_controller.force_user_turn_stop()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text

@@ -80,6 +80,7 @@ def _get_model_name(service) -> str:
         or "unknown"
     )
 
+
 def _noop_decorator(func):
     """No-op fallback decorator when tracing is unavailable.
 
@@ -827,7 +828,9 @@ def traced_llm(func: Callable | None = None, *, name: str | None = None) -> Call
                                             ),
                                             "arguments": getattr(call, "arguments", None),
                                         }
-                                        call_key = json.dumps(call_info, sort_keys=True, default=str)
+                                        call_key = json.dumps(
+                                            call_info, sort_keys=True, default=str
+                                        )
                                         if call_key in seen_function_call_keys:
                                             continue
                                         seen_function_call_keys.add(call_key)

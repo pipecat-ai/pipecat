@@ -131,6 +131,34 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         # stop watchdog eventually fires `stopped`.
         self.assertEqual(events[0], "inference_triggered")
 
+    async def test_force_user_turn_stop_stops_once(self):
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
+            )
+        )
+
+        await controller.setup(self.task_manager)
+
+        stop_events: list[object | None] = []
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            stop_events.append(strategy)
+
+        await controller.process_frame(VADUserStartedSpeakingFrame())
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now")
+        )
+
+        await controller.force_user_turn_stop()
+        self.assertEqual(stop_events, [None])
+
+        await controller.process_frame(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
+
+        self.assertEqual(stop_events, [None])
+
     async def test_user_turn_start_reset(self):
         controller = UserTurnController(
             user_turn_strategies=UserTurnStrategies(

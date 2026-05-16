@@ -141,6 +141,36 @@ class UserTurnController(BaseObject):
         self._user_turn_strategies = strategies
         await self._setup_strategies()
 
+    @property
+    def has_active_user_turn(self) -> bool:
+        """Whether a user turn is currently active."""
+        return self._user_turn
+
+    async def force_user_turn_stop(self, *, enable_user_speaking_frames: bool = True):
+        """Force the current user turn to stop.
+
+        This is used when downstream semantic evidence, such as an LLM tool
+        call, proves the turn is complete before local stop strategies finish.
+
+        Args:
+            enable_user_speaking_frames: Whether the normal
+                ``UserStoppedSpeakingFrame`` should be emitted.
+        """
+        if not self._user_turn:
+            return
+
+        self._user_speaking = False
+        self._user_turn_stop_timeout_event.set()
+
+        # Clear any partially accumulated start-strategy state so the next
+        # turn begins from a clean slate after a semantic stop.
+        for s in self._user_turn_strategies.start or []:
+            await s.reset()
+
+        await self._trigger_user_turn_stop(
+            None, UserTurnStoppedParams(enable_user_speaking_frames=enable_user_speaking_frames)
+        )
+
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect user turn start or stop.
 

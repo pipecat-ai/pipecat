@@ -50,12 +50,9 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
-    UserMuteStartedFrame,
-    UserMuteStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -512,6 +509,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         self._last_sent_time = 0
 
+        self._system_instruction_from_init = self._settings.system_instruction
+        self._tools_from_init = tools
         self._inference_on_context_initialization = inference_on_context_initialization
         self._needs_initial_turn_complete_message = False
 
@@ -519,28 +518,19 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         self._video_input_paused = start_video_paused
         self._ready_for_realtime_input = False
         self._context = None
-        self._handled_initial_context = False
         self._api_key = api_key
         self._http_options = update_google_client_http_options(http_options)
         self._session: AsyncSession = None
         self._connection_task = None
 
         self._disconnecting = False
-        self._session_ready_event = asyncio.Event()
+        self._run_llm_when_session_ready = False
 
         self._user_is_speaking = False
         self._bot_is_responding = False
-        # Tracks user-mute state from broadcast UserMute{Started,Stopped}Frames
-        # emitted by the user context aggregator. While muted, we skip
-        # forwarding InputAudioRawFrames to the model so the live session
-        # doesn't react to the user (e.g. when interruption is disabled).
-        self._user_is_muted = False
-        self._reconnect_pending = False
-        self._pending_function_calls = []
         self._user_audio_buffer = bytearray()
         self._user_transcription_buffer = ""
         self._last_transcription_sent = ""
-        self._finalize_pending = False
         self._bot_audio_buffer = bytearray()
         self._bot_text_buffer = ""
         self._llm_output_buffer = ""
@@ -583,6 +573,10 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         # tool's final result back to the provider, since the async-tool
         # message in the context only carries the id.
         self._tool_call_id_to_name: dict[str, str] = {}
+        # tool_call_id -> (tool_name, tool_result_message). Results are queued
+        # here when the context updates while a reconnect is still in flight,
+        # then replayed once the session is ready again.
+        self._pending_tool_results: dict[str, tuple[str, dict[str, Any]]] = {}
         self._async_tool_warning_logged: bool = False
 
     def create_client(self):
@@ -611,26 +605,32 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        Settings are stored but not applied to the active connection.
+        Settings are stored but not applied to the active connection unless a
+        subclass opts in via :meth:`_handle_changed_settings`.
         """
         changed = await super()._update_settings(delta)
 
         if not changed:
             return changed
 
-        if "system_instruction" in changed:
-            # First time setting system_instruction
-            if not self._session:
-                await self._connect()
-            elif self._bot_is_responding:
-                self._reconnect_pending = True
-            else:
-                await self._reconnect()
-
-        remaining = {k: v for k, v in changed.items() if k != "system_instruction"}
+        handled = await self._handle_changed_settings(changed)
+        remaining = {k: v for k, v in changed.items() if k not in handled}
         self._warn_unhandled_updated_settings(remaining)
 
         return changed
+
+    async def _handle_changed_settings(self, changed: dict[str, Any]) -> set[str]:
+        """Hook for subclasses to react to runtime setting changes.
+
+        Override to act on specific changes (e.g. reconnect to apply a new
+        ``system_instruction``). Return the set of changed keys that were
+        handled, so they're excluded from the unhandled-warning emitted by
+        :meth:`_update_settings`.
+
+        Default: no settings are handled (i.e. all changes are warned about),
+        matching the pre-hook behavior of the base class.
+        """
+        return set()
 
     def set_audio_input_paused(self, paused: bool):
         """Set the audio input pause state.
@@ -682,13 +682,17 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             frame: The start frame.
         """
         await super().start(frame)
-
-        # Dograh: we initiate the pipeline before we set the
-        # system instruction so that pre_call fetching can
-        # populate the context variables. We dont want to
-        # connect with default system instructions.
-        if self._settings.system_instruction:
+        if self._should_connect_on_start():
             await self._connect()
+
+    def _should_connect_on_start(self) -> bool:
+        """Whether to open the connection during :meth:`start`.
+
+        Override to defer connection until a precondition is met (e.g. a
+        system instruction has been set via :meth:`_update_settings`).
+        Defaults to ``True`` (connect immediately on start).
+        """
+        return True
 
     async def stop(self, frame: EndFrame):
         """Stop the service and close connections.
@@ -723,11 +727,6 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
     async def _handle_user_started_speaking(self, frame):
         self._user_is_speaking = True
-        # A new VAD start invalidates any pending finalize from a prior stop
-        # that hasn't been paired with a transcription yet. Only the
-        # transcription committed after the *most recent* VAD stop should be
-        # marked finalized.
-        self._finalize_pending = False
         if self._vad_disabled and self._session and self._ready_for_realtime_input:
             try:
                 await self._session.send_realtime_input(activity_start=ActivityStart())
@@ -737,7 +736,6 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     async def _handle_user_stopped_speaking(self, frame):
         self._user_is_speaking = False
         self._user_audio_buffer = bytearray()
-        self._finalize_pending = True
         await self.start_ttfb_metrics()
         if self._vad_disabled and self._session and self._ready_for_realtime_input:
             try:
@@ -780,14 +778,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             await self._send_user_text(frame.text)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputAudioRawFrame):
-            if not self._user_is_muted:
-                await self._send_user_audio(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, UserMuteStartedFrame):
-            self._user_is_muted = True
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, UserMuteStoppedFrame):
-            self._user_is_muted = False
+            await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputImageRawFrame):
             await self._send_user_video(frame)
@@ -805,10 +796,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             # Ignore this frame. Use the serverContent API message instead
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            # Bot turn-tracking is driven by serverContent.turnComplete, but we
-            # also flush deferred function calls here so they fire as soon as
-            # the bot's audio finishes — even if turnComplete is delayed.
-            await self._run_pending_function_calls()
+            # ignore this frame. Use the serverContent.turnComplete API message
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMMessagesAppendFrame):
             # NOTE: handling LLMMessagesAppendFrame here in the LLMService is
@@ -818,14 +806,6 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             # off a conversation still works (we used to have an example that
             # did that).
             await self._create_single_response(frame.messages)
-        elif isinstance(frame, TTSSpeakFrame):
-            if not self._handled_initial_context:
-                await self._handle_context(self._context)
-            else:
-                logger.warning(
-                    f"{self}: TTSSpeakFrame received after initial context already handled. "
-                    "Gemini Live manages its own audio generation — ignoring frame."
-                )
         elif isinstance(frame, LLMSetToolsFrame):
             # TODO: implement runtime tool updates for Gemini Live.
             pass
@@ -833,10 +813,58 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             await self.push_frame(frame, direction)
 
     async def _handle_context(self, context: LLMContext):
-        if not self._handled_initial_context:
+        if not self._context:
             # We got our initial context
-            self._handled_initial_context = True
             self._context = context
+
+            # Reconnect if context changes the effective system instruction
+            # or tools compared to the initial connection (which used the
+            # init-provided values). Note that the determination of "effective"
+            # system instruction is delegated to the adapter, which still
+            # chooses the init-provided value if there is one.
+            adapter = self.get_llm_adapter()
+            params = adapter.get_llm_invocation_params(
+                self._context, system_instruction=assert_given(self._system_instruction_from_init)
+            )
+            system_instruction = params["system_instruction"]
+            tools = params["tools"]
+            system_instruction_changed = system_instruction != self._system_instruction_from_init
+            if tools and self._tools_from_init:
+                logger.warning(
+                    "Tools provided both at init time and in context; using context-provided value."
+                )
+            # For tools we simply check presence rather than diffing against
+            # init-provided tools, assuming that if context provides tools
+            # they warrant a reconnect.
+            if system_instruction_changed or tools:
+                await self._reconnect()
+
+            # Initialize our bookkeeping of already-completed tool calls in
+            # the context
+            await self._process_completed_function_calls(send_new_results=False)
+
+            # Create initial response if needed, based on conversation history
+            # in context.
+            # (If the context has no messages but we do have a system
+            # instruction — meaning it was provided at init time — doctor our
+            # context now so that we'll have something to send to the service
+            # to trigger a response).
+            messages = params["messages"]
+            if not messages and self._inference_on_context_initialization:
+                if self._system_instruction_from_init:
+                    logger.debug(
+                        "No messages found in initial context; seeding with system instruction to trigger bot response."
+                    )
+                    self._context.add_message(
+                        {
+                            "role": "system",
+                            "content": assert_given(self._system_instruction_from_init),
+                        }
+                    )
+                else:
+                    logger.warning(
+                        "No messages found in initial context; cannot trigger initial bot response without messages or system instruction."
+                    )
             await self._create_initial_response()
         else:
             # We got an updated context.
@@ -861,6 +889,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         # freezes during tool execution, so the "keep talking while the tool
         # runs" intent of the flag is structurally not achievable. Surface a
         # one-time warning so users see they're not getting what they expect.
+        logger.debug(f"In _process_completed_function_calls send_new_results: {send_new_results}")
         if not self._supports_non_blocking_tools and not self._async_tool_warning_logged:
             for message in self._context.get_messages():
                 if isinstance(message, LLMSpecificMessage):
@@ -918,11 +947,13 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                         async_payload.tool_call_id, "tool_call_result"
                     )
                     response_dict = GeminiLLMAdapter.to_function_response_dict(async_payload.result)
+                    delivered = True
                     if send_new_results:
-                        await self._tool_result(
+                        delivered = await self._tool_result(
                             async_payload.tool_call_id, tool_name, response_dict
                         )
-                    self._completed_tool_calls.add(async_payload.tool_call_id)
+                    if not send_new_results or delivered:
+                        self._completed_tool_calls.add(async_payload.tool_call_id)
                     continue
                 # Defensive: any async-tool message must not fall through
                 # to the regular tool-result block below, even if it
@@ -938,9 +969,23 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
                     response_dict = GeminiLLMAdapter.to_function_response_dict(
                         message.get("content")
                     )
+                    delivered = True
                     if send_new_results:
-                        await self._tool_result(tool_call_id, tool_name, response_dict)
-                    self._completed_tool_calls.add(tool_call_id)
+                        delivered = await self._tool_result(tool_call_id, tool_name, response_dict)
+                    if not send_new_results or delivered:
+                        self._completed_tool_calls.add(tool_call_id)
+
+    async def _drain_pending_tool_results(self):
+        """Replay any tool results that were queued during a reconnect gap."""
+        if self._disconnecting or not self._session or not self._pending_tool_results:
+            return
+
+        for tool_call_id, (tool_name, tool_result_message) in list(
+            self._pending_tool_results.items()
+        ):
+            delivered = await self._tool_result(tool_call_id, tool_name, tool_result_message)
+            if delivered:
+                self._completed_tool_calls.add(tool_call_id)
 
     async def _set_bot_is_responding(self, responding: bool):
         if self._bot_is_responding == responding:
@@ -948,28 +993,8 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         self._bot_is_responding = responding
 
-        if not self._bot_is_responding:
-            await self._run_pending_function_calls()
-
         if not self._bot_is_responding and self._end_frame_pending_bot_turn_finished:
             await self._release_deferred_end_frame()
-
-        # Dograh: We set _reconnect_pending when system instructions was changed,
-        # which is most likely when a node transition happened
-        if not self._bot_is_responding and self._reconnect_pending:
-            self._reconnect_pending = False
-            await self._reconnect()
-
-    async def _run_pending_function_calls(self):
-        """Run any function calls that were deferred while the bot was responding."""
-        if not self._pending_function_calls:
-            return
-        function_calls = self._pending_function_calls
-        self._pending_function_calls = []
-        logger.debug(
-            f"{self}: Executing {len(function_calls)} deferred function calls after bot finished"
-        )
-        await self.run_function_calls(function_calls)
 
     async def _release_deferred_end_frame(self):
         """Release a deferred EndFrame and cancel the deferral timeout."""
@@ -1127,18 +1152,29 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             # Add system instruction and tools to configuration, if provided.
             # These settings from the context take precedence over the ones
             # provided at initialization time.
+            #
+            # Read system_instruction from self._settings (the latest applied
+            # value), not from self._system_instruction_from_init (frozen at
+            # __init__). Subclasses that opt into runtime updates via
+            # _handle_changed_settings mutate self._settings between connects;
+            # for upstream users who don't, the two values are identical.
             adapter = self.get_llm_adapter()
             system_instruction = None
             tools = None
             if self._context:
                 params = adapter.get_llm_invocation_params(
-                    self._context, system_instruction=self._settings.system_instruction
+                    self._context,
+                    system_instruction=self._settings.system_instruction,
                 )
                 system_instruction = params["system_instruction"]
                 tools = params["tools"]
             else:
                 system_instruction = self._settings.system_instruction
+            if not tools:
+                tools = adapter.from_standard_tools(self._tools_from_init)
             if system_instruction:
+                # Trim very long system instructions in the debug log so call
+                # transcripts in log aggregators stay readable.
                 if len(system_instruction) > 400:
                     trimmed = f"{system_instruction[:200]}...{system_instruction[-200:]}"
                 else:
@@ -1326,9 +1362,6 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             if self._session:
                 await self._session.close()
                 self._session = None
-            self._session_ready_event.clear()
-            self._completed_tool_calls = set()
-            self._tool_call_id_to_name = {}
             self._async_tool_warning_logged = False
             self._ready_for_realtime_input = False
             self._disconnecting = False
@@ -1468,7 +1501,9 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         if self._disconnecting:
             return
 
-        await self._session_ready_event.wait()
+        if not self._session:
+            self._run_llm_when_session_ready = True
+            return
 
         adapter = self.get_llm_adapter()
         messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
@@ -1484,9 +1519,11 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         logger.debug(f"Creating initial response: {messages}")
 
-        # Enforce Gemini 2.5's "seed must end with user turn" requirement.
+        # Enforce Gemini 2.5's "seed must end with user turn" requirement when
+        # there are messages to seed. (No-op for Gemini 3.x, and for any empty
+        # context — the latter falls through to the realtime-input path below.)
         seed_messages = messages
-        if not self._is_gemini_3:
+        if not self._is_gemini_3 and messages:
             last_role = getattr(messages[-1], "role", None)
             if last_role != "user":
                 seed_messages = messages + [Content(role="user", parts=[Part(text=" ")])]
@@ -1494,12 +1531,16 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         await self.start_ttfb_metrics()
 
         try:
-            if messages:
+            if seed_messages:
                 await self._session.send_client_content(
-                    turns=messages, turn_complete=self._inference_on_context_initialization
+                    turns=seed_messages,
+                    turn_complete=trigger_inference,
                 )
-
-            # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
+            # Gemini 3.x wants turn_complete=True, but also won't run inference
+            # without a realtime input. The " " nudge is also the only way to
+            # trigger an initial response when the context has just a system
+            # instruction and no message history (e.g. an LLM-driven greeting
+            # off a node prompt) — without it, the session would sit silent.
             if self._is_gemini_3 and trigger_inference:
                 await self._session.send_realtime_input(text=" ")
         except Exception as e:
@@ -1547,14 +1588,15 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(
         self, tool_call_id: str, tool_name: str, tool_result_message: dict[str, Any]
-    ):
+    ) -> bool:
         """Send tool result back to the API."""
-        if self._disconnecting:
-            return
 
-        logger.debug(
-            f"Sending tool result to Gemini Live for tool_call_id={tool_call_id}, tool_result_message={tool_result_message}"
-        )
+        if self._disconnecting or not self._session:
+            logger.debug(
+                f"{self}: queueing tool result for tool_call_id={tool_call_id} until session is ready"
+            )
+            self._pending_tool_results[tool_call_id] = (tool_name, tool_result_message)
+            return False
 
         # Pair the NON_BLOCKING declaration on async tools with a
         # scheduling hint on the response. WHEN_IDLE lets Gemini finish
@@ -1575,17 +1617,47 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
         try:
             await self._session.send_tool_response(function_responses=response)
-            if self._is_gemini_3:
-                await self._session.send_realtime_input(text=" ")
         except Exception as e:
+            self._pending_tool_results[tool_call_id] = (tool_name, tool_result_message)
             await self._handle_send_error(e)
+            return False
+
+        self._pending_tool_results.pop(tool_call_id, None)
+
+        if self._is_gemini_3:
+            try:
+                await self._session.send_realtime_input(text=" ")
+            except Exception as e:
+                await self._handle_send_error(e)
+
+        return True
 
     @traced_gemini_live(operation="llm_setup")
     async def _handle_session_ready(self, session: AsyncSession):
         """Handle the session being ready."""
         self._session = session
-        self._ready_for_realtime_input = True
-        self._session_ready_event.set()
+        if self._run_llm_when_session_ready:
+            # Initial connection: context arrived before session was ready.
+            self._run_llm_when_session_ready = False
+            await self._create_initial_response()
+        elif self._session_resumption_handle:
+            # Reconnect with session resumption: the server will restore
+            # session state, so we can accept realtime input right away.
+            self._ready_for_realtime_input = True
+            await self._drain_pending_tool_results()
+        elif self._context:
+            # Reconnect without session resumption (e.g. error occurred
+            # before server sent a resumption handle): re-seed conversation
+            # history so the new session retains full context before
+            # accepting input. We route through _create_initial_response so
+            # that the seed/commit dance stays in one place. See that
+            # method's docstring for the reconnect-specific behavior.
+            await self._create_initial_response(for_reconnect=True)
+        else:
+            # Initial connection: session is ready before context has
+            # arrived. Nothing to do — _handle_context will call
+            # _create_initial_response when the context arrives.
+            pass
 
     async def _handle_msg_model_turn(self, msg: LiveServerMessage):
         """Handle the model turn message."""
@@ -1667,13 +1739,26 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     @traced_gemini_live(operation="llm_tool_call")
     async def _handle_msg_tool_call(self, message: LiveServerMessage):
         """Handle tool call messages."""
+        function_calls_llm = self._build_function_calls_from_msg(message)
+        if not function_calls_llm:
+            return
+
+        for fc in function_calls_llm:
+            self._tool_call_id_to_name[fc.tool_call_id] = fc.function_name
+
+        await self._run_or_defer_function_calls(function_calls_llm)
+
+    def _build_function_calls_from_msg(
+        self, message: LiveServerMessage
+    ) -> list[FunctionCallFromLLM]:
+        """Build :class:`FunctionCallFromLLM` instances from a tool-call message."""
         function_calls = message.tool_call.function_calls
         if not function_calls:
-            return
+            return []
         if not self._context:
             logger.error("Function calls are not supported without a context object.")
 
-        function_calls_llm = [
+        return [
             FunctionCallFromLLM(
                 context=self._context,
                 tool_call_id=(
@@ -1687,16 +1772,14 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             for f in function_calls
         ]
 
-        for fc in function_calls_llm:
-            self._tool_call_id_to_name[fc.tool_call_id] = fc.function_name
+    async def _run_or_defer_function_calls(self, function_calls_llm: list[FunctionCallFromLLM]):
+        """Execute or defer function calls.
 
-        if self._bot_is_responding:
-            self._pending_function_calls = function_calls_llm
-            logger.debug(
-                f"{self}: Deferring {len(function_calls_llm)} function calls until after bot finishes"
-            )
-        else:
-            await self.run_function_calls(function_calls_llm)
+        Default: execute immediately via :meth:`run_function_calls`. Override
+        to defer execution based on local state (e.g. wait for the bot's
+        current turn to finish before invoking tools).
+        """
+        await self.run_function_calls(function_calls_llm)
 
     @traced_gemini_live(operation="llm_response")
     async def _handle_msg_turn_complete(self, message: LiveServerMessage):
@@ -1747,15 +1830,14 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             result: Optional LiveServerMessage that triggered this transcription
         """
         await self._handle_user_transcription(text, True, self._settings.language)
-        finalized = self._finalize_pending
-        self._finalize_pending = False
-        await self.broadcast_frame(
-            TranscriptionFrame,
-            text=text,
-            user_id="",
-            timestamp=time_now_iso8601(),
-            result=result,
-            finalized=finalized,
+        await self.push_frame(
+            TranscriptionFrame(
+                text=text,
+                user_id="",
+                timestamp=time_now_iso8601(),
+                result=result,
+            ),
+            FrameDirection.UPSTREAM,
         )
 
     async def _transcription_timeout_handler(self):

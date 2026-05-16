@@ -463,6 +463,52 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         # The user mute strategies should have muted the user.
         self.assertFalse(user_turn)
 
+    async def test_function_call_start_force_stops_user_turn_without_llm_rerun(self):
+        context = LLMContext()
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
+
+        stop_messages = []
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy, message):
+            stop_messages.append((strategy, message))
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            SleepFrame(),
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="fn_1", tool_call_id="1", arguments={}, context=None
+                    )
+                ]
+            ),
+            SleepFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
+        ]
+        (down_frames, _) = await run_test(
+            Pipeline([user_aggregator]), frames_to_send=frames_to_send
+        )
+
+        down_frame_types = [type(frame) for frame in down_frames]
+
+        self.assertIn(UserStoppedSpeakingFrame, down_frame_types)
+        self.assertNotIn(LLMContextFrame, down_frame_types)
+        self.assertEqual(len(stop_messages), 1)
+        self.assertIsNone(stop_messages[0][0])
+        self.assertEqual(stop_messages[0][1].content, "Hello!")
+
     async def test_pending_transcription_emitted_on_end_frame(self):
         """Pending user transcription should be emitted when EndFrame arrives."""
         context = LLMContext()

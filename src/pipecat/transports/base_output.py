@@ -54,8 +54,6 @@ from pipecat.utils.frame_queue import FrameQueue
 from pipecat.utils.time import nanoseconds_to_seconds
 
 BOT_VAD_STOP_SECS = 0.35
-# Only used as a fallback
-BOT_VAD_STOP_FALLBACK_SECS = 3
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -804,9 +802,9 @@ class BaseOutputTransport(FrameProcessor):
                         await asyncio.sleep(0)
 
             if self._mixer:
-                return with_mixer(BOT_VAD_STOP_FALLBACK_SECS)
+                return with_mixer(self._params.bot_vad_stop_secs)
             else:
-                return without_mixer(BOT_VAD_STOP_FALLBACK_SECS)
+                return without_mixer(self._params.bot_vad_stop_secs)
 
         async def _send_silence(self, secs: int):
             if secs <= 0:

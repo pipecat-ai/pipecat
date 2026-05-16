@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from opentelemetry.trace import Span
 
 
-def mark_trace_public(span: "Span") -> None:
+def mark_trace_public(span: Span) -> None:
     """Mark the current trace as public for Langfuse sharing."""
     span.set_attribute("langfuse.trace.public", True)
 
@@ -153,7 +153,7 @@ def standardize_tools_to_chatml(tools: Any) -> Any:
     return chatml_tools
 
 
-def set_tts_input_attributes(span: "Span", text: str | None) -> None:
+def set_tts_input_attributes(span: Span, text: str | None) -> None:
     """Attach TTS input text using both upstream and Langfuse-friendly keys."""
     if not text:
         return
@@ -162,7 +162,7 @@ def set_tts_input_attributes(span: "Span", text: str | None) -> None:
     span.set_attribute("metrics.character_count", len(text))
 
 
-def set_stt_output_attributes(span: "Span", transcript: str | None) -> None:
+def set_stt_output_attributes(span: Span, transcript: str | None) -> None:
     """Attach STT transcript using both upstream and Langfuse-friendly keys."""
     if not transcript:
         return
