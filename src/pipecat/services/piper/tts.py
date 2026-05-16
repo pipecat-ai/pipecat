@@ -212,6 +212,7 @@ class PiperHttpTTSService(TTSService):
         *,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
+        speed: float = 1.0,
         voice_id: str | None = None,
         settings: Settings | None = None,
         **kwargs,
@@ -228,6 +229,7 @@ class PiperHttpTTSService(TTSService):
 
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
+            speed: Speed in samples per second.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -257,6 +259,7 @@ class PiperHttpTTSService(TTSService):
 
         self._base_url = base_url
         self._session = aiohttp_session
+        self._speed = speed
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -285,6 +288,7 @@ class PiperHttpTTSService(TTSService):
             data = {
                 "text": text,
                 "voice": self._settings.voice,
+                "length_scale": self._speed,
             }
 
             async with self._session.post(self._base_url, json=data, headers=headers) as response:
