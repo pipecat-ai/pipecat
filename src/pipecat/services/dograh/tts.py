@@ -124,8 +124,6 @@ class DograhTTSService(WebsocketTTSService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        language_str = default_settings.language or "en"
-
         super().__init__(
             text_aggregation_mode=text_aggregation_mode,
             push_text_frames=False,
@@ -139,12 +137,14 @@ class DograhTTSService(WebsocketTTSService):
         self._api_key = api_key
         self._base_url = base_url
         self._ws_path = ws_path
-        self._voice_settings = {
-            "language": language_str,
-            "speed": default_settings.speed,
-            "pitch": default_settings.pitch,
-            "volume": default_settings.volume,
-        }
+        # Only forward fields the upstream provider recognizes. Unknown
+        # fields (e.g. pitch/volume/language) get echoed verbatim by MPS to
+        # ElevenLabs, which then trips "voice_settings field must not change"
+        # on the second context of the connection.
+        self._voice_settings: dict[str, float | bool] = {}
+        speed = default_settings.speed
+        if isinstance(speed, (int, float)):
+            self._voice_settings["speed"] = float(speed)
 
         # WebSocket tasks
         self._receive_task = None
@@ -154,6 +154,7 @@ class DograhTTSService(WebsocketTTSService):
         self._cumulative_time = 0
         self._accumulated_text = ""
         self._start_metadata = None
+        self._remote_initialized_context_ids: set[str] = set()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -174,7 +175,7 @@ class DograhTTSService(WebsocketTTSService):
         Args:
             language: The language to use for synthesis.
         """
-        self._voice_settings["language"] = language.value
+        self._settings.language = language.value
 
     async def _connect_websocket(self):
         """Establish the websocket connection to Dograh TTS service."""
@@ -191,6 +192,7 @@ class DograhTTSService(WebsocketTTSService):
             logger.debug(f"Connecting to Dograh TTS WebSocket at {url}")
             ws = await websocket_connect(url, additional_headers=headers)
             self._websocket = ws
+            self._remote_initialized_context_ids.clear()
 
             # Send initial configuration
             config_msg = {
@@ -198,8 +200,9 @@ class DograhTTSService(WebsocketTTSService):
                 "model": self._settings.model,
                 "voice": self._settings.voice,
                 "sample_rate": self.sample_rate,
-                "settings": self._voice_settings,
             }
+            if self._voice_settings:
+                config_msg["settings"] = self._voice_settings
 
             # Add workflow_run_id if available from StartFrame metadata
             if self._start_metadata and "workflow_run_id" in self._start_metadata:
@@ -226,6 +229,7 @@ class DograhTTSService(WebsocketTTSService):
         except Exception as e:
             logger.error(f"Error disconnecting from Dograh TTS service: {e}")
         finally:
+            self._remote_initialized_context_ids.clear()
             await self.remove_active_audio_context()
             self._websocket = None
 
@@ -285,6 +289,7 @@ class DograhTTSService(WebsocketTTSService):
                 if msg_type == "final":
                     logger.trace(f"Received final message for context {ctx_id}")
                     if ctx_id:
+                        self._remote_initialized_context_ids.discard(ctx_id)
                         await self.remove_audio_context(ctx_id)
                     continue
 
@@ -379,6 +384,13 @@ class DograhTTSService(WebsocketTTSService):
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
                     context_id = self.get_active_audio_context_id()
+                    if not context_id:
+                        continue
+                    if context_id not in self._remote_initialized_context_ids:
+                        logger.trace(
+                            f"Skipping keepalive for uninitialized remote context {context_id}"
+                        )
+                        continue
                     keepalive_msg = {
                         "type": "keepalive",
                         "context_id": context_id,
@@ -432,14 +444,16 @@ class DograhTTSService(WebsocketTTSService):
                         "context_id": context_id,
                         "voice": self._settings.voice,
                         "model": self._settings.model,
-                        "settings": self._voice_settings,
                     }
+                    if self._voice_settings:
+                        context_msg["settings"] = self._voice_settings
 
                     # Add workflow_run_id if available
                     if self._start_metadata and "workflow_run_id" in self._start_metadata:
                         context_msg["correlation_id"] = self._start_metadata["workflow_run_id"]
 
                     await self._get_websocket().send(json.dumps(context_msg))
+                    self._remote_initialized_context_ids.add(context_id)
                     logger.trace(f"Created new context {context_id} with voice settings")
 
                 # Send text for synthesis
@@ -464,6 +478,7 @@ class DograhTTSService(WebsocketTTSService):
         """
         if context_id and self._websocket:
             logger.trace(f"{self}: Closing context {context_id}")
+            self._remote_initialized_context_ids.discard(context_id)
             try:
                 await self._websocket.send(
                     json.dumps({"type": "close_context", "context_id": context_id})
@@ -497,7 +512,9 @@ class DograhTTSService(WebsocketTTSService):
         if not flush_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = {"context_id": flush_id, "flush": True}
+        # MPS routes by "type"; the bare {context_id, flush:true} shape is
+        # what the upstream ElevenLabs WS expects, but here we go through MPS.
+        msg = {"type": "flush", "context_id": flush_id}
         await self._websocket.send(json.dumps(msg))
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
