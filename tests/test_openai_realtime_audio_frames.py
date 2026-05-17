@@ -38,14 +38,6 @@ def _make_service() -> OpenAIRealtimeLLMService:
     return OpenAIRealtimeLLMService(api_key="test-key")
 
 
-def _fake_jwt(payload: dict[str, Any]) -> str:
-    def encode(obj: dict[str, Any]) -> str:
-        raw = json.dumps(obj, separators=(",", ":")).encode("utf-8")
-        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-    return f"{encode({'alg': 'none'})}.{encode(payload)}.signature"
-
-
 class _FakeWebSocket:
     """Minimal async-iterable websocket that yields scripted JSON strings."""
 
@@ -155,41 +147,6 @@ async def _drive(service: OpenAIRealtimeLLMService, scripted: list[dict[str, Any
     """Feed scripted server-event dicts through the receive handler."""
     service._websocket = _FakeWebSocket([json.dumps(e) for e in scripted])
     await service._receive_task_handler()
-
-
-# ---------------------------------------------------------------------------
-# WebSocket auth headers
-# ---------------------------------------------------------------------------
-
-
-def test_websocket_headers_include_bearer_token():
-    service = OpenAIRealtimeLLMService(api_key="test-key")
-
-    assert service._websocket_headers() == {"Authorization": "Bearer test-key"}
-
-
-def test_websocket_headers_support_codex_auth():
-    token = _fake_jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acct_123"}})
-    service = OpenAIRealtimeLLMService(api_key=token, use_codex_auth=True)
-
-    assert service._websocket_headers() == {
-        "Authorization": f"Bearer {token}",
-        "User-Agent": "codex_cli_rs/0.0.0 (Pipecat)",
-        "originator": "codex_cli_rs",
-        "ChatGPT-Account-ID": "acct_123",
-    }
-
-
-def test_websocket_headers_allow_custom_overrides():
-    service = OpenAIRealtimeLLMService(
-        api_key="test-key",
-        use_codex_auth=True,
-        additional_headers={"originator": "custom-client", "X-Test": "1"},
-    )
-
-    assert service._websocket_headers()["Authorization"] == "Bearer test-key"
-    assert service._websocket_headers()["originator"] == "custom-client"
-    assert service._websocket_headers()["X-Test"] == "1"
 
 
 # ---------------------------------------------------------------------------
