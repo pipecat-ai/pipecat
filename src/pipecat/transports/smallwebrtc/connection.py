@@ -410,6 +410,39 @@ class SmallWebRTCConnection(BaseObject):
         """
         await self._create_answer(sdp, type)
 
+    async def create_offer(self) -> str:
+        """Create an SDP offer for outbound connections.
+
+        Adds an audio transceiver in sendrecv mode, generates an SDP offer, and
+        sets it as the local description. Use :meth:`set_remote_answer` once the
+        remote party's SDP answer is available.
+
+        Returns:
+            The SDP offer string to send to the remote party.
+        """
+        self._pc.addTransceiver("audio", direction="sendrecv")
+        logger.debug("Creating offer")
+        local_offer = await self._pc.createOffer()
+        await self._pc.setLocalDescription(local_offer)
+        logger.debug("Offer created and set as local description")
+        self._answer = None  # no answer yet for outbound
+        return self._pc.localDescription.sdp
+
+    async def set_remote_answer(self, sdp: str, type: str = "answer"):
+        """Set the remote SDP answer for an outbound connection.
+
+        Called after receiving the remote party's SDP answer, typically delivered
+        via a webhook. Completes the WebRTC offer/answer exchange.
+
+        Args:
+            sdp: The SDP answer string from the remote party.
+            type: The SDP type (should be "answer").
+        """
+        logger.debug("Setting remote answer")
+        answer = RTCSessionDescription(sdp=sdp, type=type)
+        await self._pc.setRemoteDescription(answer)
+        logger.debug("Remote answer set")
+
     async def connect(self):
         """Connect the WebRTC peer connection and handle initial setup."""
         self._connect_invoked = True
