@@ -71,21 +71,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             },
         ],
     )
-    # `wait_for_transcript_to_end_user_turn=False` configures the user
-    # aggregator for realtime services like Gemini Live that emit user
-    # transcripts after the end of turn. With this flag the aggregator:
+    # `wait_for_transcript_to_end_user_turn=False` is the right setting
+    # for pipelines like this one — local turn detection driving a
+    # realtime service. It avoids unnecessary latency from transcript
+    # delay: the realtime service consumes user audio directly, so
+    # we don't need user transcripts in context before it can respond.
+    # With this option:
     #
-    # - drops `TranscriptionUserTurnStartStrategy` from the default start
-    #   strategies (so late-arriving realtime transcripts don't trigger
-    #   new turns),
-    # - sets `wait_for_transcript=False` on the default stop strategy
-    #   (so the turn ends without waiting for transcripts),
-    # - fires `on_user_turn_stopped` at the end of turn with empty
-    #   `message.content` (no transcripts have arrived yet), and
-    # - defers the context flush until after a short wait that gives the
-    #   realtime service time to emit its transcripts, then emits
-    #   `on_user_turn_message_finalized` with the populated message so
-    #   the user's words land in the LLM context for audit/history.
+    # - Turn strategies do not consider user transcripts, so the user
+    #   turn ends sooner.
+    # - User transcripts are handled by the aggregator: a simple timer
+    #   gives it time to gather them after the user turn ends, then
+    #   the aggregator emits `on_user_turn_message_finalized` with the
+    #   new user context message.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -124,17 +122,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    # With `wait_for_transcript_to_end_user_turn=False`, `on_user_turn_stopped`
-    # fires at the end of turn (before any transcripts arrive), so its
-    # `message.content` is empty. Logged here to make the timing of the
-    # end-of-turn signal visible alongside the later finalization event.
+    # `on_user_turn_stopped` fires at the end of the user turn. With
+    # `wait_for_transcript_to_end_user_turn=False`, the aggregator
+    # hasn't gathered user transcripts yet at this point, so
+    # `message.content` is empty. Logged here to make the end-of-turn
+    # signal visible alongside the later finalization event.
     @user_aggregator.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
         logger.info(f"User turn ended (strategy: {type(strategy).__name__})")
 
     # `on_user_turn_message_finalized` fires when the user message has
-    # been written to context — later than `on_user_turn_stopped` in this
-    # mode, since transcripts arrive after the end of turn.
+    # been finalized into the context. Here it fires later than
+    # `on_user_turn_stopped`, after the aggregator has gathered the
+    # realtime service's user transcripts.
     @user_aggregator.event_handler("on_user_turn_message_finalized")
     async def on_user_turn_message_finalized(
         aggregator, strategy, message: UserMessageFinalizedMessage

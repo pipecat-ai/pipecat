@@ -767,11 +767,12 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         """``wait_for_transcript_to_end_user_turn=False`` splits the lifecycle:
 
         - ``on_user_turn_stopped`` fires at the end of turn with empty
-          content (no transcripts have arrived yet).
-        - Late transcripts are captured into ``_aggregation``.
-        - When the pending-finalization timer fires,
+          content (the aggregator hasn't gathered transcripts yet).
+        - Transcripts arriving after the end of turn are captured into
+          ``_aggregation``.
+        - When the transcript-gather timer fires,
           ``on_user_turn_message_finalized`` fires with the populated
-          message and the user message lands in context.
+          user context message.
         """
         from unittest.mock import patch
 
@@ -813,10 +814,10 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 # Let the user_speech_timeout fire so the strategy
                 # fires turn-stopped.
                 SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
-                # Late transcripts arrive after the end of turn (just
-                # one here for the basic case).
+                # Transcripts arrive after the end of turn (just one
+                # here for the basic case).
                 TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
-                # Wait for the pending-finalization timer to fire.
+                # Wait for the transcript-gather timer to fire.
                 SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
             ]
             await run_test(pipeline, frames_to_send=frames_to_send)
@@ -830,8 +831,8 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m["content"] for m in user_messages], ["Hello!"])
 
     async def test_no_wait_for_transcript_no_transcripts_arrive(self):
-        """When no transcripts arrive, the pending-finalization timer
-        still runs — ``on_user_turn_message_finalized`` fires with empty
+        """When no transcripts arrive, the transcript-gather timer still
+        runs — ``on_user_turn_message_finalized`` fires with empty
         content and nothing is written to context.
         """
         from unittest.mock import patch
@@ -940,7 +941,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 # simplicity).
                 TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
                 SleepFrame(),
-                # Turn 2 starts before turn 1's pending-finalization timer
+                # Turn 2 starts before turn 1's transcript-gather timer
                 # fires — precondition violation. The aggregator should
                 # force-flush turn 1 first.
                 VADUserStartedSpeakingFrame(),
@@ -968,10 +969,10 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         message lands in context *before* the assistant message, even
         though the user's transcripts arrive after the end of turn.
 
-        Correct ordering requires the user aggregator's pending
+        Correct ordering requires the user aggregator's deferred
         ``push_aggregation`` to run before the assistant aggregator's
         ``push_aggregation`` (which fires on ``LLMFullResponseEndFrame``).
-        The patched-short pending-finalization timer plus the sleep
+        The patched-short transcript-gather timer plus the sleep
         between LLM start and end make that constraint hold here.
         """
         from unittest.mock import patch
@@ -1008,13 +1009,13 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 # service has finally emitted them — just one here).
                 TranscriptionFrame(text="What's the weather?", user_id="", timestamp="now"),
                 # Bot starts responding. Ordering correctness depends on
-                # the user's pending-finalization timer firing before
+                # the user's transcript-gather timer firing before
                 # LLMFullResponseEndFrame below.
                 LLMFullResponseStartFrame(),
                 LLMTextFrame("It's sunny."),
-                # Allow time for the user's pending-finalization timer to
-                # fire (flushing the user message to context) before the
-                # assistant turn ends.
+                # Allow time for the user's transcript-gather timer to
+                # fire (flushing the user message to context) before
+                # the assistant turn ends.
                 SleepFrame(sleep=0.1),
                 LLMFullResponseEndFrame(),
                 SleepFrame(),
@@ -1112,16 +1113,17 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_transcript_fallback_no_wait_for_transcript_mode(self):
         """The strategy's fallback path still gets the user message into
-        context in delayed-transcript mode, even though no end-of-turn
-        event ever fires (the bundle drops
-        ``TranscriptionUserTurnStartStrategy``, so a transcript-only flow
-        never starts a turn in the controller; the strategy's stop-fire
-        is dropped by the controller too).
+        context when ``wait_for_transcript_to_end_user_turn=False``,
+        even though no end-of-turn event ever fires (the bundle drops
+        ``TranscriptionUserTurnStartStrategy``, so a transcript-only
+        flow never starts a turn in the controller; the strategy's
+        stop-fire is dropped by the controller too).
 
         At session end the aggregated text is flushed and
         ``on_user_turn_message_finalized`` fires with the content.
-        ``on_user_turn_stopped`` doesn't fire — in delayed-transcript
-        mode it's reserved for the end-of-turn path.
+        ``on_user_turn_stopped`` doesn't fire — when the aggregator
+        gathers transcripts after the turn ends, it's reserved for
+        the end-of-turn path.
         """
         from unittest.mock import patch
 
@@ -1157,8 +1159,9 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
             frames_to_send = [
                 TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
-                # Wait for the strategy's fallback timer +
-                # pending-finalization timer.
+                # Wait long enough that the strategy's fallback timer
+                # has elapsed (its stop-fire is dropped by the
+                # controller, since no turn ever started).
                 SleepFrame(sleep=2 * TRANSCRIPTION_TIMEOUT + 0.1),
             ]
             await run_test(pipeline, frames_to_send=frames_to_send)

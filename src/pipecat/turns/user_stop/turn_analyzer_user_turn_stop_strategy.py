@@ -43,14 +43,17 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     received. Otherwise, an STT timeout (adjusted by VAD stop_secs) is used
     as a fallback.
 
-    Set ``wait_for_transcript=False`` for pipelines where the downstream LLM
-    doesn't need the user's words recorded in context to respond — typically
-    when using local turn detection to drive a realtime service like Gemini
-    Live. In that case the strategy fires the turn stop as soon as the
-    analyzer concludes the turn is complete, without waiting for transcripts.
-    Pair with ``wait_for_transcript_to_end_user_turn=False`` on
-    ``LLMUserAggregatorParams`` so the aggregator still captures transcripts
-    when they arrive.
+    Set ``wait_for_transcript=False`` to make this strategy not consider
+    user transcripts, so the user turn ends sooner — as soon as the
+    analyzer concludes the turn is complete. Most callers don't set
+    this directly: it's flipped automatically by
+    ``wait_for_transcript_to_end_user_turn=False`` on
+    ``LLMUserAggregatorParams``, which also wires the aggregator to
+    gather user transcripts after the turn ends. That pattern fits
+    pipelines where local turn detection drives a realtime service like
+    Gemini Live — the realtime service consumes user audio directly,
+    so user transcripts don't need to be in context before it can
+    respond.
     """
 
     def __init__(
@@ -64,10 +67,11 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         Args:
             turn_analyzer: The turn detection analyzer instance to detect end of user turn.
-            wait_for_transcript: Whether to wait for a transcript before
-                ending the user turn. Defaults to True. Set to False when
-                using local turn detection with a realtime service that
-                doesn't need user transcripts in context to respond.
+            wait_for_transcript: Whether the strategy considers user
+                transcripts in deciding when the user turn ends.
+                Defaults to True. Usually flipped indirectly via
+                ``wait_for_transcript_to_end_user_turn=False`` on
+                ``LLMUserAggregatorParams``.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
