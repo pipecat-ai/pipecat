@@ -37,6 +37,7 @@ class OpenRouterLLMService(OpenAILLMService):
 
     Settings = OpenRouterLLMSettings
     _settings: Settings
+    supports_developer_role = False
 
     def __init__(
         self,
