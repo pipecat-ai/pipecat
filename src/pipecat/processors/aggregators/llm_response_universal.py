@@ -55,6 +55,7 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     StartFrame,
+    STTMetadataFrame,
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
@@ -701,10 +702,14 @@ class LLMUserAggregator(LLMContextAggregator):
         # (`_aggregator_gathers_transcripts == True`):
         # `on_user_turn_stopped` has fired with empty content, and the
         # aggregator is waiting on `_transcript_gather_task` before
-        # finalizing the user message into context.
+        # finalizing the user message into context. The gather window
+        # duration is taken from the last `STTMetadataFrame` seen
+        # (`STTMetadataFrame.ttfs_p99_latency`), falling back to
+        # `DEFAULT_TTFS_P99` if no STT service has reported one.
         self._gathering_for_strategy: BaseUserTurnStopStrategy | None = None
         self._inference_during_gather: bool = False
         self._transcript_gather_task: asyncio.Task | None = None
+        self._stt_ttfs_p99_latency: float | None = None
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -861,6 +866,13 @@ class LLMUserAggregator(LLMContextAggregator):
             # Interim transcriptions and translations are consumed here
             # and not pushed downstream, same as final TranscriptionFrame.
             pass
+        elif isinstance(frame, STTMetadataFrame):
+            # Record the STT service's reported P99 TTFS so the
+            # transcript-gather timer can size itself to the real
+            # latency. Frame is also pushed downstream so other
+            # processors keep seeing it.
+            self._stt_ttfs_p99_latency = frame.ttfs_p99_latency
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
@@ -1151,8 +1163,13 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._call_event_handler("on_user_turn_stopped", strategy, end_of_turn_message)
 
             self._gathering_for_strategy = strategy
+            gather_timeout = (
+                self._stt_ttfs_p99_latency
+                if self._stt_ttfs_p99_latency is not None
+                else DEFAULT_TTFS_P99
+            )
             self._transcript_gather_task = self.create_task(
-                self._transcript_gather_handler(DEFAULT_TTFS_P99),
+                self._transcript_gather_handler(gather_timeout),
                 f"{self}::transcript_gather",
             )
             return

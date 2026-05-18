@@ -830,6 +830,64 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
         self.assertEqual([m["content"] for m in user_messages], ["Hello!"])
 
+    async def test_no_wait_for_transcript_uses_stt_metadata_for_gather_timer(self):
+        """The transcript-gather timer prefers the STT-reported P99 TTFS
+        over ``DEFAULT_TTFS_P99``. With a long ``DEFAULT_TTFS_P99`` and
+        a short STT-reported value, the gather completes by the shorter
+        time — if the timer fell back to ``DEFAULT_TTFS_P99``, this test
+        would hang.
+        """
+        from unittest.mock import patch
+
+        from pipecat.frames.frames import STTMetadataFrame
+        from pipecat.processors.aggregators import llm_response_universal
+
+        with patch.object(llm_response_universal, "DEFAULT_TTFS_P99", 60.0):
+            context = LLMContext()
+            user_aggregator = LLMUserAggregator(
+                context,
+                params=LLMUserAggregatorParams(
+                    user_turn_strategies=UserTurnStrategies(
+                        stop=[
+                            SpeechTimeoutUserTurnStopStrategy(
+                                user_speech_timeout=TRANSCRIPTION_TIMEOUT
+                            )
+                        ],
+                    ),
+                    wait_for_transcript_to_end_user_turn=False,
+                ),
+            )
+
+            events: list[tuple[str, str | None]] = []
+
+            @user_aggregator.event_handler("on_user_turn_stopped")
+            async def on_stopped(aggregator, strategy, message):
+                events.append(("stopped", message.content))
+
+            @user_aggregator.event_handler("on_user_turn_message_finalized")
+            async def on_finalized(aggregator, strategy, message):
+                events.append(("finalized", message.content))
+
+            pipeline = Pipeline([user_aggregator])
+
+            frames_to_send = [
+                # STT service advertises its P99 TTFS latency.
+                STTMetadataFrame(service_name="TestSTT", ttfs_p99_latency=TRANSCRIPTION_TIMEOUT),
+                VADUserStartedSpeakingFrame(),
+                SleepFrame(),
+                VADUserStoppedSpeakingFrame(),
+                # Let the user_speech_timeout fire so the strategy
+                # fires turn-stopped.
+                SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+                TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+                # Wait for the transcript-gather timer to fire (sized
+                # to the STT-reported TTFS, not DEFAULT_TTFS_P99).
+                SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+            ]
+            await run_test(pipeline, frames_to_send=frames_to_send)
+
+        self.assertEqual(events, [("stopped", None), ("finalized", "Hello!")])
+
     async def test_no_wait_for_transcript_no_transcripts_arrive(self):
         """When no transcripts arrive, the transcript-gather timer still
         runs — ``on_user_turn_message_finalized`` fires with empty
