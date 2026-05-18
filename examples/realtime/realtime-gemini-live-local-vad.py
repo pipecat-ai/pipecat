@@ -20,6 +20,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
+    UserMessageFinalizedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -72,19 +73,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     # `wait_for_transcript_to_end_user_turn=False` configures the user
     # aggregator for realtime services like Gemini Live that emit user
-    # transcripts after the audible end of the turn. With this flag the
-    # aggregator:
+    # transcripts after the end of turn. With this flag the aggregator:
     #
     # - drops `TranscriptionUserTurnStartStrategy` from the default start
     #   strategies (so late-arriving realtime transcripts don't trigger
     #   new turns),
     # - sets `wait_for_transcript=False` on the default stop strategy
-    #   (so the turn ends without waiting for a transcript),
-    # - fires `on_user_turn_stopped` on the audible end of the turn with
-    #   empty `message.content` (the transcript hasn't arrived yet), and
-    # - defers the context flush until the (late) transcript arrives, then
-    #   emits `on_user_turn_message_finalized` with the populated message
-    #   so the user's words land in the LLM context for audit/history.
+    #   (so the turn ends without waiting for transcripts),
+    # - fires `on_user_turn_stopped` at the end of turn with empty
+    #   `message.content` (no transcripts have arrived yet), and
+    # - defers the context flush until after a short wait that gives the
+    #   realtime service time to emit its transcripts, then emits
+    #   `on_user_turn_message_finalized` with the populated message so
+    #   the user's words land in the LLM context for audit/history.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -124,18 +125,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.cancel()
 
     # With `wait_for_transcript_to_end_user_turn=False`, `on_user_turn_stopped`
-    # fires on the audible end of the turn (before the transcript arrives), so
-    # its `message.content` is empty. Logged here to make the timing of the
-    # audible-stop signal visible alongside the later transcript event.
+    # fires at the end of turn (before any transcripts arrive), so its
+    # `message.content` is empty. Logged here to make the timing of the
+    # end-of-turn signal visible alongside the later finalization event.
     @user_aggregator.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
-        logger.info(f"User turn ended (audible, strategy: {type(strategy).__name__})")
+        logger.info(f"User turn ended (strategy: {type(strategy).__name__})")
 
-    # `on_user_turn_message_finalized` fires when the user transcript has
+    # `on_user_turn_message_finalized` fires when the user message has
     # been written to context — later than `on_user_turn_stopped` in this
-    # mode, since transcripts arrive after the audible turn end.
+    # mode, since transcripts arrive after the end of turn.
     @user_aggregator.event_handler("on_user_turn_message_finalized")
-    async def on_user_turn_message_finalized(aggregator, strategy, message: UserTurnStoppedMessage):
+    async def on_user_turn_message_finalized(
+        aggregator, strategy, message: UserMessageFinalizedMessage
+    ):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")

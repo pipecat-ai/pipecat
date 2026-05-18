@@ -130,15 +130,16 @@ class LLMUserAggregatorParams:
         vad_analyzer: Voice Activity Detection analyzer instance.
         wait_for_transcript_to_end_user_turn: Defaults to True. Set to
             False when using local turn detection to drive a realtime
-            service (e.g. Gemini Live), where waiting for the transcript
+            service (e.g. Gemini Live), where waiting for transcripts
             before ending the turn is pure latency. When False:
 
             - the user turn ends as soon as the user stops speaking,
               without waiting for transcripts: ``on_user_turn_stopped``
               fires immediately with empty content
-            - the user-text flush to context and the
-              ``on_user_turn_message_finalized`` event are deferred
-              until a backstop timer expires
+            - user message finalization (the user-text flush to context
+              and the ``on_user_turn_message_finalized`` event) is
+              deferred and runs after a short wait, giving the realtime
+              service time to emit its transcripts
 
             As part of configuring this behavior, the aggregator drops
             ``TranscriptionUserTurnStartStrategy`` from start strategies
@@ -278,13 +279,40 @@ class LLMAssistantAggregatorParams:
 
 @dataclass
 class UserTurnStoppedMessage:
-    """A user turn stopped message containing a user transcript update.
+    """A message accompanying ``on_user_turn_stopped`` (end of user turn).
 
-    A message in a conversation transcript containing the user content. This is
-    the aggregated transcript that is then used in the context.
+    In default mode (``wait_for_transcript_to_end_user_turn=True``), the
+    user message is finalized at the end of the turn, so ``content``
+    carries the aggregated transcript. In delayed-transcript mode
+    (``wait_for_transcript_to_end_user_turn=False``), transcripts arrive
+    later, so ``content`` is ``None`` here — subscribe to
+    ``on_user_turn_message_finalized`` for the populated message.
 
     Parameters:
-        content: The message content/text.
+        content: The aggregated user transcript, or ``None`` if no
+            transcripts had arrived when end of turn fired (delayed-
+            transcript mode).
+        timestamp: When the user turn started.
+        user_id: Optional identifier for the user.
+
+    """
+
+    content: str | None
+    timestamp: str
+    user_id: str | None = None
+
+
+@dataclass
+class UserMessageFinalizedMessage:
+    """A message accompanying ``on_user_turn_message_finalized``.
+
+    Fired when the user message has been finalized into the context.
+    In default mode this coincides with ``on_user_turn_stopped``; in
+    delayed-transcript mode it fires later, once the realtime service
+    has emitted its transcripts. ``content`` is always populated.
+
+    Parameters:
+        content: The aggregated user transcript.
         timestamp: When the user turn started.
         user_id: Optional identifier for the user.
 
@@ -545,19 +573,23 @@ class LLMUserAggregator(LLMContextAggregator):
 
     Event handlers available:
 
-    - on_user_turn_started: Called when the user turn starts
-    - on_user_turn_stopped: Called when the user turn ends. With
-      ``wait_for_transcript_to_end_user_turn=True`` (default), this fires
-      with the populated ``UserTurnStoppedMessage.content``. With
-      ``wait_for_transcript_to_end_user_turn=False`` (realtime + local
-      turn detection), this fires on the audible end of the turn — before
-      the transcript has arrived — so ``content`` is empty; subscribe to
-      ``on_user_turn_message_finalized`` to get the transcript.
-    - on_user_turn_message_finalized: Called once the user message has
-      been finalized into the context. Fires in both modes — in the
-      default mode it coincides with ``on_user_turn_stopped``; in the
-      delayed-transcript path it fires later, when the transcript
-      arrives. The ``UserTurnStoppedMessage.content`` is always populated.
+    - on_user_turn_started: Called when the user turn starts.
+    - on_user_turn_stopped: Called at the end of turn, with a
+      ``UserTurnStoppedMessage``. In default mode
+      (``wait_for_transcript_to_end_user_turn=True``)
+      ``message.content`` carries the aggregated transcript. In
+      delayed-transcript mode
+      (``wait_for_transcript_to_end_user_turn=False``) the user's
+      transcripts haven't arrived yet, so ``message.content`` is
+      ``None``; subscribe to ``on_user_turn_message_finalized`` to get
+      the assembled message.
+    - on_user_turn_message_finalized: Called at user message
+      finalization — when the user message has been flushed to the
+      context — with a ``UserMessageFinalizedMessage``. In default
+      mode it coincides with ``on_user_turn_stopped``; in
+      delayed-transcript mode it fires a short time after, once the
+      realtime service has had time to emit its transcripts.
+      ``message.content`` is always populated.
     - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
     - on_user_mute_started: Called when the user becomes muted
@@ -574,7 +606,7 @@ class LLMUserAggregator(LLMContextAggregator):
             ...
 
         @aggregator.event_handler("on_user_turn_message_finalized")
-        async def on_user_turn_message_finalized(aggregator, strategy: BaseUserTurnStopStrategy, message: UserTurnStoppedMessage):
+        async def on_user_turn_message_finalized(aggregator, strategy: BaseUserTurnStopStrategy, message: UserMessageFinalizedMessage):
             ...
 
         @aggregator.event_handler("on_user_turn_stop_timeout")
@@ -662,14 +694,14 @@ class LLMUserAggregator(LLMContextAggregator):
         # inferences fire before finalization.
         self._full_user_turn_aggregation: str | None = None
 
-        # State for the deferred-finalization path that activates when
-        # `wait_for_transcript_to_end_user_turn=False`. The strategy fires
-        # turn-stopped on the audible end of the user's turn; we defer the
-        # context flush and `on_user_turn_stopped` event until the transcript
-        # arrives (or a backstop timer fires).
+        # Pending-finalization state used in delayed-transcript mode
+        # (`_expect_delayed_transcripts == True`): the end-of-turn event
+        # `on_user_turn_stopped` has fired (with empty content) and user
+        # message finalization is scheduled to run after the
+        # pending-finalization timer expires.
         self._pending_stop_strategy: BaseUserTurnStopStrategy | None = None
         self._pending_inference_trigger: bool = False
-        self._delayed_transcript_backstop_task: asyncio.Task | None = None
+        self._pending_finalization_task: asyncio.Task | None = None
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -715,12 +747,17 @@ class LLMUserAggregator(LLMContextAggregator):
 
     @property
     def _expect_delayed_transcripts(self) -> bool:
-        """Internal alias for the deferred-finalization mode.
+        """True in delayed-transcript mode, False in default mode.
 
-        Active whenever ``wait_for_transcript_to_end_user_turn`` is False,
-        which is also when the strategy-mutation bundle is applied. The two
-        always travel together — there's no configuration where one is
-        active without the other.
+        In delayed-transcript mode the end of turn and user message
+        finalization happen at different times: ``on_user_turn_stopped``
+        fires immediately at the end of turn (with empty content), and
+        user message finalization is scheduled to run after the
+        pending-finalization timer expires, giving the realtime service
+        time to emit its transcripts.
+
+        Internal alias for ``wait_for_transcript_to_end_user_turn=False``.
+        Always travels with the strategy-mutation bundle applied at init.
         """
         return not self._params.wait_for_transcript_to_end_user_turn
 
@@ -879,17 +916,20 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._cleanup()
 
     async def _finalize_on_session_end(self):
-        """Flush any pending turn-stop on session end.
+        """Flush any pending user message on session end.
 
-        If a deferred turn finalization is pending (because
-        ``expect_delayed_transcripts`` is True and the transcript hadn't
-        arrived yet), replay it first so the user message is captured before
-        the session shuts down.
+        If user message finalization is pending (delayed-transcript mode,
+        transcript hadn't arrived yet), replay the pending finalization
+        so the user message is captured before the session shuts down.
+        Otherwise, run the mode-appropriate finalize path on whatever's
+        currently in the buffer.
         """
         if self._pending_stop_strategy is not None or self._pending_inference_trigger:
-            await self._replay_deferred_turn_finalization(on_session_end=True)
+            await self._run_pending_finalization(on_session_end=True)
+        elif self._expect_delayed_transcripts:
+            await self._finalize_delayed_user_message(on_session_end=True)
         else:
-            await self._maybe_emit_user_turn_stopped(on_session_end=True)
+            await self._finalize_user_turn(on_session_end=True)
 
     async def _cleanup(self):
         if self._vad_controller:
@@ -1021,16 +1061,17 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         logger.debug(f"{self}: User started speaking (strategy: {strategy})")
 
-        # Precondition guard for `expect_delayed_transcripts`: if the previous
-        # turn's finalization is still pending, the precondition (turn N's
-        # transcript arrives before turn N+1 starts) has been violated.
-        # Force-flush the previous turn before proceeding.
+        # Precondition guard for delayed-transcript mode: if the previous
+        # turn's user message finalization is still pending, the
+        # precondition (turn N's transcripts arrive before turn N+1
+        # starts) has been violated. Force-finalize the previous turn
+        # before proceeding.
         if self._pending_stop_strategy is not None or self._pending_inference_trigger:
             logger.warning(
                 f"{self}: user turn started while previous turn's transcript was "
                 f"still pending; flushing previous turn now"
             )
-            await self._replay_deferred_turn_finalization()
+            await self._run_pending_finalization()
 
         self._user_turn_start_timestamp = time_now_iso8601()
         self._full_user_turn_aggregation = None
@@ -1053,8 +1094,9 @@ class LLMUserAggregator(LLMContextAggregator):
         logger.debug(f"{self}: User turn inference triggered (strategy: {strategy})")
 
         if self._expect_delayed_transcripts:
-            # Defer the push_aggregation and event emission until the
-            # transcript arrives (or the backstop fires).
+            # Defer the push_aggregation and event emission; they'll run
+            # alongside user message finalization when the
+            # pending-finalization timer expires.
             self._pending_inference_trigger = True
             return
 
@@ -1083,60 +1125,67 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
-        # Audible-stop side effects fire on the strategy event regardless of
-        # whether the transcript-ready finalization is deferred.
+        # End-of-turn side effects always fire on the strategy event,
+        # regardless of whether user message finalization is deferred.
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         if self._expect_delayed_transcripts:
-            # Fire `on_user_turn_stopped` now to signal the audible end of the
-            # turn. `content` is empty because the transcript hasn't arrived
-            # yet — consumers that want the transcript subscribe to
-            # `on_user_turn_message_finalized` instead, which fires later when
-            # the transcript lands (or the backstop timer fires).
-            audible_stop_message = UserTurnStoppedMessage(
-                content="", timestamp=self._user_turn_start_timestamp
+            # Delayed-transcript mode: fire `on_user_turn_stopped` now
+            # for the end of turn — content is empty because no
+            # transcripts have arrived yet. User message finalization
+            # is scheduled to run when the pending-finalization timer
+            # expires; consumers wanting the assembled message subscribe
+            # to `on_user_turn_message_finalized`.
+            end_of_turn_message = UserTurnStoppedMessage(
+                content=None, timestamp=self._user_turn_start_timestamp
             )
-            await self._call_event_handler("on_user_turn_stopped", strategy, audible_stop_message)
+            await self._call_event_handler("on_user_turn_stopped", strategy, end_of_turn_message)
 
             self._pending_stop_strategy = strategy
-            self._delayed_transcript_backstop_task = self.create_task(
-                self._delayed_transcript_backstop_handler(DEFAULT_TTFS_P99),
-                f"{self}::delayed_transcript_backstop",
+            self._pending_finalization_task = self.create_task(
+                self._pending_finalization_handler(DEFAULT_TTFS_P99),
+                f"{self}::pending_finalization",
             )
             return
 
-        await self._maybe_emit_user_turn_stopped(strategy)
+        await self._finalize_user_turn(strategy)
 
-    async def _delayed_transcript_backstop_handler(self, timeout: float):
-        """Backstop timer for `expect_delayed_transcripts`.
+    async def _pending_finalization_handler(self, timeout: float):
+        """Pending-finalization timer for delayed-transcript mode.
 
-        Fires after ``timeout`` seconds and replays the deferred turn
-        finalization with whatever transcript has been captured by then
-        (possibly nothing).
+        Waits ``timeout`` seconds — giving the realtime service time to
+        emit its transcripts — then runs the pending finalization with
+        whatever transcripts have been captured by then (possibly
+        nothing). Cancelled by reset / next-turn precondition guard /
+        session end.
         """
         try:
             await asyncio.sleep(timeout)
         except asyncio.CancelledError:
             return
         finally:
-            self._delayed_transcript_backstop_task = None
+            self._pending_finalization_task = None
 
-        await self._replay_deferred_turn_finalization()
+        await self._run_pending_finalization()
 
-    async def _replay_deferred_turn_finalization(self, *, on_session_end: bool = False):
-        """Replay the deferred halves of inference-triggered and turn-stopped.
+    async def _run_pending_finalization(self, *, on_session_end: bool = False):
+        """Run the pending finalization for delayed-transcript mode.
 
-        Called from the backstop timer, the precondition guard in
-        `_on_user_turn_started`, and the session-end paths. Clears all
-        pending state before delegating to the normal finalization methods
-        so they run the unmodified code path.
+        In delayed-transcript mode the end of turn fires
+        ``on_user_turn_stopped`` immediately and leaves user message
+        finalization (plus any pending inference-triggered segment)
+        pending. This method runs that pending work: pushes the
+        accumulated user message to context and emits
+        ``on_user_turn_message_finalized``. Called from the
+        pending-finalization timer (the normal path), the precondition
+        guard in ``_on_user_turn_started``, and the session-end paths.
         """
-        if self._delayed_transcript_backstop_task:
-            await self.cancel_task(self._delayed_transcript_backstop_task)
-            self._delayed_transcript_backstop_task = None
+        if self._pending_finalization_task:
+            await self.cancel_task(self._pending_finalization_task)
+            self._pending_finalization_task = None
 
         pending_strategy = self._pending_stop_strategy
         had_pending_inference = self._pending_inference_trigger
@@ -1155,31 +1204,29 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._call_event_handler("on_user_turn_inference_triggered", pending_strategy)
 
         if pending_strategy is not None or on_session_end:
-            # `on_user_turn_stopped` already fired on the audible stop;
-            # only fire `on_user_turn_message_finalized` here.
-            await self._maybe_emit_user_turn_stopped(
-                pending_strategy,
-                on_session_end=on_session_end,
-                emit_stopped_event=False,
+            # `on_user_turn_stopped` already fired at the end of turn;
+            # this is the deferred user message finalization.
+            await self._finalize_delayed_user_message(
+                pending_strategy, on_session_end=on_session_end
             )
 
     async def _on_reset_aggregation(
         self, controller: UserTurnController, strategy: BaseUserTurnStartStrategy
     ):
         logger.debug(f"{self}: Resetting aggregation (strategy: {strategy})")
-        await self._discard_deferred_turn_finalization()
+        await self._discard_pending_finalization()
         await self.reset()
 
-    async def _discard_deferred_turn_finalization(self):
-        """Drop any pending deferred turn finalization without replaying.
+    async def _discard_pending_finalization(self):
+        """Drop pending finalization state without running it.
 
-        Called from reset paths (interruption, explicit reset). "Reset" means
-        "throw it away" — we don't want to flush a partial transcript that
+        Called from reset paths (interruption, explicit reset). "Reset"
+        means "throw it away" — we don't flush a partial transcript that
         was about to be invalidated anyway.
         """
-        if self._delayed_transcript_backstop_task:
-            await self.cancel_task(self._delayed_transcript_backstop_task)
-            self._delayed_transcript_backstop_task = None
+        if self._pending_finalization_task:
+            await self.cancel_task(self._pending_finalization_task)
+            self._pending_finalization_task = None
         self._pending_stop_strategy = None
         self._pending_inference_trigger = False
 
@@ -1189,32 +1236,22 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _on_user_turn_idle(self, controller):
         await self._call_event_handler("on_user_turn_idle")
 
-    async def _maybe_emit_user_turn_stopped(
-        self,
-        strategy: BaseUserTurnStopStrategy | None = None,
-        on_session_end: bool = False,
-        *,
-        emit_stopped_event: bool = True,
-    ):
-        """Finalize the user message and emit the corresponding events.
+    async def _flush_user_message_to_context(
+        self, on_session_end: bool = False
+    ) -> tuple[str, str] | None:
+        """Push the aggregated user message to context, return ``(content, timestamp)``.
 
-        Earlier inference triggers in the same turn have already pushed
-        their segments to the context and accumulated them into
-        ``self._full_user_turn_aggregation``. Any aggregation that
-        arrived after the last inference trigger is flushed here so
-        end-of-turn content is never lost from the public events.
+        Earlier inference triggers in the same turn already pushed their
+        segments to the context and accumulated them in
+        ``self._full_user_turn_aggregation``; whatever arrived after the
+        last inference trigger is flushed here so end-of-turn content is
+        never lost.
 
-        Always emits ``on_user_turn_message_finalized``. Also emits
-        ``on_user_turn_stopped`` when ``emit_stopped_event=True`` (the
-        default path); the delayed-transcript path passes False because it
-        already fired ``on_user_turn_stopped`` on the audible stop.
-
-        Args:
-            strategy: The strategy that triggered the turn stop.
-            on_session_end: If True, only emit if there's unemitted content
-                (avoids duplicate events when session ends).
-            emit_stopped_event: Whether to fire ``on_user_turn_stopped``
-                alongside ``on_user_turn_message_finalized``.
+        Returns ``(content, timestamp)`` for the just-finalized user
+        message, or ``None`` when there's no content to flush and
+        ``on_session_end=True`` (avoids emitting empty events during
+        session shutdown). Callers construct the appropriate message
+        dataclass for each event they emit.
         """
         segment = await self.push_aggregation()
         full_aggregation = self._full_user_turn_aggregation
@@ -1225,14 +1262,51 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             content = full_aggregation or segment
 
-        if not on_session_end or content:
-            message = UserTurnStoppedMessage(
-                content=content, timestamp=self._user_turn_start_timestamp
-            )
-            if emit_stopped_event:
-                await self._call_event_handler("on_user_turn_stopped", strategy, message)
-            await self._call_event_handler("on_user_turn_message_finalized", strategy, message)
-            self._user_turn_start_timestamp = ""
+        if on_session_end and not content:
+            return None
+
+        timestamp = self._user_turn_start_timestamp
+        self._user_turn_start_timestamp = ""
+        return content, timestamp
+
+    async def _finalize_user_turn(
+        self,
+        strategy: BaseUserTurnStopStrategy | None = None,
+        on_session_end: bool = False,
+    ):
+        """Finalize the user turn: flush the message, emit both events.
+
+        Used in default mode (``_expect_delayed_transcripts == False``),
+        where end of turn and user message finalization coincide. Emits
+        both ``on_user_turn_stopped`` and ``on_user_turn_message_finalized``.
+        """
+        result = await self._flush_user_message_to_context(on_session_end=on_session_end)
+        if result is None:
+            return
+        content, timestamp = result
+        stopped_msg = UserTurnStoppedMessage(content=content, timestamp=timestamp)
+        finalized_msg = UserMessageFinalizedMessage(content=content, timestamp=timestamp)
+        await self._call_event_handler("on_user_turn_stopped", strategy, stopped_msg)
+        await self._call_event_handler("on_user_turn_message_finalized", strategy, finalized_msg)
+
+    async def _finalize_delayed_user_message(
+        self,
+        strategy: BaseUserTurnStopStrategy | None = None,
+        on_session_end: bool = False,
+    ):
+        """Finalize the user message: flush to context, emit one event.
+
+        Used in delayed-transcript mode (``_expect_delayed_transcripts ==
+        True``), where user message finalization fires after the end of
+        turn. Emits ``on_user_turn_message_finalized`` only;
+        ``on_user_turn_stopped`` was already emitted at the end of turn.
+        """
+        result = await self._flush_user_message_to_context(on_session_end=on_session_end)
+        if result is None:
+            return
+        content, timestamp = result
+        finalized_msg = UserMessageFinalizedMessage(content=content, timestamp=timestamp)
+        await self._call_event_handler("on_user_turn_message_finalized", strategy, finalized_msg)
 
 
 class LLMAssistantAggregator(LLMContextAggregator):

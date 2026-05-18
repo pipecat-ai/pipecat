@@ -48,9 +48,10 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     doesn't need the user's words recorded in context to respond — typically
     when using local turn detection to drive a realtime service like Gemini
     Live. In that case the strategy fires the turn stop as soon as the
-    user_speech_timeout elapses, without waiting for a transcript. Pair with
-    ``expect_delayed_transcripts=True`` on ``LLMUserAggregatorParams`` so the
-    aggregator still captures the transcript when it arrives.
+    user_speech_timeout elapses, without waiting for transcripts. Pair with
+    ``wait_for_transcript_to_end_user_turn=False`` on
+    ``LLMUserAggregatorParams`` so the aggregator still captures transcripts
+    when they arrive.
     """
 
     def __init__(
