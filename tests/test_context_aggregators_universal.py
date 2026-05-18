@@ -767,10 +767,10 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         """``wait_for_transcript_to_end_user_turn=False`` splits the lifecycle:
 
         - ``on_user_turn_stopped`` fires at the end of turn with empty
-          content (the aggregator hasn't gathered transcripts yet).
+          content (no transcripts have arrived yet).
         - Transcripts arriving after the end of turn are captured into
           ``_aggregation``.
-        - When the transcript-gather timer fires,
+        - When the post-turn transcript wait timer fires,
           ``on_user_turn_message_finalized`` fires with the populated
           user context message.
         """
@@ -817,7 +817,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 # Transcripts arrive after the end of turn (just one
                 # here for the basic case).
                 TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
-                # Wait for the transcript-gather timer to fire.
+                # Wait for the post-turn transcript wait timer to fire.
                 SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
             ]
             await run_test(pipeline, frames_to_send=frames_to_send)
@@ -830,10 +830,10 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         user_messages = [m for m in context.get_messages() if m.get("role") == "user"]
         self.assertEqual([m["content"] for m in user_messages], ["Hello!"])
 
-    async def test_no_wait_for_transcript_uses_stt_metadata_for_gather_timer(self):
-        """The transcript-gather timer prefers the STT-reported P99 TTFS
+    async def test_no_wait_for_transcript_uses_stt_metadata_for_wait_timer(self):
+        """The post-turn transcript wait timer prefers the STT-reported P99 TTFS
         over ``DEFAULT_TTFS_P99``. With a long ``DEFAULT_TTFS_P99`` and
-        a short STT-reported value, the gather completes by the shorter
+        a short STT-reported value, the wait completes by the shorter
         time — if the timer fell back to ``DEFAULT_TTFS_P99``, this test
         would hang.
         """
@@ -880,7 +880,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 # fires turn-stopped.
                 SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
                 TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
-                # Wait for the transcript-gather timer to fire (sized
+                # Wait for the post-turn transcript wait timer to fire (sized
                 # to the STT-reported TTFS, not DEFAULT_TTFS_P99).
                 SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
             ]
@@ -889,7 +889,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [("stopped", None), ("finalized", "Hello!")])
 
     async def test_no_wait_for_transcript_no_transcripts_arrive(self):
-        """When no transcripts arrive, the transcript-gather timer still
+        """When no transcripts arrive, the post-turn transcript wait timer still
         runs — ``on_user_turn_message_finalized`` fires with empty
         content and nothing is written to context.
         """
@@ -999,7 +999,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 # simplicity).
                 TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
                 SleepFrame(),
-                # Turn 2 starts before turn 1's transcript-gather timer
+                # Turn 2 starts before turn 1's post-turn transcript wait timer
                 # fires — precondition violation. The aggregator should
                 # force-flush turn 1 first.
                 VADUserStartedSpeakingFrame(),
@@ -1030,7 +1030,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         Correct ordering requires the user aggregator's deferred
         ``push_aggregation`` to run before the assistant aggregator's
         ``push_aggregation`` (which fires on ``LLMFullResponseEndFrame``).
-        The patched-short transcript-gather timer plus the sleep
+        The patched-short post-turn transcript wait timer plus the sleep
         between LLM start and end make that constraint hold here.
         """
         from unittest.mock import patch
@@ -1067,11 +1067,11 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
                 # service has finally emitted them — just one here).
                 TranscriptionFrame(text="What's the weather?", user_id="", timestamp="now"),
                 # Bot starts responding. Ordering correctness depends on
-                # the user's transcript-gather timer firing before
+                # the user's post-turn transcript wait timer firing before
                 # LLMFullResponseEndFrame below.
                 LLMFullResponseStartFrame(),
                 LLMTextFrame("It's sunny."),
-                # Allow time for the user's transcript-gather timer to
+                # Allow time for the user's post-turn transcript wait timer to
                 # fire (flushing the user message to context) before
                 # the assistant turn ends.
                 SleepFrame(sleep=0.1),
@@ -1180,7 +1180,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         At session end the aggregated text is flushed and
         ``on_user_turn_message_finalized`` fires with the content.
         ``on_user_turn_stopped`` doesn't fire — when the aggregator
-        gathers transcripts after the turn ends, it's reserved for
+        runs a post-turn transcript wait, that event is reserved for
         the end-of-turn path.
         """
         from unittest.mock import patch

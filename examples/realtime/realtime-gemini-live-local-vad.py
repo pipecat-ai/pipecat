@@ -80,10 +80,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     #
     # - Turn strategies do not consider user transcripts, so the user
     #   turn ends sooner.
-    # - User transcripts are handled by the aggregator: a simple timer
-    #   gives it time to gather them after the user turn ends, then
-    #   the aggregator emits `on_user_turn_message_finalized` with the
-    #   new user context message.
+    # - User transcripts are handled by the aggregator: a simple
+    #   post-turn transcript wait gives them time to arrive after the
+    #   user turn ends, then the aggregator emits
+    #   `on_user_turn_message_finalized` with the new user context
+    #   message.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -123,8 +124,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.cancel()
 
     # `on_user_turn_stopped` fires at the end of the user turn. With
-    # `wait_for_transcript_to_end_user_turn=False`, the aggregator
-    # hasn't gathered user transcripts yet at this point, so
+    # `wait_for_transcript_to_end_user_turn=False`, no user
+    # transcripts have arrived yet at this point, so
     # `message.content` is empty. Logged here to make the end-of-turn
     # signal visible alongside the later finalization event.
     @user_aggregator.event_handler("on_user_turn_stopped")
@@ -133,8 +134,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # `on_user_turn_message_finalized` fires when the user message has
     # been finalized into the context. Here it fires later than
-    # `on_user_turn_stopped`, after the aggregator has gathered the
-    # realtime service's user transcripts.
+    # `on_user_turn_stopped`, after the aggregator's post-turn
+    # transcript wait completes.
     @user_aggregator.event_handler("on_user_turn_message_finalized")
     async def on_user_turn_message_finalized(
         aggregator, strategy, message: UserMessageFinalizedMessage
