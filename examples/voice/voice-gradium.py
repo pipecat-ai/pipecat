@@ -54,7 +54,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = GradiumSTTService(
         api_key=os.environ["GRADIUM_API_KEY"],
-        api_endpoint_base_url="wss://us.api.gradium.ai/api/speech/asr",
         settings=GradiumSTTService.Settings(
             language=Language.EN,
         ),
@@ -62,7 +61,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = GradiumTTSService(
         api_key=os.environ["GRADIUM_API_KEY"],
-        url="wss://us.api.gradium.ai/api/speech/tts",
         settings=GradiumTTSService.Settings(
             voice="YTpq7expH9539ERJ",
         ),

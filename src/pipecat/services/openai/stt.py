@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
@@ -178,15 +179,13 @@ class OpenAISTTService(BaseWhisperSTTService):
         return await self._client.audio.transcriptions.create(**kwargs)
 
 
-_OPENAI_SAMPLE_RATE = 24000
-
-
 @dataclass
 class OpenAIRealtimeSTTSettings(STTSettings):
     """Settings for OpenAIRealtimeSTTService.
 
     Parameters:
-        prompt: Optional prompt text to guide transcription style.
+        prompt: Optional prompt text to guide transcription style. Not supported by
+            ``"gpt-realtime-whisper"``.
         noise_reduction: Noise reduction mode. ``"near_field"`` for close
             microphones, ``"far_field"`` for distant microphones, or ``None``
             to disable.
@@ -227,7 +226,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         stt = OpenAIRealtimeSTTService(
             api_key="sk-...",
             settings=OpenAIRealtimeSTTService.Settings(
-                model="gpt-4o-transcribe",
+                model="gpt-realtime-whisper",
                 noise_reduction="near_field",
             ),
         )
@@ -255,7 +254,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         Args:
             api_key: OpenAI API key for authentication.
-            model: Transcription model. Supported values are
+            model: Transcription model. For low-latency streaming
+                transcription, use ``"gpt-realtime-whisper"``. Other
+                supported transcription models include
                 ``"gpt-4o-transcribe"`` and ``"gpt-4o-mini-transcribe"``.
 
                 .. deprecated:: 0.0.105
@@ -269,7 +270,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                     Use ``settings=OpenAIRealtimeSTTService.Settings(language=...)`` instead.
 
             prompt: Optional prompt text to guide transcription style
-                or provide keyword hints.
+                or provide keyword hints. Not supported by
+                ``"gpt-realtime-whisper"``.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=OpenAIRealtimeSTTService.Settings(prompt=...)`` instead.
@@ -303,7 +305,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         # --- 1. Hardcoded defaults ---
         default_settings = self.Settings(
-            model="gpt-4o-transcribe",
+            model=OPENAI_REALTIME_WHISPER_MODEL,
             language=Language.EN,
             prompt=None,
             noise_reduction=None,
@@ -329,6 +331,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         if settings is not None:
             default_settings.apply_update(settings)
 
+        self._omit_unsupported_prompt(default_settings)
+
         super().__init__(
             ttfs_p99_latency=ttfs_p99_latency,
             settings=default_settings,
@@ -348,6 +352,19 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         # Server-side VAD is disabled by default (turn_detection=False).
         # Set to None or a dict to enable server-side VAD.
         self._server_vad_enabled = turn_detection is not False
+
+    @staticmethod
+    def _omit_unsupported_prompt(settings: OpenAIRealtimeSTTSettings) -> dict[str, Any]:
+        """Drop prompt settings that are not accepted by the selected model."""
+        if settings.model == OPENAI_REALTIME_WHISPER_MODEL and settings.prompt:
+            old_prompt = settings.prompt
+            settings.prompt = None
+            logger.warning(
+                f"{OPENAI_REALTIME_WHISPER_MODEL} does not support the prompt parameter; "
+                "omitting prompt from OpenAI Realtime transcription session."
+            )
+            return {"prompt": old_prompt}
+        return {}
 
     @staticmethod
     def _language_to_code(language: Language) -> str:
@@ -382,6 +399,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(delta)
+        for field, previous_value in self._omit_unsupported_prompt(self._settings).items():
+            changed.setdefault(field, previous_value)
 
         if changed and self._session_ready:
             await self._send_session_update()
@@ -550,7 +569,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         input_audio: dict = {
             "format": {
                 "type": "audio/pcm",
-                "rate": _OPENAI_SAMPLE_RATE,
+                "rate": OPENAI_SAMPLE_RATE,
             },
             "transcription": transcription,
         }
@@ -587,7 +606,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         Args:
             audio: Raw audio bytes at the pipeline sample rate.
         """
-        audio = await self._resampler.resample(audio, self.sample_rate, _OPENAI_SAMPLE_RATE)
+        audio = await self._resampler.resample(audio, self.sample_rate, OPENAI_SAMPLE_RATE)
         if not audio:
             return
         payload = base64.b64encode(audio).decode("utf-8")
@@ -676,9 +695,9 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
     async def _handle_transcription_delta(self, evt: dict):
         """Handle incremental transcription text.
 
-        For ``gpt-4o-transcribe`` and ``gpt-4o-mini-transcribe``, deltas
-        contain streaming partial text. For ``whisper-1``, each delta
-        contains the full turn transcript.
+        For ``gpt-realtime-whisper``, ``gpt-4o-transcribe``, and
+        ``gpt-4o-mini-transcribe``, deltas contain low-latency streaming
+        partial text.
 
         Args:
             evt: The delta event from the server.

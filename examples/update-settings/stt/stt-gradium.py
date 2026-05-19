@@ -50,10 +50,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = GradiumSTTService(
-        api_key=os.environ["GRADIUM_API_KEY"],
-        api_endpoint_base_url="wss://us.api.gradium.ai/api/speech/asr",
-    )
+    stt = GradiumSTTService(api_key=os.environ["GRADIUM_API_KEY"])
 
     tts = CartesiaTTSService(
         api_key=os.environ["CARTESIA_API_KEY"],

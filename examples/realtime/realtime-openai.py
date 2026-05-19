@@ -232,6 +232,20 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         #     [LLMUpdateSettingsFrame(settings=SessionProperties(tools=new_tools).model_dump())]
         # )
 
+        # Reasoning effort can be changed at runtime too. Only
+        # reasoning-capable Realtime models (e.g. gpt-realtime-2) support this.
+        # await task.queue_frames(
+        #     [
+        #         LLMUpdateSettingsFrame(
+        #             delta=OpenAIRealtimeLLMService.Settings(
+        #                 session_properties=SessionProperties(
+        #                     reasoning=Reasoning(effort="xhigh"),
+        #                 ),
+        #             )
+        #         )
+        #     ]
+        # )
+
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")

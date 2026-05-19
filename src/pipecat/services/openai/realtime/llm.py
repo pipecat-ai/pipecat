@@ -52,6 +52,7 @@ from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -82,12 +83,14 @@ class CurrentAudioResponse:
         content_index: Index of the audio content within the item.
         start_time_ms: Timestamp when the audio response started in milliseconds.
         total_size: Total size of audio data received in bytes. Defaults to 0.
+        response_id: ID of the server response the item belongs to. Defaults to "".
     """
 
     item_id: str
     content_index: int
     start_time_ms: int
     total_size: int = 0
+    response_id: str = ""
 
 
 @dataclass
@@ -252,7 +255,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="gpt-realtime-1.5",
+            model="gpt-realtime-2",
             system_instruction=None,
             temperature=None,
             max_tokens=None,
@@ -288,6 +291,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         if settings is not None:
             default_settings.apply_update(settings)
 
+        self._omit_unsupported_input_audio_transcription_prompt(default_settings.session_properties)
+
         # Build WebSocket URL with model query parameter
         # Source: https://platform.openai.com/docs/guides/realtime-websocket
         full_url = f"{base_url}?model={default_settings.model}"
@@ -319,10 +324,37 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         self._messages_added_manually = {}
         self._pending_function_calls = {}  # Track function calls by call_id
         self._completed_tool_calls = set()
+        # Whether we've already emitted the "stripping `reasoning`" warning
+        # for this service instance. The Realtime API doesn't allow swapping
+        # the model mid-session, so once is enough.
+        self._reasoning_strip_warned = False
 
         self._register_event_handler("on_conversation_item_created")
         self._register_event_handler("on_conversation_item_updated")
         self._retrieve_conversation_item_futures = {}
+
+    @staticmethod
+    def _omit_unsupported_input_audio_transcription_prompt(
+        session_properties: events.SessionProperties,
+    ) -> bool:
+        """Drop input transcription prompt settings unsupported by the selected model."""
+        transcription = (
+            session_properties.audio.input.transcription
+            if session_properties.audio
+            and session_properties.audio.input
+            and session_properties.audio.input.transcription
+            else None
+        )
+        if transcription and transcription.model == OPENAI_REALTIME_WHISPER_MODEL:
+            if transcription.prompt:
+                transcription.prompt = None
+                logger.warning(
+                    f"{OPENAI_REALTIME_WHISPER_MODEL} does not support the prompt "
+                    "parameter; omitting prompt from OpenAI Realtime input audio "
+                    "transcription settings."
+                )
+                return True
+        return False
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
@@ -481,7 +513,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         self._current_audio_response = None
 
     def _calculate_audio_duration_ms(
-        self, total_bytes: int, sample_rate: int = 24000, bytes_per_sample: int = 2
+        self, total_bytes: int, sample_rate: int = OPENAI_SAMPLE_RATE, bytes_per_sample: int = 2
     ) -> int:
         """Calculate audio duration in milliseconds based on PCM audio parameters."""
         samples = total_bytes / bytes_per_sample
@@ -650,11 +682,41 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     async def _update_settings(self, delta):
         """Apply a settings delta, sending a session update when needed."""
         changed = await super()._update_settings(delta)
+        prompt_omitted = self._omit_unsupported_input_audio_transcription_prompt(
+            assert_given(self._settings.session_properties)
+        )
         handled = {"session_properties", "system_instruction"}
-        if changed.keys() & handled:
+        handled_settings_changed = bool(changed.keys() & handled)
+        if handled_settings_changed or prompt_omitted:
             await self._send_session_update()
         self._warn_unhandled_updated_settings(changed.keys() - handled)
         return changed
+
+    # Substrings used to recognize reasoning-capable Realtime models. Substring
+    # match (rather than exact equality) so date-versioned variants of the same
+    # base model also match without code changes. Extend this tuple as OpenAI
+    # ships more reasoning-capable Realtime models.
+    _REASONING_CAPABLE_MODEL_SUBSTRINGS = ("gpt-realtime-2",)
+
+    def _strip_unsupported_reasoning(
+        self, settings: events.SessionProperties
+    ) -> events.SessionProperties:
+        """Drop ``reasoning`` from an outgoing session.update if the model can't use it.
+
+        The server otherwise rejects the whole update and kills the session.
+        Returns a copy when stripping; the user's stored config is preserved.
+        """
+        if settings.reasoning is None or not settings.model:
+            return settings
+        if any(s in settings.model for s in self._REASONING_CAPABLE_MODEL_SUBSTRINGS):
+            return settings
+        if not self._reasoning_strip_warned:
+            logger.warning(
+                f"{self} stripping `reasoning` from session.update: model={settings.model!r} "
+                f"isn't a known reasoning-capable Realtime model."
+            )
+            self._reasoning_strip_warned = True
+        return settings.model_copy(update={"reasoning": None})
 
     async def _send_session_update(self):
         settings = assert_given(self._settings.session_properties)
@@ -681,7 +743,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         if settings.tools and isinstance(settings.tools, ToolsSchema):
             settings.tools = adapter.from_standard_tools(settings.tools)
 
-        await self.send_client_event(events.SessionUpdateEvent(session=settings))
+        outgoing = self._strip_unsupported_reasoning(settings)
+
+        await self.send_client_event(events.SessionUpdateEvent(session=outgoing))
 
     #
     # inbound server event handling
@@ -697,8 +761,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 await self._handle_evt_session_updated(evt)
             elif evt.type == "response.output_audio.delta":
                 await self._handle_evt_audio_delta(evt)
-            elif evt.type == "response.output_audio.done":
-                await self._handle_evt_audio_done(evt)
             elif evt.type == "conversation.item.added":
                 await self._handle_evt_conversation_item_added(evt)
             elif evt.type == "conversation.item.done":
@@ -752,34 +814,42 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # this event from the server
         await self.stop_ttfb_metrics()
 
-        if self._current_audio_response and self._current_audio_response.item_id != evt.item_id:
-            logger.warning(
-                f"Received a new audio delta for an already completed audio response before receiving the BotStoppedSpeakingFrame."
-            )
-            logger.debug("Forcing previous audio response to None")
-            self._current_audio_response = None
-
         if not self._current_audio_response:
+            # First delta of a new assistant turn.
             self._current_audio_response = CurrentAudioResponse(
                 item_id=evt.item_id,
                 content_index=evt.content_index,
                 start_time_ms=int(time.time() * 1000),
+                response_id=evt.response_id,
             )
             await self.push_frame(TTSStartedFrame())
+        elif self._current_audio_response.item_id != evt.item_id:
+            # A response can contain multiple output items (observed with
+            # gpt-realtime-2 on long replies). Deltas arrive in playback order
+            # across items, so we treat them as one continuous TTS turn:
+            # advance the tracked item in place without emitting another
+            # TTSStartedFrame. Reset total_size so truncation math reflects the
+            # current item only (last-item-wins, matching openai-agents-python).
+            logger.debug(
+                f"{self} advancing to next audio output item "
+                f"(prev item_id={self._current_audio_response.item_id} -> "
+                f"new item_id={evt.item_id} response_id={evt.response_id} "
+                f"output_index={evt.output_index} content_index={evt.content_index})"
+            )
+            self._current_audio_response.item_id = evt.item_id
+            self._current_audio_response.content_index = evt.content_index
+            self._current_audio_response.response_id = evt.response_id
+            self._current_audio_response.start_time_ms = int(time.time() * 1000)
+            self._current_audio_response.total_size = 0
+
         audio = base64.b64decode(evt.delta)
         self._current_audio_response.total_size += len(audio)
         frame = TTSAudioRawFrame(
             audio=audio,
-            sample_rate=24000,
+            sample_rate=OPENAI_SAMPLE_RATE,
             num_channels=1,
         )
         await self.push_frame(frame)
-
-    async def _handle_evt_audio_done(self, evt):
-        if self._current_audio_response:
-            await self.push_frame(TTSStoppedFrame())
-            # Don't clear the self._current_audio_response here. We need to wait until we
-            # receive a BotStoppedSpeakingFrame from the output transport.
 
     async def _handle_evt_conversation_item_added(self, evt):
         """Handle conversation.item.added event - item is added but may still be processing."""
@@ -863,6 +933,17 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         )
         await self.start_llm_usage_metrics(tokens)
         await self.stop_processing_metrics()
+        # Push TTSStoppedFrame here (rather than on each per-item
+        # response.output_audio.done) so that a response containing multiple
+        # output items still emits exactly one bracketing TTSStartedFrame /
+        # TTSStoppedFrame pair around the audio. In practice gpt-realtime-2's
+        # audio.done events arrive batched within a few milliseconds of
+        # response.done, so this is effectively coincident with end-of-audio.
+        # The strictly-sequential variant (audio.done A before item B begins)
+        # is theoretical — we haven't observed it — but this placement handles
+        # it too: per-item gating would otherwise emit Stopped/Started/Stopped.
+        if self._current_audio_response is not None:
+            await self.push_frame(TTSStoppedFrame())
         await self.push_frame(LLMFullResponseEndFrame())
         self._current_assistant_response = None
         # error handling

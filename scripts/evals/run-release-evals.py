@@ -242,6 +242,7 @@ TESTS_VIDEO_AVATAR = [
 
 TESTS_TURN_MANAGEMENT = [
     ("turn-management/turn-management-filter-incomplete-turns.py", EVAL_COMPLETE_TURN),
+    ("turn-management/turn-management-filter-incomplete-turns-function-calling.py", EVAL_WEATHER),
 ]
 
 TESTS_THINKING = [

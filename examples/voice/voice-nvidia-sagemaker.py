@@ -3,7 +3,8 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
-
+# For a full example of how to deploy to SageMaker, see:
+# https://github.com/pipecat-ai/pipecat-examples/tree/main/nvidia_sagemaker_example/deployment/aws-sagemaker-nvidia
 
 import os
 
@@ -22,16 +23,17 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.soniox.stt import SonioxSTTService
-from pipecat.services.soniox.tts import SonioxTTSService
-from pipecat.transcriptions.language import Language
+from pipecat.services.nvidia.llm import NvidiaLLMService
+from pipecat.services.nvidia.sagemaker.stt import NvidiaSageMakerSTTService
+from pipecat.services.nvidia.sagemaker.tts import NvidiaSageMakerTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -51,29 +53,22 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = SonioxSTTService(
-        api_key=os.environ["SONIOX_API_KEY"],
-        settings=SonioxSTTService.Settings(
-            # Add language hints to use a specific language
-            # Add strict mode to enforce the language hints
-            language_hints=[Language.EN],
-            language_hints_strict=True,
-            enable_language_identification=True,
-        ),
+    stt = NvidiaSageMakerSTTService(
+        endpoint_name=os.environ["SAGEMAKER_ASR_ENDPOINT_NAME"],
+        region=os.getenv("AWS_REGION", "us-west-2"),
     )
 
-    tts = SonioxTTSService(
-        api_key=os.environ["SONIOX_API_KEY"],
-        settings=SonioxTTSService.Settings(
-            voice="Maya",
-        ),
-    )
-
-    llm = OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
+    llm = NvidiaLLMService(
+        api_key=os.environ["NVIDIA_API_KEY"],
+        settings=NvidiaLLMService.Settings(
+            model="meta/llama-3.3-70b-instruct",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
+    )
+
+    tts = NvidiaSageMakerTTSService(
+        endpoint_name=os.environ["SAGEMAKER_MAGPIE_ENDPOINT_NAME"],
+        region=os.getenv("AWS_REGION", "us-west-2"),
     )
 
     context = LLMContext()
@@ -85,7 +80,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,
+            stt,  # STT
             user_aggregator,  # User responses
             llm,  # LLM
             tts,  # TTS
@@ -93,6 +88,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             assistant_aggregator,  # Assistant spoken responses
         ]
     )
+
     task = PipelineTask(
         pipeline,
         params=PipelineParams(

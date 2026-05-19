@@ -509,35 +509,29 @@ async def create_transport(
             "daily": lambda: DailyParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
             ),
             "webrtc": lambda: TransportParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
             ),
             "twilio": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
             "telnyx": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
             "plivo": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
             "exotel": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
         }
@@ -568,6 +562,12 @@ async def create_transport(
         )
 
     elif isinstance(runner_args, WebSocketRunnerArguments):
+        if runner_args.transport_type == "websocket":
+            params = _get_transport_params("websocket", transport_params)
+            from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
+
+            return FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
+
         # Parse once to determine the provider and get data
         transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
         params = _get_transport_params(transport_type, transport_params)

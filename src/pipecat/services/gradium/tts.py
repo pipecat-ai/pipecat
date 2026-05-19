@@ -68,7 +68,7 @@ class GradiumTTSService(WebsocketTTSService):
         *,
         api_key: str,
         voice_id: str | None = None,
-        url: str = "wss://eu.api.gradium.ai/api/speech/tts",
+        url: str = "wss://api.gradium.ai/api/speech/tts",
         model: str | None = None,
         json_config: str | None = None,
         params: InputParams | None = None,

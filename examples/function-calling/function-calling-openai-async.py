@@ -29,7 +29,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.openai.stt import OpenAIRealtimeSTTService
 from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -69,13 +69,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = OpenAISTTService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAISTTService.Settings(
-            model="gpt-4o-transcribe",
-            prompt="Expect words related weather, such as temperature and conditions. And restaurant names.",
-        ),
-    )
+    stt = OpenAIRealtimeSTTService(api_key=os.environ["OPENAI_API_KEY"])
 
     tts = OpenAITTSService(
         api_key=os.environ["OPENAI_API_KEY"],

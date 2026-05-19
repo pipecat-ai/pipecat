@@ -304,7 +304,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="sonic-3",
+            model="sonic-3.5",
             voice=None,
             language=Language.EN,
             generation_config=None,
@@ -419,30 +419,30 @@ class CartesiaTTSService(WebsocketTTSService):
         """Convenience method to create a speed tag."""
         return f'<speed ratio="{speed}" />'
 
-    def _is_cjk_language(self, language: str) -> bool:
-        """Check if the given language is CJK (Chinese, Japanese, Korean).
+    def _is_chinese_or_japanese_language(self, language: str) -> bool:
+        """Check if the given language is Chinese or Japanese.
 
         Args:
             language: The language code to check.
 
         Returns:
-            True if the language is Chinese, Japanese, or Korean.
+            True if the language is Chinese or Japanese.
         """
-        cjk_languages = {"zh", "ja", "ko"}
         base_lang = language.split("-")[0].lower()
-        return base_lang in cjk_languages
+        return base_lang in {"zh", "ja"}
 
     def _process_word_timestamps_for_language(
         self, words: list[str], starts: list[float]
     ) -> list[tuple[str, float]]:
         """Process word timestamps based on the current language.
 
-        For CJK languages, Cartesia groups related characters in the same timestamp message.
+        For Chinese and Japanese, Cartesia groups related characters in the same timestamp
+        message.
         For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
         We combine these into single words so the downstream aggregator can add natural
         spacing between meaningful units rather than individual characters.
 
-        For non-CJK languages, words are already properly separated and are used as-is.
+        For other languages, words are already properly separated and are used as-is.
 
         Args:
             words: List of words/characters from Cartesia.
@@ -453,10 +453,10 @@ class CartesiaTTSService(WebsocketTTSService):
         """
         current_language = assert_given(self._settings.language)
 
-        # Check if this is a CJK language (if language is None, treat as non-CJK)
-        if current_language and self._is_cjk_language(current_language):
-            # For CJK languages, combine all characters in this message into one word
-            # using the first character's start time
+        # Check if this is a Chinese/Japanese language (if language is None, treat as other)
+        if current_language and self._is_chinese_or_japanese_language(current_language):
+            # For Chinese/Japanese, combine all characters in this message into one word
+            # using the first character's start time.
             if words and starts:
                 combined_word = "".join(words)
                 first_start = starts[0]
@@ -466,6 +466,11 @@ class CartesiaTTSService(WebsocketTTSService):
         else:
             # For non-CJK languages, use as-is
             return list(zip(words, starts))
+
+    def _word_timestamps_include_inter_frame_spaces(self) -> bool:
+        """Whether timestamp text should be treated as carrying its own spacing."""
+        current_language = assert_given(self._settings.language)
+        return bool(current_language and self._is_chinese_or_japanese_language(current_language))
 
     def _build_msg(
         self,
@@ -660,7 +665,13 @@ class CartesiaTTSService(WebsocketTTSService):
                 processed_timestamps = self._process_word_timestamps_for_language(
                     msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
                 )
-                await self.add_word_timestamps(processed_timestamps, ctx_id)
+                await self.add_word_timestamps(
+                    processed_timestamps,
+                    ctx_id,
+                    includes_inter_frame_spaces=(
+                        True if self._word_timestamps_include_inter_frame_spaces() else None
+                    ),
+                )
             elif msg["type"] == "chunk":
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["data"]),
@@ -801,7 +812,7 @@ class CartesiaHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="sonic-3",
+            model="sonic-3.5",
             voice=None,
             language=Language.EN,
             generation_config=None,

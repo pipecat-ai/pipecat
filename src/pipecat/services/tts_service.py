@@ -1283,10 +1283,17 @@ class TTSService(AIService):
     def get_active_audio_context_id(self) -> str | None:
         """Get the active audio context ID.
 
+        Returns the playback cursor when set (during active playback), falling
+        back to the current turn's synthesis context_id. The fallback covers
+        the gap between contexts and the start of a turn before the playback
+        task has popped the just-created context off the serialization queue —
+        important for services whose wire protocol does not echo context_id
+        back on incoming audio.
+
         Returns:
-            The active context ID, or None if no context is active.
+            The active context ID, or None if neither cursor is set.
         """
-        return self._playing_context_id
+        return self._playing_context_id or self._turn_context_id
 
     async def remove_active_audio_context(self):
         """Remove the active audio context."""

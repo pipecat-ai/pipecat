@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
 )
+from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -84,8 +85,6 @@ class OpenAITTSService(TTSService):
 
     Settings = OpenAITTSSettings
     _settings: Settings
-
-    OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
 
     class InputParams(BaseModel):
         """Input parameters for OpenAI TTS configuration.
@@ -150,9 +149,9 @@ class OpenAITTSService(TTSService):
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to TTSService.
         """
-        if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
+        if sample_rate and sample_rate != OPENAI_SAMPLE_RATE:
             logger.warning(
-                f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
+                f"OpenAI TTS only supports {OPENAI_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
 
@@ -217,9 +216,9 @@ class OpenAITTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        if self.sample_rate != self.OPENAI_SAMPLE_RATE:
+        if self.sample_rate != OPENAI_SAMPLE_RATE:
             logger.warning(
-                f"OpenAI TTS requires {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
+                f"OpenAI TTS requires {OPENAI_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
