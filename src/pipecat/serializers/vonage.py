@@ -20,8 +20,6 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InterruptionFrame,
-    OutputTransportMessageFrame,
-    OutputTransportMessageUrgentFrame,
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -99,9 +97,7 @@ class VonageFrameSerializer(FrameSerializer):
 
             # Vonage expects raw binary PCM data (not base64 encoded)
             return serialized_data
-        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
-            # Allow sending custom JSON commands (e.g., notify)
-            return json.dumps(frame.message)
+        # Silently drop RTVI transport messages — not part of Vonage's protocol.
 
         return None
 

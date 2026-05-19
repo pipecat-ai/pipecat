@@ -23,8 +23,6 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InterruptionFrame,
-    OutputTransportMessageFrame,
-    OutputTransportMessageUrgentFrame,
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -139,8 +137,7 @@ class PlivoFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
-        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
-            return json.dumps(frame.message)
+        # Silently drop RTVI transport messages — not part of Plivo's protocol.
 
         # Return None for unhandled frames
         return None

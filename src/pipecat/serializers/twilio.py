@@ -23,8 +23,6 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputDTMFFrame,
     InterruptionFrame,
-    OutputTransportMessageFrame,
-    OutputTransportMessageUrgentFrame,
     StartFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -166,8 +164,11 @@ class TwilioFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
-        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
-            return json.dumps(frame.message)
+        # Silently drop OutputTransportMessageFrame / OutputTransportMessageUrgentFrame
+        # (e.g. RTVI protocol messages like bot-ready, user-started-speaking, tts-text).
+        # These are meant for browser-based WebSocket clients, not Twilio.
+        # Sending them causes Twilio error 31951 (Stream - Protocol - Invalid message)
+        # which can terminate the media stream.
 
         # Return None for unhandled frames
         return None
