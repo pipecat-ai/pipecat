@@ -137,6 +137,12 @@ TRANSPORT_ROUTE_DEPENDENCIES = {
     "webrtc": ("aiortc",),
     "websocket": ("fastapi", "websockets"),
 }
+TRANSPORT_INSTALL_HINTS = {
+    "daily": "install pipecat-ai[daily]",
+    "webrtc": "install pipecat-ai[webrtc]",
+    "telephony": "install pipecat-ai[websocket]",
+    "websocket": "install pipecat-ai[websocket]",
+}
 
 # Mirror Pipecat Cloud's 4-hour max session limit so dev rooms get cleaned up.
 PIPECAT_ROOM_EXP_HOURS = 4.0
@@ -201,6 +207,80 @@ def _transport_routes_enabled(transport: str) -> bool:
         ``True`` if the requested transport is enabled.
     """
     return all(_is_module_available(module) for module in _transport_route_dependencies(transport))
+
+
+def _runner_url(args: argparse.Namespace) -> str:
+    """Return the browser URL for the runner prebuilt client."""
+    return f"http://{args.host}:{args.port}"
+
+
+def _transport_status_lists() -> tuple[list[str], list[str]]:
+    """Return enabled and disabled transport labels for the startup banner."""
+    transports = ["daily", "webrtc", "telephony", "websocket"]
+    enabled = []
+    disabled = []
+
+    for label in transports:
+        transport = TELEPHONY_TRANSPORTS[0] if label == "telephony" else label
+        if _transport_routes_enabled(transport):
+            enabled.append(label)
+        else:
+            disabled.append(f"{label} ({TRANSPORT_INSTALL_HINTS[label]})")
+
+    return enabled, disabled
+
+
+def _format_transport_status(labels: list[str]) -> str:
+    """Format a startup banner transport status list."""
+    return ", ".join(labels) if labels else "none"
+
+
+def _print_startup_message(args: argparse.Namespace):
+    """Print connection information for the development runner."""
+    print()
+    if args.transport is None:
+        enabled, disabled = _transport_status_lists()
+        print("🚀 Bot ready!")
+        print(f"   → Open: {_runner_url(args)}")
+        print(f"   → Enabled transports: {_format_transport_status(enabled)}")
+        if disabled:
+            print(f"   → Disabled transports: {_format_transport_status(disabled)}")
+    elif args.transport == "webrtc":
+        if args.esp32:
+            print("🚀 Bot ready! (ESP32 mode)")
+        elif args.whatsapp:
+            print("🚀 Bot ready! (WhatsApp)")
+        else:
+            print("🚀 Bot ready! (WebRTC)")
+        if _transport_routes_enabled("webrtc"):
+            print(f"   → Open: {_runner_url(args)}")
+        else:
+            print(f"   → WebRTC disabled ({TRANSPORT_INSTALL_HINTS['webrtc']})")
+    elif args.transport == "daily":
+        print("🚀 Bot ready! (Daily)")
+        if not _transport_routes_enabled("daily"):
+            print(f"   → Daily disabled ({TRANSPORT_INSTALL_HINTS['daily']})")
+        else:
+            print(f"   → Open: {_runner_url(args)}")
+            if args.dialin:
+                print(
+                    f"   → Daily dial-in webhook: "
+                    f"http://{args.host}:{args.port}/daily-dialin-webhook"
+                )
+                print("   → Configure this URL in your Daily phone number settings")
+    elif args.transport in TELEPHONY_TRANSPORTS:
+        print(f"🚀 Bot ready! ({args.transport.capitalize()})")
+        if not _transport_routes_enabled(args.transport):
+            print(f"   → Telephony disabled ({TRANSPORT_INSTALL_HINTS['telephony']})")
+        else:
+            print(f"   → Open: {_runner_url(args)}")
+            if args.proxy:
+                print(f"   → XML webhook: http://{args.host}:{args.port}/")
+            print(f"   → WebSocket:   ws://{args.host}:{args.port}/ws")
+    elif args.transport == "vonage":
+        print()
+        print("🚀 Bot ready!")
+    print()
 
 
 def _get_bot_module():
@@ -1226,64 +1306,11 @@ def main(parser: argparse.ArgumentParser | None = None):
         return
 
     # Print startup message
-    print()
-    if args.transport is None:
-        print("🚀 Bot ready!")
-        if _transport_routes_enabled("webrtc"):
-            print(f"   → WebRTC:    http://{args.host}:{args.port}/client")
-        else:
-            print("   → WebRTC:    disabled (install pipecat-ai[webrtc])")
-        if _transport_routes_enabled("daily"):
-            print(f"   → Daily:     http://{args.host}:{args.port}/daily")
-        else:
-            print("   → Daily:     disabled (install pipecat-ai[daily])")
-        if _transport_routes_enabled("twilio"):
-            print(f"   → Telephony: ws://{args.host}:{args.port}/ws")
-        else:
-            print("   → Telephony: disabled (install pipecat-ai[websocket])")
-        if _transport_routes_enabled("websocket"):
-            print(f"   → WebSocket: ws://{args.host}:{args.port}/ws-client")
-        else:
-            print("   → WebSocket: disabled (install pipecat-ai[websocket])")
-    elif args.transport == "webrtc":
-        if args.esp32:
-            print("🚀 Bot ready! (ESP32 mode)")
-        elif args.whatsapp:
-            print("🚀 Bot ready! (WhatsApp)")
-        else:
-            print("🚀 Bot ready! (WebRTC)")
-        if _transport_routes_enabled("webrtc"):
-            print(f"   → Open http://{args.host}:{args.port}/client in your browser")
-        else:
-            print("   → WebRTC disabled (install pipecat-ai[webrtc])")
-    elif args.transport == "daily":
-        print("🚀 Bot ready! (Daily)")
-        if not _transport_routes_enabled("daily"):
-            print("   → Daily disabled (install pipecat-ai[daily])")
-        elif args.dialin:
-            print(
-                f"   → Daily dial-in webhook: http://{args.host}:{args.port}/daily-dialin-webhook"
-            )
-            print(f"   → Configure this URL in your Daily phone number settings")
-        else:
-            print(
-                f"   → Open http://{args.host}:{args.port}/daily in your browser to start a session"
-            )
-    elif args.transport in TELEPHONY_TRANSPORTS:
-        print(f"🚀 Bot ready! ({args.transport.capitalize()})")
-        if not _transport_routes_enabled(args.transport):
-            print("   → Telephony disabled (install pipecat-ai[websocket])")
-        elif args.proxy:
-            print(f"   → XML webhook: http://{args.host}:{args.port}/")
-        if _transport_routes_enabled(args.transport):
-            print(f"   → WebSocket:   ws://{args.host}:{args.port}/ws")
-    elif args.transport == "vonage":
-        print()
-        print(f"🚀 Bot ready!")
+    _print_startup_message(args)
+    if args.transport == "vonage":
         asyncio.run(_run_vonage())
         print()
         return
-    print()
 
     RUNNER_DOWNLOADS_FOLDER = args.folder
     RUNNER_HOST = args.host

@@ -5,9 +5,11 @@
 #
 
 import argparse
+import io
 import sys
 import types
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
@@ -15,6 +17,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from pipecat.runner.run import (
+    _print_startup_message,
     _setup_daily_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
@@ -26,6 +29,12 @@ from pipecat.runner.run import (
 
 
 class TestRunnerRun(unittest.TestCase):
+    def _capture_startup_message(self, args: argparse.Namespace) -> str:
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            _print_startup_message(args)
+        return buffer.getvalue()
+
     def test_transport_route_dependencies_maps_transports_to_modules(self):
         self.assertEqual(_transport_route_dependencies("daily"), ("daily",))
         self.assertEqual(_transport_route_dependencies("webrtc"), ("aiortc",))
@@ -70,9 +79,7 @@ class TestRunnerRun(unittest.TestCase):
         connection_module = types.ModuleType("pipecat.transports.smallwebrtc.connection")
         connection_module.SmallWebRTCConnection = MagicMock()
 
-        request_handler_module = types.ModuleType(
-            "pipecat.transports.smallwebrtc.request_handler"
-        )
+        request_handler_module = types.ModuleType("pipecat.transports.smallwebrtc.request_handler")
 
         class IceCandidate(BaseModel):
             candidate: str
@@ -238,6 +245,77 @@ class TestRunnerRun(unittest.TestCase):
                 "Check the startup banner for enabled transports."
             ),
         )
+
+    def test_startup_message_all_transports_shows_open_url_and_transport_status(self):
+        args = argparse.Namespace(transport=None, host="localhost", port=7860)
+
+        def routes_enabled(transport: str) -> bool:
+            return transport in {"twilio", "websocket"}
+
+        with patch("pipecat.runner.run._transport_routes_enabled", side_effect=routes_enabled):
+            output = self._capture_startup_message(args)
+
+        self.assertEqual(
+            output,
+            (
+                "\n"
+                "🚀 Bot ready!\n"
+                "   → Open: http://localhost:7860\n"
+                "   → Enabled transports: telephony, websocket\n"
+                "   → Disabled transports: daily (install pipecat-ai[daily]), "
+                "webrtc (install pipecat-ai[webrtc])\n"
+                "\n"
+            ),
+        )
+
+    def test_startup_message_all_transports_omits_disabled_status_when_all_enabled(self):
+        args = argparse.Namespace(transport=None, host="localhost", port=7860)
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            output = self._capture_startup_message(args)
+
+        self.assertEqual(
+            output,
+            (
+                "\n"
+                "🚀 Bot ready!\n"
+                "   → Open: http://localhost:7860\n"
+                "   → Enabled transports: daily, webrtc, telephony, websocket\n"
+                "\n"
+            ),
+        )
+
+    def test_startup_message_webrtc_uses_root_open_url(self):
+        args = argparse.Namespace(
+            transport="webrtc", host="localhost", port=7860, esp32=False, whatsapp=False
+        )
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            output = self._capture_startup_message(args)
+
+        self.assertIn("   → Open: http://localhost:7860\n", output)
+        self.assertNotIn("/client", output)
+
+    def test_startup_message_daily_uses_root_open_url(self):
+        args = argparse.Namespace(transport="daily", host="localhost", port=7860, dialin=False)
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            output = self._capture_startup_message(args)
+
+        self.assertIn("   → Open: http://localhost:7860\n", output)
+        self.assertNotIn("/daily in your browser", output)
+
+    def test_startup_message_telephony_keeps_provider_endpoint_details(self):
+        args = argparse.Namespace(
+            transport="twilio", host="localhost", port=7860, proxy="example.ngrok.io"
+        )
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            output = self._capture_startup_message(args)
+
+        self.assertIn("   → Open: http://localhost:7860\n", output)
+        self.assertIn("   → XML webhook: http://localhost:7860/\n", output)
+        self.assertIn("   → WebSocket:   ws://localhost:7860/ws\n", output)
 
 
 if __name__ == "__main__":
