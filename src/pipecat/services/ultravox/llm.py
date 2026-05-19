@@ -586,11 +586,21 @@ class UltravoxRealtimeLLMService(LLMService):
     #
 
     async def _receive_messages(self):
-        """Receive messages from the Ultravox Realtime WebSocket."""
+        """Receive messages from the Ultravox Realtime WebSocket.
+
+        The ``try`` wraps the ``async for`` itself so that ``ConnectionClosed``
+        raised from the underlying iterator (e.g. when our own close handshake
+        races a client-driven teardown and the peer never echoes a close
+        frame) is covered by the same ``_disconnecting`` guard that suppresses
+        in-flight dispatch errors during shutdown. Without this, the
+        connection-closed exception escapes ``_receive_messages`` and lands in
+        the task manager as an "unexpected exception" log line even though
+        the call ended normally. Fixes #4518.
+        """
         if not self._socket:
             return
-        async for message in self._socket:
-            try:
+        try:
+            async for message in self._socket:
                 if isinstance(message, bytes):
                     await self._handle_audio(message)
                     continue
@@ -626,10 +636,10 @@ class UltravoxRealtimeLLMService(LLMService):
                                 )
                     case _:
                         logger.debug(f"Received unhandled Ultravox message: {data}")
-            except Exception as e:
-                if self._disconnecting or not self._socket:
-                    return
-                await self.push_error("Ultravox websocket receive error", e, fatal=True)
+        except Exception as e:
+            if self._disconnecting or not self._socket:
+                return
+            await self.push_error("Ultravox websocket receive error", e, fatal=True)
 
     async def _handle_audio(self, audio: bytes):
         """Handle incoming audio bytes from Ultravox Realtime."""
