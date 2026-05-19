@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tone-pipecat"
-version = "0.0.75.dev5"
+version = "0.0.75.dev6"
 description = "An open source framework for voice (and multimodal) assistants"
 license = "BSD-2-Clause"
 license-files = ["LICENSE"]
