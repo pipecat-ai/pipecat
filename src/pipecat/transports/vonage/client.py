@@ -334,15 +334,12 @@ class VonageClient:
 
         if self._event_task and self._task_manager:
             await self._task_manager.cancel_task(self._event_task)
-            await self._event_task
             self._event_task = None
         if self._audio_task and self._task_manager:
             await self._task_manager.cancel_task(self._audio_task)
-            await self._audio_task
             self._audio_task = None
         if self._video_task and self._task_manager:
             await self._task_manager.cancel_task(self._video_task)
-            await self._video_task
             self._video_task = None
 
     def add_listener(self, listener: VonageClientListener) -> int:
