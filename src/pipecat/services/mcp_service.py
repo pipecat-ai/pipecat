@@ -11,6 +11,7 @@ from collections.abc import Callable
 from contextlib import AsyncExitStack
 from typing import Any, TypeAlias
 
+import httpx
 from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -25,7 +26,8 @@ try:
     from mcp.client.session_group import SseServerParameters, StreamableHttpParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
+    from mcp.shared._httpx_utils import create_mcp_http_client
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use an MCP client, you need to `pip install pipecat-ai[mcp]`.")
@@ -112,8 +114,22 @@ class MCPClient(BaseObject):
                     sse_client(**self._server_params.model_dump())
                 )
             else:  # StreamableHttpParameters (validated in __init__)
+                timeout = httpx.Timeout(
+                    self._server_params.timeout.total_seconds(),
+                    read=self._server_params.sse_read_timeout.total_seconds(),
+                )
+                http_client = await exit_stack.enter_async_context(
+                    create_mcp_http_client(
+                        headers=self._server_params.headers,
+                        timeout=timeout,
+                    )
+                )
                 read_stream, write_stream, _ = await exit_stack.enter_async_context(
-                    streamablehttp_client(**self._server_params.model_dump())
+                    streamable_http_client(
+                        self._server_params.url,
+                        http_client=http_client,
+                        terminate_on_close=self._server_params.terminate_on_close,
+                    )
                 )
 
             session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
@@ -290,7 +306,7 @@ class MCPClient(BaseObject):
                 continue
 
             logger.debug(f"Processing tool: {tool_name}")
-            logger.debug(f"Tool description: {tool.description}")
+            logger.trace(f"Tool description: {tool.description}")
 
             try:
                 # Convert the schema
