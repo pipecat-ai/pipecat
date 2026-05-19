@@ -148,6 +148,20 @@ TRANSPORT_INSTALL_HINTS = {
     "websocket": "install pipecat-ai[websocket]",
 }
 
+TRANSPORT_ROUTE_DEPENDENCIES = {
+    "daily": ("daily",),
+    "webrtc": ("aiortc",),
+    "websocket": ("fastapi", "websockets"),
+    "moq": ("aioquic", "cryptography"),
+}
+TRANSPORT_INSTALL_HINTS = {
+    "daily": "install pipecat-ai[daily]",
+    "webrtc": "install pipecat-ai[webrtc]",
+    "telephony": "install pipecat-ai[websocket]",
+    "websocket": "install pipecat-ai[websocket]",
+    "moq": "install pipecat-ai[moq]",
+}
+
 # Mirror Pipecat Cloud's 4-hour max session limit so dev rooms get cleaned up.
 PIPECAT_ROOM_EXP_HOURS = 4.0
 
@@ -377,6 +391,126 @@ def _setup_websocket_routes(app: FastAPI, args: argparse.Namespace):
         await _run_websocket_bot(websocket, args)
 
 
+def _is_module_available(module: str) -> bool:
+    """Check whether a module can be imported without importing it.
+
+    Args:
+        module: Fully-qualified module name to check.
+
+    Returns:
+        ``True`` if Python can resolve the module, ``False`` otherwise.
+    """
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+
+def _transport_route_dependencies(transport: str) -> tuple[str, ...]:
+    """Return module dependencies required for a transport route.
+
+    Args:
+        transport: Transport name from the runner request or CLI.
+
+    Returns:
+        Module names required to enable the transport route.
+    """
+    if transport in TELEPHONY_TRANSPORTS:
+        return TRANSPORT_ROUTE_DEPENDENCIES["websocket"]
+    return TRANSPORT_ROUTE_DEPENDENCIES.get(transport, ())
+
+
+def _transport_routes_enabled(transport: str) -> bool:
+    """Return whether a transport route can run in this environment.
+
+    Args:
+        transport: Transport name from the runner request or CLI.
+
+    Returns:
+        ``True`` if the requested transport is enabled.
+    """
+    return all(_is_module_available(module) for module in _transport_route_dependencies(transport))
+
+
+def _runner_url(args: argparse.Namespace) -> str:
+    """Return the browser URL for the runner prebuilt client."""
+    return f"http://{args.host}:{args.port}"
+
+
+def _transport_status_lists() -> tuple[list[str], list[str]]:
+    """Return enabled and disabled transport labels for the startup banner."""
+    transports = ["daily", "webrtc", "telephony", "websocket", "moq"]
+    enabled = []
+    disabled = []
+
+    for label in transports:
+        transport = TELEPHONY_TRANSPORTS[0] if label == "telephony" else label
+        if _transport_routes_enabled(transport):
+            enabled.append(label)
+        else:
+            disabled.append(f"{label} ({TRANSPORT_INSTALL_HINTS[label]})")
+
+    return enabled, disabled
+
+
+def _format_transport_status(labels: list[str]) -> str:
+    """Format a startup banner transport status list."""
+    return ", ".join(labels) if labels else "none"
+
+
+def _print_startup_message(args: argparse.Namespace):
+    """Print connection information for the development runner."""
+    print()
+    if args.transport is None:
+        enabled, disabled = _transport_status_lists()
+        print("🚀 Bot ready!")
+        print(f"   → Open: {_runner_url(args)}")
+        print(f"   → Enabled transports: {_format_transport_status(enabled)}")
+        if disabled:
+            print(f"   → Disabled transports: {_format_transport_status(disabled)}")
+    elif args.transport == "webrtc":
+        if args.esp32:
+            print("🚀 Bot ready! (ESP32 mode)")
+        elif args.whatsapp:
+            print("🚀 Bot ready! (WhatsApp)")
+        else:
+            print("🚀 Bot ready! (WebRTC)")
+        if _transport_routes_enabled("webrtc"):
+            print(f"   → Open: {_runner_url(args)}")
+        else:
+            print(f"   → WebRTC disabled ({TRANSPORT_INSTALL_HINTS['webrtc']})")
+    elif args.transport == "daily":
+        print("🚀 Bot ready! (Daily)")
+        if not _transport_routes_enabled("daily"):
+            print(f"   → Daily disabled ({TRANSPORT_INSTALL_HINTS['daily']})")
+        else:
+            print(f"   → Open: {_runner_url(args)}")
+            if args.dialin:
+                print(
+                    f"   → Daily dial-in webhook: "
+                    f"http://{args.host}:{args.port}/daily-dialin-webhook"
+                )
+                print("   → Configure this URL in your Daily phone number settings")
+    elif args.transport in TELEPHONY_TRANSPORTS:
+        print(f"🚀 Bot ready! ({args.transport.capitalize()})")
+        if not _transport_routes_enabled(args.transport):
+            print(f"   → Telephony disabled ({TRANSPORT_INSTALL_HINTS['telephony']})")
+        else:
+            print(f"   → Open: {_runner_url(args)}")
+            if args.proxy:
+                print(f"   → XML webhook: http://{args.host}:{args.port}/")
+            print(f"   → WebSocket:   ws://{args.host}:{args.port}/ws")
+    elif args.transport == "moq":
+        print("🚀 Bot ready! (MoQ)")
+        if not _transport_routes_enabled("moq"):
+            print(f"   → MoQ disabled ({TRANSPORT_INSTALL_HINTS['moq']})")
+        else:
+            print(f"   → Open: {_runner_url(args)}")
+            print(f"   → Relay: {args.moq_host}:{args.moq_port}")
+            print(f"   → Namespace: {args.moq_namespace}")
+    print()
+
+
 def _configure_server_app(args: argparse.Namespace):
     """Configure the module-level FastAPI app with routes for all transports."""
     app.add_middleware(
@@ -391,6 +525,11 @@ def _configure_server_app(args: argparse.Namespace):
     # flow and the /sessions/{session_id}/... proxy routes.
     active_sessions: dict[str, dict[str, Any]] = {}
 
+    # All transports — MoQ included — share the unified routes:
+    # `pipecat_ai_prebuilt` UI at /client (which knows about MoQ via the
+    # MoqDemo component), unified POST /start with per-transport
+    # branches. The hand-rolled `moq_prebuilt/` UI is still in the repo
+    # as a fallback but is no longer wired into the runner.
     _setup_frontend_routes(app)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
@@ -400,10 +539,6 @@ def _configure_server_app(args: argparse.Namespace):
 
     if args.whatsapp:
         _setup_whatsapp_routes(app, args)
-
-    #### hmmm, this might not be right
-    if args.transport == "moq":
-        _setup_moq_routes(app, args)
 
 
 def _setup_unified_start_route(
@@ -416,7 +551,7 @@ def _setup_unified_start_route(
     When ``-t`` was passed on the command line, requests for any other transport
     are rejected with HTTP 400.
     """
-    ALL_TRANSPORTS = ["webrtc", "daily", *TELEPHONY_TRANSPORTS, "websocket"]
+    ALL_TRANSPORTS = ["webrtc", "daily", "moq", *TELEPHONY_TRANSPORTS, "websocket"]
 
     @app.get("/status")
     async def status():
@@ -437,6 +572,11 @@ def _setup_unified_start_route(
         dailyToken: str | None
         wsUrl: str | None
         token: str | None
+        namespace: str | None
+        relay: str | None
+        # MoQ-specific. Carries everything the browser needs to construct
+        # an `@pipecat-ai/moq-transport` instance.
+        moq: dict[str, Any] | None
 
     @app.post("/start")
     async def start_agent(request: Request):
@@ -472,6 +612,16 @@ def _setup_unified_start_route(
             transport = "daily"
         if transport is None:
             transport = args.transport or "webrtc"
+
+        # Reject requests for transports whose route dependencies are missing
+        if not _transport_routes_enabled(transport):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Transport '{transport}' is disabled in this runner environment. "
+                    "Check the startup banner for enabled transports."
+                ),
+            )
 
         # Enforce restriction when -t was explicitly set on the command line
         if args.transport is not None and transport != args.transport:
@@ -585,6 +735,46 @@ def _setup_unified_start_route(
                 wsUrl=f"{scheme}://{args.host}:{args.port}/ws-client",
                 sessionId=session_id,
                 token="mock_token",
+            )
+
+        elif transport == "moq":
+            # MoQ: spawn the bot and wait for it to finish the MoQ handshake
+            # before returning, so the browser's WebTransport SUBSCRIBE arrives
+            # at a publisher the relay already knows about.
+            namespace = request_data.get("namespace", args.moq_namespace)
+            body = request_data.get("body", {})
+            session_id = str(uuid.uuid4())
+            bot_module = _get_bot_module()
+
+            ready_event = asyncio.Event()
+            runner_args = MOQRunnerArguments(
+                host=args.moq_host,
+                port=args.moq_port,
+                path=args.moq_path,
+                namespace=namespace,
+                participant_id=args.moq_bot_id,
+                peer_id=args.moq_client_id,
+                verify_ssl=not args.moq_insecure,
+                body=body,
+                session_id=session_id,
+                ready_event=ready_event,
+            )
+            runner_args.cli_args = args
+
+            asyncio.create_task(bot_module.bot(runner_args))
+            try:
+                await asyncio.wait_for(ready_event.wait(), timeout=15.0)
+            except asyncio.TimeoutError:
+                raise HTTPException(
+                    status_code=504,
+                    detail="Bot did not connect to MOQ relay within 15s",
+                )
+
+            return StartBotResult(
+                sessionId=session_id,
+                namespace=namespace,
+                relay=f"{args.moq_host}:{args.moq_port}",
+                moq=_build_moq_client_config(args, namespace),
             )
 
         else:
@@ -1059,8 +1249,60 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
 
 
 
+def _compute_moq_cert_hash(args: argparse.Namespace) -> str | None:
+    """Compute the base64 SHA-256 of the relay's TLS cert, if configured.
+
+    The browser uses this for ``WebTransport`` ``serverCertificateHashes``
+    pinning when the relay has a self-signed cert. Returns ``None`` for
+    setups using a CA-signed cert (where pinning isn't needed).
+    """
+    cert_path = getattr(args, "moq_cert", None)
+    if not cert_path:
+        return None
+    try:
+        import base64
+        import hashlib
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+
+        with open(cert_path, "rb") as f:
+            cert = x509.load_pem_x509_certificate(f.read())
+        der_bytes = cert.public_bytes(serialization.Encoding.DER)
+        digest = hashlib.sha256(der_bytes).digest()
+        return base64.b64encode(digest).decode()
+    except Exception as e:
+        logger.warning(f"Could not compute cert fingerprint: {e}")
+        return None
+
+
+def _build_moq_client_config(args: argparse.Namespace, namespace: str) -> dict[str, Any]:
+    """Build the MoQ relay config the browser needs to construct a transport.
+
+    Returned from POST /start (under the ``moq`` key) so the React UI can
+    pipe it into ``MoqTransport``'s constructor without a separate fetch.
+    Track names use the JS-side casing conventions.
+    """
+    # WebTransport always uses HTTPS — even for self-signed dev relays,
+    # the cert is pinned via `certHash` below.
+    return {
+        "relayUrl": f"https://{args.moq_host}:{args.moq_port}{args.moq_path}",
+        "certHash": _compute_moq_cert_hash(args),
+        "namespace": namespace,
+        "clientId": args.moq_client_id,
+        "botId": args.moq_bot_id,
+        "publishTrack": "user-audio",
+        "subscribeTrack": "bot-audio",
+        "transcriptTrack": "transcript",
+        "messageTrack": "user-message",
+    }
+
+
 def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
     """Set up MOQ (Media over QUIC) specific routes."""
+    if not _transport_routes_enabled("moq"):
+        return
+
     MOQPrebuiltUI = None
     try:
         from moq_prebuilt.frontend import MOQPrebuiltUI
@@ -1080,9 +1322,6 @@ def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
     if not MOQPrebuiltUI:
         logger.warning("moq_prebuilt client not found, MOQ client UI will not be available")
 
-    # Track active MOQ sessions
-    moq_sessions: Dict[str, Any] = {}
-
     # Mount the frontend
     if MOQPrebuiltUI:
         app.mount("/client", MOQPrebuiltUI)
@@ -1094,34 +1333,20 @@ def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
 
     @app.get("/api/config")
     async def moq_config():
-        """Return MOQ relay connection config for the browser client."""
-        cert_hash = None
-        if getattr(args, "moq_cert", None):
-            try:
-                import base64
-                import hashlib
+        """Return MOQ relay connection config for the browser client.
 
-                from cryptography import x509
-                from cryptography.hazmat.primitives import serialization
-
-                with open(args.moq_cert, "rb") as f:
-                    cert = x509.load_pem_x509_certificate(f.read())
-                der_bytes = cert.public_bytes(serialization.Encoding.DER)
-                digest = hashlib.sha256(der_bytes).digest()
-                cert_hash = base64.b64encode(digest).decode()
-            except Exception as e:
-                logger.warning(f"Could not compute cert fingerprint: {e}")
-
+        This is the legacy endpoint the hand-rolled ``moq_prebuilt/`` UI
+        polls before opening WebTransport. The newer ``pipecat-prebuilt``
+        client reads the same data out of the ``POST /start`` response
+        instead — see ``_build_moq_client_config``.
+        """
         return {
             "relay_host": args.moq_host,
             "relay_port": args.moq_port,
             "path": args.moq_path,
             "namespace": args.moq_namespace,
             "insecure": args.moq_insecure,
-            "cert_hash": cert_hash,
-            # Per-participant broadcast paths. Browser publishes its mic
-            # under <namespace>/<client_id>/<publish_track> and subscribes
-            # to the bot under <namespace>/<bot_id>/<subscribe_track>.
+            "cert_hash": _compute_moq_cert_hash(args),
             "client_id": args.moq_client_id,
             "bot_id": args.moq_bot_id,
             "publish_track": "user-audio",
@@ -1129,58 +1354,9 @@ def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
             "transcript_track": "transcript",
         }
 
-    @app.post("/start")
-    async def start_moq_bot(request: Request):
-        """Start a MOQ bot session."""
-        try:
-            request_data = await request.json()
-            logger.debug(f"Received MOQ start request: {request_data}")
-        except Exception:
-            request_data = {}
-
-        body = request_data.get("body", {})
-        namespace = request_data.get("namespace", args.moq_namespace)
-
-        bot_module = _get_bot_module()
-
-        ready_event = asyncio.Event()
-        runner_args = MOQRunnerArguments(
-            host=args.moq_host,
-            port=args.moq_port,
-            path=args.moq_path,
-            namespace=namespace,
-            participant_id=args.moq_bot_id,
-            peer_id=args.moq_client_id,
-            verify_ssl=not args.moq_insecure,
-            body=body,
-            ready_event=ready_event,
-        )
-        runner_args.cli_args = args
-
-        session_id = str(uuid.uuid4())
-        moq_sessions[session_id] = {
-            "namespace": namespace,
-            "host": args.moq_host,
-            "port": args.moq_port,
-        }
-
-        # Spawn the bot and wait until it signals it has finished the MOQ
-        # handshake, so the browser's SUBSCRIBE arrives at a publisher the
-        # relay already knows about.
-        asyncio.create_task(bot_module.bot(runner_args))
-        try:
-            await asyncio.wait_for(ready_event.wait(), timeout=15.0)
-        except asyncio.TimeoutError:
-            return JSONResponse(
-                status_code=504,
-                content={"error": "Bot did not connect to MOQ relay within 15s"},
-            )
-
-        return {
-            "sessionId": session_id,
-            "namespace": namespace,
-            "relay": f"{args.moq_host}:{args.moq_port}",
-        }
+    # The MoQ bot is started via the unified POST /start (with
+    # ``{"transport": "moq", ...}``), registered by
+    # ``_setup_unified_start_route``. No MoQ-specific /start needed here.
 
 
 def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
@@ -1500,7 +1676,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         asyncio.run(_run_daily_direct(args))
         return
 
-    # Print startup message
+    # Print startup banner (transport-aware, shows enabled/disabled deps)
     _print_startup_message(args)
     if args.transport == "vonage":
         asyncio.run(_run_vonage())

@@ -577,14 +577,15 @@ async function doConnect() {
     config = await resp.json();
     log(`Config: relay=${config.relay_host}:${config.relay_port}, path="${config.path}", ns="${config.namespace}", client_id="${config.client_id}", bot_id="${config.bot_id}", publish="${config.publish_track}", subscribe="${config.subscribe_track}", insecure=${config.insecure}, cert_hash=${config.cert_hash ? config.cert_hash.slice(0, 12) + "..." : "none"}`);
 
-    // 1b. Ask the server to start the bot. It blocks until the bot has
-    //     finished its MOQ handshake with the relay, so our SUBSCRIBE is
-    //     guaranteed to land at a publisher the relay already knows.
+    // 1b. Ask the server to start the bot via the unified /start. The
+    //     server blocks until the bot has finished its MOQ handshake
+    //     with the relay, so our SUBSCRIBE is guaranteed to land at a
+    //     publisher the relay already knows.
     log("Starting bot via /start...");
     const startResp = await fetch("/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ namespace: config.namespace }),
+      body: JSON.stringify({ transport: "moq", namespace: config.namespace }),
     });
     if (!startResp.ok) {
       throw new Error(`/start returned HTTP ${startResp.status}`);

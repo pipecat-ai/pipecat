@@ -71,7 +71,48 @@ done
 echo
 
 # ---------------------------------------------------------------------------
-# 4. Print run commands
+# 4. npm-link the unpublished moq-transport into the prebuilt client.
+#
+# TEMPORARY: remove this block once `@pipecat-ai/moq-transport` is published
+# and the prebuilt client depends on it normally.
+#
+# Two link chains are set up:
+#   a) @pipecat-ai/moq-transport (source: pipecat-client-web-transports/transports/moq-transport)
+#      -> consumed by pipecat-prebuilt/client
+#   b) @pipecat-ai/client-js (source: pipecat-prebuilt/client's installed copy at 1.8.x)
+#      -> linked into pipecat-client-web-transports so the linked moq-transport
+#         resolves the same Transport class as the consumer (without this,
+#         moq-transport picks up client-js@1.10.x from the monorepo and tsc
+#         rejects the assignment with "Property '_options' is protected").
+#
+# Prerequisites: `npm install` has been run in both
+#   pipecat-client-web-transports/ and pipecat-prebuilt/client/ already.
+# ---------------------------------------------------------------------------
+TRANSPORTS_DIR="$PIPECAT_DIR/../pipecat-client-web-transports"
+MOQ_PKG_DIR="$TRANSPORTS_DIR/transports/moq-transport"
+PREBUILT_CLIENT_DIR="$PIPECAT_DIR/../pipecat-prebuilt/client"
+PREBUILT_CLIENT_JS_DIR="$PREBUILT_CLIENT_DIR/node_modules/@pipecat-ai/client-js"
+
+echo "==> Linking moq-transport into pipecat-prebuilt/client (temporary)..."
+
+if [[ ! -d "$MOQ_PKG_DIR" ]]; then
+  echo "    skipped: $MOQ_PKG_DIR not found"
+elif [[ ! -d "$PREBUILT_CLIENT_DIR/node_modules" ]]; then
+  echo "    skipped: run 'npm install' in $PREBUILT_CLIENT_DIR first"
+elif [[ ! -d "$PREBUILT_CLIENT_JS_DIR" ]]; then
+  echo "    skipped: $PREBUILT_CLIENT_JS_DIR not found (run 'npm install' in $PREBUILT_CLIENT_DIR)"
+else
+  ( cd "$MOQ_PKG_DIR"          && npm link >/dev/null )
+  ( cd "$PREBUILT_CLIENT_DIR"  && npm link @pipecat-ai/moq-transport >/dev/null )
+  ( cd "$PREBUILT_CLIENT_JS_DIR" && npm link >/dev/null )
+  ( cd "$TRANSPORTS_DIR"       && npm link @pipecat-ai/client-js >/dev/null )
+  echo "    @pipecat-ai/moq-transport -> $MOQ_PKG_DIR"
+  echo "    @pipecat-ai/client-js     -> $PREBUILT_CLIENT_JS_DIR"
+fi
+echo
+
+# ---------------------------------------------------------------------------
+# 5. Print run commands
 # ---------------------------------------------------------------------------
 echo "==========================================="
 echo " Run these in separate terminals:"
@@ -93,6 +134,10 @@ echo "  --moq-cert moq-cert.pem \\"
 echo "  --moq-insecure \\"
 echo "  --moq-path /"
 echo
-echo "# 3. Open browser"
+echo "# 3. Start the prebuilt client dev server"
+echo "cd $PIPECAT_DIR/../pipecat-prebuilt/client"
+echo "npm run dev"
+echo
+echo "# 4. Open browser"
 echo "open http://localhost:7860"
 echo
