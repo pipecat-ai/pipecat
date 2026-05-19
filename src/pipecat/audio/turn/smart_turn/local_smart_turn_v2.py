@@ -33,7 +33,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use LocalSmartTurnAnalyzerV2, you need to `pip install pipecat-ai[local-smart-turn]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class LocalSmartTurnAnalyzerV2(BaseSmartTurn):

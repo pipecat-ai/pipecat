@@ -41,7 +41,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use xAI STT, you need to `pip install "pipecat-ai[xai]"`.')
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_xai_stt_language(language: Language) -> str:

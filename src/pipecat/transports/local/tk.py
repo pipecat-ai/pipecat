@@ -34,14 +34,14 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use local audio, you need to `pip install pipecat-ai[local]`. On MacOS, you also need to `brew install portaudio`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 try:
     import tkinter as tk
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("tkinter missing. Try `apt install python3-tk` or `brew install python-tk@3.10`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class TkTransportParams(TransportParams):

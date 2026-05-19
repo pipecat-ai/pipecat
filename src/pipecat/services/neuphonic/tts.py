@@ -41,7 +41,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Neuphonic, you need to `pip install pipecat-ai[neuphonic]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_neuphonic_lang_code(language: Language) -> str:

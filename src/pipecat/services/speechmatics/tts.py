@@ -32,7 +32,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use Speechmatics, you need to `pip install pipecat-ai[speechmatics]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
