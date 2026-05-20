@@ -10,9 +10,9 @@ Each file listed in the ``PIPECAT_SETUP_FILES`` environment variable (colon
 separated) may define one or both of the following async functions:
 
 - ``setup_pipeline_runner(runner)`` — invoked once per :class:`PipelineRunner`
-  before its spawned tasks start.
-- ``setup_pipeline_task(task)`` — invoked once per :class:`PipelineTask` while
-  the task sets up its pipeline.
+  before its spawned workers start.
+- ``setup_pipeline_worker(worker)`` — invoked once per :class:`PipelineWorker` while
+  the worker sets up its pipeline.
 
 Setup files are imported at most once per process; module-level state (for
 example, a shared debugger instance referenced by both hooks) is preserved

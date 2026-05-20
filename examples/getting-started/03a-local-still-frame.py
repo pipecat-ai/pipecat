@@ -16,7 +16,7 @@ from loguru import logger
 from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.worker import PipelineWorker
 from pipecat.services.fal.image import FalImageGenService
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
@@ -46,18 +46,18 @@ async def main():
 
         pipeline = Pipeline([imagegen, transport.output()])
 
-        task = PipelineTask(pipeline)
-        await task.queue_frames([TextFrame("a cat in the style of picasso")])
+        worker = PipelineWorker(pipeline)
+        await worker.queue_frames([TextFrame("a cat in the style of picasso")])
 
         runner = PipelineRunner()
 
         async def run_tk():
-            while not task.has_finished():
+            while not worker.has_finished():
                 tk_root.update()
                 tk_root.update_idletasks()
                 await asyncio.sleep(0.1)
 
-        await asyncio.gather(runner.run(task), run_tk())
+        await asyncio.gather(runner.run(worker), run_tk())
 
 
 if __name__ == "__main__":

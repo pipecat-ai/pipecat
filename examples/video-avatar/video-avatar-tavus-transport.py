@@ -16,7 +16,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -81,7 +81,7 @@ async def main():
             ]
         )
 
-        task = PipelineTask(
+        worker = PipelineWorker(
             pipeline,
             params=PipelineParams(
                 audio_in_sample_rate=16000,
@@ -109,16 +109,16 @@ async def main():
                     "content": "Start by greeting the user and ask how you can help.",
                 }
             )
-            await task.queue_frames([LLMRunFrame()])
+            await worker.queue_frames([LLMRunFrame()])
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, participant):
             logger.info(f"Client disconnected")
-            await task.cancel()
+            await worker.cancel()
 
         runner = PipelineRunner()
 
-        await runner.run(task)
+        await runner.run(worker)
 
 
 if __name__ == "__main__":

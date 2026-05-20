@@ -4,21 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Bus bridge and edge processors for inter-task frame routing.
+"""Bus bridge and edge processors for inter-worker frame routing.
 
 Provides:
 
 - `BusBridgeProcessor`: a mid-pipeline processor that exchanges frames
-  with other tasks through the bus, consuming local frames.
+  with other workers through the bus, consuming local frames.
 - `_BusEdgeProcessor`: a pipeline-edge processor used internally by
-  `PipelineTask` when ``bridged`` is set. Tees frames between the local
+  `PipelineWorker` when ``bridged`` is set. Tees frames between the local
   pipeline and the bus (frames continue locally and are also forwarded
   to the bus).
 """
 
 from typing import TYPE_CHECKING
 
-from pipecat.bus.bus import TaskBus
+from pipecat.bus.bus import WorkerBus
 from pipecat.bus.messages import BusFrameMessage, BusMessage
 from pipecat.bus.subscriber import BusSubscriber
 from pipecat.frames.frames import (
@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 if TYPE_CHECKING:
-    from pipecat.pipeline.base_task import BaseTask
+    from pipecat.pipeline.base_worker import BaseWorker
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
 _PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
@@ -41,16 +41,16 @@ _PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
 class BusBridgeProcessor(FrameProcessor, BusSubscriber):
     """Bidirectional mid-pipeline bridge between a Pipecat pipeline and the bus.
 
-    Placed in a transport or session task's pipeline to exchange frames
-    with other tasks via the `TaskBus`. Lifecycle and excluded frames
+    Placed in a transport or session worker's pipeline to exchange frames
+    with other workers via the `WorkerBus`. Lifecycle and excluded frames
     pass through locally without crossing the bus.
     """
 
     def __init__(
         self,
         *,
-        bus: TaskBus,
-        task_name: str,
+        bus: WorkerBus,
+        worker_name: str,
         target_task: str | None = None,
         bridge: str | None = None,
         exclude_frames: tuple[type[Frame], ...] | None = None,
@@ -59,9 +59,9 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         """Initialize the BusBridgeProcessor.
 
         Args:
-            bus: The `TaskBus` to exchange frames with.
-            task_name: Name of the owning task, used as message source.
-            target_task: When set, only exchange frames with this task.
+            bus: The `WorkerBus` to exchange frames with.
+            worker_name: Name of the owning worker, used as message source.
+            target_task: When set, only exchange frames with this worker.
             bridge: Optional bridge name for routing. When set, outgoing
                 frames are tagged with this name and only incoming frames
                 with the same bridge name are accepted.
@@ -71,7 +71,7 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         """
         super().__init__(**kwargs)
         self._bus = bus
-        self._task_name = task_name
+        self._worker_name = worker_name
         self._target_task = target_task
         self._bridge = bridge
         self._exclude_frames = exclude_frames or ()
@@ -101,7 +101,7 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
             return
 
         # Urgent transport frames pass through directly. They need to
-        # reach the transport even when no child task is active yet.
+        # reach the transport even when no child worker is active yet.
         if isinstance(frame, _PASSTHROUGH_FRAMES):
             await self.push_frame(frame, direction)
             return
@@ -113,7 +113,7 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
 
         # Send to bus
         msg = BusFrameMessage(
-            source=self._task_name,
+            source=self._worker_name,
             frame=frame,
             direction=direction,
             bridge=self._bridge,
@@ -130,19 +130,19 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
             return
 
         # Skip own frames
-        if message.source == self._task_name:
+        if message.source == self._worker_name:
             return
 
         # Filter by bridge name
         if self._bridge and message.bridge != self._bridge:
             return
 
-        # If target_task set, only accept from that task
+        # If target_task set, only accept from that worker
         if self._target_task and message.source != self._target_task:
             return
 
         # If message targeted at someone else, skip
-        if message.target and message.target != self._task_name:
+        if message.target and message.target != self._worker_name:
             return
 
         await self.push_frame(message.frame, message.direction)
@@ -151,7 +151,7 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
 class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
     """Pipeline-edge tee between a local pipeline and the bus.
 
-    Placed by `PipelineTask` at the source and sink of a bridged
+    Placed by `PipelineWorker` at the source and sink of a bridged
     pipeline. Frames always continue through the local pipeline; in
     addition, frames travelling in ``direction`` are forwarded to the
     bus, and frames received from the bus in the opposite direction
@@ -161,7 +161,7 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
     def __init__(
         self,
         *,
-        task: "BaseTask",
+        worker: "BaseWorker",
         direction: FrameDirection,
         bridges: tuple[str, ...] = (),
         exclude_frames: tuple[type[Frame], ...] | None = None,
@@ -170,11 +170,11 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         """Initialize the edge processor.
 
         Args:
-            task: The owning task; the edge reads ``task.bus`` lazily
+            worker: The owning worker; the edge reads ``worker.bus`` lazily
                 so the bus only needs to be set (via
-                :meth:`BaseTask.attach`) by the time the processor is
-                set up. ``task.name`` is the message source and
-                ``task.active`` gates inbound frames.
+                :meth:`BaseWorker.attach`) by the time the processor is
+                set up. ``worker.name`` is the message source and
+                ``worker.active`` gates inbound frames.
             direction: Direction this edge captures and forwards to the
                 bus. Inbound frames from the bus travelling in the
                 opposite direction are injected here.
@@ -185,7 +185,7 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
             **kwargs: Additional arguments passed to ``FrameProcessor``.
         """
         super().__init__(**kwargs)
-        self._task = task
+        self._task = worker
         self._direction = direction
         self._bridges = bridges
         self._exclude_frames = exclude_frames or ()

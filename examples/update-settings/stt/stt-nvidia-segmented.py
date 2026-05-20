@@ -14,7 +14,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, STTUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -84,7 +84,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -99,22 +99,22 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
-        await task.queue_frames([LLMRunFrame()])
+        await worker.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
         logger.info("Updating NVIDIA Segmented STT settings: profanity_filter=True")
-        await task.queue_frame(
+        await worker.queue_frame(
             STTUpdateSettingsFrame(delta=NvidiaSegmentedSTTService.Settings(profanity_filter=True))
         )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(task)
+    await runner.run(worker)
 
 
 async def bot(runner_args: RunnerArguments):

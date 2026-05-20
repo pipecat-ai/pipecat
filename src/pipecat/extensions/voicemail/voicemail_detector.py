@@ -59,16 +59,16 @@ class NotifierGate(FrameProcessor):
     decisions or events.
     """
 
-    def __init__(self, notifier: BaseNotifier, task_name: str = "gate"):
+    def __init__(self, notifier: BaseNotifier, worker_name: str = "gate"):
         """Initialize the notifier gate.
 
         Args:
             notifier: Notifier that signals when the gate should close.
-            task_name: Name for the notification waiting task (for debugging).
+            worker_name: Name for the notification waiting task (for debugging).
         """
         super().__init__()
         self._notifier = notifier
-        self._task_name = task_name
+        self._worker_name = worker_name
         self._gate_opened = True
         self._gate_task: asyncio.Task | None = None
 
@@ -139,7 +139,7 @@ class ClassifierGate(NotifierGate):
                 been made and the gate should close.
             conversation_notifier: Notifier that signals when conversation is detected.
         """
-        super().__init__(gate_notifier, task_name="classifier_gate")
+        super().__init__(gate_notifier, worker_name="classifier_gate")
         self._conversation_notifier = conversation_notifier
         self._conversation_detected = False
         self._conversation_task: asyncio.Task | None = None
@@ -208,7 +208,7 @@ class ConversationGate(NotifierGate):
             voicemail_notifier: Notifier that signals when voicemail has been
                 detected and the conversation should be blocked.
         """
-        super().__init__(voicemail_notifier, task_name="conversation_gate")
+        super().__init__(voicemail_notifier, worker_name="conversation_gate")
 
 
 class ClassificationProcessor(FrameProcessor):

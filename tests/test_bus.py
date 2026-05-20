@@ -11,7 +11,7 @@ import unittest
 from pipecat.bus import (
     AsyncQueueBus,
     BusCancelMessage,
-    BusCancelTaskMessage,
+    BusCancelWorkerMessage,
     BusDataMessage,
     BusJobCancelMessage,
     BusSubscriber,
@@ -245,7 +245,7 @@ class TestBusMessagePriority(unittest.IsolatedAsyncioTestCase):
         await bus.send(BusDataMessage(source="data_2"))
         await bus.send(BusCancelMessage(source="cancel_1"))
         await bus.send(BusDataMessage(source="data_3"))
-        await bus.send(BusCancelTaskMessage(source="cancel_2", target="task"))
+        await bus.send(BusCancelWorkerMessage(source="cancel_2", target="task"))
 
         await bus.start()
         await asyncio.sleep(0.1)

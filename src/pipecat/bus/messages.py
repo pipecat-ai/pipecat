@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Bus message types for inter-task communication.
+"""Bus message types for inter-worker communication.
 
-Defines the message hierarchy used by the `TaskBus` for pub/sub messaging
-between tasks, the session, and the runner.
+Defines the message hierarchy used by the `WorkerBus` for pub/sub messaging
+between workers and the runner.
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ from typing import TYPE_CHECKING
 
 from pipecat.frames.frames import DataFrame, Frame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.registry.types import TaskRegistryEntry
+from pipecat.registry.types import WorkerRegistryEntry
 
 if TYPE_CHECKING:
-    from pipecat.pipeline.base_task import BaseTask
+    from pipecat.pipeline.base_worker import BaseWorker
     from pipecat.pipeline.job_context import JobStatus
 
 # ---------------------------------------------------------------------------
@@ -53,8 +53,8 @@ class BusDataMessage(BusMessage, DataFrame):
     """Normal-priority bus message.
 
     Parameters:
-        source: Name of the task or component that sent this message.
-        target: Name of the intended recipient task, or None for broadcast.
+        source: Name of the worker or component that sent this message.
+        target: Name of the intended recipient worker, or None for broadcast.
     """
 
     source: str
@@ -66,8 +66,8 @@ class BusSystemMessage(BusMessage, SystemFrame):
     """High-priority bus message that preempts normal messages in subscriber queues.
 
     Parameters:
-        source: Name of the task or component that sent this message.
-        target: Name of the intended recipient task, or None for broadcast.
+        source: Name of the worker or component that sent this message.
+        target: Name of the intended recipient worker, or None for broadcast.
     """
 
     source: str
@@ -95,13 +95,13 @@ class BusFrameMessage(BusDataMessage):
 
 
 # ---------------------------------------------------------------------------
-# Task lifecycle
+# Worker lifecycle
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class BusActivateTaskMessage(BusDataMessage):
-    """Tells a targeted task to become active and start processing.
+class BusActivateWorkerMessage(BusDataMessage):
+    """Tells a targeted worker to become active and start processing.
 
     Parameters:
         args: Optional activation arguments forwarded to `on_activated`.
@@ -111,8 +111,8 @@ class BusActivateTaskMessage(BusDataMessage):
 
 
 @dataclass
-class BusDeactivateTaskMessage(BusDataMessage):
-    """Tells a targeted task to become inactive and stop processing."""
+class BusDeactivateWorkerMessage(BusDataMessage):
+    """Tells a targeted worker to become inactive and stop processing."""
 
     pass
 
@@ -121,8 +121,8 @@ class BusDeactivateTaskMessage(BusDataMessage):
 class BusEndMessage(BusDataMessage):
     """Request a graceful end of the session.
 
-    Sent by a task to the runner, which responds by sending
-    `BusEndTaskMessage` to each task.
+    Sent by a worker to the runner, which responds by sending
+    `BusEndWorkerMessage` to each worker.
 
     Parameters:
         reason: Optional human-readable reason for ending.
@@ -132,10 +132,10 @@ class BusEndMessage(BusDataMessage):
 
 
 @dataclass
-class BusEndTaskMessage(BusDataMessage):
-    """Tells a targeted task to end its pipeline gracefully.
+class BusEndWorkerMessage(BusDataMessage):
+    """Tells a targeted worker to end its pipeline gracefully.
 
-    Sent by the runner to individual tasks during shutdown.
+    Sent by the runner to individual workers during shutdown.
 
     Parameters:
         reason: Optional human-readable reason for ending.
@@ -148,8 +148,8 @@ class BusEndTaskMessage(BusDataMessage):
 class BusCancelMessage(BusSystemMessage):
     """Request a hard cancel of the session.
 
-    Sent by a task to the runner, which responds by sending
-    `BusCancelTaskMessage` to each task.
+    Sent by a worker to the runner, which responds by sending
+    `BusCancelWorkerMessage` to each worker.
 
     Parameters:
         reason: Optional human-readable reason for the cancellation.
@@ -159,10 +159,10 @@ class BusCancelMessage(BusSystemMessage):
 
 
 @dataclass
-class BusCancelTaskMessage(BusSystemMessage):
-    """Tells a targeted task to cancel its pipeline.
+class BusCancelWorkerMessage(BusSystemMessage):
+    """Tells a targeted worker to cancel its pipeline.
 
-    Sent by the runner to individual tasks during cancellation.
+    Sent by the runner to individual workers during cancellation.
 
     Parameters:
         reason: Optional human-readable reason for the cancellation.
@@ -172,54 +172,54 @@ class BusCancelTaskMessage(BusSystemMessage):
 
 
 # ---------------------------------------------------------------------------
-# Task registry and errors
+# Worker registry and errors
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class BusAddTaskMessage(BusSystemMessage, BusLocalMessage):
-    """Request to add a task to the local runner.
+class BusAddWorkerMessage(BusSystemMessage, BusLocalMessage):
+    """Request to add a worker to the local runner.
 
-    Local-only: carries an in-memory task reference that cannot be
+    Local-only: carries an in-memory worker reference that cannot be
     serialized over the network.
 
     Parameters:
-        task: The task instance to add.
+        worker: The worker instance to add.
     """
 
-    task: BaseTask
+    worker: BaseWorker
 
 
 @dataclass
-class BusTaskRegistryMessage(BusSystemMessage):
-    """Snapshot of tasks managed by a runner.
+class BusWorkerRegistryMessage(BusSystemMessage):
+    """Snapshot of workers managed by a runner.
 
     Sent by the runner on startup and when new runners connect,
-    so that remote runners can discover each other's tasks.
+    so that remote runners can discover each other's workers.
 
     Parameters:
-        runner: Name of the runner that owns these tasks.
-        tasks: List of task entries with their state.
+        runner: Name of the runner that owns these workers.
+        workers: List of worker entries with their state.
     """
 
     runner: str
-    tasks: list[TaskRegistryEntry]
+    workers: list[WorkerRegistryEntry]
 
 
 @dataclass
-class BusTaskReadyMessage(BusDataMessage):
-    """Announces that a task is ready.
+class BusWorkerReadyMessage(BusDataMessage):
+    """Announces that a worker is ready.
 
-    Sent when any task (root or child) becomes ready. Carries the
-    task's parent name so observers can reconstruct the full hierarchy.
+    Sent when any worker (root or child) becomes ready. Carries the
+    worker's parent name so observers can reconstruct the full hierarchy.
 
     Parameters:
-        runner: Name of the runner managing this task.
-        parent: Name of the parent task, or None for root tasks.
-        active: Whether the task started active.
-        bridged: Whether the task is bridged (receives pipeline frames
+        runner: Name of the runner managing this worker.
+        parent: Name of the parent worker, or None for root workers.
+        active: Whether the worker started active.
+        bridged: Whether the worker is bridged (receives pipeline frames
             from the bus).
-        started_at: Unix timestamp when the task became ready.
+        started_at: Unix timestamp when the worker became ready.
     """
 
     runner: str
@@ -230,11 +230,11 @@ class BusTaskReadyMessage(BusDataMessage):
 
 
 @dataclass
-class BusTaskErrorMessage(BusSystemMessage):
-    """Reports an error from a root task.
+class BusWorkerErrorMessage(BusSystemMessage):
+    """Reports an error from a root worker.
 
-    Sent over the network so remote tasks can react. For child task
-    errors, see `BusTaskLocalErrorMessage`.
+    Sent over the network so remote workers can react. For child worker
+    errors, see `BusWorkerLocalErrorMessage`.
 
     Parameters:
         error: Description of the error.
@@ -244,11 +244,11 @@ class BusTaskErrorMessage(BusSystemMessage):
 
 
 @dataclass
-class BusTaskLocalErrorMessage(BusSystemMessage, BusLocalMessage):
-    """Reports an error from a child task to its parent.
+class BusWorkerLocalErrorMessage(BusSystemMessage, BusLocalMessage):
+    """Reports an error from a child worker to its parent.
 
     Local-only: never crosses the network. The parent receives it
-    via `on_task_failed()`.
+    via `on_worker_failed()`.
 
     Parameters:
         error: Description of the error.
@@ -264,7 +264,7 @@ class BusTaskLocalErrorMessage(BusSystemMessage, BusLocalMessage):
 
 @dataclass
 class BusJobRequestMessage(BusDataMessage):
-    """Requests a worker task to start work.
+    """Requests a worker worker to start work.
 
     Parameters:
         job_id: Unique identifier for this job.
@@ -279,7 +279,7 @@ class BusJobRequestMessage(BusDataMessage):
 
 @dataclass
 class BusJobResponseMessage(BusDataMessage):
-    """Response from a worker task when its job completes.
+    """Response from a worker worker when its job completes.
 
     Parameters:
         job_id: The job identifier.
@@ -312,7 +312,7 @@ class BusJobResponseUrgentMessage(BusSystemMessage):
 
 @dataclass
 class BusJobUpdateMessage(BusDataMessage):
-    """Progress update from a worker task.
+    """Progress update from a worker worker.
 
     Parameters:
         job_id: The job identifier.
@@ -341,7 +341,7 @@ class BusJobUpdateUrgentMessage(BusSystemMessage):
 
 @dataclass
 class BusJobUpdateRequestMessage(BusDataMessage):
-    """Request a progress update from a worker task.
+    """Request a progress update from a worker worker.
 
     Parameters:
         job_id: The job identifier.

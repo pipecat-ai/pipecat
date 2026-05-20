@@ -72,7 +72,7 @@ from pipecat.utils.context.llm_context_summarization import (
 )
 
 if TYPE_CHECKING:
-    from pipecat.pipeline.task import PipelineTask
+    from pipecat.pipeline.worker import PipelineWorker
 
 
 # Type alias for a callable that handles LLM function calls.
@@ -117,7 +117,7 @@ class FunctionCallParams:
             it with ``properties=FunctionCallResultProperties(is_final=False)``
             to push intermediate updates before the final result.
         app_resources: The application-defined resources passed to
-            ``PipelineTask(..., app_resources=...)``. Same object — passed by
+            ``PipelineWorker(..., app_resources=...)``. Same object — passed by
             reference, not a copy. Use it to share DB handles, clients, state,
             feature flags, etc. across all of a session's tool handlers.
     """
@@ -131,7 +131,7 @@ class FunctionCallParams:
     # treat it invariantly, rejecting `LLMService[XAdapter]` at the call
     # sites that build FunctionCallParams.
     llm: LLMService[Any]
-    pipeline_task: PipelineTask
+    pipeline_worker: PipelineWorker
     context: LLMContext
     result_callback: FunctionCallResultCallback
     app_resources: Any = None
@@ -963,10 +963,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                         tool_call_id=runner_item.tool_call_id,
                         arguments=runner_item.arguments,
                         llm=self,
-                        pipeline_task=self.pipeline_task,
+                        pipeline_worker=self.pipeline_worker,
                         context=runner_item.context,
                         result_callback=function_call_result_callback,
-                        app_resources=self.pipeline_task.app_resources,
+                        app_resources=self.pipeline_worker.app_resources,
                     ),
                 )
             else:
@@ -976,10 +976,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                     tool_call_id=runner_item.tool_call_id,
                     arguments=runner_item.arguments,
                     llm=self,
-                    pipeline_task=self.pipeline_task,
+                    pipeline_worker=self.pipeline_worker,
                     context=runner_item.context,
                     result_callback=function_call_result_callback,
-                    app_resources=self.pipeline_task.app_resources,
+                    app_resources=self.pipeline_worker.app_resources,
                 )
                 await item.handler(params)
         except Exception as e:

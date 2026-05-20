@@ -4,15 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Decorator for marking task methods as job handlers."""
+"""Decorator for marking worker methods as job handlers."""
 
 from collections.abc import Callable
 
 
 def job(*, name: str, sequential: bool = False):
-    """Mark a task method as a job handler.
+    """Mark a worker method as a job handler.
 
-    Decorated methods are automatically collected by ``BaseTask`` at
+    Decorated methods are automatically collected by ``BaseWorker`` at
     initialization and dispatched when matching job requests arrive.
     Each request runs in its own asyncio task so the bus message loop
     is never blocked.

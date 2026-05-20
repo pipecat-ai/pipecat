@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -177,7 +177,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     generator = VideoPatternGenerator(WIDTH, HEIGHT, FPS)
     blue_tint = BlueTintProcessor(destination="blue")
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         Pipeline([generator, blue_tint, transport.output()]),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
@@ -189,10 +189,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
-        await task.queue_frame(EndFrame())
+        await worker.queue_frame(EndFrame())
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.run(task)
+    await runner.run(worker)
 
 
 async def bot(runner_args: RunnerArguments):

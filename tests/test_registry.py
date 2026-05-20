@@ -6,45 +6,45 @@
 
 import unittest
 
-from pipecat.registry import TaskRegistry
-from pipecat.registry.types import TaskReadyData
+from pipecat.registry import WorkerRegistry
+from pipecat.registry.types import WorkerReadyData
 
 
 class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.registry = TaskRegistry(runner_name="runner_a")
+        self.registry = WorkerRegistry(runner_name="runner_a")
 
     async def test_register_local_task(self):
-        """Local task is registered and appears in local_tasks."""
-        data = TaskReadyData(task_name="greeter", runner="runner_a")
+        """Local task is registered and appears in local_workers."""
+        data = WorkerReadyData(worker_name="greeter", runner="runner_a")
         result = await self.registry.register(data)
 
         self.assertTrue(result)
-        self.assertIn("greeter", self.registry.local_tasks)
-        self.assertNotIn("greeter", self.registry.remote_tasks)
+        self.assertIn("greeter", self.registry.local_workers)
+        self.assertNotIn("greeter", self.registry.remote_workers)
 
     async def test_register_remote_task(self):
-        """Remote task is registered and appears in remote_tasks."""
-        data = TaskReadyData(task_name="support", runner="runner_b")
+        """Remote task is registered and appears in remote_workers."""
+        data = WorkerReadyData(worker_name="support", runner="runner_b")
         result = await self.registry.register(data)
 
         self.assertTrue(result)
-        self.assertIn("support", self.registry.remote_tasks)
-        self.assertNotIn("support", self.registry.local_tasks)
+        self.assertIn("support", self.registry.remote_workers)
+        self.assertNotIn("support", self.registry.local_workers)
 
     async def test_duplicate_registration_returns_false(self):
         """Registering the same task twice returns False."""
-        data = TaskReadyData(task_name="greeter", runner="runner_a")
+        data = WorkerReadyData(worker_name="greeter", runner="runner_a")
         first = await self.registry.register(data)
         second = await self.registry.register(data)
 
         self.assertTrue(first)
         self.assertFalse(second)
-        self.assertEqual(self.registry.local_tasks.count("greeter"), 1)
+        self.assertEqual(self.registry.local_workers.count("greeter"), 1)
 
     async def test_get_local_task(self):
         """get() returns data for a local task."""
-        data = TaskReadyData(task_name="greeter", runner="runner_a")
+        data = WorkerReadyData(worker_name="greeter", runner="runner_a")
         await self.registry.register(data)
 
         result = self.registry.get("greeter")
@@ -52,7 +52,7 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_remote_task(self):
         """get() returns data for a remote task."""
-        data = TaskReadyData(task_name="support", runner="runner_b")
+        data = WorkerReadyData(worker_name="support", runner="runner_b")
         await self.registry.register(data)
 
         result = self.registry.get("support")
@@ -64,7 +64,7 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
 
     async def test_contains(self):
         """__contains__ works for registered and unregistered tasks."""
-        data = TaskReadyData(task_name="greeter", runner="runner_a")
+        data = WorkerReadyData(worker_name="greeter", runner="runner_a")
         await self.registry.register(data)
 
         self.assertIn("greeter", self.registry)
@@ -79,7 +79,7 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
 
         await self.registry.watch("greeter", handler)
 
-        data = TaskReadyData(task_name="greeter", runner="runner_a")
+        data = WorkerReadyData(worker_name="greeter", runner="runner_a")
         await self.registry.register(data)
 
         self.assertEqual(len(received), 1)
@@ -94,7 +94,7 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
 
         await self.registry.watch("greeter", handler)
 
-        data = TaskReadyData(task_name="support", runner="runner_a")
+        data = WorkerReadyData(worker_name="support", runner="runner_a")
         await self.registry.register(data)
 
         self.assertEqual(len(received), 0)
@@ -108,7 +108,7 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
 
         await self.registry.watch("greeter", handler)
 
-        data = TaskReadyData(task_name="greeter", runner="runner_a")
+        data = WorkerReadyData(worker_name="greeter", runner="runner_a")
         await self.registry.register(data)
         await self.registry.register(data)
 
@@ -128,7 +128,7 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
         await self.registry.watch("greeter", handler_a)
         await self.registry.watch("greeter", handler_b)
 
-        data = TaskReadyData(task_name="greeter", runner="runner_a")
+        data = WorkerReadyData(worker_name="greeter", runner="runner_a")
         await self.registry.register(data)
 
         self.assertEqual(len(received_a), 1)
@@ -136,7 +136,7 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
 
     async def test_watch_fires_immediately_if_already_registered(self):
         """Watch handler fires immediately when the task is already registered."""
-        data = TaskReadyData(task_name="greeter", runner="runner_a")
+        data = WorkerReadyData(worker_name="greeter", runner="runner_a")
         await self.registry.register(data)
 
         received = []
@@ -155,12 +155,12 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
 
     async def test_multiple_remote_runners(self):
         """Tasks from multiple remote runners are tracked separately."""
-        data_b = TaskReadyData(task_name="task_b", runner="runner_b")
-        data_c = TaskReadyData(task_name="task_c", runner="runner_c")
+        data_b = WorkerReadyData(worker_name="task_b", runner="runner_b")
+        data_c = WorkerReadyData(worker_name="task_c", runner="runner_c")
         await self.registry.register(data_b)
         await self.registry.register(data_c)
 
-        remote = self.registry.remote_tasks
+        remote = self.registry.remote_workers
         self.assertIn("task_b", remote)
         self.assertIn("task_c", remote)
         self.assertEqual(len(remote), 2)

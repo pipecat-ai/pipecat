@@ -9,7 +9,7 @@ import itertools
 import unittest
 
 from pipecat.bus import (
-    BusAddTaskMessage,
+    BusAddWorkerMessage,
     BusDataMessage,
     BusEndMessage,
     BusFrameMessage,
@@ -18,7 +18,7 @@ from pipecat.bus import (
 )
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.frames.frames import TextFrame
-from pipecat.pipeline.base_task import BaseTask
+from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
@@ -133,8 +133,8 @@ class TestRedisBus(unittest.IsolatedAsyncioTestCase):
         await self.bus.subscribe(_make_sub(received))
         await self.bus.start()
 
-        task = BaseTask("test")
-        msg = BusAddTaskMessage(source="parent", task=task)
+        worker = BaseWorker("test")
+        msg = BusAddWorkerMessage(source="parent", worker=worker)
         await self.bus.send(msg)
 
         await asyncio.sleep(0.05)
@@ -144,8 +144,8 @@ class TestRedisBus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.redis._published), 0)
         # But delivered locally
         self.assertEqual(len(received), 1)
-        self.assertIsInstance(received[0], BusAddTaskMessage)
-        self.assertIs(received[0].task, task)
+        self.assertIsInstance(received[0], BusAddWorkerMessage)
+        self.assertIs(received[0].worker, worker)
 
     async def test_round_trip_via_subscriber(self):
         """Messages published are received by subscribers."""
@@ -156,7 +156,7 @@ class TestRedisBus(unittest.IsolatedAsyncioTestCase):
         msg = BusEndMessage(source="task_a", reason="done")
         await self.bus.send(msg)
 
-        # Give the reader task time to process
+        # Give the reader worker time to process
         await asyncio.sleep(0.1)
         await self.bus.stop()
 
@@ -239,7 +239,7 @@ class TestRedisBus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.redis._published[0][0], "custom:channel")
 
     async def test_stop_cleans_up(self):
-        """stop() cancels the reader task and unsubscribes from Redis."""
+        """stop() cancels the reader worker and unsubscribes from Redis."""
         await self.bus.start()
         self.assertIsNotNone(self.bus._pubsub)
         self.assertIsNotNone(self.bus._reader_task)
