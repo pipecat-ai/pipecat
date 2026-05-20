@@ -231,30 +231,34 @@ class LLMTask(PipelineTask):
         await self._finish_function_call(result_callback, messages=messages)
         await super().end(reason=reason)
 
-    async def handoff_to(
+    async def activate_task(
         self,
         task_name: str,
         *,
-        activation_args: TaskActivationArgs | None = None,
+        args: TaskActivationArgs | None = None,
+        deactivate_self: bool = False,
         messages: list | None = None,
         result_callback: FunctionCallResultCallback | None = None,
     ) -> None:
-        """Hand off to another task.
+        """Activate another task, optionally finishing an in-progress tool call.
 
         When called from a ``@tool`` handler, pass ``params.result_callback`` to
-        ensure any pending LLM output is fully delivered before handing off.
+        ensure any pending LLM output is fully delivered before the target is
+        activated.
 
         Args:
-            task_name: The name of the task to hand off to.
-            activation_args: Optional arguments forwarded to the target
+            task_name: The name of the task to activate.
+            args: Optional ``TaskActivationArgs`` forwarded to the target
                 task's ``on_activated`` handler.
+            deactivate_self: Whether to deactivate this task before activating
+                the target.
             messages: Optional LLM messages to inject and speak before
-                handing off. The LLM runs immediately so the output is
-                delivered before the transfer completes.
+                activating the target. The LLM runs immediately so the output
+                is delivered before the transfer completes.
             result_callback: The ``result_callback`` from `FunctionCallParams`.
         """
         await self._finish_function_call(result_callback, messages=messages)
-        await super().handoff_to(task_name, activation_args=activation_args)
+        await super().activate_task(task_name, args=args, deactivate_self=deactivate_self)
 
     async def process_deferred_tool_frames(
         self, frames: list[tuple[Frame, FrameDirection]]

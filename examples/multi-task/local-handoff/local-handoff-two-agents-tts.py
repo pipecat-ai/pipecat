@@ -106,7 +106,7 @@ class AcmeTTSTask(LLMTask):
             reason (str): Why the user is being transferred.
         """
         logger.info(f"Task '{self.name}': transferring to '{agent}' ({reason})")
-        await self.handoff_to(
+        await self.activate_task(
             agent,
             messages=[
                 {
@@ -114,9 +114,10 @@ class AcmeTTSTask(LLMTask):
                     "content": f"Tell the user about the transfer ({reason}).",
                 }
             ],
-            activation_args=LLMTaskActivationArgs(
+            args=LLMTaskActivationArgs(
                 messages=[{"role": "developer", "content": reason}],
             ),
+            deactivate_self=True,
             result_callback=params.result_callback,
         )
 
