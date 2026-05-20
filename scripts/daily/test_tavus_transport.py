@@ -2,7 +2,6 @@ import array
 import asyncio
 import os
 import signal
-import time
 
 from daily import (
     AudioData,
@@ -53,7 +52,6 @@ class DailyProxyApp(EventHandler):
         # Raw PCM buffer — filled at DECLARED_SAMPLE_RATE speed, drained at TRUE_SAMPLE_RATE speed.
         self._buffer = bytearray()
         self._audio_task: asyncio.Task | None = None
-        self._receive_start_time: float | None = None
 
         self._client: CallClient = CallClient(event_handler=self)
         self._client.update_subscription_profiles(
@@ -172,9 +170,6 @@ class DailyProxyApp(EventHandler):
         new_bytes = audio_data.audio_frames
         if self._is_silence(new_bytes):
             return
-
-        if self._receive_start_time is None:
-            self._receive_start_time = time.monotonic()
 
         self._buffer.extend(new_bytes)
 

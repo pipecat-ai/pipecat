@@ -75,9 +75,7 @@ class TavusApi:
         # Only for development
         self._dev_room_url = os.getenv("TAVUS_SAMPLE_ROOM_URL")
 
-    async def create_conversation(
-        self, replica_id: str, persona_id: str, sample_rate: int
-    ) -> dict:
+    async def create_conversation(self, replica_id: str, persona_id: str, sample_rate: int) -> dict:
         """Create a new conversation with the specified replica and persona.
 
         Args:
@@ -251,15 +249,11 @@ class TavusTransportClient:
             on_participant_joined=self._callbacks.on_participant_joined,
             on_participant_left=self._callbacks.on_participant_left,
             on_participant_updated=partial(self._on_handle_callback, "on_participant_updated"),
-            on_transcription_message=partial(
-                self._on_handle_callback, "on_transcription_message"
-            ),
+            on_transcription_message=partial(self._on_handle_callback, "on_transcription_message"),
             on_recording_started=partial(self._on_handle_callback, "on_recording_started"),
             on_recording_stopped=partial(self._on_handle_callback, "on_recording_stopped"),
             on_recording_error=partial(self._on_handle_callback, "on_recording_error"),
-            on_transcription_stopped=partial(
-                self._on_handle_callback, "on_transcription_stopped"
-            ),
+            on_transcription_stopped=partial(self._on_handle_callback, "on_transcription_stopped"),
             on_transcription_error=partial(self._on_handle_callback, "on_transcription_error"),
         )
 
