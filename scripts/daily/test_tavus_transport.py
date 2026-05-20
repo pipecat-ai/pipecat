@@ -61,7 +61,7 @@ class DailyProxyApp(EventHandler):
         )
 
         # Playback source declared at TRUE_SAMPLE_RATE — consumes audio at real-time speed.
-        self._audio_source = CustomAudioSource(TRUE_SAMPLE_RATE, 1)
+        self._audio_source = CustomAudioSource(TRUE_SAMPLE_RATE, 1, False)
         self._audio_track = CustomAudioTrack(self._audio_source)
 
     def on_joined(self, data, error):
@@ -162,16 +162,11 @@ class DailyProxyApp(EventHandler):
     async def _buffer_audio(self, audio_data: AudioData):
         """Append received bytes to the buffer, skipping WebRTC-injected silence.
 
-        Speech frames arrive at DECLARED_SAMPLE_RATE speed (~2x real-time) and
-        are added in full — the buffer grows ahead of playback, which is the
-        fast-audio effect we want to observe. The buffer then drains at
-        TRUE_SAMPLE_RATE speed once speech stops.
-
-        On the first silence after speech (speech→silence transition) we insert
-        one real-time-equivalent chunk of silence to represent the natural pause.
-        All subsequent silence frames are dropped so the buffer drains back down.
-        This also limits the impact of any TTS-emitted silence to a single chunk
-        per transition rather than letting it accumulate.
+        Speech frames arrive at DECLARED_SAMPLE_RATE speed (~2x real-time) so the
+        buffer grows ahead of the drain. WebRTC-injected silence (all-zero PCM) is
+        handled differently based on buffer level: below MIN_AUDIO_BUFFER we keep it
+        so the pre-buffer can fill; above that threshold we discard it so the buffer
+        drains back down between utterances.
         """
         new_bytes = audio_data.audio_frames
         if self._is_silence(new_bytes):
