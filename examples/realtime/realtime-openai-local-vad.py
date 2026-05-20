@@ -4,6 +4,24 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""OpenAI Realtime with locally-driven turn detection.
+
+By default OpenAI Realtime drives the conversation with its own server-side
+VAD (see `realtime-openai.py`). This variant disables server-side turn
+detection (``turn_detection=False``) and instead drives turn boundaries
+locally with ``SileroVADAnalyzer`` wired into the user aggregator. This is
+the path to take if you want a turn analyzer like ``LocalSmartTurnV3`` to
+decide when the user is done speaking, or if you need ``UserStartedSpeakingFrame``
+/ ``UserStoppedSpeakingFrame`` to fire from the same source as
+``InterruptionFrame``.
+
+Caveat: locally-generated turn boundaries are a heuristic and may not match
+the provider's actual server-side turn decisions. With OpenAI Realtime,
+server-side turn detection is generally what the service expects to drive
+the conversation, and disabling it puts the responsibility on you. Prefer
+server-emitted turn frames (i.e. the base `realtime-openai.py` example)
+unless you have a specific reason to drive turn detection locally.
+"""
 
 import asyncio
 import os
@@ -14,14 +32,17 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
     RealtimeServiceModeConfig,
     UserTurnStoppedMessage,
 )
@@ -33,14 +54,12 @@ from pipecat.services.openai.realtime.events import (
     AudioInput,
     InputAudioNoiseReduction,
     InputAudioTranscription,
-    SemanticTurnDetection,
     SessionProperties,
 )
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -109,12 +128,9 @@ restaurant_function = FunctionSchema(
     required=["location"],
 )
 
-# Create tools schema
 tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
 
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -155,30 +171,22 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
                 audio=AudioConfiguration(
                     input=AudioInput(
                         transcription=InputAudioTranscription(),
-                        # Set openai TurnDetection parameters. Not setting this at all will turn it
-                        # on by default
-                        turn_detection=SemanticTurnDetection(),
-                        # Or set to False to disable openai turn detection and use transport VAD
-                        # turn_detection=False,
+                        # Disable OpenAI's server-side turn detection — this
+                        # example drives turn boundaries locally via the
+                        # SileroVADAnalyzer wired into the user aggregator
+                        # below.
+                        turn_detection=False,
                         noise_reduction=InputAudioNoiseReduction(type="near_field"),
                     )
                 ),
-                # In this example we provide tools through the context, but you could
-                # alternatively provide them here.
-                # tools=tools,
             ),
         ),
     )
 
-    # you can either register a single function for all function calls, or specific functions
-    # llm.register_function(None, fetch_weather_from_api)
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
     llm.register_function("get_news", get_news)
 
-    # Create a standard OpenAI LLM context object using the normal messages format. The
-    # OpenAIRealtimeLLMService will convert this internally to messages that the
-    # openai WebSocket API can understand.
     context = LLMContext(
         [{"role": "developer", "content": "Say hello!"}],
         tools,
@@ -186,26 +194,25 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        # OpenAI Realtime drives the conversation server-side and emits its
-        # own UserStarted/StoppedSpeakingFrame from server VAD events, so
-        # local VAD on the aggregator is unnecessary. realtime_service_mode
-        # decouples context writes from turn frames and transcript-bound
-        # turn-end. See `realtime-openai-local-vad.py` for the variant
-        # that disables server VAD and drives turn detection locally.
+        # Drive turn detection locally via SileroVAD wired into the user
+        # aggregator. realtime_service_mode keeps context-write semantics
+        # correct and (by default) drops the transcript wait on turn-end so
+        # local VAD can drive turn boundaries on the latency critical path.
         realtime_service_mode=RealtimeServiceModeConfig(),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
+            transport.input(),
             user_aggregator,
-            llm,  # LLM
-            transport.output(),  # Transport bot output
+            llm,
+            transport.output(),
             assistant_aggregator,
         ]
     )
 
-    worker = PipelineWorker(
+    task = PipelineTask(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -218,49 +225,19 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Kick off the conversation.
-        await worker.queue_frames([LLMRunFrame()])
+        await task.queue_frames([LLMRunFrame()])
 
-        # Add a new tool at runtime after a delay.
         await asyncio.sleep(15)
         new_tools = ToolsSchema(
             standard_tools=[weather_function, restaurant_function, get_news_function]
         )
-        await worker.queue_frames([LLMSetToolsFrame(tools=new_tools)])
-        # Alternative pattern, useful if you're changing other session properties, too.
-        # (Though note that tools in your LLMContext take precedence over those
-        # in session properties, so if you have context-provided tools, prefer
-        # LLMSetToolsFrame instead, as it updates your context. Ditto for
-        # updating system instructions: send an LLMMessagesUpdateFrame with
-        # context messages updated with your new desired system message.)
-        # await worker.queue_frames(
-        #     [LLMUpdateSettingsFrame(settings=SessionProperties(tools=new_tools).model_dump())]
-        # )
-
-        # Reasoning effort can be changed at runtime too. Only
-        # reasoning-capable Realtime models (e.g. gpt-realtime-2) support this.
-        # await worker.queue_frames(
-        #     [
-        #         LLMUpdateSettingsFrame(
-        #             delta=OpenAIRealtimeLLMService.Settings(
-        #                 session_properties=SessionProperties(
-        #                     reasoning=Reasoning(effort="xhigh"),
-        #                 ),
-        #             )
-        #         )
-        #     ]
-        # )
+        await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await worker.cancel()
+        await task.cancel()
 
-    # Log transcript updates. In realtime mode the turn-stopped events
-    # fire before the message text is finalized (UserTurnStoppedMessage
-    # content is None), so subscribe to the *_message_added events
-    # instead — they fire when the message is written to context and
-    # carry the finalized content.
     @user_aggregator.event_handler("on_user_message_added")
     async def on_user_message_added(aggregator, message: UserTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
@@ -273,10 +250,9 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.add_workers(worker)
-    await runner.run()
+    await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):

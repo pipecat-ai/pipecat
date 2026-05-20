@@ -13,7 +13,6 @@ from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import LLMContextMessage
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -21,7 +20,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
+    RealtimeServiceModeConfig,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -74,7 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        realtime_service_mode=RealtimeServiceModeConfig(),
     )
 
     pipeline = Pipeline(
@@ -96,8 +95,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
-    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
-    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+    @assistant_aggregator.event_handler("on_assistant_message_added")
+    async def on_assistant_message_added(aggregator, message: AssistantTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")

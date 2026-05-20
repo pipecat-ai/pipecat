@@ -46,6 +46,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
+    RealtimeServiceModeConfig,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -149,7 +150,10 @@ Always be helpful and proactive in offering assistance.""",
         tools,
     )
 
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        realtime_service_mode=RealtimeServiceModeConfig(),
+    )
 
     # Build the pipeline
     pipeline = Pipeline(
@@ -182,13 +186,16 @@ Always be helpful and proactive in offering assistance.""",
         logger.info("Client disconnected")
         await worker.cancel()
 
-    @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    # In realtime mode the turn-stopped events fire before the message
+    # text is finalized; subscribe to the *_message_added events for the
+    # finalized content.
+    @user_aggregator.event_handler("on_user_message_added")
+    async def on_user_message_added(aggregator, message: UserTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         logger.info(f"Transcript: {timestamp}user: {message.content}")
 
-    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
-    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+    @assistant_aggregator.event_handler("on_assistant_message_added")
+    async def on_assistant_message_added(aggregator, message: AssistantTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         logger.info(f"Transcript: {timestamp}assistant: {message.content}")
 

@@ -16,7 +16,10 @@ from pipecat.frames.frames import EndTaskFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    RealtimeServiceModeConfig,
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -148,7 +151,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [{"role": "developer", "content": "Say hello."}],
     )
     # Server-side VAD is enabled by default; no local VAD is added.
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        realtime_service_mode=RealtimeServiceModeConfig(),
+    )
 
     pipeline = Pipeline(
         [

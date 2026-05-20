@@ -12,14 +12,13 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
+    RealtimeServiceModeConfig,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -29,8 +28,6 @@ from pipecat.services.ultravox.llm import OneShotInputParams, UltravoxRealtimeLL
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 # Load environment variables
@@ -178,18 +175,23 @@ There is also a secret menu that changes daily. If the user asks about it, use t
 
     context = LLMContext([])
 
-    # Necessary to complete the function call lifecycle in Pipecat and
-    # to produce user and assistant turn stopped events.
+    # Ultravox drives the conversation server-side. It does NOT emit
+    # UserStartedSpeakingFrame / UserStoppedSpeakingFrame, so pipeline
+    # processors that depend on those frames — RTVI client speech events,
+    # TurnTrackingObserver, AudioBufferProcessor turn recording,
+    # UserIdleController, user mute strategies, voicemail detector — won't
+    # activate with this default setup. Context aggregation still works
+    # with realtime_service_mode.
+    #
+    # To produce these frames locally, wire a VAD analyzer (e.g.
+    # SileroVADAnalyzer) into LLMUserAggregatorParams. Caveat: locally-
+    # generated turn boundaries are a heuristic and may not match
+    # Ultravox's server-side turn decisions, which is what drives the
+    # conversation; the two can drift apart in subtle ways especially
+    # around interruptions and overlapping speech.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[SpeechTimeoutUserTurnStopStrategy()],
-            ),
-            # Set the VAD analyzer to create reliable TTFB measurements and
-            # user stop events.
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
+        realtime_service_mode=RealtimeServiceModeConfig(),
     )
 
     # Build the pipeline
@@ -224,14 +226,18 @@ There is also a secret menu that changes daily. If the user asks about it, use t
         logger.info(f"Client disconnected")
         await worker.cancel()
 
-    @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    # Ultravox doesn't emit user-turn frames so on_user_turn_stopped
+    # would never fire. The *_message_added events fire when messages are
+    # written to context and carry the finalized content; use those for
+    # transcript logging.
+    @user_aggregator.event_handler("on_user_message_added")
+    async def on_user_message_added(aggregator, message: UserTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
-    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+    @assistant_aggregator.event_handler("on_assistant_message_added")
+    async def on_assistant_message_added(aggregator, message: AssistantTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")

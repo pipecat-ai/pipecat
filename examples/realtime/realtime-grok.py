@@ -33,9 +33,6 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-
-# Note: Grok has built-in server-side VAD, so we don't need local VAD
-# from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
@@ -46,6 +43,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
+    RealtimeServiceModeConfig,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -212,7 +210,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tools,
     )
 
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        realtime_service_mode=RealtimeServiceModeConfig(),
+    )
 
     # Build the pipeline
     # Note: In realtime mode, transcription comes from Grok (upstream),
@@ -248,15 +249,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await worker.cancel()
 
-    # Log transcript updates
-    @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    # Log transcript updates. In realtime mode the turn-stopped events
+    # fire before the message text is finalized (UserTurnStoppedMessage
+    # content is None), so subscribe to the *_message_added events
+    # instead — they fire when the message is written to context and
+    # carry the finalized content.
+    @user_aggregator.event_handler("on_user_message_added")
+    async def on_user_message_added(aggregator, message: UserTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
-    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+    @assistant_aggregator.event_handler("on_assistant_message_added")
+    async def on_assistant_message_added(aggregator, message: AssistantTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")

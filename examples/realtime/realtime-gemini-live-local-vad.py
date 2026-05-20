@@ -4,6 +4,29 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Gemini Live with locally-driven turn detection.
+
+By default Gemini Live drives the conversation with its own server-side VAD
+(see `realtime-gemini-live.py`). That setup doesn't surface
+``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``, so pipeline
+processors that depend on those frames (RTVI client speech events,
+``TurnTrackingObserver``, ``AudioBufferProcessor`` turn recording,
+``UserIdleController``, user mute strategies, voicemail detector) don't
+activate.
+
+This variant disables Gemini Live's server-side VAD
+(``GeminiVADParams(disabled=True)``) and instead drives turn boundaries
+locally with ``SileroVADAnalyzer`` wired into the user aggregator. Use this
+variant if you need those downstream processors, or if you want a turn
+analyzer like ``LocalSmartTurnV3`` to decide when the user is done speaking.
+
+Caveat: locally-generated turn boundaries are a heuristic and may not match
+the provider's actual server-side turn decisions, which is what really
+drives the conversation. The two can drift apart in subtle, hard-to-debug
+ways, especially around interruptions and overlapping speech. Prefer
+server-emitted turn frames (i.e. the base `realtime-gemini-live.py` example)
+unless you have a specific reason to drive turn detection locally.
+"""
 
 import os
 
@@ -19,6 +42,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
+    RealtimeServiceModeConfig,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -72,6 +96,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
+        realtime_service_mode=RealtimeServiceModeConfig(),
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
         ),
@@ -107,14 +132,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await worker.cancel()
 
-    @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    # The *_message_added events fire when messages are written to context
+    # and carry the finalized content. In realtime mode the turn-stopped
+    # events fire before the message text is finalized.
+    @user_aggregator.event_handler("on_user_message_added")
+    async def on_user_message_added(aggregator, message: UserTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
-    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+    @assistant_aggregator.event_handler("on_assistant_message_added")
+    async def on_assistant_message_added(aggregator, message: AssistantTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")

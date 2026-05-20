@@ -14,7 +14,10 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    RealtimeServiceModeConfig,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -158,7 +161,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
     # Server-side VAD is enabled by default; no local VAD is added.
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        realtime_service_mode=RealtimeServiceModeConfig(),
+    )
 
     # Build the pipeline
     pipeline = Pipeline(
