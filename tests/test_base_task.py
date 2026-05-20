@@ -200,14 +200,14 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         task._pending_activation = False
         self.assertIsNone(task.activation_args)
 
-    async def test_handoff_to_sends_activate_and_deactivates(self):
-        """handoff_to() sends BusDeactivateTaskMessage and BusActivateTaskMessage."""
+    async def test_activate_task_with_deactivate_self_sends_both_messages(self):
+        """activate_task(deactivate_self=True) sends deactivate then activate."""
         sent = capture_bus(self.bus)
 
         task = make_stub_pipeline_task("task_a", bridged=())
         task.attach(registry=self.registry, bus=self.bus)
 
-        await task.handoff_to("task_b")
+        await task.activate_task("task_b", deactivate_self=True)
 
         deactivate_msgs = [m for m in sent if isinstance(m, BusDeactivateTaskMessage)]
         self.assertEqual(len(deactivate_msgs), 1)
@@ -331,14 +331,14 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(finished_fired.is_set())
 
-    async def test_handoff_deactivates(self):
-        """handoff_to() sends a deactivate message for the calling task."""
+    async def test_activate_task_with_deactivate_self_deactivates(self):
+        """activate_task(deactivate_self=True) sends a deactivate for the calling task."""
         sent = capture_bus(self.bus)
         task = make_stub_pipeline_task("test", bridged=())
         task.attach(registry=self.registry, bus=self.bus)
 
         self.assertTrue(task.active)
-        await task.handoff_to("other")
+        await task.activate_task("other", deactivate_self=True)
         deactivate_msgs = [m for m in sent if isinstance(m, BusDeactivateTaskMessage)]
         self.assertEqual(len(deactivate_msgs), 1)
         self.assertEqual(deactivate_msgs[0].target, "test")
@@ -429,7 +429,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received[1].text, "b")
 
     async def test_self_handoff(self):
-        """A task can handoff to itself via handoff_to(self.name)."""
+        """A task can hand off to itself via activate_task(self.name, deactivate_self=True)."""
         task = make_stub_pipeline_task("test", bridged=())
 
         handoff_done = asyncio.Event()
@@ -442,7 +442,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             # Wait for first activation (from active=True)
             await asyncio.sleep(0.05)
             handoff_done.clear()
-            await task.handoff_to("test")
+            await task.activate_task("test", deactivate_self=True)
             await asyncio.wait_for(handoff_done.wait(), timeout=2.0)
             await task.queue_frame(EndFrame())
 

@@ -68,7 +68,7 @@ uv run local-handoff/local-handoff-two-agents.py --transport daily
 
 ### Overview
 
-- **[`local-handoff-two-agents.py`](local-handoff/local-handoff-two-agents.py)** — Two LLM tasks (greeter + support) that hand off via `BaseTask.handoff_to(...)`. The main task owns STT, TTS, transport, and a `BusBridgeProcessor`.
+- **[`local-handoff-two-agents.py`](local-handoff/local-handoff-two-agents.py)** — Two LLM tasks (greeter + support) that hand off via `activate_task(..., deactivate_self=True)`. The main task owns STT, TTS, transport, and a `BusBridgeProcessor`.
 - **[`local-handoff-two-agents-tts.py`](local-handoff/local-handoff-two-agents-tts.py)** — Same shape, but each child task ships with its own `CartesiaTTSService` in a custom pipeline. The main task has no TTS — audio comes from whichever child is active over the bus.
 
 ## Parallel debate

@@ -565,6 +565,7 @@ class BaseTask(BaseObject, BusSubscriber):
         task_name: str,
         *,
         args: TaskActivationArgs | None = None,
+        deactivate_self: bool = False,
     ) -> None:
         """Activate a task by name.
 
@@ -575,7 +576,11 @@ class BaseTask(BaseObject, BusSubscriber):
             task_name: The name of the task to activate.
             args: Optional ``TaskActivationArgs`` forwarded to the
                 target task's ``on_activated``.
+            deactivate_self: Whether to deactivate this task before activating
+                the target.
         """
+        if self._active and deactivate_self:
+            await self.deactivate_task(self.name)
         await self.send_message(
             BusActivateTaskMessage(
                 source=self.name, target=task_name, args=args.to_dict() if args else None
@@ -591,26 +596,6 @@ class BaseTask(BaseObject, BusSubscriber):
             task_name: The name of the task to deactivate.
         """
         await self.send_message(BusDeactivateTaskMessage(source=self.name, target=task_name))
-
-    async def handoff_to(
-        self,
-        task_name: str,
-        *,
-        activation_args: TaskActivationArgs | None = None,
-    ) -> None:
-        """Hand off to another task.
-
-        Deactivates this task and activates the target. For independent
-        control, use ``activate_task()`` and ``deactivate_task()`` directly.
-
-        Args:
-            task_name: The name of the task to hand off to.
-            activation_args: Optional arguments forwarded to the target
-                task's ``on_activated`` handler.
-        """
-        if self._active:
-            await self.deactivate_task(self.name)
-        await self.activate_task(task_name, args=activation_args)
 
     async def watch_task(self, task_name: str) -> None:
         """Request notification when a task registers.
