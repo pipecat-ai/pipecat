@@ -52,6 +52,9 @@ class DailyProxyApp(EventHandler):
         # Raw PCM buffer — filled at DECLARED_SAMPLE_RATE speed, drained at TRUE_SAMPLE_RATE speed.
         self._buffer = bytearray()
         self._audio_task: asyncio.Task | None = None
+        # Tracks whether the previous frame was silence, to detect speech→silence transitions.
+        # Initialised True so leading silence before first speech is dropped.
+        self._last_was_silence: bool = True
 
         self._client: CallClient = CallClient(event_handler=self)
         self._client.update_subscription_profiles(
@@ -149,7 +152,7 @@ class DailyProxyApp(EventHandler):
         )
 
     @staticmethod
-    def _is_silence(data: bytes, threshold: int = 10) -> bool:
+    def _is_silence(data: bytes, threshold: int = 5) -> bool:
         # Interpret as 16-bit signed PCM samples and check peak amplitude.
         # WebRTC-injected silence is all zeros; real TTS audio has non-trivial
         # amplitude. This lets us skip buffering frames that Pipecat never wrote,
@@ -165,16 +168,44 @@ class DailyProxyApp(EventHandler):
         fast-audio effect we want to observe. The buffer then drains at
         TRUE_SAMPLE_RATE speed once speech stops.
 
-        Silence frames are dropped from the buffer entirely.
+        On the first silence after speech (speech→silence transition) we insert
+        one real-time-equivalent chunk of silence to represent the natural pause.
+        All subsequent silence frames are dropped so the buffer drains back down.
+        This also limits the impact of any TTS-emitted silence to a single chunk
+        per transition rather than letting it accumulate.
         """
         new_bytes = audio_data.audio_frames
         if self._is_silence(new_bytes):
+            if not self._last_was_silence:
+                # First silence after speech: mark the pause with one chunk.
+                self._buffer.extend(bytes(len(new_bytes) // SPEEDUP))
+                self._last_was_silence = True
             return
 
+        self._last_was_silence = False
         self._buffer.extend(new_bytes)
 
     def _audio_data_received(self, participant_id: str, audio_data: AudioData, audio_source: str):
         asyncio.run_coroutine_threadsafe(self._buffer_audio(audio_data), self._loop)
+
+    async def _handle_interrupt(self):
+        """Clear the audio buffer, mimicking the avatar stopping mid-speech."""
+        dropped = len(self._buffer)
+        self._buffer.clear()
+        self._last_was_silence = True
+        logger.info(
+            f"Interrupt received — dropped {dropped}B ({dropped / (TRUE_SAMPLE_RATE * 2):.3f}s) from buffer"
+        )
+
+    #
+    # Daily (EventHandler)
+    #
+
+    def on_app_message(self, message, sender):
+        if not isinstance(message, dict):
+            return
+        if message.get("event_type") == "conversation.interrupt":
+            asyncio.run_coroutine_threadsafe(self._handle_interrupt(), self._loop)
 
     async def _audio_task_handler(self):
         """Drain the buffer at TRUE_SAMPLE_RATE speed (real-time playback)."""
@@ -201,10 +232,6 @@ class DailyProxyApp(EventHandler):
                         f"Buffer status: {len(self._buffer)}B ({buffer_seconds:.3f}s buffered)"
                     )
                     last_log_time = now
-
-    #
-    # Daily (EventHandler)
-    #
 
     def on_participant_joined(self, participant):
         participant_name = participant["info"]["userName"]
