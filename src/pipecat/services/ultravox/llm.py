@@ -48,7 +48,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.time import time_now_iso8601
 
@@ -178,6 +178,10 @@ class UltravoxRealtimeLLMService(LLMService):
 
     Settings = UltravoxRealtimeLLMSettings
     _settings: Settings
+
+    # Realtime (speech-to-speech) service. Does NOT emit
+    # UserStarted/StoppedSpeakingFrame from server-side turn signals.
+    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=False)
 
     def __init__(
         self,

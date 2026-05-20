@@ -51,7 +51,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -244,6 +244,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     _settings: Settings
 
     adapter_class = InworldRealtimeLLMAdapter
+
+    # Realtime (speech-to-speech) service. Emits UserStarted/Stopped
+    # speaking frames from server-side VAD events.
+    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=True)
 
     # Target ~60ms audio chunks when sending to Inworld (16-bit mono).
     _AUDIO_CHUNK_TARGET_MS = 60

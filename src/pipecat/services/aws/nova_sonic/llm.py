@@ -56,7 +56,7 @@ from pipecat.services.aws.nova_sonic.session_continuation import (
     SessionContinuationHelper,
     SessionContinuationParams,
 )
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import LLMService, RealtimeServiceInfo
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.utils.time import time_now_iso8601
 
@@ -248,6 +248,10 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
     adapter_class = AWSNovaSonicLLMAdapter
+
+    # Realtime (speech-to-speech) service. Does NOT emit
+    # UserStarted/StoppedSpeakingFrame from server-side turn signals.
+    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=False)
 
     def __init__(
         self,

@@ -1440,6 +1440,27 @@ class STTMetadataFrame(ServiceMetadataFrame):
 
 
 @dataclass
+class RealtimeServiceMetadataFrame(ServiceMetadataFrame):
+    """Metadata announcing a realtime (speech-to-speech) LLM service.
+
+    Broadcast by realtime LLM services at pipeline start so downstream
+    processors — notably ``LLMContextAggregatorPair`` — can detect that
+    a realtime service is in the pipeline. The aggregator uses this to
+    surface a one-time recommendation to opt in to
+    ``RealtimeServiceModeConfig`` when it hasn't been configured.
+
+    Parameters:
+        emits_user_turn_frames: Whether this service emits
+            ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``
+            from server-side turn signals. False for services with no
+            server-side turn signals (e.g. Gemini Live, AWS Nova Sonic,
+            Ultravox).
+    """
+
+    emits_user_turn_frames: bool = True
+
+
+@dataclass
 class ServiceSwitcherRequestMetadataFrame(ControlFrame):
     """Request a service to re-emit its metadata frames.
 

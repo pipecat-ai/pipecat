@@ -51,7 +51,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 from pipecat.services.settings import (
     NOT_GIVEN,
@@ -211,6 +211,10 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
     adapter_class = OpenAIRealtimeLLMAdapter
+
+    # Realtime (speech-to-speech) service. Emits UserStarted/Stopped
+    # speaking frames from server-side VAD events.
+    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=True)
 
     def __init__(
         self,
