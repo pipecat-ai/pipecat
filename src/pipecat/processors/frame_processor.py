@@ -75,10 +75,10 @@ class FrameProcessorSetup:
     Parameters:
         clock: The clock instance for timing operations.
         task_manager: The task manager for handling async operations.
-        observer: Optional observer for monitoring frame processing events.
         pipeline_task: The :class:`PipelineTask` running this pipeline. Stored
             on each processor as ``self.pipeline_task`` so processors can
             reach task-scoped state (e.g. ``self.pipeline_task.app_resources``).
+        observer: Optional observer for monitoring frame processing events.
         tool_resources: Deprecated. :class:`PipelineTask` continues to populate
             this with ``app_resources`` so that custom :class:`FrameProcessor`
             subclasses whose ``setup()`` overrides read ``setup.tool_resources``
@@ -93,8 +93,8 @@ class FrameProcessorSetup:
 
     clock: BaseClock
     task_manager: BaseTaskManager
+    pipeline_task: PipelineTask
     observer: BaseObserver | None = None
-    pipeline_task: PipelineTask | None = None
     tool_resources: Any = None
 
     def __getattribute__(self, name: str) -> Any:
@@ -220,8 +220,9 @@ class FrameProcessor(BaseObject):
         # Observer
         self._observer: BaseObserver | None = None
 
-        # Pipeline Task
-        self._pipeline_task: PipelineTask | None = None
+        # Pipeline Task. Populated by ``setup()``; accessing the
+        # ``pipeline_task`` property before setup raises.
+        self._pipeline_task: PipelineTask | None = None  # set in setup()
 
         # Other properties
         self._enable_metrics = False
@@ -366,7 +367,7 @@ class FrameProcessor(BaseObject):
         return self._report_only_initial_ttfb
 
     @property
-    def pipeline_task(self) -> PipelineTask | None:
+    def pipeline_task(self) -> PipelineTask:
         """Get the :class:`PipelineTask` this processor is running in.
 
         Provides access to task-scoped state from inside a processor — most
@@ -374,11 +375,10 @@ class FrameProcessor(BaseObject):
         shared bag of resources (DB handles, clients, feature flags, etc.).
 
         Returns:
-            The :class:`PipelineTask` instance that set up this processor,
-            or ``None`` if the processor has not yet been set up by one
-            (for example, before the task has started, or when the processor
-            was instantiated in isolation).
+            The :class:`PipelineTask` instance that set up this processor.
         """
+        if not self._pipeline_task:
+            raise Exception(f"{self} pipeline task is still not set.")
         return self._pipeline_task
 
     def processors_with_metrics(self):

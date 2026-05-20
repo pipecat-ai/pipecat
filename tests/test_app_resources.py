@@ -14,9 +14,8 @@ from unittest.mock import AsyncMock
 from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import EndFrame, Frame, StartFrame
-from pipecat.pipeline.base_task import PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineTask, PipelineTaskParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import (
@@ -65,6 +64,7 @@ class TestFunctionCallParamsAppResources(unittest.TestCase):
             tool_call_id="1",
             arguments={},
             llm=None,  # type: ignore[arg-type]
+            pipeline_task=None,  # type: ignore[arg-type]
             context=LLMContext(),
             result_callback=AsyncMock(),
         )
@@ -77,6 +77,7 @@ class TestFunctionCallParamsAppResources(unittest.TestCase):
             tool_call_id="1",
             arguments={},
             llm=None,  # type: ignore[arg-type]
+            pipeline_task=None,  # type: ignore[arg-type]
             context=LLMContext(),
             result_callback=AsyncMock(),
             app_resources=resources,
@@ -90,6 +91,7 @@ class TestFunctionCallParamsAppResources(unittest.TestCase):
             tool_call_id="1",
             arguments={},
             llm=None,  # type: ignore[arg-type]
+            pipeline_task=None,  # type: ignore[arg-type]
             context=LLMContext(),
             result_callback=AsyncMock(),
             app_resources=resources,
@@ -160,32 +162,6 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
 
         self.assertIs(captured["params"].app_resources, resources)
 
-    async def test_app_resources_none_when_pipeline_task_unset(self):
-        service = _MockLLMService()
-        captured: dict[str, Any] = {}
-
-        async def handler(params: FunctionCallParams):
-            captured["params"] = params
-            await params.result_callback({"ok": True})
-
-        service._functions["lookup"] = FunctionCallRegistryItem(
-            function_name="lookup",
-            handler=handler,
-            cancel_on_interruption=True,
-        )
-        service.broadcast_frame = AsyncMock()  # type: ignore[method-assign]
-
-        runner_item = FunctionCallRunnerItem(
-            registry_item=service._functions["lookup"],
-            function_name="lookup",
-            tool_call_id="call-1",
-            arguments={},
-            context=LLMContext(),
-        )
-        await service._run_function_call(runner_item)
-
-        self.assertIsNone(captured["params"].app_resources)
-
     async def test_frame_processor_setup_tool_resources_warns_on_read(self):
         # ``FrameProcessorSetup.tool_resources`` is retained for backwards
         # compatibility with custom FrameProcessors whose ``setup()`` overrides
@@ -198,6 +174,7 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
         setup = FrameProcessorSetup(
             clock=SystemClock(),
             task_manager=task_manager,
+            pipeline_task=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
             tool_resources=resources,
         )
 
@@ -317,9 +294,10 @@ class TestFrameProcessorPipelineTaskAccess(unittest.IsolatedAsyncioTestCase):
         self.assertIs(recorder.observed_task, task)
         self.assertIs(recorder.observed_app_resources, resources)
 
-    def test_pipeline_task_returns_none_when_not_set_up(self):
+    def test_pipeline_task_raises_when_not_set_up(self):
         recorder = _RecordingProcessor()
-        self.assertIsNone(recorder.pipeline_task)
+        with self.assertRaises(Exception):
+            _ = recorder.pipeline_task
 
 
 if __name__ == "__main__":
