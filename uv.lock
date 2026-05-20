@@ -4539,7 +4539,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'ultravox'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'websocket'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'xai'" },
-    { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.0.0" },
+    { name = "pipecat-ai-prebuilt", marker = "extra == 'runner'", specifier = ">=1.0.1" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "protobuf", specifier = ">=5.29.6,<7" },
     { name = "protobuf", marker = "extra == 'nvidia'", specifier = ">=6.31.1,<7" },
@@ -4603,14 +4603,14 @@ docs = [
 
 [[package]]
 name = "pipecat-ai-prebuilt"
-version = "1.0.0"
+version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi", extra = ["all"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d0/86/7527474a324e3da787468133a1dba877e06576edc502e1bc7dd84ba7c9f7/pipecat_ai_prebuilt-1.0.0.tar.gz", hash = "sha256:dc66df541f17620eef5dedb2fd44737eb97232899779afb66dcca5aaa9317512", size = 601709, upload-time = "2026-05-14T21:15:26.575Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/27/91857cd93661922687e51f4141583dbeb71f9a6c8d0d6379bae1aa467522/pipecat_ai_prebuilt-1.0.1.tar.gz", hash = "sha256:9453136fcb994802f9b650b5175f3ce1d0476849a9e609fefe52ecc1c3299680", size = 601771, upload-time = "2026-05-20T16:08:14.485Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/89/b1/648122d5e418d3e0c8f797028bc53a22229ffc07a2406712b13b76735f38/pipecat_ai_prebuilt-1.0.0-py3-none-any.whl", hash = "sha256:6b7057920d3d00e5687adb26e032634ba1f6d924eb9079b1804d031620a1e854", size = 601949, upload-time = "2026-05-14T21:15:24.666Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/4f/a636e47967c3aa885ae912502d73a46d1e824a67992e405ea1e94b78bd94/pipecat_ai_prebuilt-1.0.1-py3-none-any.whl", hash = "sha256:45d78d3fd2ac8193626a5dabb5f45d0ff2d35bfc92098b4bcea308ae612196aa", size = 601994, upload-time = "2026-05-20T16:08:12.4Z" },
 ]
 
 [[package]]
