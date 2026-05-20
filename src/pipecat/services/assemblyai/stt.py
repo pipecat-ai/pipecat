@@ -586,9 +586,9 @@ class AssemblyAISTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             logger.debug(f"{self} Connected to AssemblyAI WebSocket")
         except Exception as e:
+            self._websocket = None
             self._connected = False
             await self.push_error(error_msg=f"Unable to connect to AssemblyAI: {e}", exception=e)
-            raise
 
     async def _disconnect_websocket(self):
         """Close the websocket connection to AssemblyAI."""
