@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
 import unittest
 
@@ -33,6 +34,7 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    RealtimeServiceMetadataFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
@@ -55,6 +57,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregator,
     LLMUserAggregatorParams,
+    RealtimeServiceModeConfig,
+    UserTurnStoppedMessage,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.tests.utils import SleepFrame, run_test
@@ -62,6 +66,10 @@ from pipecat.turns.user_mute import (
     FirstSpeechUserMuteStrategy,
     FunctionCallUserMuteStrategy,
     MuteUntilFirstBotCompleteUserMuteStrategy,
+)
+from pipecat.turns.user_start import (
+    TranscriptionUserTurnStartStrategy,
+    VADUserTurnStartStrategy,
 )
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import (
@@ -1649,6 +1657,315 @@ class TestToolChangeMessages(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(pair.user()._add_tool_change_messages)
         self.assertFalse(pair.assistant()._add_tool_change_messages)
+
+
+class TestRealtimeServiceModeConfig(unittest.TestCase):
+    def test_default_fields_are_realtime(self):
+        cfg = RealtimeServiceModeConfig()
+        self.assertFalse(cfg.context_writes_await_turns)
+        self.assertFalse(cfg.turns_await_transcripts)
+
+    def test_keep_transcripts_keep_writes_on_turn(self):
+        cfg = RealtimeServiceModeConfig(
+            turns_await_transcripts=True, context_writes_await_turns=True
+        )
+        self.assertTrue(cfg.context_writes_await_turns)
+        self.assertTrue(cfg.turns_await_transcripts)
+
+    def test_keep_transcripts_trailing_writes(self):
+        # Valid third row: turns wait on transcripts but context writes
+        # are trailing. The plan calls this out as the explicit fine-grained
+        # case (downstream consumers of user-turn frames want transcripts).
+        cfg = RealtimeServiceModeConfig(turns_await_transcripts=True)
+        self.assertFalse(cfg.context_writes_await_turns)
+        self.assertTrue(cfg.turns_await_transcripts)
+
+    def test_invalid_combination_rejected(self):
+        # turns fire early but context writes wait → incomplete messages.
+        with self.assertRaises(ValueError):
+            RealtimeServiceModeConfig(
+                turns_await_transcripts=False, context_writes_await_turns=True
+            )
+
+
+class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
+    """End-to-end tests for the trailing-write realtime mode."""
+
+    def _build_pair(
+        self,
+        *,
+        realtime_service_mode: RealtimeServiceModeConfig | None = None,
+        user_params: LLMUserAggregatorParams | None = None,
+    ) -> tuple[LLMContext, LLMContextAggregatorPair]:
+        context = LLMContext()
+        pair = LLMContextAggregatorPair(
+            context,
+            user_params=user_params,
+            realtime_service_mode=realtime_service_mode,
+        )
+        return context, pair
+
+    async def test_pair_propagates_realtime_mode_to_halves(self):
+        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        # The pair wires shared state into both halves.
+        self.assertIs(pair.user()._paired_half, pair.assistant())
+        self.assertIs(pair.assistant()._paired_half, pair.user())
+        self.assertIs(pair.user()._pair_lock, pair.assistant()._pair_lock)
+        self.assertFalse(pair.user()._context_writes_await_turns)
+        self.assertFalse(pair.user()._turns_await_transcripts)
+        self.assertFalse(pair.assistant()._context_writes_await_turns)
+        self.assertFalse(pair.assistant()._turns_await_transcripts)
+
+    async def test_pair_omits_realtime_wiring_when_unset(self):
+        _, pair = self._build_pair()
+        # Backreferences are still created (harmless), but no shared lock
+        # is allocated when the realtime config is absent.
+        self.assertIsNone(pair.user()._pair_lock)
+        self.assertIsNone(pair.assistant()._pair_lock)
+        self.assertTrue(pair.user()._context_writes_await_turns)
+        self.assertTrue(pair.assistant()._context_writes_await_turns)
+
+    async def test_realtime_strategy_mutations_with_defaults(self):
+        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        # The mutated strategies live on the UserTurnController owned by
+        # the user aggregator.
+        strategies = pair.user()._user_turn_controller._user_turn_strategies
+        # TranscriptionUserTurnStartStrategy is dropped.
+        for s in strategies.start:
+            self.assertNotIsInstance(s, TranscriptionUserTurnStartStrategy)
+        # VAD start strategy is preserved.
+        self.assertTrue(any(isinstance(s, VADUserTurnStartStrategy) for s in strategies.start))
+        # Stop strategies that expose wait_for_transcript have it flipped.
+        for s in strategies.stop:
+            if hasattr(s, "wait_for_transcript"):
+                self.assertFalse(s.wait_for_transcript)
+
+    async def test_realtime_strategy_mutations_skipped_when_turns_await_transcripts(self):
+        _, pair = self._build_pair(
+            realtime_service_mode=RealtimeServiceModeConfig(turns_await_transcripts=True),
+        )
+        strategies = pair.user()._user_turn_controller._user_turn_strategies
+        # When turns still wait for transcripts, the transcript start
+        # strategy stays in the chain.
+        self.assertTrue(
+            any(isinstance(s, TranscriptionUserTurnStartStrategy) for s in strategies.start)
+        )
+
+    async def test_trailing_write_user_then_assistant_then_user(self):
+        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        user, assistant = pair
+
+        user_msg_added: list[UserTurnStoppedMessage] = []
+        assistant_msg_added: list[AssistantTurnStoppedMessage] = []
+
+        @user.event_handler("on_user_message_added")
+        async def _on_um(_a, msg):
+            user_msg_added.append(msg)
+
+        @assistant.event_handler("on_assistant_message_added")
+        async def _on_am(_a, msg):
+            assistant_msg_added.append(msg)
+
+        context = user.context
+
+        # Sequence: user transcript, assistant response starts (flushes
+        # user), assistant response ends (parks pending), new user
+        # transcript (flushes assistant), then EndFrame flushes the new
+        # user message.
+        frames_to_send = [
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            SleepFrame(),
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hi "),
+            LLMTextFrame("there!"),
+            LLMFullResponseEndFrame(),
+            SleepFrame(),
+            TranscriptionFrame(text="How are you?", user_id="", timestamp="now"),
+            SleepFrame(),
+        ]
+        await run_test(
+            Pipeline([user, assistant]),
+            frames_to_send=frames_to_send,
+        )
+
+        # Context should contain: user("Hello!"), assistant("Hi there!"),
+        # user("How are you?").
+        messages = context.get_messages()
+        roles_contents = [(m["role"], m["content"]) for m in messages]
+        self.assertEqual(
+            roles_contents,
+            [
+                ("user", "Hello!"),
+                ("assistant", "Hi there!"),
+                ("user", "How are you?"),
+            ],
+        )
+        self.assertEqual([m.content for m in user_msg_added], ["Hello!", "How are you?"])
+        self.assertEqual([m.content for m in assistant_msg_added], ["Hi there!"])
+        for msg in assistant_msg_added:
+            self.assertFalse(msg.interrupted)
+
+    async def test_interruption_writes_assistant_immediately(self):
+        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        user, assistant = pair
+
+        assistant_messages: list[AssistantTurnStoppedMessage] = []
+
+        @assistant.event_handler("on_assistant_message_added")
+        async def _on_am(_a, msg):
+            assistant_messages.append(msg)
+
+        context = user.context
+
+        frames_to_send = [
+            TranscriptionFrame(text="Hi!", user_id="", timestamp="now"),
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello "),
+            SleepFrame(),
+            InterruptionFrame(),
+        ]
+        await run_test(
+            Pipeline([user, assistant]),
+            frames_to_send=frames_to_send,
+        )
+
+        roles_contents = [(m["role"], m["content"]) for m in context.get_messages()]
+        # User message written when assistant started; assistant message
+        # written immediately on interruption with interrupted=True.
+        self.assertEqual(roles_contents, [("user", "Hi!"), ("assistant", "Hello")])
+        self.assertEqual(len(assistant_messages), 1)
+        self.assertTrue(assistant_messages[0].interrupted)
+
+    async def test_user_turn_stopped_in_realtime_mode_has_none_content(self):
+        # When VAD turn frames fire in realtime mode, the user-turn-stop
+        # message carries content=None — the message isn't finalized yet.
+        _, pair = self._build_pair(
+            realtime_service_mode=RealtimeServiceModeConfig(),
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(
+                            user_speech_timeout=TRANSCRIPTION_TIMEOUT,
+                        )
+                    ],
+                ),
+                user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+            ),
+        )
+        user, assistant = pair
+
+        stop_messages: list[UserTurnStoppedMessage] = []
+
+        @user.event_handler("on_user_turn_stopped")
+        async def _on_stop(_a, _s, msg):
+            stop_messages.append(msg)
+
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="hey", user_id="", timestamp="now"),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
+        ]
+        await run_test(
+            Pipeline([user, assistant]),
+            frames_to_send=frames_to_send,
+        )
+        self.assertEqual(len(stop_messages), 1)
+        self.assertIsNone(stop_messages[0].content)
+
+    async def test_realtime_metadata_recommendation_log_when_unconfigured(self):
+        # Cascade pair receiving a RealtimeServiceMetadataFrame logs the
+        # one-time recommendation. The user half records the fact via
+        # _realtime_recommendation_logged.
+        _, pair = self._build_pair()
+        user = pair.user()
+
+        frames_to_send = [
+            RealtimeServiceMetadataFrame(
+                service_name="FakeRealtimeLLM", emits_user_turn_frames=False
+            ),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
+        self.assertTrue(user._realtime_recommendation_logged)
+
+    async def test_realtime_metadata_no_log_when_configured(self):
+        # When realtime mode is opted in, the metadata frame is consumed
+        # without firing the recommendation log (we still flag the
+        # one-shot bookkeeping).
+        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        user = pair.user()
+
+        frames_to_send = [
+            RealtimeServiceMetadataFrame(
+                service_name="FakeRealtimeLLM", emits_user_turn_frames=False
+            ),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
+        self.assertTrue(user._realtime_recommendation_logged)
+
+    async def test_realtime_mode_requires_paired_half(self):
+        # Direct construction of a half with realtime mode set but no
+        # paired_half raises at StartFrame validation. We call the
+        # validation directly so the error isn't swallowed by the
+        # pipeline's exception handler.
+        context = LLMContext()
+        cfg = RealtimeServiceModeConfig()
+        user = LLMUserAggregator(context, _realtime_service_mode=cfg)
+        with self.assertRaises(RuntimeError):
+            user._validate_realtime_pairing()
+        assistant = LLMAssistantAggregator(context, _realtime_service_mode=cfg)
+        with self.assertRaises(RuntimeError):
+            assistant._validate_realtime_pairing()
+
+    async def test_realtime_mode_rejects_mismatched_halves(self):
+        # If a user code path constructs halves with mismatched configs,
+        # StartFrame validation catches it.
+        context = LLMContext()
+        lock = asyncio.Lock()
+        user = LLMUserAggregator(
+            context,
+            _realtime_service_mode=RealtimeServiceModeConfig(),
+            _pair_lock=lock,
+        )
+        assistant = LLMAssistantAggregator(
+            context,
+            _realtime_service_mode=RealtimeServiceModeConfig(turns_await_transcripts=True),
+            _pair_lock=lock,
+        )
+        user._paired_half = assistant
+        assistant._paired_half = user
+        with self.assertRaises(RuntimeError):
+            user._validate_realtime_pairing()
+
+    async def test_function_call_no_context_push_in_realtime_mode(self):
+        # Realtime services consume function results directly via
+        # FunctionCallResultFrame, so the aggregator should not push
+        # LLMContextFrame upstream after a function call result.
+        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        assistant = pair.assistant()
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+            SleepFrame(),
+        ]
+        _, up_frames = await run_test(
+            assistant,
+            frames_to_send=frames_to_send,
+        )
+        # No LLMContextFrame should have been pushed upstream in
+        # realtime mode (cascade would push one to re-run inference).
+        self.assertFalse(any(isinstance(f, LLMContextFrame) for f in up_frames))
 
 
 if __name__ == "__main__":
