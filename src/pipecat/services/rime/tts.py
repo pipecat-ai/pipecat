@@ -50,6 +50,8 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+
+
 def language_to_rime_language(language: Language) -> str:
     """Convert pipecat Language to Rime language code.
 
@@ -713,7 +715,7 @@ class RimeHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="mistv2",
+            model="coda",
             voice=None,
             language="eng",
             segment=None,
