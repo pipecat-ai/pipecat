@@ -1,0 +1,1 @@
+- `UserTurnStoppedMessage.content` is now typed `str | None`. In realtime mode (`RealtimeServiceModeConfig(context_writes_await_turns=False)`) the user message isn't finalized at turn-stop time, so `content` is `None`; subscribers wanting the finalized text should use the new `on_user_message_added` event. Cascade behavior is unchanged.
