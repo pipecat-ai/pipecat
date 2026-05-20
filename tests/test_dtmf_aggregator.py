@@ -204,6 +204,61 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(transcription_frames), 1)
         self.assertEqual(transcription_frames[0].text, "DTMF: 12*")
 
+    async def test_default_emits_non_finalized_transcription(self):
+        """Default ``finalize_transcripts=False`` emits non-finalized frames."""
+        aggregator = DTMFAggregator()
+        frames_to_send = [
+            InputDTMFFrame(button=KeypadEntry.ONE),
+            InputDTMFFrame(button=KeypadEntry.POUND),
+        ]
+        expected_down_frames = [
+            InputDTMFFrame,
+            InterruptionFrame,
+            InputDTMFFrame,
+            TranscriptionFrame,
+        ]
+
+        received_down_frames, _ = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        transcription_frames = [
+            f for f in received_down_frames if isinstance(f, TranscriptionFrame)
+        ]
+        self.assertEqual(len(transcription_frames), 1)
+        self.assertFalse(transcription_frames[0].finalized)
+
+    async def test_finalize_transcripts_opt_in(self):
+        """``finalize_transcripts=True`` marks the flushed transcript as final."""
+        aggregator = DTMFAggregator(finalize_transcripts=True)
+        frames_to_send = [
+            InputDTMFFrame(button=KeypadEntry.ONE),
+            InputDTMFFrame(button=KeypadEntry.TWO),
+            InputDTMFFrame(button=KeypadEntry.POUND),
+        ]
+        expected_down_frames = [
+            InputDTMFFrame,
+            InterruptionFrame,
+            InputDTMFFrame,
+            InputDTMFFrame,
+            TranscriptionFrame,
+        ]
+
+        received_down_frames, _ = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        transcription_frames = [
+            f for f in received_down_frames if isinstance(f, TranscriptionFrame)
+        ]
+        self.assertEqual(len(transcription_frames), 1)
+        self.assertEqual(transcription_frames[0].text, "DTMF: 12#")
+        self.assertTrue(transcription_frames[0].finalized)
+
     async def test_all_keypad_entries(self):
         """Test all possible keypad entries."""
         aggregator = DTMFAggregator()
