@@ -208,12 +208,29 @@ class DailyProxyApp(EventHandler):
             asyncio.run_coroutine_threadsafe(self._handle_interrupt(), self._loop)
 
     async def _audio_task_handler(self):
-        """Drain the buffer at TRUE_SAMPLE_RATE speed (real-time playback)."""
-        chunk_frames = int(TRUE_SAMPLE_RATE * 20 / 1000)  # 20 ms chunks
-        chunk_bytes = chunk_frames * 2  # 16-bit mono
+        """Drain the buffer at TRUE_SAMPLE_RATE speed (real-time playback).
+
+        Waits until min_audio_buffer bytes are accumulated before starting
+        playback, then drains freely in chunk_bytes steps. If the buffer runs
+        dry it re-enters the waiting state so the next burst also gets the
+        pre-buffer delay.
+        """
+        chunk_bytes = int(TRUE_SAMPLE_RATE * 20 / 1000) * 2  # 20 ms, 16-bit mono
+        min_audio_buffer = chunk_bytes * 5  # 100 ms pre-buffer
+        buffering = True
         last_log_time = self._loop.time()
 
         while True:
+            if buffering:
+                if len(self._buffer) >= min_audio_buffer:
+                    buffering = False
+                    logger.debug(
+                        f"Pre-buffer reached ({min_audio_buffer}B) — starting playback"
+                    )
+                else:
+                    await asyncio.sleep(0.001)
+                    continue
+
             if len(self._buffer) >= chunk_bytes:
                 chunk = bytes(self._buffer[:chunk_bytes])
                 del self._buffer[:chunk_bytes]
@@ -222,6 +239,7 @@ class DailyProxyApp(EventHandler):
                 self._audio_source.write_frames(chunk, completion=completion_callback(future))
                 await future
             else:
+                buffering = True
                 await asyncio.sleep(0.001)
 
             now = self._loop.time()
@@ -231,7 +249,7 @@ class DailyProxyApp(EventHandler):
                     logger.info(
                         f"Buffer status: {len(self._buffer)}B ({buffer_seconds:.3f}s buffered)"
                     )
-                    last_log_time = now
+                last_log_time = now
 
     def on_participant_joined(self, participant):
         participant_name = participant["info"]["userName"]
