@@ -29,7 +29,7 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
 
         processor = BusBridgeProcessor(
             bus=bus,
-            task_name="test_task",
+            worker_name="test_task",
         )
         pipeline = Pipeline([processor])
 
@@ -66,7 +66,7 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
 
         processor = BusBridgeProcessor(
             bus=bus,
-            task_name="test_task",
+            worker_name="test_task",
         )
         pipeline = Pipeline([processor])
 
@@ -98,7 +98,7 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
 
         processor = BusBridgeProcessor(
             bus=bus,
-            task_name="test_task",
+            worker_name="test_task",
             exclude_frames=(TextFrame,),
         )
         pipeline = Pipeline([processor])
@@ -125,7 +125,7 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         travel downstream alongside frames from later pipeline processors."""
         from pipecat.frames.frames import EndFrame
         from pipecat.pipeline.runner import PipelineRunner
-        from pipecat.pipeline.task import PipelineTask
+        from pipecat.pipeline.worker import PipelineWorker
         from pipecat.processors.frame_processor import FrameProcessor
 
         class AppendFrameProcessor(FrameProcessor):
@@ -140,16 +140,16 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         bus = AsyncQueueBus()
         bridge = BusBridgeProcessor(
             bus=bus,
-            task_name="main_task",
+            worker_name="main_task",
         )
         pipeline = Pipeline([bridge, AppendFrameProcessor()])
-        task = PipelineTask(pipeline, cancel_on_idle_timeout=False)
+        worker = PipelineWorker(pipeline, cancel_on_idle_timeout=False)
 
         received = []
-        task.set_reached_downstream_filter((TextFrame,))
+        worker.set_reached_downstream_filter((TextFrame,))
 
-        @task.event_handler("on_frame_reached_downstream")
-        async def on_frame(task, frame):
+        @worker.event_handler("on_frame_reached_downstream")
+        async def on_frame(worker, frame):
             received.append(frame)
 
         msg = BusFrameMessage(
@@ -162,21 +162,21 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.02)
             await bridge.on_bus_message(msg)
             await asyncio.sleep(0.02)
-            await task.queue_frame(EndFrame())
+            await worker.queue_frame(EndFrame())
 
         runner = PipelineRunner()
-        await asyncio.gather(runner.run(task), inject_and_end())
+        await asyncio.gather(runner.run(worker), inject_and_end())
 
         texts = [f.text for f in received if isinstance(f, TextFrame)]
         self.assertIn("from_child", texts)
         self.assertIn("after_bridge", texts)
 
     async def test_skips_own_frames(self):
-        """Bridge ignores bus frames from its own task."""
+        """Bridge ignores bus frames from its own worker."""
         bus = AsyncQueueBus()
         processor = BusBridgeProcessor(
             bus=bus,
-            task_name="test_task",
+            worker_name="test_task",
         )
 
         injected = []
@@ -200,11 +200,11 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(injected), 0)
 
     async def test_target_task_filtering(self):
-        """Bridge with target_task only accepts frames from that task."""
+        """Bridge with target_task only accepts frames from that worker."""
         bus = AsyncQueueBus()
         processor = BusBridgeProcessor(
             bus=bus,
-            task_name="main_task",
+            worker_name="main_task",
             target_task="specific_child",
         )
 
@@ -217,7 +217,7 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
 
         processor.push_frame = capture_push
 
-        # Frame from wrong task — should be ignored
+        # Frame from wrong worker — should be ignored
         wrong_msg = BusFrameMessage(
             source="other_child",
             frame=TextFrame(text="wrong"),
@@ -226,7 +226,7 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         await processor.on_bus_message(wrong_msg)
         self.assertEqual(len(injected), 0)
 
-        # Frame from correct task — should be injected
+        # Frame from correct worker — should be injected
         right_msg = BusFrameMessage(
             source="specific_child",
             frame=TextFrame(text="right"),
@@ -237,11 +237,11 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(injected[0].text, "right")
 
     async def test_targeted_message_for_other_task_skipped(self):
-        """Bridge skips bus messages targeted at a different task."""
+        """Bridge skips bus messages targeted at a different worker."""
         bus = AsyncQueueBus()
         processor = BusBridgeProcessor(
             bus=bus,
-            task_name="main_task",
+            worker_name="main_task",
         )
 
         injected = []

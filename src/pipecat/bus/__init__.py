@@ -4,33 +4,33 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Task bus package -- pub/sub messaging between tasks and the runner.
+"""Worker bus package -- pub/sub messaging between workers and the runner.
 
-Provides the pub/sub infrastructure that connects tasks to each other and to
+Provides the pub/sub infrastructure that connects workers to each other and to
 the runner. Key components:
 
-- `TaskBus` -- abstract base class defining the send/receive interface.
+- `WorkerBus` -- abstract base class defining the send/receive interface.
 - `AsyncQueueBus` -- in-process implementation backed by ``asyncio.Queue``.
 - `BusBridgeProcessor` -- bidirectional mid-pipeline bridge for
-  transport/session tasks that exchanges frames with other tasks
+  transport/session workers that exchanges frames with other workers
   through the bus.
 - `BusMessage` and its subclasses -- the typed message hierarchy used for
-  task lifecycle events (activation, cancellation, shutdown), job
+  worker lifecycle events (activation, cancellation, shutdown), job
   coordination, and frame transport.
 """
 
 from pipecat.bus.bridge_processor import BusBridgeProcessor
-from pipecat.bus.bus import TaskBus
+from pipecat.bus.bus import WorkerBus
 from pipecat.bus.local import AsyncQueueBus
 from pipecat.bus.messages import (
-    BusActivateTaskMessage,
-    BusAddTaskMessage,
+    BusActivateWorkerMessage,
+    BusAddWorkerMessage,
     BusCancelMessage,
-    BusCancelTaskMessage,
+    BusCancelWorkerMessage,
     BusDataMessage,
-    BusDeactivateTaskMessage,
+    BusDeactivateWorkerMessage,
     BusEndMessage,
-    BusEndTaskMessage,
+    BusEndWorkerMessage,
     BusFrameMessage,
     BusJobCancelMessage,
     BusJobRequestMessage,
@@ -45,29 +45,29 @@ from pipecat.bus.messages import (
     BusLocalMessage,
     BusMessage,
     BusSystemMessage,
-    BusTaskErrorMessage,
-    BusTaskLocalErrorMessage,
-    BusTaskReadyMessage,
-    BusTaskRegistryMessage,
+    BusWorkerErrorMessage,
+    BusWorkerLocalErrorMessage,
+    BusWorkerReadyMessage,
+    BusWorkerRegistryMessage,
 )
 from pipecat.bus.subscriber import BusSubscriber
-from pipecat.registry.types import TaskRegistryEntry
+from pipecat.registry.types import WorkerRegistryEntry
 
 __all__ = [
-    "TaskBus",
+    "WorkerBus",
     "AsyncQueueBus",
-    "BusActivateTaskMessage",
-    "BusAddTaskMessage",
-    "BusTaskErrorMessage",
-    "BusTaskLocalErrorMessage",
-    "TaskRegistryEntry",
-    "BusTaskReadyMessage",
-    "BusTaskRegistryMessage",
+    "BusActivateWorkerMessage",
+    "BusAddWorkerMessage",
+    "BusWorkerErrorMessage",
+    "BusWorkerLocalErrorMessage",
+    "WorkerRegistryEntry",
+    "BusWorkerReadyMessage",
+    "BusWorkerRegistryMessage",
     "BusBridgeProcessor",
-    "BusCancelTaskMessage",
+    "BusCancelWorkerMessage",
     "BusCancelMessage",
-    "BusDeactivateTaskMessage",
-    "BusEndTaskMessage",
+    "BusDeactivateWorkerMessage",
+    "BusEndWorkerMessage",
     "BusEndMessage",
     "BusFrameMessage",
     "BusDataMessage",

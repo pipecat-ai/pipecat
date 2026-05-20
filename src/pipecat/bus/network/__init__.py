@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Network bus implementations for distributed tasks.
+"""Network bus implementations for distributed workers.
 
 Each adapter has its own optional dependency. Imports are lazy so the
 package can be loaded with only the extras you need; importing a specific

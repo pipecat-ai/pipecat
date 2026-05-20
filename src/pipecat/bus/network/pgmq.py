@@ -4,14 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""PGMQ (PostgreSQL Message Queue) task bus for distributed tasks."""
+"""PGMQ (PostgreSQL Message Queue) worker bus for distributed workers."""
 
 import asyncio
 import json
 
 from loguru import logger
 
-from pipecat.bus.bus import TaskBus
+from pipecat.bus.bus import WorkerBus
 from pipecat.bus.messages import BusMessage
 from pipecat.bus.network.pgmq_backends import (
     DirectPgmqBackend,
@@ -28,8 +28,8 @@ except ModuleNotFoundError as e:  # pragma: no cover - exercised only when extra
     raise Exception(f"Missing module: {e}")
 
 
-class PgmqBus(TaskBus):
-    """Distributed task bus backed by PGMQ (PostgreSQL Message Queue).
+class PgmqBus(WorkerBus):
+    """Distributed worker bus backed by PGMQ (PostgreSQL Message Queue).
 
     Pub/sub fan-out is implemented on top of PGMQ's point-to-point queue
     semantics by giving each :class:`PgmqBus` instance its own queue and
@@ -113,7 +113,7 @@ class PgmqBus(TaskBus):
                 this knob.)
             max_poll_seconds: Maximum seconds the reader blocks per poll
                 cycle. Defaults to 5.
-            **kwargs: Additional arguments passed to :class:`TaskBus`.
+            **kwargs: Additional arguments passed to :class:`WorkerBus`.
         """
         super().__init__(**kwargs)
         if pgmq is not None and backend is not None:

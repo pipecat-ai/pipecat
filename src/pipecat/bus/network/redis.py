@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Redis pub/sub task bus for distributed tasks."""
+"""Redis pub/sub worker bus for distributed workers."""
 
 import asyncio
 
 from loguru import logger
 
-from pipecat.bus.bus import TaskBus
+from pipecat.bus.bus import WorkerBus
 from pipecat.bus.messages import BusMessage
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.bus.serializers.base import MessageSerializer
@@ -24,8 +24,8 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class RedisBus(TaskBus):
-    """Distributed task bus backed by Redis pub/sub.
+class RedisBus(WorkerBus):
+    """Distributed worker bus backed by Redis pub/sub.
 
     Publishes serialized messages to a Redis channel for cross-process
     communication. ``BusLocalMessage`` messages bypass Redis and are
@@ -56,7 +56,7 @@ class RedisBus(TaskBus):
             serializer: The `MessageSerializer` for encoding/decoding messages.
                 Defaults to `JSONMessageSerializer`.
             channel: The Redis pub/sub channel name. Defaults to ``"pipecat:bus"``.
-            **kwargs: Additional arguments passed to `TaskBus`.
+            **kwargs: Additional arguments passed to `WorkerBus`.
         """
         super().__init__(**kwargs)
         self._redis = redis

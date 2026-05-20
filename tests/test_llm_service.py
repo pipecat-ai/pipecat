@@ -47,7 +47,7 @@ class MockLLMService(LLMService):
         )
         super().__init__(settings=settings, **kwargs)
         # Stub the pipeline task so FunctionCallParams can be constructed.
-        self._pipeline_task = SimpleNamespace(app_resources=None)
+        self._pipeline_worker = SimpleNamespace(app_resources=None)
 
 
 class TestUnparameterizedSubclass(unittest.TestCase):

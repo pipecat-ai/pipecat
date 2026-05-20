@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Abstract task bus for inter-task pub/sub messaging.
+"""Abstract worker bus for inter-worker pub/sub messaging.
 
-Provides the abstract `TaskBus` base class. Concrete implementations
+Provides the abstract `WorkerBus` base class. Concrete implementations
 (e.g. `AsyncQueueBus`) live in separate modules.
 """
 
@@ -30,7 +30,7 @@ class BusSubscription:
         subscriber: The subscriber receiving messages.
         queue: Priority queue for incoming messages.
         data_queue: Secondary queue for data messages dispatched by
-            the router task.
+            the router worker.
         router_task: Task that reads from the priority queue, handles
             system messages inline, and routes data messages to the
             data queue.
@@ -45,8 +45,8 @@ class BusSubscription:
     data_task: asyncio.Task | None = field(default=None, repr=False)
 
 
-class TaskBus(BaseObject):
-    """Abstract base for inter-task and runner-task communication.
+class WorkerBus(BaseObject):
+    """Abstract base for inter-worker and runner-worker communication.
 
     Provides pub/sub messaging where each subscriber receives messages
     independently through its own priority queue. System messages
@@ -60,7 +60,7 @@ class TaskBus(BaseObject):
     """
 
     def __init__(self, **kwargs):
-        """Initialize the TaskBus.
+        """Initialize the WorkerBus.
 
         Args:
             **kwargs: Additional arguments passed to `BaseObject`.
@@ -101,7 +101,7 @@ class TaskBus(BaseObject):
         sub = BusSubscription(subscriber=subscriber)
         if self._running:
             self._start_dispatch_task(sub)
-            # Schedule task right away.
+            # Schedule worker right away.
             await asyncio.sleep(0)
         if subscriber.name in self._subscriptions:
             raise ValueError(f"Subscriber '{subscriber.name}' is already registered on the bus")

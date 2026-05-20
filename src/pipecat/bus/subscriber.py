@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Bus subscriber mixin for receiving messages from an TaskBus."""
+"""Bus subscriber mixin for receiving messages from an WorkerBus."""
 
 from pipecat.bus.messages import BusMessage
 
 
 class BusSubscriber:
-    """Mixin for objects that receive messages from an `TaskBus`.
+    """Mixin for objects that receive messages from an `WorkerBus`.
 
     Implementors override `on_bus_message()` to handle incoming messages.
     Concrete subscribers must provide a ``name`` property (typically

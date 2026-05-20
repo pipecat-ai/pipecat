@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from pipecat.bus import (
-    BusAddTaskMessage,
+    BusAddWorkerMessage,
     BusDataMessage,
     BusEndMessage,
     BusFrameMessage,
@@ -21,7 +21,7 @@ from pipecat.bus import (
 )
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.frames.frames import TextFrame
-from pipecat.pipeline.base_task import BaseTask
+from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
@@ -171,8 +171,8 @@ class TestPgmqBus(unittest.IsolatedAsyncioTestCase):
         received = []
         await self.bus.subscribe(_make_sub(received))
 
-        task = BaseTask("test")
-        msg = BusAddTaskMessage(source="parent", task=task)
+        worker = BaseWorker("test")
+        msg = BusAddWorkerMessage(source="parent", worker=worker)
         await self.bus.send(msg)
 
         await asyncio.sleep(0.05)
@@ -181,8 +181,8 @@ class TestPgmqBus(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.pgmq.sent), 0)
         # But delivered locally
         self.assertEqual(len(received), 1)
-        self.assertIsInstance(received[0], BusAddTaskMessage)
-        self.assertIs(received[0].task, task)
+        self.assertIsInstance(received[0], BusAddWorkerMessage)
+        self.assertIs(received[0].worker, worker)
 
     async def test_round_trip_via_subscriber(self):
         """Messages published are received by subscribers."""
@@ -367,7 +367,7 @@ class TestPgmqBusEdgeCases(unittest.IsolatedAsyncioTestCase):
         await bus.stop()
 
     async def test_stop_cleans_up(self):
-        """stop() cancels the reader task and drops the queue."""
+        """stop() cancels the reader worker and drops the queue."""
         pgmq = FakePgmq()
         bus = PgmqBus(pgmq=pgmq, channel="cleanup_test", poll_interval_ms=10, max_poll_seconds=1)
         tm = TaskManager()

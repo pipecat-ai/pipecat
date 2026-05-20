@@ -10,12 +10,12 @@ from unittest.mock import MagicMock
 
 from pipecat.bus import (
     AsyncQueueBus,
-    BusAddTaskMessage,
+    BusAddWorkerMessage,
     BusDataMessage,
 )
 from pipecat.bus.serializers import JSONMessageSerializer
-from pipecat.pipeline.base_task import BaseTask
-from pipecat.registry import TaskRegistry
+from pipecat.pipeline.base_worker import BaseWorker
+from pipecat.registry import WorkerRegistry
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 
@@ -85,17 +85,17 @@ class FakeStarletteWebSocket:
 class TestWebSocketProxyClientTask(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
-        self.registry = TaskRegistry(runner_name="test-runner")
+        self.registry = WorkerRegistry(runner_name="test-runner")
         self.serializer = JSONMessageSerializer()
 
     async def _create_client(self, fake_ws):
-        from pipecat.tasks.proxy.websocket.client import WebSocketProxyClientTask
+        from pipecat.workers.proxy.websocket.client import WebSocketProxyClientTask
 
         task = WebSocketProxyClientTask(
             "proxy",
             url="ws://fake",
-            remote_task_name="worker",
-            local_task_name="voice",
+            remote_worker_name="worker",
+            local_worker_name="voice",
             serializer=self.serializer,
         )
         task.attach(registry=self.registry, bus=self.bus)
@@ -141,9 +141,9 @@ class TestWebSocketProxyClientTask(unittest.IsolatedAsyncioTestCase):
         fake_ws = FakeWebSocket()
         task = await self._create_client(fake_ws)
 
-        stub = MagicMock(spec=BaseTask)
+        stub = MagicMock(spec=BaseWorker)
         stub.name = "child"
-        msg = BusAddTaskMessage(source="parent", target="worker", task=stub)
+        msg = BusAddWorkerMessage(source="parent", target="worker", worker=stub)
         await task.on_bus_message(msg)
 
         self.assertEqual(len(fake_ws._sent), 0)
@@ -208,17 +208,17 @@ class TestWebSocketProxyClientTask(unittest.IsolatedAsyncioTestCase):
 class TestWebSocketProxyServerTask(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
-        self.registry = TaskRegistry(runner_name="test-runner")
+        self.registry = WorkerRegistry(runner_name="test-runner")
         self.serializer = JSONMessageSerializer()
 
     async def _create_server(self, fake_ws):
-        from pipecat.tasks.proxy.websocket.server import WebSocketProxyServerTask
+        from pipecat.workers.proxy.websocket.server import WebSocketProxyServerTask
 
         task = WebSocketProxyServerTask(
             "gateway",
             websocket=fake_ws,
-            task_name="worker",
-            remote_task_name="voice",
+            worker_name="worker",
+            remote_worker_name="voice",
             serializer=self.serializer,
         )
         task.attach(registry=self.registry, bus=self.bus)

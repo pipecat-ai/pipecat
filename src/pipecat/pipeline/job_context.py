@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Task group types for structured concurrent task execution."""
+"""Worker group types for structured concurrent worker execution."""
 
 from __future__ import annotations
 
@@ -14,20 +14,20 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
-    from pipecat.pipeline.base_task import BaseTask
+    from pipecat.pipeline.base_worker import BaseWorker
 
 
 class JobStatus(StrEnum):
-    """Status of a completed task.
+    """Status of a completed worker.
 
     Inherits from ``str`` so values compare naturally with plain strings
     and serialize without extra handling.
 
     Attributes:
-        COMPLETED: The task finished successfully.
-        CANCELLED: The task was cancelled by the requester.
-        FAILED: The task failed due to a logical or business error.
-        ERROR: The task encountered an unexpected runtime error.
+        COMPLETED: The worker finished successfully.
+        CANCELLED: The worker was cancelled by the requester.
+        FAILED: The worker failed due to a logical or business error.
+        ERROR: The worker encountered an unexpected runtime error.
     """
 
     COMPLETED = "completed"
@@ -37,13 +37,13 @@ class JobStatus(StrEnum):
 
 
 class JobError(Exception):
-    """Raised when a task is cancelled due to a worker error or timeout."""
+    """Raised when a worker is cancelled due to a worker error or timeout."""
 
     pass
 
 
 class JobGroupError(Exception):
-    """Raised when a task group is cancelled due to a worker error or timeout."""
+    """Raised when a worker group is cancelled due to a worker error or timeout."""
 
     pass
 
@@ -85,7 +85,7 @@ class JobGroupEvent:
 
     Parameters:
         type: The event type.
-        task_name: The name of the worker that sent the event.
+        worker_name: The name of the worker that sent the event.
         data: Optional event payload.
     """
 
@@ -95,7 +95,7 @@ class JobGroupEvent:
     STREAM_END: ClassVar[str] = "stream_end"
 
     type: str
-    task_name: str
+    worker_name: str
     data: dict | None = None
 
 
@@ -105,16 +105,16 @@ class JobGroup:
 
     Parameters:
         job_id: Shared identifier for all workers in this group.
-        task_names: Names of the workers in the group.
+        worker_names: Names of the workers in the group.
         responses: Collected responses keyed by worker name.
-        timeout_task: Optional asyncio task that cancels the group on timeout.
+        timeout_task: Optional asyncio worker that cancels the group on timeout.
         cancel_on_error: Whether to cancel the group if a worker errors.
         event_queue: Optional queue for streaming events to a
             ``JobGroupContext`` async iterator.
     """
 
     job_id: str
-    task_names: set[str]
+    worker_names: set[str]
     responses: dict[str, dict] = field(default_factory=dict)
     timeout_task: asyncio.Task | None = None
     cancel_on_error: bool = True
@@ -171,7 +171,7 @@ class JobGroupContext:
 
         async with self.job_group("w1", "w2", payload=data) as tg:
             async for event in tg:
-                print(f"{event.task_name} [{event.type}]: {event.data}")
+                print(f"{event.worker_name} [{event.type}]: {event.data}")
 
         for name, result in tg.responses.items():
             print(name, result)
@@ -179,8 +179,8 @@ class JobGroupContext:
 
     def __init__(
         self,
-        task: BaseTask,
-        task_names: tuple[str, ...],
+        worker: BaseWorker,
+        worker_names: tuple[str, ...],
         *,
         name: str | None = None,
         payload: dict | None = None,
@@ -190,8 +190,8 @@ class JobGroupContext:
         """Initialize the JobGroupContext.
 
         Args:
-            task: The parent `BaseTask` that owns this job group.
-            task_names: Names of the workers to send the job to.
+            worker: The parent `BaseWorker` that owns this job group.
+            worker_names: Names of the workers to send the job to.
             name: Optional job name for routing to named ``@job`` handlers.
             payload: Optional structured data describing the work.
             timeout: Optional timeout in seconds covering both the
@@ -199,8 +199,8 @@ class JobGroupContext:
             cancel_on_error: Whether to cancel the group if a worker
                 errors. Defaults to True.
         """
-        self._task = task
-        self._task_names = task_names
+        self._worker = worker
+        self._worker_names = worker_names
         self._name = name
         self._payload = payload
         self._timeout = timeout
@@ -233,8 +233,8 @@ class JobGroupContext:
         return event
 
     async def __aenter__(self) -> JobGroupContext:
-        self._group = await self._task.create_job_group_and_request_job(
-            list(self._task_names),
+        self._group = await self._worker.create_job_group_and_request_job(
+            list(self._worker_names),
             name=self._name,
             payload=self._payload,
             timeout=self._timeout,
@@ -245,12 +245,12 @@ class JobGroupContext:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         if exc_type is not None:
-            if self._group and self._group.job_id in self._task.job_groups:
+            if self._group and self._group.job_id in self._worker.job_groups:
                 # Shield the cleanup so it completes even if the
-                # surrounding task is being cancelled (e.g. tool
+                # surrounding worker is being cancelled (e.g. tool
                 # interruption).
                 await asyncio.shield(
-                    self._task.cancel_job_group(
+                    self._worker.cancel_job_group(
                         self._group.job_id, reason="context exited with error"
                     )
                 )
@@ -283,8 +283,8 @@ class JobContext:
 
     def __init__(
         self,
-        task: BaseTask,
-        task_name: str,
+        worker: BaseWorker,
+        worker_name: str,
         *,
         name: str | None = None,
         payload: dict | None = None,
@@ -293,15 +293,15 @@ class JobContext:
         """Initialize the JobContext.
 
         Args:
-            task: The parent `BaseTask` that owns this job.
-            task_name: Name of the worker to send the job to.
+            worker: The parent `BaseWorker` that owns this job.
+            worker_name: Name of the worker to send the job to.
             name: Optional job name for routing to a named ``@job`` handler.
             payload: Optional structured data describing the work.
             timeout: Optional timeout in seconds covering both the
                 ready-wait and job execution.
         """
-        self._task = task
-        self._task_name = task_name
+        self._worker = worker
+        self._worker_name = worker_name
         self._name = name
         self._payload = payload
         self._timeout = timeout
@@ -319,7 +319,7 @@ class JobContext:
         """The worker's response payload."""
         if not self._group:
             raise RuntimeError("Job has not been started")
-        return self._group.responses.get(self._task_name, {})
+        return self._group.responses.get(self._worker_name, {})
 
     def __aiter__(self):
         return self
@@ -333,8 +333,8 @@ class JobContext:
         return JobEvent(type=event.type, data=event.data)
 
     async def __aenter__(self) -> JobContext:
-        self._group = await self._task.create_job_group_and_request_job(
-            [self._task_name],
+        self._group = await self._worker.create_job_group_and_request_job(
+            [self._worker_name],
             name=self._name,
             payload=self._payload,
             timeout=self._timeout,
@@ -345,12 +345,12 @@ class JobContext:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         if exc_type is not None:
-            if self._group and self._group.job_id in self._task.job_groups:
+            if self._group and self._group.job_id in self._worker.job_groups:
                 # Shield the cleanup so it completes even if the
-                # surrounding task is being cancelled (e.g. tool
+                # surrounding worker is being cancelled (e.g. tool
                 # interruption).
                 await asyncio.shield(
-                    self._task.cancel_job_group(
+                    self._worker.cancel_job_group(
                         self._group.job_id, reason="context exited with error"
                     )
                 )

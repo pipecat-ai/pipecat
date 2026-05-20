@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Task registry for tracking known tasks across runners."""
+"""Worker registry for tracking known workers across runners."""
 
-from pipecat.registry.registry import TaskRegistry
+from pipecat.registry.registry import WorkerRegistry
 
 __all__ = [
-    "TaskRegistry",
+    "WorkerRegistry",
 ]

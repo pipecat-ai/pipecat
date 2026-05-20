@@ -49,7 +49,7 @@ async def _make_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
         FrameProcessorSetup(
             clock=SystemClock(),
             task_manager=task_manager,
-            pipeline_task=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
         )
     )
 

@@ -4,40 +4,40 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Shared registry for tracking known tasks across runners."""
+"""Shared registry for tracking known workers across runners."""
 
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 
 from loguru import logger
 
-from pipecat.registry.types import TaskReadyData
+from pipecat.registry.types import WorkerReadyData
 
-WatchHandler = Callable[[TaskReadyData], Coroutine]
+WatchHandler = Callable[[WorkerReadyData], Coroutine]
 
 
-class TaskRegistry:
-    """Tracks all known tasks across local and remote runners.
+class WorkerRegistry:
+    """Tracks all known workers across local and remote runners.
 
-    Owned by a runner and shared with its tasks. Organizes tasks into
+    Owned by a runner and shared with its workers. Organizes workers into
     local (this runner) and remote (other runners) so they are easy to
-    distinguish. Deduplication is built in: each task name is
+    distinguish. Deduplication is built in: each worker name is
     registered at most once.
 
     Notifications use a targeted watch mechanism: call
-    ``watch(task_name, handler)`` to be notified when a specific task
+    ``watch(worker_name, handler)`` to be notified when a specific worker
     registers.
     """
 
     def __init__(self, runner_name: str):
-        """Initialize the TaskRegistry.
+        """Initialize the WorkerRegistry.
 
         Args:
             runner_name: Name of the runner that owns this registry.
         """
         self._runner_name = runner_name
-        self._local_tasks: dict[str, TaskReadyData] = {}
-        self._remote_tasks: dict[str, dict[str, TaskReadyData]] = defaultdict(dict)
+        self._local_workers: dict[str, WorkerReadyData] = {}
+        self._remote_workers: dict[str, dict[str, WorkerReadyData]] = defaultdict(dict)
         self._watches: dict[str, list[WatchHandler]] = defaultdict(list)
 
     @property
@@ -46,84 +46,84 @@ class TaskRegistry:
         return self._runner_name
 
     @property
-    def local_tasks(self) -> list[str]:
-        """Names of tasks registered under this runner."""
-        return list(self._local_tasks.keys())
+    def local_workers(self) -> list[str]:
+        """Names of workers registered under this runner."""
+        return list(self._local_workers.keys())
 
     @property
-    def remote_tasks(self) -> list[str]:
-        """Names of tasks registered under remote runners."""
+    def remote_workers(self) -> list[str]:
+        """Names of workers registered under remote runners."""
         result: list[str] = []
-        for tasks in self._remote_tasks.values():
-            result.extend(tasks.keys())
+        for workers in self._remote_workers.values():
+            result.extend(workers.keys())
         return result
 
-    def get(self, task_name: str) -> TaskReadyData | None:
-        """Look up a registered task by name.
+    def get(self, worker_name: str) -> WorkerReadyData | None:
+        """Look up a registered worker by name.
 
         Args:
-            task_name: The task name to look up.
+            worker_name: The worker name to look up.
 
         Returns:
-            The task's ``TaskReadyData``, or None if not found.
+            The worker's ``WorkerReadyData``, or None if not found.
         """
-        if task_name in self._local_tasks:
-            return self._local_tasks[task_name]
-        for tasks in self._remote_tasks.values():
-            if task_name in tasks:
-                return tasks[task_name]
+        if worker_name in self._local_workers:
+            return self._local_workers[worker_name]
+        for workers in self._remote_workers.values():
+            if worker_name in workers:
+                return workers[worker_name]
         return None
 
-    def __contains__(self, task_name: str) -> bool:
-        return self.get(task_name) is not None
+    def __contains__(self, worker_name: str) -> bool:
+        return self.get(worker_name) is not None
 
-    async def watch(self, task_name: str, handler: WatchHandler) -> None:
-        """Watch for a specific task's registration.
+    async def watch(self, worker_name: str, handler: WatchHandler) -> None:
+        """Watch for a specific worker's registration.
 
-        If the task is already registered, the handler fires immediately.
+        If the worker is already registered, the handler fires immediately.
 
         Args:
-            task_name: The task name to watch for.
-            handler: Async callable invoked with the task's data.
+            worker_name: The worker name to watch for.
+            handler: Async callable invoked with the worker's data.
         """
-        self._watches[task_name].append(handler)
-        existing = self.get(task_name)
+        self._watches[worker_name].append(handler)
+        existing = self.get(worker_name)
         if existing:
             await handler(existing)
 
-    async def register(self, task_data: TaskReadyData) -> bool:
-        """Register a task. Returns True if the task was new.
+    async def register(self, worker_data: WorkerReadyData) -> bool:
+        """Register a worker. Returns True if the worker was new.
 
-        If the task is already registered, this is a no-op and returns
-        False. Otherwise the task is added and watchers are notified.
+        If the worker is already registered, this is a no-op and returns
+        False. Otherwise the worker is added and watchers are notified.
 
         Args:
-            task_data: Information about the task to register.
+            worker_data: Information about the worker to register.
 
         Returns:
-            True if the task was newly registered, False if already known.
+            True if the worker was newly registered, False if already known.
         """
-        is_local = task_data.runner == self._runner_name
-        target = self._local_tasks if is_local else self._remote_tasks[task_data.runner]
+        is_local = worker_data.runner == self._runner_name
+        target = self._local_workers if is_local else self._remote_workers[worker_data.runner]
 
-        if task_data.task_name in target:
+        if worker_data.worker_name in target:
             return False
 
         # Warn if the same name exists on a different runner
-        existing = self.get(task_data.task_name)
-        if existing and existing.runner != task_data.runner:
+        existing = self.get(worker_data.worker_name)
+        if existing and existing.runner != worker_data.runner:
             logger.warning(
-                f"Task '{task_data.task_name}' registered on both "
-                f"'{existing.runner}' and '{task_data.runner}'"
+                f"Worker '{worker_data.worker_name}' registered on both "
+                f"'{existing.runner}' and '{worker_data.runner}'"
             )
 
-        target[task_data.task_name] = task_data
-        locality = "local" if is_local else task_data.runner
-        logger.debug(f"Task '{task_data.task_name}' ready ({locality})")
-        await self._notify(task_data)
+        target[worker_data.worker_name] = worker_data
+        locality = "local" if is_local else worker_data.runner
+        logger.debug(f"Worker '{worker_data.worker_name}' ready ({locality})")
+        await self._notify(worker_data)
         return True
 
-    async def _notify(self, task_data: TaskReadyData) -> None:
+    async def _notify(self, worker_data: WorkerReadyData) -> None:
         """Notify watchers of a new registration."""
-        for handler in self._watches.get(task_data.task_name, []):
-            await handler(task_data)
+        for handler in self._watches.get(worker_data.worker_name, []):
+            await handler(worker_data)

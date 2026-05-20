@@ -13,7 +13,7 @@ from pipecat.bus import (
     BusJobRequestMessage,
     BusJobResponseMessage,
 )
-from pipecat.pipeline.base_task import BaseTask
+from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_context import (
     JobError,
     JobEvent,
@@ -21,16 +21,16 @@ from pipecat.pipeline.job_context import (
     JobGroupEvent,
     JobStatus,
 )
-from pipecat.registry import TaskRegistry
-from pipecat.registry.types import TaskReadyData
+from pipecat.registry import WorkerRegistry
+from pipecat.registry.types import WorkerReadyData
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 
-class StubTask(BaseTask):
+class StubTask(BaseWorker):
     pass
 
 
-class JobWorkerTask(BaseTask):
+class JobWorkerTask(BaseWorker):
     """Worker that automatically responds to job requests via the bus."""
 
     def __init__(self, name, *, response=None, status=JobStatus.COMPLETED):
@@ -43,7 +43,7 @@ class JobWorkerTask(BaseTask):
         await self.send_job_response(message.job_id, self._auto_response, status=self._auto_status)
 
 
-class UrgentJobWorkerTask(BaseTask):
+class UrgentJobWorkerTask(BaseWorker):
     """Worker that responds urgently to job requests."""
 
     def __init__(self, name, *, response=None, status=JobStatus.COMPLETED):
@@ -58,7 +58,7 @@ class UrgentJobWorkerTask(BaseTask):
         )
 
 
-class UpdatingWorkerTask(BaseTask):
+class UpdatingWorkerTask(BaseWorker):
     """Worker that sends updates before responding."""
 
     def __init__(self, name, *, updates, response=None):
@@ -73,7 +73,7 @@ class UpdatingWorkerTask(BaseTask):
         await self.send_job_response(message.job_id, self._auto_response)
 
 
-class StreamingWorkerTask(BaseTask):
+class StreamingWorkerTask(BaseWorker):
     """Worker that streams data before responding."""
 
     def __init__(self, name, *, chunks, response=None):
@@ -89,7 +89,7 @@ class StreamingWorkerTask(BaseTask):
         await self.send_job_stream_end(message.job_id, self._auto_response)
 
 
-class SlowWorkerTask(BaseTask):
+class SlowWorkerTask(BaseWorker):
     """Worker that blocks during job execution until cancelled."""
 
     def __init__(self, name):
@@ -113,7 +113,7 @@ async def create_test_env():
     tm.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
     await bus.setup(tm)
     await bus.start()
-    registry = TaskRegistry(runner_name="test-runner")
+    registry = WorkerRegistry(runner_name="test-runner")
     return bus, tm, registry
 
 
@@ -122,7 +122,7 @@ async def setup_task(bus, registry, task):
     task.attach(registry=registry, bus=bus)
     await task.setup(bus.task_manager)
     await bus.subscribe(task)
-    await registry.register(TaskReadyData(task_name=task.name, runner="test-runner"))
+    await registry.register(WorkerReadyData(worker_name=task.name, runner="test-runner"))
 
 
 def capture_bus(bus):
@@ -351,7 +351,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(events), 2)
         self.assertEqual(events[0].type, JobGroupEvent.UPDATE)
-        self.assertEqual(events[0].task_name, "worker")
+        self.assertEqual(events[0].worker_name, "worker")
         self.assertEqual(events[0].data, {"progress": 25})
         self.assertEqual(events[1].data, {"progress": 75})
         self.assertEqual(tg.responses, {"worker": {"result": "done"}})
@@ -405,7 +405,7 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].type, JobGroupEvent.UPDATE)
-        self.assertEqual(events[0].task_name, "w1")
+        self.assertEqual(events[0].worker_name, "w1")
         self.assertEqual(tg.responses, {"w1": {"a": 1}, "w2": {"b": 2}})
 
     async def test_job_group_no_iteration_still_works(self):

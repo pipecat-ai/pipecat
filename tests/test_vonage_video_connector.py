@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 
@@ -247,7 +248,11 @@ class TestVonageVideoConnectorTransport:
         clock: SystemClock = SystemClock()  # type: ignore[no-untyped-call]
         task_manager = TaskManager()
         task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
-        self._frame_processor_setup = FrameProcessorSetup(clock=clock, task_manager=task_manager)
+        self._frame_processor_setup = FrameProcessorSetup(
+            clock=clock,
+            task_manager=task_manager,
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+        )
         return self._frame_processor_setup
 
     async def _wait_for_condition(

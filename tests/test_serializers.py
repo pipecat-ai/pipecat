@@ -9,7 +9,7 @@ import unittest
 from pydantic import BaseModel
 
 from pipecat.bus.messages import (
-    BusActivateTaskMessage,
+    BusActivateWorkerMessage,
     BusCancelMessage,
     BusDataMessage,
     BusEndMessage,
@@ -60,8 +60,8 @@ class TestJSONMessageSerializer(unittest.TestCase):
         self.assertIsNone(restored.target)
 
     def test_round_trip_activate_message(self):
-        """BusActivateTaskMessage with args round-trips."""
-        msg = BusActivateTaskMessage(
+        """BusActivateWorkerMessage with args round-trips."""
+        msg = BusActivateWorkerMessage(
             source="parent",
             target="child",
             args={"messages": [{"role": "user", "content": "hello"}]},
@@ -69,7 +69,7 @@ class TestJSONMessageSerializer(unittest.TestCase):
         data = self.serializer.serialize(msg)
         restored = self.serializer.deserialize(data)
 
-        self.assertIsInstance(restored, BusActivateTaskMessage)
+        self.assertIsInstance(restored, BusActivateWorkerMessage)
         self.assertEqual(restored.source, "parent")
         self.assertEqual(restored.target, "child")
         self.assertEqual(restored.args["messages"][0]["content"], "hello")

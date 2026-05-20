@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -87,7 +87,7 @@ async def main():
         ]
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -100,7 +100,7 @@ async def main():
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
         await asyncio.sleep(1)
-        await task.queue_frame(
+        await worker.queue_frame(
             TTSSpeakFrame(
                 "Hello there! How are you doing today? Would you like to talk about the weather?"
             )
@@ -116,7 +116,7 @@ async def main():
         # convert data from bytes to string
         json_data = json.loads(data)
 
-        await task.queue_frames(
+        await worker.queue_frames(
             [
                 InterruptionFrame(),
                 UserStartedSpeakingFrame(),
@@ -131,7 +131,7 @@ async def main():
 
     runner = PipelineRunner()
 
-    await runner.run(task)
+    await runner.run(worker)
 
 
 if __name__ == "__main__":
