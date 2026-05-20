@@ -154,13 +154,13 @@ class TestWebSocketProxyClientTask(unittest.IsolatedAsyncioTestCase):
         task = await self._create_client(fake_ws)
 
         sent_to_bus = []
-        original_send = task.send_message
+        original_send = task.send_bus_message
 
         async def capture_send(message):
             sent_to_bus.append(message)
             await original_send(message)
 
-        task.send_message = capture_send
+        task.send_bus_message = capture_send
 
         msg = BusDataMessage(source="worker", target="voice")
         fake_ws.inject(self.serializer.serialize(msg))
@@ -183,13 +183,13 @@ class TestWebSocketProxyClientTask(unittest.IsolatedAsyncioTestCase):
         task = await self._create_client(fake_ws)
 
         sent_to_bus = []
-        original_send = task.send_message
+        original_send = task.send_bus_message
 
         async def capture_send(message):
             sent_to_bus.append(message)
             await original_send(message)
 
-        task.send_message = capture_send
+        task.send_bus_message = capture_send
 
         msg = BusDataMessage(source="worker", target="other_task")
         fake_ws.inject(self.serializer.serialize(msg))
@@ -264,13 +264,13 @@ class TestWebSocketProxyServerTask(unittest.IsolatedAsyncioTestCase):
         task = await self._create_server(fake_ws)
 
         sent_to_bus = []
-        original_send = task.send_message
+        original_send = task.send_bus_message
 
         async def capture_send(message):
             sent_to_bus.append(message)
             await original_send(message)
 
-        task.send_message = capture_send
+        task.send_bus_message = capture_send
 
         msg = BusDataMessage(source="voice", target="worker")
         fake_ws.inject(self.serializer.serialize(msg))
@@ -292,13 +292,13 @@ class TestWebSocketProxyServerTask(unittest.IsolatedAsyncioTestCase):
         task = await self._create_server(fake_ws)
 
         sent_to_bus = []
-        original_send = task.send_message
+        original_send = task.send_bus_message
 
         async def capture_send(message):
             sent_to_bus.append(message)
             await original_send(message)
 
-        task.send_message = capture_send
+        task.send_bus_message = capture_send
 
         msg = BusDataMessage(source="voice", target="other_task")
         fake_ws.inject(self.serializer.serialize(msg))
