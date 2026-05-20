@@ -23,6 +23,8 @@ load_dotenv(override=True)
 TRUE_SAMPLE_RATE = 24000
 DECLARED_SAMPLE_RATE = 48000
 SPEEDUP = DECLARED_SAMPLE_RATE // TRUE_SAMPLE_RATE
+CHUNK_BYTES = int(TRUE_SAMPLE_RATE * 20 / 1000) * 2  # 20 ms, 16-bit mono
+MIN_AUDIO_BUFFER = CHUNK_BYTES * 5  # 100 ms pre-buffer
 
 
 def completion_callback(future):
@@ -52,9 +54,6 @@ class DailyProxyApp(EventHandler):
         # Raw PCM buffer — filled at DECLARED_SAMPLE_RATE speed, drained at TRUE_SAMPLE_RATE speed.
         self._buffer = bytearray()
         self._audio_task: asyncio.Task | None = None
-        # Tracks whether the previous frame was silence, to detect speech→silence transitions.
-        # Initialised True so leading silence before first speech is dropped.
-        self._last_was_silence: bool = True
 
         self._client: CallClient = CallClient(event_handler=self)
         self._client.update_subscription_profiles(
@@ -176,13 +175,12 @@ class DailyProxyApp(EventHandler):
         """
         new_bytes = audio_data.audio_frames
         if self._is_silence(new_bytes):
-            if not self._last_was_silence:
-                # First silence after speech: mark the pause with one chunk.
-                self._buffer.extend(bytes(len(new_bytes) // SPEEDUP))
-                self._last_was_silence = True
+            if len(self._buffer) < MIN_AUDIO_BUFFER:
+                # Below pre-buffer threshold: add silence so the buffer fills up.
+                self._buffer.extend(new_bytes)
+            # else: buffer is healthy, discard silence so it can drain.
             return
 
-        self._last_was_silence = False
         self._buffer.extend(new_bytes)
 
     def _audio_data_received(self, participant_id: str, audio_data: AudioData, audio_source: str):
@@ -192,7 +190,6 @@ class DailyProxyApp(EventHandler):
         """Clear the audio buffer, mimicking the avatar stopping mid-speech."""
         dropped = len(self._buffer)
         self._buffer.clear()
-        self._last_was_silence = True
         logger.info(
             f"Interrupt received — dropped {dropped}B ({dropped / (TRUE_SAMPLE_RATE * 2):.3f}s) from buffer"
         )
@@ -215,25 +212,21 @@ class DailyProxyApp(EventHandler):
         dry it re-enters the waiting state so the next burst also gets the
         pre-buffer delay.
         """
-        chunk_bytes = int(TRUE_SAMPLE_RATE * 20 / 1000) * 2  # 20 ms, 16-bit mono
-        min_audio_buffer = chunk_bytes * 5  # 100 ms pre-buffer
         buffering = True
         last_log_time = self._loop.time()
 
         while True:
             if buffering:
-                if len(self._buffer) >= min_audio_buffer:
+                if len(self._buffer) >= MIN_AUDIO_BUFFER:
                     buffering = False
-                    logger.debug(
-                        f"Pre-buffer reached ({min_audio_buffer}B) — starting playback"
-                    )
+                    logger.debug(f"Pre-buffer reached ({MIN_AUDIO_BUFFER}B) — starting playback")
                 else:
                     await asyncio.sleep(0.001)
                     continue
 
-            if len(self._buffer) >= chunk_bytes:
-                chunk = bytes(self._buffer[:chunk_bytes])
-                del self._buffer[:chunk_bytes]
+            if len(self._buffer) >= CHUNK_BYTES:
+                chunk = bytes(self._buffer[:CHUNK_BYTES])
+                del self._buffer[:CHUNK_BYTES]
 
                 future = asyncio.get_running_loop().create_future()
                 self._audio_source.write_frames(chunk, completion=completion_callback(future))
