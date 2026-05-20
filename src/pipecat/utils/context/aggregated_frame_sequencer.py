@@ -181,7 +181,7 @@ class AggregatedFrameSequencer:
         raw_text = active.tracker.get_llm_consumed() if (active and active.tracker) else None
         emit_context_id = active.context_id if active else context_id
 
-        logger.debug(f"{self._name} Word '{word}' → frame_text='{frame_text}', raw='{raw_text}'")
+        # logger.debug(f"{self._name} Word '{word}' → frame_text='{frame_text}', raw='{raw_text}'")
         frames: list[Frame] = [
             self._build_word_frame(frame_text, pts, emit_context_id, raw_text=raw_text)
         ]
