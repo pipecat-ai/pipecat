@@ -197,7 +197,7 @@ class WebSocketProxyServerTask(BaseTask):
                     # Accept additional message types (e.g. BusFrameMessage).
                     if self._forward_messages and isinstance(message, self._forward_messages):
                         logger.trace(f"Task '{self}': received {message} from client")
-                        await self.send_message(message)
+                        await self.send_bus_message(message)
                         continue
 
                     # Only accept other messages targeted at the local task.
@@ -209,7 +209,7 @@ class WebSocketProxyServerTask(BaseTask):
                         continue
 
                     logger.trace(f"Task '{self}': received {message} from client")
-                    await self.send_message(message)
+                    await self.send_bus_message(message)
                 except Exception:
                     logger.exception(f"Task '{self}': failed to deserialize client message")
         except WebSocketDisconnect:

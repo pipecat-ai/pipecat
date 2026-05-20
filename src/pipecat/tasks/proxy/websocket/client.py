@@ -188,13 +188,13 @@ class WebSocketProxyClientTask(BaseTask):
                         logger.trace(
                             f"Task '{self}': received registry from remote: {message.tasks}"
                         )
-                        await self.send_message(message)
+                        await self.send_bus_message(message)
                         continue
 
                     # Accept additional message types (e.g. BusFrameMessage).
                     if self._forward_messages and isinstance(message, self._forward_messages):
                         logger.trace(f"Task '{self}': received {message} from remote")
-                        await self.send_message(message)
+                        await self.send_bus_message(message)
                         continue
 
                     # Only accept other messages targeted at the local task.
@@ -206,7 +206,7 @@ class WebSocketProxyClientTask(BaseTask):
                         continue
 
                     logger.trace(f"Task '{self}': received {message} from remote")
-                    await self.send_message(message)
+                    await self.send_bus_message(message)
                 except Exception:
                     logger.exception(f"Task '{self}': failed to deserialize remote message")
         except websockets.exceptions.ConnectionClosed:
