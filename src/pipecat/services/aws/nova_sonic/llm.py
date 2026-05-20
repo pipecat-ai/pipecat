@@ -1434,7 +1434,14 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                 else:
                     if self._assistant_is_responding:
                         # TEXT INTERRUPTED before audio started means no AUDIO
-                        # contentEnd will arrive — end the response here.
+                        # contentEnd will arrive — end the response here. Emit
+                        # InterruptionFrame upstream so the assistant aggregator
+                        # marks the message interrupted=True, and downstream so
+                        # BaseOutputTransport can clear any audio it had already
+                        # buffered. Must fire before _report_assistant_response_ended
+                        # so the aggregator handles InterruptionFrame before
+                        # LLMFullResponseEndFrame closes the turn.
+                        await self.broadcast_interruption()
                         self._assistant_is_responding = False
                         await self._report_assistant_response_ended()
                     # Session continuation: TEXT INTERRUPTED is a completion
@@ -1447,6 +1454,18 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                 if stop_reason in ("END_TURN", "INTERRUPTED"):
                     # END_TURN: normal completion. INTERRUPTED: user interrupted
                     # mid-audio. Both mean no more audio for this turn.
+                    if stop_reason == "INTERRUPTED":
+                        # Emit InterruptionFrame upstream so the assistant
+                        # aggregator marks the message interrupted=True, and
+                        # downstream so BaseOutputTransport clears the audio
+                        # buffer (without this the bot keeps talking past the
+                        # interruption while the buffer drains, since Nova
+                        # Sonic doesn't surface server-side interruption any
+                        # other way). Must fire before
+                        # _report_assistant_response_ended so the aggregator
+                        # handles InterruptionFrame before LLMFullResponseEndFrame
+                        # closes the turn.
+                        await self.broadcast_interruption()
                     self._assistant_is_responding = False
                     await self._report_assistant_response_ended()
         elif content.role == Role.USER:

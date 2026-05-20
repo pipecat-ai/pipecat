@@ -604,6 +604,18 @@ class UltravoxRealtimeLLMService(LLMService):
                     case "state":
                         if self._bot_responding and data.get("state") != "speaking":
                             await self._handle_response_end()
+                    case "playback_clear_buffer":
+                        # Server signals that the user interrupted the bot
+                        # mid-speech and any buffered output audio should be
+                        # dropped. Broadcast InterruptionFrame so the assistant
+                        # aggregator records the message interrupted=True
+                        # (upstream) and BaseOutputTransport clears its audio
+                        # buffer (downstream). The subsequent "state" message
+                        # transitioning off "speaking" is what closes the
+                        # response via _handle_response_end; firing the
+                        # interruption first ensures the aggregator handles
+                        # InterruptionFrame before LLMFullResponseEndFrame.
+                        await self.broadcast_interruption()
                     case "client_tool_invocation":
                         await self._handle_tool_invocation(
                             data.get("toolName"), data.get("invocationId"), data.get("parameters")
