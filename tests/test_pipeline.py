@@ -625,6 +625,33 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         except asyncio.CancelledError:
             assert cancelled
 
+    async def test_task_cancel_before_start_reaches_sink(self):
+        class StartBlocker(FrameProcessor):
+            def __init__(self, *, start_received: asyncio.Event, **kwargs):
+                super().__init__(**kwargs)
+                self._start_received = start_received
+                self._block = asyncio.Event()
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if isinstance(frame, StartFrame):
+                    self._start_received.set()
+                    await self._block.wait()
+
+                await self.push_frame(frame, direction)
+
+        start_received = asyncio.Event()
+        pipeline = Pipeline([StartBlocker(start_received=start_received)])
+        task = PipelineTask(pipeline, cancel_timeout_secs=0.1)
+
+        run_task = asyncio.create_task(task.run(PipelineTaskParams(loop=asyncio.get_event_loop())))
+        await start_received.wait()
+        await task.cancel()
+        await asyncio.wait_for(run_task, timeout=1.0)
+
+        assert task.has_finished()
+
     async def test_task_error(self):
         class ErrorProcessor(FrameProcessor):
             def __init__(self, **kwargs):
