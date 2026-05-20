@@ -151,7 +151,7 @@ class DailyProxyApp(EventHandler):
         )
 
     @staticmethod
-    def _is_silence(data: bytes, threshold: int = 200) -> bool:
+    def _is_silence(data: bytes, threshold: int = 10) -> bool:
         # Interpret as 16-bit signed PCM samples and check peak amplitude.
         # WebRTC-injected silence is all zeros; real TTS audio has non-trivial
         # amplitude. This lets us skip buffering frames that Pipecat never wrote,
@@ -160,7 +160,15 @@ class DailyProxyApp(EventHandler):
         return max(abs(s) for s in samples) < threshold
 
     async def _buffer_audio(self, audio_data: AudioData):
-        """Append received bytes to the buffer, skipping WebRTC-injected silence."""
+        """Append received bytes to the buffer, skipping WebRTC-injected silence.
+
+        Speech frames arrive at DECLARED_SAMPLE_RATE speed (~2x real-time) and
+        are added in full — the buffer grows ahead of playback, which is the
+        fast-audio effect we want to observe. The buffer then drains at
+        TRUE_SAMPLE_RATE speed once speech stops.
+
+        Silence frames are dropped from the buffer entirely.
+        """
         new_bytes = audio_data.audio_frames
         if self._is_silence(new_bytes):
             return
