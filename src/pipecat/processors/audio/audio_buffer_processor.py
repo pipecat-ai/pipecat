@@ -85,6 +85,7 @@ class AudioBufferProcessor(FrameProcessor):
         self._bot_turn_audio_buffer = bytearray()
 
         self._recording = False
+        self._recording_start_time: int | None = None
 
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
@@ -111,6 +112,20 @@ class AudioBufferProcessor(FrameProcessor):
             Number of channels (1 for mono, 2 for stereo).
         """
         return self._num_channels
+
+    @property
+    def recording_start_time(self) -> int | None:
+        """Pipeline-clock time at which the current recording started.
+
+        Captured from the processor's clock the moment ``start_recording()`` is
+        called, so downstream consumers can align other pipeline-clock events
+        (e.g. word PTS, turn-boundary events) to the recorded audio's t=0.
+
+        Returns:
+            The recording start time in nanoseconds, or ``None`` if recording
+            has not been started yet (or has been stopped).
+        """
+        return self._recording_start_time
 
     def has_audio(self) -> bool:
         """Check if either user or bot audio buffers contain data.
@@ -143,19 +158,25 @@ class AudioBufferProcessor(FrameProcessor):
     async def start_recording(self):
         """Start recording audio from both user and bot.
 
-        Initializes recording state and resets audio buffers.
+        Initializes recording state, resets audio buffers, and captures the
+        pipeline-clock time at which recording begins (exposed via the
+        ``recording_start_time`` property).
         """
         self._recording = True
+        self._recording_start_time = self._clock.get_time() if self._clock else None
         self._reset_recording()
 
     async def stop_recording(self):
         """Stop recording and trigger final audio data handlers.
 
         Calls audio handlers with any remaining buffered audio before stopping.
+        ``recording_start_time`` is cleared so a subsequent ``start_recording()``
+        call captures a fresh anchor.
         """
         await self._call_on_audio_data_handler()
         self._reset_recording()
         self._recording = False
+        self._recording_start_time = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming audio frames and manage audio buffers.
