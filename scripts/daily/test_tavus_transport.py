@@ -1,3 +1,4 @@
+import array
 import asyncio
 import os
 import signal
@@ -149,9 +150,21 @@ class DailyProxyApp(EventHandler):
             f"(true content: {TRUE_SAMPLE_RATE} Hz, ~{SPEEDUP}x faster than real-time)"
         )
 
+    @staticmethod
+    def _is_silence(data: bytes, threshold: int = 200) -> bool:
+        # Interpret as 16-bit signed PCM samples and check peak amplitude.
+        # WebRTC-injected silence is all zeros; real TTS audio has non-trivial
+        # amplitude. This lets us skip buffering frames that Pipecat never wrote,
+        # so the buffer only grows when actual speech arrives (via our trick).
+        samples = array.array("h", data)
+        return max(abs(s) for s in samples) < threshold
+
     async def _buffer_audio(self, audio_data: AudioData):
-        """Append received bytes to the buffer and log the fill rate."""
+        """Append received bytes to the buffer, skipping WebRTC-injected silence."""
         new_bytes = audio_data.audio_frames
+        if self._is_silence(new_bytes):
+            return
+
         if self._receive_start_time is None:
             self._receive_start_time = time.monotonic()
 
