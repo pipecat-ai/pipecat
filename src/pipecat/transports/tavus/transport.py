@@ -648,7 +648,11 @@ class TavusOutputTransport(BaseOutputTransport):
         await self._client.start(frame)
 
         if self._transport_destination:
-            await self._client.register_audio_destination(self._transport_destination)
+            # auto_silence=False so the CustomAudioSource only writes frames when
+            # there is real TTS audio.
+            await self._client.register_audio_destination(
+                self._transport_destination, auto_silence=True
+            )
 
         await self.set_transport_ready(frame)
 
