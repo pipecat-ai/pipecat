@@ -840,6 +840,7 @@ class SarvamSTTService(STTService):
                             time_now_iso8601(),
                             language,
                             result=(message.dict() if hasattr(message, "dict") else str(message)),
+                            finalized=True,
                         )
                     )
 
