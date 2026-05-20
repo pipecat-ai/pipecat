@@ -204,6 +204,15 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     Implements the OpenAI Realtime API with WebSocket communication for low-latency
     bidirectional audio and text interactions. Supports function calling, conversation
     management, and real-time transcription.
+
+    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
+    OpenAI's server-side VAD events, so pipeline processors that depend on
+    those frames (RTVI client speech events, ``TurnTrackingObserver``,
+    ``AudioBufferProcessor`` turn recording, ``UserIdleController``, user
+    mute strategies, voicemail detector) work out of the box. Pair with
+    ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
+    so context writes are decoupled from those frames; see the
+    ``examples/realtime/realtime-openai.py`` example.
     """
 
     Settings = OpenAIRealtimeLLMSettings

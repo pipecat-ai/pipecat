@@ -195,6 +195,11 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         - Built-in tools (web_search, x_search, file_search)
         - Custom function calling
         - Server-side VAD (Voice Activity Detection)
+
+    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
+    Grok's server-side VAD events. Pair with
+    ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
+    so context writes are decoupled from those frames.
     """
 
     Settings = GrokRealtimeLLMSettings

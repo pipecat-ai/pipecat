@@ -361,6 +361,18 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     This service enables real-time conversations with Gemini, supporting both
     text and audio modalities. It handles voice transcription, streaming audio
     responses, and tool usage.
+
+    Does NOT emit ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``
+    (the API exposes an ``interrupted`` event but no turn-start/-end), so
+    pipeline processors that depend on those frames — RTVI client speech
+    events, ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn
+    recording, ``UserIdleController``, user mute strategies, voicemail
+    detector — won't activate with the default server-VAD-only setup. Pair
+    with ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
+    so context writes are correct anyway. To produce the turn frames
+    locally, see ``examples/realtime/realtime-gemini-live-local-vad.py``;
+    note that locally-generated turn boundaries are a heuristic and may
+    not match Gemini Live's server-side turn decisions.
     """
 
     Settings = GeminiLiveLLMSettings

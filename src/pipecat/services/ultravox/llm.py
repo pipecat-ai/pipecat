@@ -174,6 +174,17 @@ class UltravoxRealtimeLLMService(LLMService):
 
     Note: Ultravox is an audio-native model, so voice transcriptions are not used
     by the model and may not always align with its understanding of user input.
+
+    Does NOT emit ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``,
+    so pipeline processors that depend on those frames — RTVI client
+    speech events, ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn
+    recording, ``UserIdleController``, user mute strategies, voicemail
+    detector — won't activate with the default server-VAD-only setup. Pair
+    with ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
+    so context writes are correct anyway. To produce the turn frames
+    locally, wire ``vad_analyzer=SileroVADAnalyzer()`` (or similar) into
+    ``LLMUserAggregatorParams``; locally-generated turn boundaries are a
+    heuristic and may not match Ultravox's server-side turn decisions.
     """
 
     Settings = UltravoxRealtimeLLMSettings

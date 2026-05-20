@@ -201,6 +201,11 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     Supports function calling, conversation management, and real-time
     transcription.
 
+    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
+    Inworld's server-side VAD events. Pair with
+    ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
+    so context writes are decoupled from those frames.
+
     Example::
 
         llm = InworldRealtimeLLMService(
