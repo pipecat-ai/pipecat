@@ -558,8 +558,9 @@ class GladiaSTTService(WebsocketSTTService):
 
             logger.debug(f"{self} Connected to Gladia WebSocket")
         except Exception as e:
+            self._websocket = None
+            self._connection_active = False
             await self.push_error(error_msg=f"Unable to connect to Gladia: {e}", exception=e)
-            raise
 
     async def _disconnect_websocket(self):
         """Close the websocket connection to Gladia."""

@@ -5,8 +5,10 @@
 #
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
+from websockets.protocol import State
 
 from pipecat.frames.frames import TranscriptionFrame
 from pipecat.services.soniox.stt import END_TOKEN, SonioxSTTService, _language_from_tokens
@@ -14,8 +16,10 @@ from pipecat.transcriptions.language import Language
 
 
 class _FakeWebsocket:
-    def __init__(self, messages):
+    def __init__(self, messages, *, state=State.OPEN, send_side_effect=None):
         self._messages = messages
+        self.state = state
+        self.send = AsyncMock(side_effect=send_side_effect)
 
     def __aiter__(self):
         return self._iter_messages()
@@ -23,6 +27,21 @@ class _FakeWebsocket:
     async def _iter_messages(self):
         for message in self._messages:
             yield message
+
+
+@pytest.mark.asyncio
+async def test_connect_failure_clears_stale_websocket_without_raising(monkeypatch):
+    async def fake_websocket_connect(*args, **kwargs):
+        raise RuntimeError("connection failed")
+
+    monkeypatch.setattr("pipecat.services.soniox.stt.websocket_connect", fake_websocket_connect)
+
+    service = SonioxSTTService(api_key="test-key")
+    service._websocket = _FakeWebsocket([], state=State.CLOSED)
+
+    await service._connect_websocket()
+
+    assert service._websocket is None
 
 
 def test_language_from_tokens_uses_single_recognized_language():

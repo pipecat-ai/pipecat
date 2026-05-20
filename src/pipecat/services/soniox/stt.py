@@ -537,8 +537,8 @@ class SonioxSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             logger.debug("Connected to Soniox STT")
         except Exception as e:
+            self._websocket = None
             await self.push_error(error_msg=f"Unable to connect to Soniox: {e}", exception=e)
-            raise
 
     async def _disconnect_websocket(self):
         """Close the websocket connection to Soniox."""

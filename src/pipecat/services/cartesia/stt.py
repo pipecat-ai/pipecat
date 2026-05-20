@@ -354,7 +354,8 @@ class CartesiaSTTService(WebsocketSTTService):
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            self._websocket = None
+            await self.push_error(error_msg=f"Unable to connect to Cartesia: {e}", exception=e)
 
     async def _disconnect_websocket(self):
         ws = self._websocket
