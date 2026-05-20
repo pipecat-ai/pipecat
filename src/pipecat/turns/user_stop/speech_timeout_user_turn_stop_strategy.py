@@ -45,16 +45,35 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
     transcript — so the stt wait is marked done immediately.
     """
 
-    def __init__(self, *, user_speech_timeout: float = 0.6, **kwargs):
+    def __init__(
+        self,
+        *,
+        user_speech_timeout: float = 0.6,
+        wait_for_transcript: bool = True,
+        **kwargs,
+    ):
         """Initialize the speech timeout-based user turn stop strategy.
 
         Args:
             user_speech_timeout: Time to wait for the user to potentially
                 say more after they pause speaking. Defaults to 0.6 seconds.
+            wait_for_transcript: Whether to require at least one transcript
+                before triggering end-of-turn. When True (default), turn-end
+                fires only after the user-speech timer expires *and* at least
+                one transcript has been received. When False, the strategy
+                signals turn-end as soon as VAD reports end of speech and the
+                user-speech timer has elapsed — independent of transcripts.
+                Set this to False when local turn detection is the intended
+                driver of the conversation (e.g. with a realtime LLM service
+                consuming audio directly), so transcripts are off the latency
+                critical path. ``LLMContextAggregatorPair`` flips this for
+                you when ``realtime_service_mode`` is configured with
+                ``turns_await_transcripts=False``.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._user_speech_timeout = user_speech_timeout
+        self._wait_for_transcript = wait_for_transcript
         self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
         self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
         self._stop_secs_warned: bool = False
@@ -68,6 +87,15 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._stt_timeout_task: asyncio.Task | None = None
         self._user_speech_wait_done: bool = False
         self._stt_wait_done: bool = False
+
+    @property
+    def wait_for_transcript(self) -> bool:
+        """Whether transcripts gate end-of-turn signalling."""
+        return self._wait_for_transcript
+
+    @wait_for_transcript.setter
+    def wait_for_transcript(self, value: bool) -> None:
+        self._wait_for_transcript = value
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -252,10 +280,14 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         Both timers must be done (stt is marked done immediately on the
         fallback path and when finalization short-circuits the safety net),
-        the user must not be currently speaking, and at least one transcript
-        must have been received.
+        the user must not be currently speaking, and — when
+        ``wait_for_transcript`` is True — at least one transcript must
+        have been received.
         """
-        if self._vad_user_speaking or not self._text:
+        if self._vad_user_speaking:
+            return
+
+        if self._wait_for_transcript and not self._text:
             return
 
         if self._user_speech_wait_done and self._stt_wait_done:
