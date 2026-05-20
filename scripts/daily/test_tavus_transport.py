@@ -1,6 +1,7 @@
 import asyncio
 import os
 import signal
+import time
 
 from daily import (
     AudioData,
@@ -14,6 +15,14 @@ from dotenv import load_dotenv
 from loguru import logger
 
 load_dotenv(override=True)
+
+# Pipecat sends audio at this true content rate but declares it as
+# DECLARED_SAMPLE_RATE to write_frames(), which makes delivery faster than
+# real-time. We receive at the declared rate (no resampling) and play back at
+# the true rate so the avatar consumes audio at normal speed.
+TRUE_SAMPLE_RATE = 24000
+DECLARED_SAMPLE_RATE = 48000
+SPEEDUP = DECLARED_SAMPLE_RATE // TRUE_SAMPLE_RATE
 
 
 def completion_callback(future):
@@ -37,19 +46,21 @@ class DailyProxyApp(EventHandler):
     def __new__(cls, *args, **kwargs):
         return super().__new__(cls)
 
-    def __init__(self, sample_rate: int):
+    def __init__(self):
         super().__init__()
-        self._sample_rate = sample_rate
         self._loop = asyncio.new_event_loop()
-        self._audio_queue: asyncio.Queue = asyncio.Queue()
+        # Raw PCM buffer — filled at DECLARED_SAMPLE_RATE speed, drained at TRUE_SAMPLE_RATE speed.
+        self._buffer = bytearray()
         self._audio_task: asyncio.Task | None = None
+        self._receive_start_time: float | None = None
 
         self._client: CallClient = CallClient(event_handler=self)
         self._client.update_subscription_profiles(
             {"base": {"camera": "unsubscribed", "microphone": "subscribed"}}
         )
 
-        self._audio_source = CustomAudioSource(self._sample_rate, 1)
+        # Playback source declared at TRUE_SAMPLE_RATE — consumes audio at real-time speed.
+        self._audio_source = CustomAudioSource(TRUE_SAMPLE_RATE, 1)
         self._audio_track = CustomAudioTrack(self._audio_source)
 
     def on_joined(self, data, error):
@@ -113,7 +124,6 @@ class DailyProxyApp(EventHandler):
         if self._audio_task:
             self._audio_task.cancel()
             try:
-                # Waits for it to finish
                 await self._audio_task
             except asyncio.CancelledError:
                 pass
@@ -121,36 +131,60 @@ class DailyProxyApp(EventHandler):
 
     async def capture_participant_audio(self, participant_id: str):
         logger.info(f"Capturing participant audio: {participant_id}")
-        # Receiving from this custom track
-        # audio_source: str = "microphone"
         audio_source: str = "stream"
         media = {"media": {"customAudio": {audio_source: "subscribed"}}}
         await self.update_subscriptions(participant_settings={participant_id: media})
 
+        # Must match the declared rate Pipecat used so WebRTC skips resampling —
+        # every original byte arrives intact.
         self._client.set_audio_renderer(
             participant_id,
             self._audio_data_received,
             audio_source=audio_source,
-            sample_rate=self._sample_rate,
+            sample_rate=DECLARED_SAMPLE_RATE,
             callback_interval_ms=20,
         )
+        logger.info(
+            f"Receiving at declared_rate={DECLARED_SAMPLE_RATE} Hz "
+            f"(true content: {TRUE_SAMPLE_RATE} Hz, ~{SPEEDUP}x faster than real-time)"
+        )
 
-    async def send_audio(self, audio: AudioData):
-        future = asyncio.get_running_loop().create_future()
-        self._audio_source.write_frames(audio.audio_frames, completion=completion_callback(future))
-        await future
+    async def _buffer_audio(self, audio_data: AudioData):
+        """Append received bytes to the buffer and log the fill rate."""
+        new_bytes = audio_data.audio_frames
+        if self._receive_start_time is None:
+            self._receive_start_time = time.monotonic()
 
-    async def queue_audio(self, audio: AudioData):
-        await self._audio_queue.put(audio)
+        self._buffer.extend(new_bytes)
 
     def _audio_data_received(self, participant_id: str, audio_data: AudioData, audio_source: str):
-        # logger.info(f"Received audio data for {participant_id}, audio_source: {audio_source}")
-        asyncio.run_coroutine_threadsafe(self.queue_audio(audio_data), self._loop)
+        asyncio.run_coroutine_threadsafe(self._buffer_audio(audio_data), self._loop)
 
     async def _audio_task_handler(self):
+        """Drain the buffer at TRUE_SAMPLE_RATE speed (real-time playback)."""
+        chunk_frames = int(TRUE_SAMPLE_RATE * 20 / 1000)  # 20 ms chunks
+        chunk_bytes = chunk_frames * 2  # 16-bit mono
+        last_log_time = self._loop.time()
+
         while True:
-            audio = await self._audio_queue.get()
-            await self.send_audio(audio)
+            if len(self._buffer) >= chunk_bytes:
+                chunk = bytes(self._buffer[:chunk_bytes])
+                del self._buffer[:chunk_bytes]
+
+                future = asyncio.get_running_loop().create_future()
+                self._audio_source.write_frames(chunk, completion=completion_callback(future))
+                await future
+            else:
+                await asyncio.sleep(0.001)
+
+            now = self._loop.time()
+            if now - last_log_time >= 1.0:
+                buffer_seconds = len(self._buffer) / (TRUE_SAMPLE_RATE * 2)
+                if buffer_seconds > 0:
+                    logger.info(
+                        f"Buffer status: {len(self._buffer)}B ({buffer_seconds:.3f}s buffered)"
+                    )
+                    last_log_time = now
 
     #
     # Daily (EventHandler)
@@ -160,7 +194,7 @@ class DailyProxyApp(EventHandler):
         participant_name = participant["info"]["userName"]
         logger.info(f"Participant {participant_name} joined")
         if participant_name != "Pipecat":
-            # We are only subscribing for audios from Pipecat.
+            # We are only subscribing for audio from Pipecat.
             return
         asyncio.run_coroutine_threadsafe(
             self.capture_participant_audio(participant_id=participant["id"]), self._loop
@@ -173,7 +207,7 @@ class DailyProxyApp(EventHandler):
 def main():
     Daily.init()
     room_url = os.environ["TAVUS_SAMPLE_ROOM_URL"]
-    app = DailyProxyApp(sample_rate=24000)
+    app = DailyProxyApp()
     app.run(room_url)
 
 

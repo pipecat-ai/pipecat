@@ -40,9 +40,15 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import (
     DailyCallbacks,
+    DailyCustomAudioTrackParams,
     DailyParams,
     DailyTransportClient,
 )
+
+# Opus codec maximum. When the Tavus server supports fast audio delivery it
+# returns this as stream_declared_sample_rate so that write_frames() blocks for
+# n/48000 s instead of n/true_rate s, delivering audio faster than real-time.
+_STREAM_DECLARED_SAMPLE_RATE = 48000
 
 
 class TavusApi:
@@ -69,20 +75,30 @@ class TavusApi:
         # Only for development
         self._dev_room_url = os.getenv("TAVUS_SAMPLE_ROOM_URL")
 
-    async def create_conversation(self, replica_id: str, persona_id: str) -> dict:
+    async def create_conversation(
+        self, replica_id: str, persona_id: str, sample_rate: int
+    ) -> dict:
         """Create a new conversation with the specified replica and persona.
 
         Args:
             replica_id: ID of the replica to use in the conversation.
             persona_id: ID of the persona to use in the conversation.
+            sample_rate: True audio sample rate of the pipeline's output. Sent
+                to Tavus so the server can negotiate fast audio delivery. When
+                the server supports it, the response includes
+                ``stream_declared_sample_rate`` — the rate Pipecat should
+                declare to the ``CustomAudioSource`` for faster-than-realtime
+                delivery.
 
         Returns:
-            Dictionary containing conversation_id and conversation_url.
+            Dictionary containing conversation_id, conversation_url, and
+            optionally stream_declared_sample_rate.
         """
         if self._dev_room_url:
             return {
                 "conversation_id": self.MOCK_CONVERSATION_ID,
                 "conversation_url": self._dev_room_url,
+                "stream_declared_sample_rate": _STREAM_DECLARED_SAMPLE_RATE,
             }
 
         logger.debug(f"Creating Tavus conversation: replica={replica_id}, persona={persona_id}")
@@ -90,6 +106,8 @@ class TavusApi:
         payload = {
             "replica_id": replica_id,
             "persona_id": persona_id,
+            # TODO: start to send it when Tavus start to support it.
+            # "sample_rate": sample_rate,
         }
         async with self._session.post(url, headers=self._headers, json=payload) as r:
             r.raise_for_status()
@@ -202,76 +220,64 @@ class TavusTransportClient:
         self._client: DailyTransportClient | None = None
         self._callbacks = callbacks
         self._params = params
+        self._setup: FrameProcessorSetup | None = None
+        self._initialized = False
 
-    async def _initialize(self) -> str:
-        """Initialize the conversation and return the room URL."""
-        response = await self._api.create_conversation(self._replica_id, self._persona_id)
-        self._conversation_id = response["conversation_id"]
-        return response["conversation_url"]
+    def _build_daily_callbacks(self) -> DailyCallbacks:
+        """Build the DailyCallbacks object."""
+        return DailyCallbacks(
+            on_active_speaker_changed=partial(
+                self._on_handle_callback, "on_active_speaker_changed"
+            ),
+            on_joined=self._on_joined,
+            on_left=self._on_left,
+            on_before_leave=partial(self._on_handle_callback, "on_before_leave"),
+            on_error=partial(self._on_handle_callback, "on_error"),
+            on_app_message=partial(self._on_handle_callback, "on_app_message"),
+            on_call_state_updated=partial(self._on_handle_callback, "on_call_state_updated"),
+            on_client_connected=partial(self._on_handle_callback, "on_client_connected"),
+            on_client_disconnected=partial(self._on_handle_callback, "on_client_disconnected"),
+            on_dialin_connected=partial(self._on_handle_callback, "on_dialin_connected"),
+            on_dialin_ready=partial(self._on_handle_callback, "on_dialin_ready"),
+            on_dialin_stopped=partial(self._on_handle_callback, "on_dialin_stopped"),
+            on_dialin_error=partial(self._on_handle_callback, "on_dialin_error"),
+            on_dialin_warning=partial(self._on_handle_callback, "on_dialin_warning"),
+            on_dialout_answered=partial(self._on_handle_callback, "on_dialout_answered"),
+            on_dialout_connected=partial(self._on_handle_callback, "on_dialout_connected"),
+            on_dialout_stopped=partial(self._on_handle_callback, "on_dialout_stopped"),
+            on_dialout_error=partial(self._on_handle_callback, "on_dialout_error"),
+            on_dialout_warning=partial(self._on_handle_callback, "on_dialout_warning"),
+            on_dtmf_event=partial(self._on_handle_callback, "on_dtmf_event"),
+            on_participant_joined=self._callbacks.on_participant_joined,
+            on_participant_left=self._callbacks.on_participant_left,
+            on_participant_updated=partial(self._on_handle_callback, "on_participant_updated"),
+            on_transcription_message=partial(
+                self._on_handle_callback, "on_transcription_message"
+            ),
+            on_recording_started=partial(self._on_handle_callback, "on_recording_started"),
+            on_recording_stopped=partial(self._on_handle_callback, "on_recording_stopped"),
+            on_recording_error=partial(self._on_handle_callback, "on_recording_error"),
+            on_transcription_stopped=partial(
+                self._on_handle_callback, "on_transcription_stopped"
+            ),
+            on_transcription_error=partial(self._on_handle_callback, "on_transcription_error"),
+        )
 
     async def setup(self, setup: FrameProcessorSetup):
-        """Setup the client and initialize the conversation.
+        """Save setup context for later use in start().
 
         Args:
             setup: The frame processor setup configuration.
         """
-        if self._conversation_id is not None:
-            logger.debug(f"Conversation ID already defined: {self._conversation_id}")
-            return
-        try:
-            room_url = await self._initialize()
-            daily_callbacks = DailyCallbacks(
-                on_active_speaker_changed=partial(
-                    self._on_handle_callback, "on_active_speaker_changed"
-                ),
-                on_joined=self._on_joined,
-                on_left=self._on_left,
-                on_before_leave=partial(self._on_handle_callback, "on_before_leave"),
-                on_error=partial(self._on_handle_callback, "on_error"),
-                on_app_message=partial(self._on_handle_callback, "on_app_message"),
-                on_call_state_updated=partial(self._on_handle_callback, "on_call_state_updated"),
-                on_client_connected=partial(self._on_handle_callback, "on_client_connected"),
-                on_client_disconnected=partial(self._on_handle_callback, "on_client_disconnected"),
-                on_dialin_connected=partial(self._on_handle_callback, "on_dialin_connected"),
-                on_dialin_ready=partial(self._on_handle_callback, "on_dialin_ready"),
-                on_dialin_stopped=partial(self._on_handle_callback, "on_dialin_stopped"),
-                on_dialin_error=partial(self._on_handle_callback, "on_dialin_error"),
-                on_dialin_warning=partial(self._on_handle_callback, "on_dialin_warning"),
-                on_dialout_answered=partial(self._on_handle_callback, "on_dialout_answered"),
-                on_dialout_connected=partial(self._on_handle_callback, "on_dialout_connected"),
-                on_dialout_stopped=partial(self._on_handle_callback, "on_dialout_stopped"),
-                on_dialout_error=partial(self._on_handle_callback, "on_dialout_error"),
-                on_dialout_warning=partial(self._on_handle_callback, "on_dialout_warning"),
-                on_dtmf_event=partial(self._on_handle_callback, "on_dtmf_event"),
-                on_participant_joined=self._callbacks.on_participant_joined,
-                on_participant_left=self._callbacks.on_participant_left,
-                on_participant_updated=partial(self._on_handle_callback, "on_participant_updated"),
-                on_transcription_message=partial(
-                    self._on_handle_callback, "on_transcription_message"
-                ),
-                on_recording_started=partial(self._on_handle_callback, "on_recording_started"),
-                on_recording_stopped=partial(self._on_handle_callback, "on_recording_stopped"),
-                on_recording_error=partial(self._on_handle_callback, "on_recording_error"),
-                on_transcription_stopped=partial(
-                    self._on_handle_callback, "on_transcription_stopped"
-                ),
-                on_transcription_error=partial(self._on_handle_callback, "on_transcription_error"),
-            )
-            self._client = DailyTransportClient(
-                room_url, None, "Pipecat", self._params, daily_callbacks, self._bot_name
-            )
-            await self._client.setup(setup)
-        except Exception as e:
-            logger.error(f"Failed to setup TavusTransportClient: {e}")
-            await self._api.end_conversation(self._conversation_id)
-            self._conversation_id = None
+        self._setup = setup
 
     async def cleanup(self):
         """Cleanup client resources."""
-        try:
-            await self._client.cleanup()
-        except Exception as e:
-            logger.error(f"Exception during cleanup: {e}")
+        if self._client:
+            try:
+                await self._client.cleanup()
+            except Exception as e:
+                logger.error(f"Exception during cleanup: {e}")
 
     async def _on_joined(self, data):
         """Handle joined event."""
@@ -295,12 +301,56 @@ class TavusTransportClient:
         return await self._api.get_persona_name(self._persona_id)
 
     async def start(self, frame: StartFrame):
-        """Start the client and join the room.
+        """Create the conversation, build the Daily client, and join the room.
 
         Args:
             frame: The start frame containing initialization parameters.
         """
+        if self._initialized:
+            return
+        self._initialized = True
+
         logger.debug("TavusTransportClient start invoked!")
+        try:
+            sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
+            response = await self._api.create_conversation(
+                self._replica_id, self._persona_id, sample_rate
+            )
+            self._conversation_id = response["conversation_id"]
+            room_url = response["conversation_url"]
+
+            params = self._params
+            stream_declared_sample_rate = response.get("stream_declared_sample_rate")
+            if stream_declared_sample_rate:
+                # Tavus supports fast audio delivery: we write true-rate PCM bytes into a
+                # CustomAudioSource declared at stream_declared_sample_rate (e.g. 48 kHz).
+                # write_frames() blocks for n/declared_rate seconds instead of n/true_rate
+                # seconds, so audio is delivered faster than real-time. The receiver must
+                # also request the same declared rate so WebRTC skips resampling and every
+                # original byte arrives intact.
+                # We always override sample_rate here even if the user already provided
+                # "stream" params, because the declared rate must match what the server
+                # negotiated — other fields (channels, send_settings) are preserved.
+                logger.debug(
+                    f"Tavus fast audio: true_rate={sample_rate} declared_rate={stream_declared_sample_rate}"
+                )
+                existing = dict(params.custom_audio_track_params or {})
+                existing["stream"] = (
+                    existing.get("stream") or DailyCustomAudioTrackParams()
+                ).model_copy(update={"sample_rate": stream_declared_sample_rate})
+                params = params.model_copy(update={"custom_audio_track_params": existing})
+
+            self._client = DailyTransportClient(
+                room_url, None, "Pipecat", params, self._build_daily_callbacks(), self._bot_name
+            )
+            await self._client.setup(self._setup)
+        except Exception as e:
+            logger.error(f"Failed to start TavusTransportClient: {e}")
+            await self._api.end_conversation(self._conversation_id)
+            self._conversation_id = None
+            self._initialized = False
+            return
+
         await self._client.start(frame)
         await self._client.join()
 
