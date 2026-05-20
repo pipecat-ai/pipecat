@@ -1,7 +1,10 @@
 import array
 import asyncio
+import datetime
+import io
 import os
 import signal
+import wave
 
 from daily import (
     AudioData,
@@ -54,6 +57,8 @@ class DailyProxyApp(EventHandler):
         # Raw PCM buffer — filled at DECLARED_SAMPLE_RATE speed, drained at TRUE_SAMPLE_RATE speed.
         self._buffer = bytearray()
         self._audio_task: asyncio.Task | None = None
+        self._wav_file: wave.Wave_write | None = None
+        self._wav_io: io.FileIO | None = None
 
         self._client: CallClient = CallClient(event_handler=self)
         self._client.update_subscription_profiles(
@@ -70,8 +75,31 @@ class DailyProxyApp(EventHandler):
             print(f"Unable to join meeting: {error}")
             self._loop.call_soon_threadsafe(self._loop.stop)
 
+    def _open_wav(self):
+        os.makedirs("recordings", exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = f"recordings/received_{timestamp}.wav"
+        self._wav_io = open(path, "wb")
+        self._wav_file = wave.open(self._wav_io, "wb")
+        self._wav_file.setnchannels(1)
+        self._wav_file.setsampwidth(2)
+        # Declare TRUE_SAMPLE_RATE so timestamps match bot_*.wav for comparison.
+        # Bytes arrive at DECLARED_SAMPLE_RATE speed (2x real-time) but each byte
+        # is 24kHz content, so the WAV plays back at normal speed.
+        self._wav_file.setframerate(TRUE_SAMPLE_RATE)
+        logger.info(f"Recording received audio to {path}")
+
+    def _close_wav(self):
+        if self._wav_file:
+            self._wav_file.close()
+            self._wav_file = None
+        if self._wav_io:
+            self._wav_io.close()
+            self._wav_io = None
+
     def run(self, meeting_url: str):
         asyncio.set_event_loop(self._loop)
+        self._open_wav()
         self._create_audio_task()
 
         def handle_exit():
@@ -104,6 +132,7 @@ class DailyProxyApp(EventHandler):
         if self._audio_task:
             self._loop.run_until_complete(self._cancel_audio_task())
 
+        self._close_wav()
         self._client.leave()
         self._client.release()
 
@@ -179,6 +208,8 @@ class DailyProxyApp(EventHandler):
         self._buffer.extend(new_bytes)
 
     def _audio_data_received(self, participant_id: str, audio_data: AudioData, audio_source: str):
+        if self._wav_file:
+            self._wav_file.writeframes(audio_data.audio_frames)
         asyncio.run_coroutine_threadsafe(self._buffer_audio(audio_data), self._loop)
 
     async def _handle_interrupt(self):

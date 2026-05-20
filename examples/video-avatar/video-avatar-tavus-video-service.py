@@ -5,8 +5,12 @@
 #
 
 
+import datetime
+import io
 import os
+import wave
 
+import aiofiles
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
@@ -21,6 +25,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -31,6 +36,21 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
+
+
+async def save_audio_file(audio: bytes, filename: str, sample_rate: int, num_channels: int):
+    """Save audio data to a WAV file."""
+    if len(audio) > 0:
+        with io.BytesIO() as buffer:
+            with wave.open(buffer, "wb") as wf:
+                wf.setsampwidth(2)
+                wf.setnchannels(num_channels)
+                wf.setframerate(sample_rate)
+                wf.writeframes(audio)
+            async with aiofiles.open(filename, "wb") as file:
+                await file.write(buffer.getvalue())
+        logger.info(f"Audio saved to {filename}")
+
 
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
@@ -59,7 +79,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
     async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+        stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"], audio_passthrough=True)
 
         tts = CartesiaTTSService(
             api_key=os.environ["CARTESIA_API_KEY"],
@@ -87,6 +107,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
         )
 
+        audiobuffer = AudioBufferProcessor()
+
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
@@ -96,6 +118,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 tts,  # TTS
                 tavus,  # Tavus output layer
                 transport.output(),  # Transport bot output
+                audiobuffer,  # Audio recording
                 assistant_aggregator,  # Assistant spoken responses
             ]
         )
@@ -114,6 +137,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info(f"Client connected")
+            await audiobuffer.start_recording()
             # Kick off the conversation.
             context.add_message(
                 {
@@ -127,6 +151,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         async def on_client_disconnected(transport, client):
             logger.info(f"Client disconnected")
             await task.cancel()
+
+        @audiobuffer.event_handler("on_audio_data")
+        async def on_audio_data(buffer, audio, sample_rate, num_channels):
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"recordings/merged_{timestamp}.wav"
+            os.makedirs("recordings", exist_ok=True)
+            await save_audio_file(audio, filename, sample_rate, num_channels)
+
+        @audiobuffer.event_handler("on_track_audio_data")
+        async def on_track_audio_data(buffer, user_audio, bot_audio, sample_rate, num_channels):
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            os.makedirs("recordings", exist_ok=True)
+            await save_audio_file(user_audio, f"recordings/user_{timestamp}.wav", sample_rate, 1)
+            await save_audio_file(bot_audio, f"recordings/bot_{timestamp}.wav", sample_rate, 1)
 
         runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
