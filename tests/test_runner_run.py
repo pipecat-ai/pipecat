@@ -39,6 +39,7 @@ class TestRunnerRun(unittest.TestCase):
         self.assertEqual(_transport_route_dependencies("daily"), ("daily",))
         self.assertEqual(_transport_route_dependencies("webrtc"), ("aiortc",))
         self.assertEqual(_transport_route_dependencies("websocket"), ("fastapi", "websockets"))
+        self.assertEqual(_transport_route_dependencies("telephony"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("twilio"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("telnyx"), ("fastapi", "websockets"))
         self.assertEqual(_transport_route_dependencies("plivo"), ("fastapi", "websockets"))
@@ -53,6 +54,7 @@ class TestRunnerRun(unittest.TestCase):
             self.assertFalse(_transport_routes_enabled("daily"))
             self.assertFalse(_transport_routes_enabled("webrtc"))
             self.assertTrue(_transport_routes_enabled("websocket"))
+            self.assertTrue(_transport_routes_enabled("telephony"))
             self.assertTrue(_transport_routes_enabled("twilio"))
             self.assertTrue(_transport_routes_enabled("vonage"))
 
@@ -250,7 +252,7 @@ class TestRunnerRun(unittest.TestCase):
         args = argparse.Namespace(transport=None, host="localhost", port=7860)
 
         def routes_enabled(transport: str) -> bool:
-            return transport in {"twilio", "websocket"}
+            return transport in {"telephony", "websocket"}
 
         with patch("pipecat.runner.run._transport_routes_enabled", side_effect=routes_enabled):
             output = self._capture_startup_message(args)

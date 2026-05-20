@@ -135,6 +135,7 @@ TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
 TRANSPORT_ROUTE_DEPENDENCIES = {
     "daily": ("daily",),
     "webrtc": ("aiortc",),
+    "telephony": ("fastapi", "websockets"),
     "websocket": ("fastapi", "websockets"),
 }
 TRANSPORT_INSTALL_HINTS = {
@@ -193,7 +194,7 @@ def _transport_route_dependencies(transport: str) -> tuple[str, ...]:
         Module names required to enable the transport route.
     """
     if transport in TELEPHONY_TRANSPORTS:
-        return TRANSPORT_ROUTE_DEPENDENCIES["websocket"]
+        return TRANSPORT_ROUTE_DEPENDENCIES["telephony"]
     return TRANSPORT_ROUTE_DEPENDENCIES.get(transport, ())
 
 
@@ -221,8 +222,7 @@ def _transport_status_lists() -> tuple[list[str], list[str]]:
     disabled = []
 
     for label in transports:
-        transport = TELEPHONY_TRANSPORTS[0] if label == "telephony" else label
-        if _transport_routes_enabled(transport):
+        if _transport_routes_enabled(label):
             enabled.append(label)
         else:
             disabled.append(f"{label} ({TRANSPORT_INSTALL_HINTS[label]})")
@@ -1051,7 +1051,7 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
     specific telephony transport is chosen via ``-t`` because the XML template
     is provider-specific and requires a proxy hostname (``--proxy``).
     """
-    if not _transport_routes_enabled("twilio"):
+    if not _transport_routes_enabled("telephony"):
         return
 
     if args.transport in TELEPHONY_TRANSPORTS:
