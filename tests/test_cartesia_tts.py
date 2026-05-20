@@ -18,7 +18,7 @@ def _service(language: str) -> CartesiaTTSService:
 def _process_word_timestamps(
     words: list[str], starts: list[float], language: str
 ) -> list[tuple[str, float]]:
-    return _service(language)._process_word_timestamps_for_language(words, starts)
+    return _service(language)._normalize_word_timestamps(words, starts)
 
 
 def _concatenate_processed_timestamps(
@@ -27,7 +27,7 @@ def _concatenate_processed_timestamps(
     service = _service(language)
     text_parts = []
     for words, starts in timestamp_groups:
-        processed_timestamps = service._process_word_timestamps_for_language(words, starts)
+        processed_timestamps = service._normalize_word_timestamps(words, starts)
         includes_inter_frame_spaces = service._word_timestamps_include_inter_frame_spaces()
         text_parts.extend(
             TextPartForConcatenation(
