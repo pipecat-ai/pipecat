@@ -155,7 +155,6 @@ def language_to_soniox_language(language: Language) -> str:
         Language.ID: "id",
         Language.IT: "it",
         Language.JA: "ja",
-        Language.KA: "ka",
         Language.KK: "kk",
         Language.KN: "kn",
         Language.KO: "ko",
@@ -232,6 +231,7 @@ class SonioxSTTSettings(STTSettings):
             context_version 2.
         enable_speaker_diarization: Whether to enable speaker diarization.
         enable_language_identification: Whether to enable language identification.
+        max_endpoint_delay_ms: Max ms before endpoint detection finalizes the turn (500-3000).
         client_reference_id: Client reference ID to use for transcription.
     """
 
@@ -242,6 +242,7 @@ class SonioxSTTSettings(STTSettings):
     enable_language_identification: bool | None | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    max_endpoint_delay_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     client_reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -309,6 +310,7 @@ class SonioxSTTService(WebsocketSTTService):
             context=None,
             enable_speaker_diarization=False,
             enable_language_identification=False,
+            max_endpoint_delay_ms=None,
             client_reference_id=None,
         )
 
@@ -390,8 +392,7 @@ class SonioxSTTService(WebsocketSTTService):
         changed = await super()._update_settings(delta)
 
         if changed:
-            await self._disconnect()
-            await self._connect()
+            await self._request_reconnect()
 
         return changed
 
@@ -522,6 +523,7 @@ class SonioxSTTService(WebsocketSTTService):
                 "audio_format": self._audio_format,
                 "num_channels": self._num_channels,
                 "enable_endpoint_detection": enable_endpoint_detection,
+                "max_endpoint_delay_ms": s.max_endpoint_delay_ms,
                 "sample_rate": self.sample_rate,
                 "language_hints": _prepare_language_hints(assert_given(s.language_hints)),
                 "language_hints_strict": s.language_hints_strict,
