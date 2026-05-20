@@ -50,6 +50,8 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+
+
 def language_to_rime_language(language: Language) -> str:
     """Convert pipecat Language to Rime language code.
 
@@ -108,9 +110,9 @@ class RimeNonJsonTTSSettings(TTSSettings):
 
     Parameters:
         segment: Text segmentation mode ("immediate", "bySentence", "never").
-        repetition_penalty: Token repetition penalty (1.0-2.0).
-        temperature: Sampling temperature (0.0-1.0).
-        top_p: Cumulative probability threshold (0.0-1.0).
+        repetition_penalty: Token repetition penalty (arcana only, 1.0-2.0).
+        temperature: Sampling temperature (arcana only, 0.0-1.0).
+        top_p: Cumulative probability threshold (arcana only, 0.0-1.0).
     """
 
     segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -213,7 +215,7 @@ class RimeTTSService(WebsocketTTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="arcana",
+            model="coda",
             voice=None,
             language=None,
             segment=None,
@@ -341,6 +343,9 @@ class RimeTTSService(WebsocketTTSService):
                 params["temperature"] = self._settings.temperature
             if self._settings.top_p is not None:
                 params["top_p"] = self._settings.top_p
+        elif self._settings.model == "coda":
+            # Coda accepts no model-specific WS params beyond the shared ones above.
+            pass
         else:  # mistv2/mist
             if self._settings.reduceLatency is not None:
                 params["reduceLatency"] = self._settings.reduceLatency
@@ -710,7 +715,7 @@ class RimeHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="mistv2",
+            model="coda",
             voice=None,
             language="eng",
             segment=None,
@@ -804,19 +809,36 @@ class RimeHttpTTSService(TTSService):
             "Content-Type": "application/json",
         }
 
-        payload = {
-            "lang": self._settings.language,
-            "speedAlpha": self._settings.speedAlpha,
-            "reduceLatency": self._settings.reduceLatency,
-            "pauseBetweenBrackets": self._settings.pauseBetweenBrackets,
-            "phonemizeBetweenBrackets": self._settings.phonemizeBetweenBrackets,
+        payload: dict[str, Any] = {
+            "text": text,
+            "speaker": self._settings.voice,
+            "modelId": self._settings.model,
+            "samplingRate": self.sample_rate,
         }
+        if self._settings.language is not None:
+            payload["lang"] = self._settings.language
+        if self._settings.speedAlpha is not None:
+            payload["speedAlpha"] = self._settings.speedAlpha
         if self._settings.inlineSpeedAlpha is not None:
             payload["inlineSpeedAlpha"] = self._settings.inlineSpeedAlpha
-        payload["text"] = text
-        payload["speaker"] = self._settings.voice
-        payload["modelId"] = self._settings.model
-        payload["samplingRate"] = self.sample_rate
+
+        if self._settings.model == "arcana":
+            if self._settings.repetition_penalty is not None:
+                payload["repetition_penalty"] = self._settings.repetition_penalty
+            if self._settings.temperature is not None:
+                payload["temperature"] = self._settings.temperature
+            if self._settings.top_p is not None:
+                payload["top_p"] = self._settings.top_p
+        elif self._settings.model == "coda":
+            # Coda accepts no model-specific HTTP params beyond the shared ones above.
+            pass
+        else:  # mistv2/mist
+            if self._settings.reduceLatency is not None:
+                payload["reduceLatency"] = self._settings.reduceLatency
+            if self._settings.pauseBetweenBrackets is not None:
+                payload["pauseBetweenBrackets"] = self._settings.pauseBetweenBrackets
+            if self._settings.phonemizeBetweenBrackets is not None:
+                payload["phonemizeBetweenBrackets"] = self._settings.phonemizeBetweenBrackets
 
         # Arcana does not support PCM audio
         if payload["modelId"] == "arcana":
@@ -881,9 +903,9 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         Args:
             language: Language for synthesis. Defaults to English.
             segment: Text segmentation mode ("immediate", "bySentence", "never").
-            repetition_penalty: Token repetition penalty (1.0-2.0).
-            temperature: Sampling temperature (0.0-1.0).
-            top_p: Cumulative probability threshold (0.0-1.0).
+            repetition_penalty: Token repetition penalty (arcana only, 1.0-2.0).
+            temperature: Sampling temperature (arcana only, 0.0-1.0).
+            top_p: Cumulative probability threshold (arcana only, 0.0-1.0).
             extra: Additional parameters to pass to the API (for future compatibility).
         """
 
@@ -1073,12 +1095,13 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                 settings_dict["lang"] = self._settings.language
             if self._settings.segment is not None:
                 settings_dict["segment"] = self._settings.segment
-            if self._settings.repetition_penalty is not None:
-                settings_dict["repetition_penalty"] = self._settings.repetition_penalty
-            if self._settings.temperature is not None:
-                settings_dict["temperature"] = self._settings.temperature
-            if self._settings.top_p is not None:
-                settings_dict["top_p"] = self._settings.top_p
+            if self._settings.model == "arcana":
+                if self._settings.repetition_penalty is not None:
+                    settings_dict["repetition_penalty"] = self._settings.repetition_penalty
+                if self._settings.temperature is not None:
+                    settings_dict["temperature"] = self._settings.temperature
+                if self._settings.top_p is not None:
+                    settings_dict["top_p"] = self._settings.top_p
             # Include extras
             settings_dict.update(self._settings.extra)
             params = "&".join(f"{k}={v}" for k, v in settings_dict.items() if v is not None)
