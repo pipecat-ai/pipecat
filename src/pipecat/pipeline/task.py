@@ -12,12 +12,9 @@ including heartbeats, idle detection, and observer integration.
 """
 
 import asyncio
-import importlib.util
-import os
 import warnings
 from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -52,6 +49,7 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
+from pipecat.pipeline.utils import run_setup_hook
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIObserverParams, RTVIProcessor
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
@@ -1068,36 +1066,12 @@ class PipelineTask(BaseTask):
         return True
 
     async def _load_setup_files(self):
-        """Dynamically setup pipeline task from files listed in PIPECAT_SETUP_FILES.
+        """Run ``setup_pipeline_task`` from each file in ``PIPECAT_SETUP_FILES``.
 
-        Each file should contain a `setup_pipeline_task(task)` async function
-        that receives the `PipelineTask` instance and can perform any custom
-        setup (e.g., adding event handlers, observers, or modifying task
-        configuration).
-
+        A setup file may define ``setup_pipeline_task(task)`` to attach event
+        handlers, observers, or other per-task wiring.
         """
-        setup_files = [f for f in os.environ.get("PIPECAT_SETUP_FILES", "").split(":") if f]
-        for f in setup_files:
-            try:
-                path = Path(f).resolve()
-                module_name = path.stem
-                spec = importlib.util.spec_from_file_location(module_name, str(path))
-                if spec and spec.loader:
-                    logger.debug(f"{self} running setup from {path}")
-
-                    # Load module.
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-
-                    # Run setup function.
-                    if hasattr(module, "setup_pipeline_task"):
-                        await module.setup_pipeline_task(self)
-                    else:
-                        logger.warning(
-                            f"{self} setup file {path} has no setup_pipeline_task function"
-                        )
-            except Exception as e:
-                logger.error(f"{self} error running external setup from {f}: {e}")
+        await run_setup_hook(target=self, function_name="setup_pipeline_task")
 
     def _print_dangling_tasks(self):
         """Log any dangling tasks that haven't been properly cleaned up."""

@@ -39,12 +39,9 @@ spawned tasks finishing on their own does **not** unblock it.
 
 import asyncio
 import gc
-import importlib.util
-import os
 import signal
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from loguru import logger
 
@@ -62,6 +59,7 @@ from pipecat.bus import (
 from pipecat.bus.subscriber import BusSubscriber
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task import PipelineTask, PipelineTaskParams
+from pipecat.pipeline.utils import run_setup_hook
 from pipecat.registry import TaskRegistry
 from pipecat.registry.types import TaskReadyData, TaskRegistryEntry
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
@@ -342,28 +340,12 @@ class PipelineRunner(BaseObject, BusSubscriber):
         await asyncio.gather(*remaining, return_exceptions=True)
 
     async def _load_setup_files(self) -> None:
-        """Load setup files from ``PIPECAT_RUNNER_SETUP_FILES``.
+        """Run ``setup_pipeline_runner`` from each file in ``PIPECAT_SETUP_FILES``.
 
-        Each file should contain an async ``setup_runner(runner)`` function
-        that receives the runner instance.
+        A setup file may define ``setup_pipeline_runner(runner)`` to attach
+        spawned tasks, event handlers, or other runner-level wiring.
         """
-        setup_files = [f for f in os.environ.get("PIPECAT_RUNNER_SETUP_FILES", "").split(":") if f]
-        for f in setup_files:
-            try:
-                path = Path(f).resolve()
-                spec = importlib.util.spec_from_file_location(path.stem, str(path))
-                if spec and spec.loader:
-                    logger.debug(f"PipelineRunner '{self}': running setup from {path}")
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-                    if hasattr(module, "setup_runner"):
-                        await module.setup_runner(self)
-                    else:
-                        logger.warning(
-                            f"PipelineRunner '{self}': setup file {path} has no setup_runner function"
-                        )
-            except Exception as e:
-                logger.error(f"PipelineRunner '{self}': error running setup from {f}: {e}")
+        await run_setup_hook(target=self, function_name="setup_pipeline_runner")
 
     async def _start_task(self, entry: _TaskEntry) -> None:
         """Run a registered task as a background asyncio task."""
