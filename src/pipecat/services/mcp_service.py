@@ -244,34 +244,82 @@ class MCPClient(BaseObject):
             error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
             logger.error(error_msg)
 
-        response = ""
-        if results:
-            if hasattr(results, "content") and results.content:
-                for i, content in enumerate(results.content):
-                    if hasattr(content, "text") and content.text:
-                        logger.debug(f"Tool response chunk {i}: {content.text}")
-                        response += content.text
-                    else:
-                        # logger.debug(f"Non-text result content: '{content}'")
-                        pass
-            else:
-                logger.error(f"Error getting content from {function_name} results.")
+        # MCP tool results can carry text, image, audio, embedded resource,
+        # or resource link blocks. Walk the list, collect text into a string
+        # and image blocks into Anthropic-shaped image dicts. If any image
+        # block is present we return a list-of-blocks (which downstream LLM
+        # adapters — Anthropic at least — pass straight through as the
+        # `tool_result.content`, giving the model a multimodal tool result).
+        # If only text blocks are present we keep the existing string
+        # behavior for backward compatibility.
+        text_parts: list[str] = []
+        image_blocks: list[dict] = []
+        if results and hasattr(results, "content") and results.content:
+            for i, content in enumerate(results.content):
+                ctype = getattr(content, "type", None)
+                if ctype == "text" and getattr(content, "text", None):
+                    logger.debug(f"Tool response chunk {i} (text): {content.text}")
+                    text_parts.append(content.text)
+                elif ctype == "image" and getattr(content, "data", None):
+                    logger.debug(
+                        f"Tool response chunk {i} (image): {len(content.data)} chars b64 "
+                        f"mimeType={getattr(content, 'mimeType', None)}"
+                    )
+                    image_blocks.append(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": getattr(content, "mimeType", "image/jpeg"),
+                                "data": content.data,
+                            },
+                        }
+                    )
+                else:
+                    logger.debug(
+                        f"Tool response chunk {i}: unhandled content type={ctype!r}; skipping"
+                    )
+        elif results and (not hasattr(results, "content") or not results.content):
+            logger.error(f"Error getting content from {function_name} results.")
 
-        # Apply output filter if configured for this tool
-        if function_name in self._tools_output_filters:
-            try:
-                response = self._tools_output_filters[function_name](response)
-                logger.debug(f"Final response (after filter): {response}")
-
-            except Exception:
-                logger.error(f"Error applying output filter for {function_name}")
-                response = ""
-
-        if response and len(response) and isinstance(response, str):
-            logger.info(f"Tool '{function_name}' completed successfully")
-            logger.debug(f"Final response: {response}")
+        response: Any
+        if image_blocks:
+            # Multimodal result: emit a list-of-blocks. Output filters that
+            # expect a string get skipped (they're text-only by convention).
+            response = []
+            if text_parts:
+                response.append({"type": "text", "text": "\n".join(text_parts)})
+            response.extend(image_blocks)
+            if function_name in self._tools_output_filters:
+                logger.warning(
+                    f"Tool '{function_name}' returned image content; "
+                    f"skipping configured output filter (filters are text-only)."
+                )
         else:
+            response = "".join(text_parts)
+            # Apply output filter if configured for this tool (text path only).
+            if function_name in self._tools_output_filters:
+                try:
+                    response = self._tools_output_filters[function_name](response)
+                    logger.debug(f"Final response (after filter): {response}")
+                except Exception:
+                    logger.error(f"Error applying output filter for {function_name}")
+                    response = ""
+
+        # Validate: a string-or-empty-list response is treated as failure;
+        # a non-empty list (multimodal) is success.
+        is_empty = (
+            (isinstance(response, str) and not response)
+            or (isinstance(response, list) and not response)
+        )
+        if is_empty:
             response = "Sorry, could not call the mcp tool"
+        else:
+            logger.info(f"Tool '{function_name}' completed successfully")
+            if isinstance(response, str):
+                logger.debug(f"Final response (text): {response}")
+            else:
+                logger.debug(f"Final response (multimodal): {len(response)} block(s)")
 
         await result_callback(response)
 
