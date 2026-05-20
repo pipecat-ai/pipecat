@@ -529,7 +529,7 @@ class BaseTask(BaseObject, BusSubscriber):
         if self._bus:
             await self._bus.send(message)
 
-    async def send_error(self, error: str) -> None:
+    async def send_bus_error_message(self, error: str) -> None:
         """Report an error on the bus.
 
         Child tasks send a local-only message to the parent.
