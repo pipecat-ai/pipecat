@@ -38,7 +38,7 @@ try:
 except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
     logger.error(f"Exception: {e}")
     logger.error("In order to use Hume, you need to `pip install pipecat-ai[hume]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 HUME_SAMPLE_RATE = 48_000  # Hume TTS streams at 48 kHz

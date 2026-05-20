@@ -52,7 +52,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use ElevenLabs Realtime STT, you need to `pip install pipecat-ai[elevenlabs]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_elevenlabs_language(language: Language) -> str:

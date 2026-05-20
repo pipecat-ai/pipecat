@@ -30,7 +30,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Groq, you need to `pip install pipecat-ai[groq]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 # Hint set for `output_format`. The values mirror the Literal that
 # `groq.resources.audio.speech.AsyncSpeech.create` accepts on its

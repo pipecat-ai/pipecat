@@ -38,7 +38,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Fish Audio, you need to `pip install pipecat-ai[fish]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 # FishAudio supports various output formats
 FishAudioOutputFormat = Literal["opus", "mp3", "pcm", "wav"]

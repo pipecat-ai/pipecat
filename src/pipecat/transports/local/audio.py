@@ -28,7 +28,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use local audio, you need to `pip install pipecat-ai[local]`. On MacOS, you also need to `brew install portaudio`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class LocalAudioTransportParams(TransportParams):

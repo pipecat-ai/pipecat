@@ -73,7 +73,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use Vonage Video Connector, you need to `pip install pipecat-ai[vonage-video-connector]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class VonageVideoConnectorTransportParams(TransportParams):
