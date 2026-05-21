@@ -146,7 +146,7 @@ class SmallestTTSService(InterruptibleTTSService):
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
         # Resolve the model early so we can pick the right default voice.
-        model = SmallestTTSModel.LIGHTNING_V3_1
+        model = SmallestTTSModel.LIGHTNING_V3_1_PRO
         if settings is not None and settings.model not in (None, NOT_GIVEN):
             try:
                 model = SmallestTTSModel(settings.model)
