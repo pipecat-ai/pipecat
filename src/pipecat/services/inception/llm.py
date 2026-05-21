@@ -27,6 +27,7 @@ class InceptionLLMSettings(BaseOpenAILLMService.Settings):
             One of "instant", "low", "medium", or "high". When unset, the
             parameter is omitted and Inception's server-side default applies.
         realtime: When True, reduces time to first diffusion block (TTFT).
+            Defaults to True.
     """
 
     reasoning_effort: Literal["instant", "low", "medium", "high"] | None | _NotGiven = field(
@@ -68,7 +69,7 @@ class InceptionLLMService(OpenAILLMService):
         default_settings = self.Settings(
             model="mercury-2",
             reasoning_effort=None,
-            realtime=None,
+            realtime=True,
         )
 
         if settings is not None:
