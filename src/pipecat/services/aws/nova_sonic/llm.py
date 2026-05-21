@@ -1443,16 +1443,15 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
                         if self._sc.on_content_end_assistant_final_text(content.text_content):
                             self.create_task(self._run_sc_handoff(), name="sc_handoff")
                 else:
+                    # FINAL TEXT INTERRUPTED is the canonical barge-in
+                    # signal. The AUDIO branch usually closed the
+                    # response already (AUDIO contentEnd arrives with
+                    # END_TURN on barge-in, before this), but the
+                    # output transport's audio buffer is still draining
+                    # — broadcast unconditionally to clear it.
+                    await self.broadcast_interruption()
                     if self._assistant_is_responding:
-                        # TEXT INTERRUPTED before audio started means no AUDIO
-                        # contentEnd will arrive — end the response here. Emit
-                        # InterruptionFrame upstream so the assistant aggregator
-                        # marks the message interrupted=True, and downstream so
-                        # BaseOutputTransport can clear any audio it had already
-                        # buffered. Must fire before _report_assistant_response_ended
-                        # so the aggregator handles InterruptionFrame before
-                        # LLMFullResponseEndFrame closes the turn.
-                        await self.broadcast_interruption()
+                        # No AUDIO contentEnd will arrive — close here.
                         self._assistant_is_responding = False
                         await self._report_assistant_response_ended()
                     # Session continuation: TEXT INTERRUPTED is a completion
