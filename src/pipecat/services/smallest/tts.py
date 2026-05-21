@@ -47,8 +47,8 @@ except ModuleNotFoundError as e:
 class SmallestTTSModel(StrEnum):
     """Available Smallest AI TTS models."""
 
-    LIGHTNING_V2 = "lightning-v2"
-    LIGHTNING_V3_1 = "lightning-v3.1"
+    LIGHTNING_V3_1 = "lightning_v3.1"
+    LIGHTNING_V3_1_PRO = "lightning_v3.1_pro"
 
 
 def language_to_smallest_tts_language(language: Language) -> str:
@@ -90,16 +90,13 @@ class SmallestTTSSettings(TTSSettings):
     """Settings for SmallestTTSService.
 
     Parameters:
-        speed: Speech speed multiplier.
-        consistency: Consistency level for voice generation (0-1).
-        similarity: Similarity level for voice generation (0-1).
-        enhancement: Enhancement level for voice generation (0-2).
+        speed: Speech speed multiplier (0.5–2.0).
+        output_format: Audio output format. One of ``pcm``, ``mp3``, ``wav``,
+            ``ulaw``, ``alaw``. Defaults to ``pcm``.
     """
 
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    consistency: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    similarity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enhancement: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -147,9 +144,7 @@ class SmallestTTSService(InterruptibleTTSService):
             voice="sophia",
             language=Language.EN,
             speed=None,
-            consistency=None,
-            similarity=None,
-            enhancement=None,
+            output_format=None,
         )
 
         if settings is not None:
@@ -204,6 +199,7 @@ class SmallestTTSService(InterruptibleTTSService):
         msg = {
             "text": text,
             "voice_id": self._settings.voice,
+            "model": self._settings.model,
             "language": self._settings.language,
             "sample_rate": self.sample_rate,
         }
@@ -211,20 +207,14 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.speed is not None:
             msg["speed"] = self._settings.speed
 
-        # consistency, similarity, enhancement are only supported by lightning-v2
-        if self._settings.model == SmallestTTSModel.LIGHTNING_V2.value:
-            if self._settings.consistency is not None:
-                msg["consistency"] = self._settings.consistency
-            if self._settings.similarity is not None:
-                msg["similarity"] = self._settings.similarity
-            if self._settings.enhancement is not None:
-                msg["enhancement"] = self._settings.enhancement
+        if self._settings.output_format is not None:
+            msg["output_format"] = self._settings.output_format
 
         return msg
 
     def _build_websocket_url(self) -> str:
-        """Build the WebSocket URL from base URL and model."""
-        return f"{self._base_url}/waves/v1/{self._settings.model}/get_speech/stream"
+        """Build the WebSocket URL."""
+        return f"{self._base_url}/waves/v1/tts/live"
 
     async def start(self, frame: StartFrame):
         """Start the Smallest TTS service.
@@ -254,22 +244,12 @@ class SmallestTTSService(InterruptibleTTSService):
         await self._disconnect()
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta, reconnecting if model changed.
+        """Apply a settings delta.
 
-        Per-message fields (speed, consistency, similarity, enhancement, voice,
-        language) apply automatically on the next ``_build_msg`` call. A model
-        change requires reconnecting because the model is part of the WebSocket URL.
+        All fields (model, speed, output_format, voice, language) take effect
+        on the next ``_build_msg`` call without reconnecting.
         """
-        changed = await super()._update_settings(delta)
-
-        if not changed:
-            return changed
-
-        if "model" in changed:
-            await self._disconnect()
-            await self._connect()
-
-        return changed
+        return await super()._update_settings(delta)
 
     async def _connect(self):
         """Connect to Smallest WebSocket and start receive task."""
@@ -362,6 +342,7 @@ class SmallestTTSService(InterruptibleTTSService):
             msg = {
                 "text": " ",
                 "voice_id": self._settings.voice,
+                "model": self._settings.model,
                 "language": self._settings.language,
             }
             await self._websocket.send(json.dumps(msg))
