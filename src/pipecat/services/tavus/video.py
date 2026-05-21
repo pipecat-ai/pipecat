@@ -11,6 +11,10 @@ avatar functionality through Tavus's streaming API.
 """
 
 import asyncio
+import datetime
+import io
+import os
+import wave
 from dataclasses import dataclass
 
 import aiohttp
@@ -103,6 +107,8 @@ class TavusVideoService(AIService):
         # This is the custom track destination expected by Tavus
         self._transport_destination: str | None = "stream"
         self._transport_ready = False
+        self._wav_file: wave.Wave_write | None = None
+        self._wav_io: io.FileIO | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the Tavus video service.
@@ -204,6 +210,25 @@ class TavusVideoService(AIService):
         """
         return await self._client.get_persona_name()
 
+    def _open_wav(self, sample_rate: int):
+        os.makedirs("recordings", exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = f"recordings/bot_pre_speed_{timestamp}.wav"
+        self._wav_io = open(path, "wb")
+        self._wav_file = wave.open(self._wav_io, "wb")
+        self._wav_file.setnchannels(1)
+        self._wav_file.setsampwidth(2)
+        self._wav_file.setframerate(sample_rate)
+        logger.info(f"Recording outgoing audio to {path}")
+
+    def _close_wav(self):
+        if self._wav_file:
+            self._wav_file.close()
+            self._wav_file = None
+        if self._wav_io:
+            self._wav_io.close()
+            self._wav_io = None
+
     async def start(self, frame: StartFrame):
         """Start the Tavus video service.
 
@@ -216,6 +241,7 @@ class TavusVideoService(AIService):
             await self._client.register_audio_destination(
                 self._transport_destination, auto_silence=False
             )
+        self._open_wav(self._client.out_sample_rate)
         await self._create_send_task()
 
     async def stop(self, frame: EndFrame):
@@ -227,6 +253,7 @@ class TavusVideoService(AIService):
         await super().stop(frame)
         await self._end_conversation()
         await self._cancel_send_task()
+        self._close_wav()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Tavus video service.
@@ -237,6 +264,7 @@ class TavusVideoService(AIService):
         await super().cancel(frame)
         await self._end_conversation()
         await self._cancel_send_task()
+        self._close_wav()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through the service.
@@ -312,5 +340,7 @@ class TavusVideoService(AIService):
         while True:
             frame = await self._queue.get()
             if isinstance(frame, OutputAudioRawFrame) and self._client:
+                if self._wav_file:
+                    self._wav_file.writeframes(frame.audio)
                 await self._client.write_audio_frame(frame)
             self._queue.task_done()

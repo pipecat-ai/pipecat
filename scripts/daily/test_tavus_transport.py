@@ -78,7 +78,7 @@ class DailyProxyApp(EventHandler):
     def _open_wav(self):
         os.makedirs("recordings", exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = f"recordings/received_{timestamp}.wav"
+        path = f"recordings/received_pos_speed_{timestamp}.wav"
         self._wav_io = open(path, "wb")
         self._wav_file = wave.open(self._wav_io, "wb")
         self._wav_file.setnchannels(1)
