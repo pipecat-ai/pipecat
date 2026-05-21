@@ -9,7 +9,7 @@
 import asyncio
 from typing import Any
 
-from pipecat.frames.frames import SystemFrame
+from pipecat.bus.messages import BusSystemMessage
 
 HIGH_PRIORITY = 1
 LOW_PRIORITY = 2
@@ -18,9 +18,9 @@ LOW_PRIORITY = 2
 class BusMessageQueue(asyncio.PriorityQueue):
     """Priority queue that delivers system messages before normal messages.
 
-    Messages that extend ``SystemFrame`` (e.g. cancel messages) get high
-    priority. All other messages are delivered in FIFO order at normal
-    priority.
+    Messages that extend :class:`BusSystemMessage` (e.g. cancel messages)
+    get high priority. All other messages are delivered in FIFO order at
+    normal priority.
     """
 
     def __init__(self):
@@ -35,7 +35,7 @@ class BusMessageQueue(asyncio.PriorityQueue):
         Args:
             item: The bus message to enqueue.
         """
-        if isinstance(item, SystemFrame):
+        if isinstance(item, BusSystemMessage):
             self._high_counter += 1
             super().put_nowait((HIGH_PRIORITY, self._high_counter, item))
         else:
@@ -48,7 +48,7 @@ class BusMessageQueue(asyncio.PriorityQueue):
         Args:
             item: The bus message to enqueue.
         """
-        if isinstance(item, SystemFrame):
+        if isinstance(item, BusSystemMessage):
             self._high_counter += 1
             await super().put((HIGH_PRIORITY, self._high_counter, item))
         else:

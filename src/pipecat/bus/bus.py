@@ -15,10 +15,9 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import cast
 
-from pipecat.bus.messages import BusLocalMessage, BusMessage
+from pipecat.bus.messages import BusLocalMessage, BusMessage, BusSystemMessage
 from pipecat.bus.queue import BusMessageQueue
 from pipecat.bus.subscriber import BusSubscriber
-from pipecat.frames.frames import SystemFrame
 from pipecat.utils.base_object import BaseObject
 
 
@@ -167,7 +166,7 @@ class WorkerBus(BaseObject):
         try:
             while True:
                 message = await sub.queue.get()
-                if isinstance(message, SystemFrame):
+                if isinstance(message, BusSystemMessage):
                     await sub.subscriber.on_bus_message(cast(BusMessage, message))
                 else:
                     sub.data_queue.put_nowait(message)

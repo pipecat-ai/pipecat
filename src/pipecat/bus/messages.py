@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from pipecat.frames.frames import DataFrame, Frame, SystemFrame
+from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.registry.types import WorkerRegistryEntry
 
@@ -28,11 +28,19 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(kw_only=True)
 class BusMessage:
-    """Mixin carrying source/target metadata for bus messages.
+    """Base class for messages carried by the `WorkerBus`.
 
-    Not a frame itself. Combined with `DataFrame` or `SystemFrame`
-    to create concrete message types with appropriate priority.
+    Bus messages are independent of pipeline `Frame`s — if a worker needs
+    to ship a frame between pipelines it wraps it in a `BusFrameMessage`.
+    Subclasses choose delivery priority by extending :class:`BusDataMessage`
+    (normal priority, FIFO) or :class:`BusSystemMessage` (high priority,
+    delivered ahead of queued data messages).
+
+    Parameters:
+        source: Name of the worker or component that sent this message.
+        target: Name of the intended recipient worker, or None for broadcast.
     """
 
     source: str
@@ -49,29 +57,24 @@ class BusLocalMessage:
 
 
 @dataclass(kw_only=True)
-class BusDataMessage(BusMessage, DataFrame):
+class BusDataMessage(BusMessage):
     """Normal-priority bus message.
 
-    Parameters:
-        source: Name of the worker or component that sent this message.
-        target: Name of the intended recipient worker, or None for broadcast.
+    Delivered in FIFO order on the subscriber's data queue.
     """
 
-    source: str
-    target: str | None = None
+    pass
 
 
 @dataclass(kw_only=True)
-class BusSystemMessage(BusMessage, SystemFrame):
-    """High-priority bus message that preempts normal messages in subscriber queues.
+class BusSystemMessage(BusMessage):
+    """High-priority bus message.
 
-    Parameters:
-        source: Name of the worker or component that sent this message.
-        target: Name of the intended recipient worker, or None for broadcast.
+    Delivered ahead of any queued :class:`BusDataMessage` on the
+    subscriber's priority queue.
     """
 
-    source: str
-    target: str | None = None
+    pass
 
 
 # ---------------------------------------------------------------------------
