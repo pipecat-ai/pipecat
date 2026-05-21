@@ -204,6 +204,7 @@ class PipelineWorker(BaseWorker):
         self,
         pipeline: BasePipeline,
         *,
+        active: bool = True,
         additional_span_attributes: dict | None = None,
         app_resources: Any = None,
         bridged: tuple[str, ...] | None = None,
@@ -230,6 +231,8 @@ class PipelineWorker(BaseWorker):
 
         Args:
             pipeline: The pipeline to execute.
+            active: Whether the worker starts active. Forwarded to
+                :class:`BaseWorker`.
             additional_span_attributes: Optional dictionary of attributes to propagate as
                 OpenTelemetry conversation span attributes.
             app_resources: Optional application-defined bag of anything your
@@ -276,7 +279,7 @@ class PipelineWorker(BaseWorker):
                     Use ``app_resources`` instead. ``tool_resources`` will be
                     removed in a future version.
         """
-        super().__init__(name=name)
+        super().__init__(name=name, active=active)
         self._bridged = bridged
         if tool_resources is not None:
             with warnings.catch_warnings():
