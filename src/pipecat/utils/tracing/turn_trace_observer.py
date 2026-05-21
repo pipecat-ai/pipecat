@@ -51,6 +51,8 @@ class TurnTraceObserver(BaseObserver):
         turn_tracker: TurnTrackingObserver,
         latency_tracker: UserBotLatencyObserver,
         conversation_id: str | None = None,
+        conversation_parent_context: Context | None = None,
+        conversation_type: str = "voice",
         additional_span_attributes: dict | None = None,
         tracing_context: TracingContext | None = None,
         **kwargs,
@@ -61,6 +63,12 @@ class TurnTraceObserver(BaseObserver):
             turn_tracker: The turn tracking observer to monitor.
             latency_tracker: The latency tracking observer for user-bot latency.
             conversation_id: Optional conversation ID for grouping turns.
+            conversation_parent_context: Optional OpenTelemetry context whose
+                active span carries a fixed trace id. When provided, the
+                conversation span is created under it instead of as a new root,
+                letting independent pipelines share one trace.
+            conversation_type: Value for the ``conversation.type`` span attribute
+                (e.g. ``"voice"`` or ``"text"``).
             additional_span_attributes: Additional attributes to add to spans.
             tracing_context: Pipeline-scoped tracing context for span hierarchy.
             **kwargs: Additional arguments passed to parent class.
@@ -77,6 +85,8 @@ class TurnTraceObserver(BaseObserver):
         # Conversation tracking properties
         self._conversation_span: Span | None = None
         self._conversation_id = conversation_id
+        self._conversation_parent_context = conversation_parent_context
+        self._conversation_type = conversation_type
         self._additional_span_attributes = additional_span_attributes or {}
 
         @turn_tracker.event_handler("on_turn_started")
@@ -136,16 +146,23 @@ class TurnTraceObserver(BaseObserver):
         self._conversation_id = conversation_id
 
         # Create a new span for this conversation.
-        # Use an empty Context() to ensure this is always a ROOT span (no parent).
-        # This is critical because if there's an active span in the current context
-        # (e.g., from an HTTP request handler), the conversation span would become
-        # a child of that span, and the langfuse.trace.public attribute wouldn't
-        # be on the actual root span.
-        self._conversation_span = self._tracer.start_span("conversation", context=Context())
+        #
+        # By default we pass an empty Context() so the conversation span is a
+        # ROOT span (no parent). This matters because an ambient span from the
+        # caller (e.g. an HTTP request handler) would otherwise capture the
+        # conversation as its child, and the langfuse.trace.public attribute
+        # wouldn't land on the real root span.
+        #
+        # When a caller supplies ``conversation_parent_context`` (a remote
+        # context carrying a fixed trace id), we honor it instead so several
+        # independent pipelines — e.g. one per turn of a stateless text-chat
+        # session — export their spans into a single shared Langfuse trace.
+        parent_context = self._conversation_parent_context or Context()
+        self._conversation_span = self._tracer.start_span("conversation", context=parent_context)
 
         # Set span attributes
         self._conversation_span.set_attribute("conversation.id", conversation_id)
-        self._conversation_span.set_attribute("conversation.type", "voice")
+        self._conversation_span.set_attribute("conversation.type", self._conversation_type)
 
         # Make trace public so it can be shared via URL without authentication.
         # This is also set on child service spans (LLM, TTS, STT) in service_decorators.py
