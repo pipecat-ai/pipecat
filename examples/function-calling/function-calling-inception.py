@@ -76,7 +76,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = InceptionLLMService(
         api_key=os.environ["INCEPTION_API_KEY"],
         settings=InceptionLLMService.Settings(
-            reasoning_effort="instant",
+            reasoning_effort="low",
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
