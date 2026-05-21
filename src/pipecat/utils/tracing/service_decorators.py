@@ -35,6 +35,10 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.context.message_sanitization import (
+    strip_thought_from_id,
+    strip_thought_ids_from_messages,
+)
 from pipecat.utils.tracing.langfuse_helpers import (
     build_llm_output_payload,
     mark_trace_public,
@@ -42,8 +46,6 @@ from pipecat.utils.tracing.langfuse_helpers import (
     set_tts_input_attributes,
     standardize_messages_to_chatml,
     standardize_tools_to_chatml,
-    strip_thought_from_id,
-    strip_thought_ids_from_messages,
 )
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
