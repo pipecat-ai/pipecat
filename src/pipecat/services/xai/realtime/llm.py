@@ -201,8 +201,10 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
     ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
     so context writes are decoupled from those frames. If you wire local
     VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
-    service, disable Grok's server-side turn detection first; otherwise
-    both sources broadcast duplicate user-turn frames.
+    service, disable Grok's server-side turn detection first via
+    ``turn_detection=None`` (manual mode); otherwise both sources
+    broadcast duplicate user-turn frames. See
+    ``examples/realtime/realtime-grok-local-vad.py``.
     """
 
     Settings = GrokRealtimeLLMSettings
