@@ -51,6 +51,12 @@ class SmallestTTSModel(StrEnum):
     LIGHTNING_V3_1_PRO = "lightning_v3.1_pro"
 
 
+_MODEL_DEFAULT_VOICES: dict[SmallestTTSModel, str] = {
+    SmallestTTSModel.LIGHTNING_V3_1: "sophia",
+    SmallestTTSModel.LIGHTNING_V3_1_PRO: "meher",
+}
+
+
 def language_to_smallest_tts_language(language: Language) -> str:
     """Convert a Language enum to a Smallest TTS language string.
 
@@ -139,9 +145,17 @@ class SmallestTTSService(InterruptibleTTSService):
             settings: Runtime-updatable settings for the TTS service.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
+        # Resolve the model early so we can pick the right default voice.
+        model = SmallestTTSModel.LIGHTNING_V3_1
+        if settings is not None and settings.model not in (None, NOT_GIVEN):
+            try:
+                model = SmallestTTSModel(settings.model)
+            except ValueError:
+                pass
+
         default_settings = self.Settings(
-            model=SmallestTTSModel.LIGHTNING_V3_1.value,
-            voice="sophia",
+            model=model.value,
+            voice=_MODEL_DEFAULT_VOICES[model],
             language=Language.EN,
             speed=None,
             output_format=None,
