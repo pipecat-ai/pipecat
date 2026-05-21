@@ -1,0 +1,4 @@
+- Replaced the `transformers.WhisperFeatureExtractor` dependency in `LocalSmartTurnAnalyzerV3` with a vendored numpy-only implementation, reducing peak RSS at import from ~566 MB to ~60 MB and cold-start time from ~5.0 s to ~0.3 s. Behavior is numerically equivalent (matches the reference numpy code path within 1e-5 absolute tolerance; ONNX model output is bit-identical on representative inputs).
+  - Smart Turn v3 no longer imports `transformers` at module load.
+  - Prepares the ground for making `transformers` an optional dependency in a future release.
+  - The vendored STFT is vectorized via `numpy.lib.stride_tricks.sliding_window_view` + batched `np.fft.rfft`, cutting `_power_spectrogram` runtime by ~55% (~4.0 ms → ~1.8 ms per call on a typical 8-second segment at 16 kHz) while preserving the same parity tolerances against the reference implementation.
