@@ -86,7 +86,6 @@ class WordCompletionTracker:
         self._overflow_word: str | None = None
         self._llm_consumed: str | None = None
         self._frame_word: str | None = None
-        logger.debug(f"WordCompletionTracker: {self._tts_normalized}")
 
     @staticmethod
     def _normalize(text: str) -> str:
