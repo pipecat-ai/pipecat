@@ -329,11 +329,30 @@ class TavusVideoService(AIService):
             self._audio_buffer = self._audio_buffer[chunk_size:]
 
     async def _send_task_handler(self):
-        """Handle sending audio frames to the Tavus client."""
+        """Handle sending audio frames to the Tavus client.
+
+        Accumulates 500 ms of audio before sending anything to WebRTC. This
+        pre-buffer absorbs TTS jitter so the WebRTC jitter buffer sees a steady
+        stream rather than bursts separated by silence, which prevents the drift
+        and silence-injection observed without it. On interruption the task is
+        replaced, so the next utterance gets a fresh 500 ms pre-buffer.
+        """
+        min_prebuffer_bytes = int(self._client.out_sample_rate * 0.5) * 2
+        prebuffer: list[OutputAudioRawFrame] | None = []
+
         while True:
             frame = await self._queue.get()
             if isinstance(frame, OutputAudioRawFrame) and self._client:
-                if self._wav_file:
-                    self._wav_file.writeframes(frame.audio)
-                await self._client.write_audio_frame(frame)
+                if prebuffer is not None:
+                    prebuffer.append(frame)
+                    if sum(len(f.audio) for f in prebuffer) >= min_prebuffer_bytes:
+                        for f in prebuffer:
+                            if self._wav_file:
+                                self._wav_file.writeframes(f.audio)
+                            await self._client.write_audio_frame(f)
+                        prebuffer = None
+                else:
+                    if self._wav_file:
+                        self._wav_file.writeframes(frame.audio)
+                    await self._client.write_audio_frame(frame)
             self._queue.task_done()
