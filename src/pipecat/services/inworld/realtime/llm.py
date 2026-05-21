@@ -204,7 +204,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
     Inworld's server-side VAD events. Pair with
     ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
-    so context writes are decoupled from those frames.
+    so context writes are decoupled from those frames. If you wire local
+    VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
+    service, disable Inworld's server-side turn detection first;
+    otherwise both sources broadcast duplicate user-turn frames.
 
     Example::
 

@@ -280,6 +280,18 @@ class RealtimeServiceModeConfig:
             path when local turn detection drives a realtime conversation.
             When True, turn-end strategies wait for transcripts to arrive
             before signalling end-of-turn.
+
+    Note:
+        Local VAD (via ``LLMUserAggregatorParams.vad_analyzer``) is intended
+        for use with realtime services that either don't emit
+        ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``
+        themselves (Gemini Live, AWS Nova Sonic, Ultravox) or have their
+        server-side turn detection disabled (e.g. OpenAI Realtime with
+        ``turn_detection=False``). Wiring local VAD on top of a service
+        whose server-side turn detection is also active produces duplicate
+        user-turn frames from both sources — the service broadcasts them,
+        and the aggregator's local-VAD-driven strategies broadcast them
+        again. Pick one source.
     """
 
     context_writes_await_turns: bool = False

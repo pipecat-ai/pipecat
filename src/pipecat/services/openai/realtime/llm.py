@@ -213,6 +213,12 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
     so context writes are decoupled from those frames; see the
     ``examples/realtime/realtime-openai.py`` example.
+
+    If you wire local VAD (``LLMUserAggregatorParams.vad_analyzer``) on
+    top of this service, disable OpenAI's server-side turn detection
+    first (``turn_detection=False``); otherwise both sources broadcast
+    duplicate user-turn frames. See
+    ``examples/realtime/realtime-openai-local-vad.py``.
     """
 
     Settings = OpenAIRealtimeLLMSettings
