@@ -209,7 +209,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     service, disable Inworld's server-side turn detection first via
     ``turn_detection=None`` (manual mode); otherwise both sources
     broadcast duplicate user-turn frames. See
-    ``examples/realtime/realtime-inworld-local-vad.py``.
+    ``examples/realtime/realtime-inworld-locally-driven-turns.py``.
 
     Example::
 

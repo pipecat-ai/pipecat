@@ -190,8 +190,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         # own UserStarted/StoppedSpeakingFrame from server VAD events, so
         # local VAD on the aggregator is unnecessary. realtime_service_mode
         # decouples context writes from turn frames and transcript-bound
-        # turn-end. See `realtime-openai-local-vad.py` for the variant
-        # that disables server VAD and drives turn detection locally.
+        # turn-end. See `realtime-openai-locally-driven-turns.py` for the
+        # variant that disables server VAD and drives turn detection locally.
         realtime_service_mode=RealtimeServiceModeConfig(),
     )
 

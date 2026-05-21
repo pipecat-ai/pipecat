@@ -147,7 +147,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # decisions and can desynchronize in subtle ways.
     #
     # For local VAD driving the conversation (server VAD disabled), see
-    # `realtime-gemini-live-local-vad.py` instead.
+    # `realtime-gemini-live-locally-driven-turns.py` instead.
     #
     # from pipecat.audio.vad.silero import SileroVADAnalyzer
     # from pipecat.processors.aggregators.llm_response_universal import (

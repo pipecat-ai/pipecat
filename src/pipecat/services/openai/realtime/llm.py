@@ -218,7 +218,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     top of this service, disable OpenAI's server-side turn detection
     first (``turn_detection=False``); otherwise both sources broadcast
     duplicate user-turn frames. See
-    ``examples/realtime/realtime-openai-local-vad.py``.
+    ``examples/realtime/realtime-openai-locally-driven-turns.py``.
     """
 
     Settings = OpenAIRealtimeLLMSettings

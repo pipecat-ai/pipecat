@@ -370,7 +370,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     detector — won't activate with the default server-VAD-only setup. Pair
     with ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
     so context writes are correct anyway. To produce the turn frames
-    locally, see ``examples/realtime/realtime-gemini-live-local-vad.py``;
+    locally, see ``examples/realtime/realtime-gemini-live-locally-driven-turns.py``;
     note that locally-generated turn boundaries are a heuristic and may
     not match Gemini Live's server-side turn decisions.
     """
