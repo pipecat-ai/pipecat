@@ -109,7 +109,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         # Convert raw audio to float32 format and append to the buffer
         audio_int16 = np.frombuffer(buffer, dtype=np.int16)
         audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
-        self._audio_buffer.append((time.time(), audio_float32))
+        self._audio_buffer.append((time.monotonic(), audio_float32))
 
         state = EndOfTurnState.INCOMPLETE
 
@@ -118,7 +118,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             self._silence_ms = 0
             self._speech_triggered = True
             if self._speech_start_time == 0:
-                self._speech_start_time = time.time()
+                self._speech_start_time = time.monotonic()
         else:
             if self._speech_triggered:
                 chunk_duration_ms = len(audio_int16) / (self._sample_rate / 1000)
@@ -138,7 +138,8 @@ class BaseSmartTurn(BaseTurnAnalyzer):
                     + self._params.max_duration_secs
                 )
                 while (
-                    self._audio_buffer and self._audio_buffer[0][0] < time.time() - max_buffer_time
+                    self._audio_buffer
+                    and self._audio_buffer[0][0] < time.monotonic() - max_buffer_time
                 ):
                     self._audio_buffer.pop(0)
 
