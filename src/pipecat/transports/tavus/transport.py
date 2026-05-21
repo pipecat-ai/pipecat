@@ -168,11 +168,15 @@ class TavusParams(DailyParams):
         audio_in_enabled: Whether to enable audio input from participants.
         audio_out_enabled: Whether to enable audio output to participants.
         microphone_out_enabled: Whether to enable microphone output track.
+        audio_out_prebuffer_secs: Seconds of audio to accumulate before sending to WebRTC.
+            Absorbs TTS jitter to prevent the WebRTC jitter buffer from injecting silence.
+            Defaults to 0.5.
     """
 
     audio_in_enabled: bool = True
     audio_out_enabled: bool = True
     microphone_out_enabled: bool = False
+    audio_out_prebuffer_secs: float = 0.5
 
 
 class TavusTransportClient:

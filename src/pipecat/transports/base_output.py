@@ -823,6 +823,23 @@ class BaseOutputTransport(FrameProcessor):
 
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
+            # Pre-buffer: accumulate audio before sending anything to the transport.
+            #
+            # prebuffer is a list while we are still accumulating, and None once the
+            # threshold has been reached and all held frames have been flushed. Using
+            # None as the sentinel avoids a boolean flag and makes the steady-state
+            # branch a simple identity check.
+            #
+            # The pre-buffer resets automatically on each interruption because the
+            # audio task is cancelled and recreated, giving the next utterance a fresh
+            # local variable.
+            min_prebuffer_bytes = (
+                int(self._sample_rate * self._params.audio_out_prebuffer_secs)
+                * 2
+                * self._params.audio_out_channels
+            )
+            prebuffer: list[OutputAudioRawFrame] | None = [] if min_prebuffer_bytes > 0 else None
+
             async for frame in self._next_frame():
                 # No need to push EndFrame, it's pushed from process_frame().
                 if isinstance(frame, EndFrame):
@@ -840,7 +857,20 @@ class BaseOutputTransport(FrameProcessor):
                 # Try to send audio to the transport.
                 try:
                     if isinstance(frame, OutputAudioRawFrame):
-                        push_downstream = await self._transport.write_audio_frame(frame)
+                        if prebuffer is not None:
+                            # Accumulation phase: hold frames until we have enough audio.
+                            prebuffer.append(frame)
+                            if sum(len(f.audio) for f in prebuffer) >= min_prebuffer_bytes:
+                                # Threshold reached: flush all held frames at once, then
+                                # switch to direct-write mode for the rest of the utterance.
+                                for f in prebuffer:
+                                    await self._transport.write_audio_frame(f)
+                                prebuffer = None
+                            # push_downstream stays True so frames flow through the
+                            # pipeline even while we are still accumulating.
+                        else:
+                            # Steady-state: write directly to the transport.
+                            push_downstream = await self._transport.write_audio_frame(frame)
                 except Exception as e:
                     logger.error(f"{self} Error writing {frame} to transport: {e}")
                     push_downstream = False

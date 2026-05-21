@@ -34,6 +34,8 @@ class TransportParams(BaseModel):
         audio_out_mixer: Audio mixer instance or destination mapping.
         audio_out_destinations: List of audio output destination identifiers.
         audio_out_end_silence_secs: How much silence to send after an EndFrame (0 for no silence).
+        audio_out_prebuffer_secs: Seconds of audio to accumulate before sending anything to the
+            transport. Resets automatically on each interruption. Defaults to 0.0 (disabled).
         audio_out_auto_silence: Insert silence frames when the audio output queue is empty.
             When False, the transport will wait for audio data instead of inserting silence.
         audio_in_enabled: Enable audio input streaming.
@@ -70,6 +72,7 @@ class TransportParams(BaseModel):
     audio_out_mixer: BaseAudioMixer | Mapping[str | None, BaseAudioMixer] | None = None
     audio_out_destinations: list[str] = Field(default_factory=list)
     audio_out_end_silence_secs: int = 2
+    audio_out_prebuffer_secs: float = 0.0
     audio_out_auto_silence: bool = True
     audio_in_enabled: bool = False
     audio_in_sample_rate: int | None = None
