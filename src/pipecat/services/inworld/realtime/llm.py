@@ -206,8 +206,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
     so context writes are decoupled from those frames. If you wire local
     VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
-    service, disable Inworld's server-side turn detection first;
-    otherwise both sources broadcast duplicate user-turn frames.
+    service, disable Inworld's server-side turn detection first via
+    ``turn_detection=None`` (manual mode); otherwise both sources
+    broadcast duplicate user-turn frames. See
+    ``examples/realtime/realtime-inworld-local-vad.py``.
 
     Example::
 
@@ -430,12 +432,25 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             return rate
         return getattr(self, "_output_sample_rate", 24000)
 
+    def _is_manual_turn_detection(self) -> bool:
+        """Whether server-side turn detection is disabled (manual mode)."""
+        session_properties = assert_given(self._settings.session_properties)
+        return bool(
+            session_properties.audio
+            and session_properties.audio.input
+            and session_properties.audio.input.turn_detection is None
+        )
+
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech.
 
-        Inworld's server-side VAD handles response cancellation and buffer
-        cleanup automatically, so we only need to clean up local state.
+        Server-side VAD handles response cancellation and buffer cleanup
+        automatically; in manual mode the client must send the cancel
+        and clear events explicitly.
         """
+        if self._is_manual_turn_detection():
+            await self.send_client_event(events.InputAudioBufferClearEvent())
+            await self.send_client_event(events.ResponseCancelEvent())
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
 
@@ -450,10 +465,16 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     async def _handle_user_stopped_speaking(self, frame):
         """Handle user stopped speaking event.
 
-        Inworld's server-side VAD handles commit and response creation,
-        so this is a no-op. Metrics are started in _handle_evt_speech_stopped.
+        Server-side VAD handles commit and response creation
+        automatically; in manual mode the client must send them
+        explicitly. Metrics are started in _handle_evt_speech_stopped
+        in the server-VAD path.
         """
-        pass
+        if self._is_manual_turn_detection():
+            await self.start_ttfb_metrics()
+            await self.start_processing_metrics()
+            await self.send_client_event(events.InputAudioBufferCommitEvent())
+            await self.send_client_event(events.ResponseCreateEvent())
 
     async def _handle_bot_stopped_speaking(self):
         """Handle bot stopped speaking event."""
