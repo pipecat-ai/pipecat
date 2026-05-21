@@ -5,6 +5,7 @@
 #
 
 import unittest
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
@@ -33,6 +34,11 @@ class _UserInfo(BaseModel):
     name: str
     age: int
     address: _Address | None = None
+
+
+@dataclass(kw_only=True)
+class _MessageWithNonInit(BusDataMessage):
+    tag: str = field(init=False, default="default")
 
 
 class TestJSONMessageSerializer(unittest.TestCase):
@@ -232,14 +238,13 @@ class TestJSONMessageSerializer(unittest.TestCase):
 
     def test_non_init_fields_preserved(self):
         """Non-init dataclass fields survive round-trip via setattr."""
-        msg = BusDataMessage(source="task_a", target="task_b")
-        # name is a non-init field on DataFrame
-        msg.name = "custom_name"
+        msg = _MessageWithNonInit(source="worker_a", target="worker_b")
+        msg.tag = "custom_tag"
 
         data = self.serializer.serialize(msg)
         restored = self.serializer.deserialize(data)
 
-        self.assertEqual(restored.name, "custom_name")
+        self.assertEqual(restored.tag, "custom_tag")
 
 
 if __name__ == "__main__":
