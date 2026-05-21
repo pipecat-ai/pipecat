@@ -24,7 +24,8 @@ class InceptionLLMSettings(BaseOpenAILLMService.Settings):
 
     Parameters:
         reasoning_effort: Controls how much reasoning the model applies.
-            One of "instant", "low", "medium", or "high". Defaults to "medium".
+            One of "instant", "low", "medium", or "high". When unset, the
+            parameter is omitted and Inception's server-side default applies.
         realtime: When True, reduces time to first diffusion block (TTFT).
     """
 
@@ -53,7 +54,6 @@ class InceptionLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.inceptionlabs.ai/v1",
-        model: str | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -62,20 +62,14 @@ class InceptionLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Inception's API.
             base_url: The base URL for Inception API. Defaults to "https://api.inceptionlabs.ai/v1".
-            model: The model identifier to use. Defaults to "mercury-2".
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=InceptionLLMService.Settings(model=...)`` instead.
-
-            settings: Runtime-updatable settings. When provided alongside deprecated
-                parameters, ``settings`` values take precedence.
+            settings: Runtime-updatable settings.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        default_settings = self.Settings(model="mercury-2", reasoning_effort=None, realtime=None)
-
-        if model is not None:
-            self._warn_init_param_moved_to_settings("model", "model")
-            default_settings.model = model
+        default_settings = self.Settings(
+            model="mercury-2",
+            reasoning_effort=None,
+            realtime=None,
+        )
 
         if settings is not None:
             default_settings.apply_update(settings)

@@ -198,6 +198,7 @@ TESTS_FUNCTION_CALLING = [
     ("function-calling/function-calling-sarvam.py", EVAL_WEATHER),
     ("function-calling/function-calling-novita.py", EVAL_WEATHER),
     ("function-calling/function-calling-deepseek.py", EVAL_WEATHER),
+    ("function-calling/function-calling-inception.py", EVAL_WEATHER),
     # Video
     ("function-calling/function-calling-anthropic-video.py", EVAL_VISION_CAMERA),
     ("function-calling/function-calling-aws-video.py", EVAL_VISION_CAMERA),

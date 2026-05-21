@@ -39,6 +39,10 @@ async def fetch_weather_from_api(params: FunctionCallParams):
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
+
+
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
@@ -72,23 +76,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = InceptionLLMService(
         api_key=os.environ["INCEPTION_API_KEY"],
         settings=InceptionLLMService.Settings(
-            reasoning_effort="medium",
-            system_instruction="""You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.
-
-You have one functions available:
-
-1. get_current_weather is used to get current weather information.
-
-Infer whether to use Fahrenheit or Celsius automatically based on the location, unless the user specifies a preference.
-
-Start by asking me for my location. Then, use 'get_weather_current' to give me a forecast.
-
-    Respond to what the user said in a creative and helpful way.""",
+            reasoning_effort="instant",
+            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
@@ -110,7 +105,19 @@ Start by asking me for my location. Then, use 'get_weather_current' to give me a
         },
         required=["location", "format"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function])
+
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
     context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -143,6 +150,9 @@ Start by asking me for my location. Then, use 'get_weather_current' to give me a
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        context.add_message(
+            {"role": "developer", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
