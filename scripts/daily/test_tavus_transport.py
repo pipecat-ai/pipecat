@@ -1,7 +1,6 @@
 import array
 import asyncio
 import datetime
-import io
 import os
 import signal
 import wave
@@ -58,7 +57,6 @@ class DailyProxyApp(EventHandler):
         self._buffer = bytearray()
         self._audio_task: asyncio.Task | None = None
         self._wav_file: wave.Wave_write | None = None
-        self._wav_io: io.FileIO | None = None
 
         self._client: CallClient = CallClient(event_handler=self)
         self._client.update_subscription_profiles(
@@ -79,8 +77,7 @@ class DailyProxyApp(EventHandler):
         os.makedirs("recordings", exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         path = f"recordings/received_pos_speed_{timestamp}.wav"
-        self._wav_io = open(path, "wb")
-        self._wav_file = wave.open(self._wav_io, "wb")
+        self._wav_file = wave.open(path, "wb")
         self._wav_file.setnchannels(1)
         self._wav_file.setsampwidth(2)
         # Declare TRUE_SAMPLE_RATE so timestamps match bot_*.wav for comparison.
@@ -93,9 +90,6 @@ class DailyProxyApp(EventHandler):
         if self._wav_file:
             self._wav_file.close()
             self._wav_file = None
-        if self._wav_io:
-            self._wav_io.close()
-            self._wav_io = None
 
     def run(self, meeting_url: str):
         asyncio.set_event_loop(self._loop)

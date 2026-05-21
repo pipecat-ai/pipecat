@@ -12,7 +12,6 @@ avatar functionality through Tavus's streaming API.
 
 import asyncio
 import datetime
-import io
 import os
 import wave
 from dataclasses import dataclass
@@ -105,10 +104,9 @@ class TavusVideoService(AIService):
         self._audio_buffer = bytearray()
         self._send_task: asyncio.Task | None = None
         # This is the custom track destination expected by Tavus
-        self._transport_destination: str | None = "stream"
+        self._transport_destination: str = "stream"
         self._transport_ready = False
         self._wav_file: wave.Wave_write | None = None
-        self._wav_io: io.FileIO | None = None
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the Tavus video service.
@@ -214,8 +212,7 @@ class TavusVideoService(AIService):
         os.makedirs("recordings", exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         path = f"recordings/bot_pre_speed_{timestamp}.wav"
-        self._wav_io = open(path, "wb")
-        self._wav_file = wave.open(self._wav_io, "wb")
+        self._wav_file = wave.open(path, "wb")
         self._wav_file.setnchannels(1)
         self._wav_file.setsampwidth(2)
         self._wav_file.setframerate(sample_rate)
@@ -225,9 +222,6 @@ class TavusVideoService(AIService):
         if self._wav_file:
             self._wav_file.close()
             self._wav_file = None
-        if self._wav_io:
-            self._wav_io.close()
-            self._wav_io = None
 
     async def start(self, frame: StartFrame):
         """Start the Tavus video service.
@@ -237,10 +231,9 @@ class TavusVideoService(AIService):
         """
         await super().start(frame)
         await self._client.start(frame)
-        if self._transport_destination:
-            await self._client.register_audio_destination(
-                self._transport_destination, auto_silence=False
-            )
+        await self._client.register_audio_destination(
+            self._transport_destination, auto_silence=False
+        )
         self._open_wav(self._client.out_sample_rate)
         await self._create_send_task()
 
