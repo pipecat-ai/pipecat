@@ -175,23 +175,29 @@ There is also a secret menu that changes daily. If the user asks about it, use t
 
     context = LLMContext([])
 
-    # Ultravox drives the conversation server-side. It does NOT emit
-    # UserStartedSpeakingFrame / UserStoppedSpeakingFrame, so pipeline
-    # processors that depend on those frames — RTVI client speech events,
+    # Ultravox drives the conversation server-side and does not emit
+    # UserStartedSpeakingFrame / UserStoppedSpeakingFrame. Context
+    # aggregation still works with realtime_service_mode, but pipeline
+    # processors that depend on those frames (RTVI client speech events,
     # TurnTrackingObserver, AudioBufferProcessor turn recording,
-    # UserIdleController, user mute strategies, voicemail detector — won't
-    # activate with this default setup. Context aggregation still works
-    # with realtime_service_mode.
+    # UserIdleController, user mute strategies, voicemail detector) won't
+    # activate. The Pipecat Prebuilt UI is one such consumer — without
+    # these frames it can't group user transcripts into discrete turns
+    # visually.
     #
-    # To produce these frames locally, wire a VAD analyzer (e.g.
-    # SileroVADAnalyzer) into LLMUserAggregatorParams. Caveat: locally-
-    # generated turn boundaries are a heuristic and may not match
-    # Ultravox's server-side turn decisions, which is what drives the
-    # conversation; the two can drift apart in subtle ways especially
-    # around interruptions and overlapping speech.
+    # If you need those frames, uncomment the SileroVADAnalyzer import
+    # above and the `user_params=` argument below. Note: local turn
+    # detection may not match Ultravox's actual server-side turn
+    # decisions and can desynchronize in subtle ways.
+    #
+    # from pipecat.audio.vad.silero import SileroVADAnalyzer
+    # from pipecat.processors.aggregators.llm_response_universal import (
+    #     LLMUserAggregatorParams,
+    # )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         realtime_service_mode=RealtimeServiceModeConfig(),
+        # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     # Build the pipeline

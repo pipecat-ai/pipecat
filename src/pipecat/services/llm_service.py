@@ -422,9 +422,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 "AudioBufferProcessor turn recording, UserIdleController, user "
                 "mute strategies, voicemail detector) will not activate. To "
                 "produce them locally, add `vad_analyzer=` to "
-                "LLMUserAggregatorParams. Note: local turn detection is a "
-                "heuristic; its boundaries may not match the provider's actual "
-                "server-side turn decisions and can desynchronize in subtle ways."
+                "LLMUserAggregatorParams. Note: local turn detection may not "
+                "match the provider's actual server-side turn decisions and "
+                "can desynchronize in subtle ways."
             )
 
     async def stop(self, frame: EndFrame):
