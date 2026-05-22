@@ -26,10 +26,18 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
-from aiortc.mediastreams import MediaStreamError
-from av import AudioFrame, VideoFrame
+import pytest
 
-from pipecat.transports.smallwebrtc.transport import (
+# The `webrtc` extra is optional; skip the whole module when it (and its
+# transitive `av` dependency) is unavailable, matching the default CI unit
+# test environment which does not install extras.
+pytest.importorskip("aiortc")
+pytest.importorskip("av")
+
+from aiortc.mediastreams import MediaStreamError  # noqa: E402
+from av import AudioFrame, VideoFrame  # noqa: E402
+
+from pipecat.transports.smallwebrtc.transport import (  # noqa: E402
     CAM_VIDEO_SOURCE,
     SCREEN_VIDEO_SOURCE,
     SmallWebRTCClient,
