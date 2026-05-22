@@ -56,7 +56,7 @@ class WebSocketProxyClientTask(BaseWorker):
         async def on_disconnected(worker, websocket):
             logger.info("Disconnected from remote server")
 
-        await runner.add_worker(proxy)
+        await runner.add_workers(proxy)
     """
 
     def __init__(
