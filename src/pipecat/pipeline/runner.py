@@ -27,10 +27,10 @@ For multi-worker setups, add the additional workers alongside the main one:
 .. code-block:: python
 
     runner = PipelineRunner()
-    await runner.add_worker(CodeWorker("code_worker", ...))
+    await runner.add_workers(CodeWorker("code_worker", ...))
     await runner.run(worker)
 
-Optionally, ``add_worker`` every worker (including the main pipeline) and call
+Optionally, ``add_workers`` every worker (including the main pipeline) and call
 ``run()`` with no argument. In that form ``run()`` blocks until
 :meth:`PipelineRunner.end` / :meth:`PipelineRunner.cancel` is called (or an
 incoming ``BusEndMessage`` / ``BusCancelMessage`` triggers the same path) —
@@ -86,10 +86,10 @@ class PipelineRunner(BaseObject, BusSubscriber):
 
     - :meth:`run(worker)` — block until the given pipeline worker finishes.
       The most common case for a single-pipeline bot.
-    - :meth:`add_worker(worker)` — register a worker on the runner's bus and
-      start it in the background. Added workers run alongside the main
-      worker and are cancelled when the main worker finishes (or when
-      :meth:`end` / :meth:`cancel` is called).
+    - :meth:`add_workers(*workers)` — register one or more workers on the
+      runner's bus and start them in the background. Added workers run
+      alongside the main worker and are cancelled when the main worker
+      finishes (or when :meth:`end` / :meth:`cancel` is called).
 
     Event handlers available:
 
@@ -151,35 +151,36 @@ class PipelineRunner(BaseObject, BusSubscriber):
         """The worker registry this runner owns."""
         return self._registry
 
-    async def add_worker(self, worker: BaseWorker) -> None:
-        """Add a worker to the runner.
+    async def add_workers(self, *workers: BaseWorker) -> None:
+        """Add one or more workers to the runner.
 
         Adding a worker attaches it to the runner's bus and registry, and
         starts it in the background. If the runner is not yet running
-        (``add_worker`` was called before :meth:`run`), the worker is
+        (``add_workers`` was called before :meth:`run`), workers are
         queued and started during run setup; if the runner is already
-        running, the worker starts immediately.
+        running, each worker starts immediately.
 
         Added workers run alongside the main worker and are cancelled
         when the main worker finishes (or when :meth:`end` /
         :meth:`cancel` is called).
 
         Args:
-            worker: The worker to add.
+            *workers: One or more workers to add.
         """
-        if worker.name in self._entries:
-            logger.error(
-                f"PipelineRunner '{self}': worker '{worker.name}' already exists, skipping"
-            )
-            return
-        worker.attach(registry=self._registry, bus=self._bus)
-        await self._registry.watch(worker.name, self._on_local_worker_ready)
-        entry = _WorkerEntry(worker=worker)
-        self._entries[worker.name] = entry
-        logger.debug(f"PipelineRunner '{self}': added worker '{worker.name}'")
+        for worker in workers:
+            if worker.name in self._entries:
+                logger.error(
+                    f"PipelineRunner '{self}': worker '{worker.name}' already exists, skipping"
+                )
+                continue
+            worker.attach(registry=self._registry, bus=self._bus)
+            await self._registry.watch(worker.name, self._on_local_worker_ready)
+            entry = _WorkerEntry(worker=worker)
+            self._entries[worker.name] = entry
+            logger.debug(f"PipelineRunner '{self}': added worker '{worker.name}'")
 
-        if self._running:
-            await self._start_worker(entry)
+            if self._running:
+                await self._start_worker(entry)
 
     async def run(self, worker: PipelineWorker | None = None) -> None:
         """Run a pipeline worker to completion (optionally alongside added workers).
@@ -203,11 +204,11 @@ class PipelineRunner(BaseObject, BusSubscriber):
         logger.debug(f"PipelineRunner '{self}': started running {worker}")
         self._shutdown_event.clear()
 
-        # Treat the main worker as any other added worker: ``add_worker`` attaches
+        # Treat the main worker as any other added worker: ``add_workers`` attaches
         # it to the bus and registry, and ``_setup_session`` then starts every
         # entry (main and pre-added) through the same code path.
         if worker is not None:
-            await self.add_worker(worker)
+            await self.add_workers(worker)
 
         await self._setup_session()
         await self._call_event_handler("on_ready")
@@ -299,7 +300,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         elif isinstance(message, BusCancelMessage):
             self.create_task(self.cancel(message.reason), "cancel")
         elif isinstance(message, BusAddWorkerMessage) and message.worker:
-            await self.add_worker(message.worker)
+            await self.add_workers(message.worker)
         elif isinstance(message, BusWorkerRegistryMessage):
             await self._handle_worker_registry(message)
 

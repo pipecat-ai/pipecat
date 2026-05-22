@@ -287,7 +287,7 @@ class BaseWorker(BaseObject, BusSubscriber):
     def attach(self, *, registry: WorkerRegistry, bus: WorkerBus) -> None:
         """Attach the worker to a runner-provided registry and bus.
 
-        Called by the runner (typically from ``add_worker()``) before the
+        Called by the runner (typically from ``add_workers()``) before the
         worker is run. After this call, :attr:`registry` and :attr:`bus`
         return the provided instances.
 

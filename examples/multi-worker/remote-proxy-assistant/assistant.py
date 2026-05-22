@@ -103,8 +103,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     assistant = AcmeAssistant()
 
-    await runner.add_worker(proxy)
-    await runner.add_worker(assistant)
+    await runner.add_workers(proxy, assistant)
 
     logger.info("Assistant server ready, waiting for activation")
     await runner.run()

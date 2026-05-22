@@ -32,20 +32,20 @@ class StubTask(BaseWorker):
 
 class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
     async def test_spawn_registers_task(self):
-        """add_worker() registers the task by name (duplicate is silently skipped)."""
+        """add_workers() registers the task by name (duplicate is silently skipped)."""
         runner = PipelineRunner(handle_sigint=False)
         task = StubTask("task_a")
 
-        await runner.add_worker(task)
+        await runner.add_workers(task)
 
         # Duplicate is silently skipped (logs error)
-        await runner.add_worker(StubTask("task_a"))
+        await runner.add_workers(StubTask("task_a"))
 
     async def test_run_starts_bus_and_tasks(self):
         """run() starts bus, starts all tasks, fires on_ready."""
         runner = PipelineRunner(handle_sigint=False)
         task = StubTask("task_a")
-        await runner.add_worker(task)
+        await runner.add_workers(task)
 
         runner_started = asyncio.Event()
 
@@ -63,7 +63,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
         """end() is idempotent — subsequent calls are no-ops."""
         runner = PipelineRunner(handle_sigint=False)
         task = StubTask("task_a")
-        await runner.add_worker(task)
+        await runner.add_workers(task)
 
         @runner.event_handler("on_ready")
         async def on_ready(runner):
@@ -77,7 +77,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
         """cancel() is idempotent — subsequent calls are no-ops."""
         runner = PipelineRunner(handle_sigint=False)
         task = StubTask("task_a")
-        await runner.add_worker(task)
+        await runner.add_workers(task)
 
         @runner.event_handler("on_ready")
         async def on_ready(runner):
@@ -96,8 +96,8 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
         child = StubTask("child")
         # Manually mark child as having root as parent
         child._parent = root.name
-        await runner.add_worker(root)
-        await runner.add_worker(child)
+        await runner.add_workers(root)
+        await runner.add_workers(child)
 
         sent = []
         bus = runner.bus
@@ -123,8 +123,8 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
         root = StubTask("root")
         child = StubTask("child")
         child._parent = root.name
-        await runner.add_worker(root)
-        await runner.add_worker(child)
+        await runner.add_workers(root)
+        await runner.add_workers(child)
 
         sent = []
         bus = runner.bus
@@ -148,7 +148,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
         """BusEndMessage on bus triggers runner.end()."""
         runner = PipelineRunner(handle_sigint=False)
         task = StubTask("task_a")
-        await runner.add_worker(task)
+        await runner.add_workers(task)
 
         bus = runner.bus
 
@@ -164,7 +164,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
         """BusCancelMessage on bus triggers runner.cancel()."""
         runner = PipelineRunner(handle_sigint=False)
         task = StubTask("task_a")
-        await runner.add_worker(task)
+        await runner.add_workers(task)
 
         bus = runner.bus
 
@@ -178,10 +178,10 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
             pass
 
     async def test_bus_add_task_message_triggers_add(self):
-        """BusAddWorkerMessage on bus triggers add_worker()."""
+        """BusAddWorkerMessage on bus triggers add_workers()."""
         runner = PipelineRunner(handle_sigint=False)
         task_a = StubTask("task_a")
-        await runner.add_worker(task_a)
+        await runner.add_workers(task_a)
 
         task_b = StubTask("task_b")
         bus = runner.bus
@@ -195,7 +195,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(runner.run(), timeout=5.0)
 
         # Verify task_b was added (duplicate is silently skipped)
-        await runner.add_worker(StubTask("task_b"))
+        await runner.add_workers(StubTask("task_b"))
 
 
 if __name__ == "__main__":

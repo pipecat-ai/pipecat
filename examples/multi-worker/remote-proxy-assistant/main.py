@@ -146,8 +146,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await runner.cancel()
 
-    await runner.add_worker(proxy)
-    await runner.add_worker(worker)
+    await runner.add_workers(proxy, worker)
 
     await runner.run()
 

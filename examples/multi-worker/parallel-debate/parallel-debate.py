@@ -217,9 +217,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await runner.cancel()
 
-    for role in ROLE_PROMPTS:
-        await runner.add_worker(DebateWorker(role))
-    await runner.add_worker(worker)
+    await runner.add_workers(
+        DebateWorker("advocate"),
+        DebateWorker("critic"),
+        DebateWorker("analyst"),
+        worker,
+    )
 
     await runner.run()
 

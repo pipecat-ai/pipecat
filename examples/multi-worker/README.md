@@ -1,6 +1,6 @@
 # Pipecat Multi-Worker Examples
 
-This directory contains example bots that use the multi-worker framework in `pipecat.workers`, `pipecat.pipeline.runner` (with `add_worker()`), and the `WorkerBus`. Each example shows a different cooperation pattern between workers: hand-off, parallel fan-out, remote workers, etc.
+This directory contains example bots that use the multi-worker framework in `pipecat.workers`, `pipecat.pipeline.runner` (with `add_workers()`), and the `WorkerBus`. Each example shows a different cooperation pattern between workers: hand-off, parallel fan-out, remote workers, etc.
 
 ## Setup
 
