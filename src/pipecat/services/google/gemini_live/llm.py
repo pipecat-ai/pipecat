@@ -1593,7 +1593,6 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
         self, tool_call_id: str, tool_name: str, tool_result_message: dict[str, Any]
     ) -> bool:
         """Send tool result back to the API."""
-
         if self._disconnecting or not self._session:
             logger.debug(
                 f"{self}: queueing tool result for tool_call_id={tool_call_id} until session is ready"
