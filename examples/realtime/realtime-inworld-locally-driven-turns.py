@@ -45,7 +45,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
     RealtimeServiceModeConfig,
-    UserTurnStoppedMessage,
+    UserMessageAddedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -209,12 +209,12 @@ Always be helpful and proactive in offering assistance.""",
         await task.cancel()
 
     @user_aggregator.event_handler("on_user_message_added")
-    async def on_user_message_added(aggregator, message: UserTurnStoppedMessage):
+    async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         logger.info(f"Transcript: {timestamp}user: {message.content}")
 
-    @assistant_aggregator.event_handler("on_assistant_message_added")
-    async def on_assistant_message_added(aggregator, message: AssistantTurnStoppedMessage):
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         logger.info(f"Transcript: {timestamp}assistant: {message.content}")
 

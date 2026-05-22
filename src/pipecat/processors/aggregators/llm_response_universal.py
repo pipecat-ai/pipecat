@@ -335,6 +335,29 @@ class UserTurnStoppedMessage:
 
 
 @dataclass
+class UserMessageAddedMessage:
+    """A message accompanying ``on_user_message_added``.
+
+    Fired when a user message is written to the LLM context. With
+    ``RealtimeServiceModeConfig(context_writes_await_turns=True)``
+    (cascade default) this coincides with ``on_user_turn_stopped``.
+    With ``context_writes_await_turns=False`` (realtime mode default)
+    the write is triggered by the content stream (assistant response
+    start, session end), so this event fires decoupled from turn
+    frames. ``content`` is always populated.
+
+    Parameters:
+        content: The aggregated user transcript.
+        timestamp: When the user turn started.
+        user_id: Optional identifier for the user.
+    """
+
+    content: str
+    timestamp: str
+    user_id: str | None = None
+
+
+@dataclass
 class AssistantTurnStoppedMessage:
     """An assistant turn stopped message containing an assistant transcript update.
 
@@ -588,6 +611,7 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_stopped: Called when the user turn ends
     - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
+    - on_user_message_added: Called when a user message is written to context
     - on_user_mute_started: Called when the user becomes muted
     - on_user_mute_stopped: Called when the user becomes unmuted
 
@@ -607,6 +631,10 @@ class LLMUserAggregator(LLMContextAggregator):
 
         @aggregator.event_handler("on_user_turn_idle")
         async def on_user_turn_idle(aggregator):
+            ...
+
+        @aggregator.event_handler("on_user_message_added")
+        async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
             ...
 
         @aggregator.event_handler("on_user_mute_started")
@@ -822,7 +850,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._context.add_message({"role": self.role, "content": aggregation})
         await self.push_context_frame()
 
-        message = UserTurnStoppedMessage(
+        message = UserMessageAddedMessage(
             content=aggregation, timestamp=self._user_turn_start_timestamp
         )
         await self._call_event_handler("on_user_message_added", message)
@@ -1333,7 +1361,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._register_event_handler("on_assistant_turn_started")
         self._register_event_handler("on_assistant_turn_stopped")
-        self._register_event_handler("on_assistant_message_added")
         self._register_event_handler("on_assistant_thought")
         self._register_event_handler("on_summary_applied")
 
@@ -1934,8 +1961,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             timestamp=self._assistant_turn_start_timestamp,
         )
         await self._call_event_handler("on_assistant_turn_stopped", message)
-        if aggregation:
-            await self._call_event_handler("on_assistant_message_added", message)
 
         self._assistant_turn_start_timestamp = ""
 

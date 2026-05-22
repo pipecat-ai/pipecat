@@ -57,6 +57,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregator,
     LLMUserAggregatorParams,
     RealtimeServiceModeConfig,
+    UserMessageAddedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -1737,16 +1738,16 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
         user, assistant = pair
 
-        user_msg_added: list[UserTurnStoppedMessage] = []
-        assistant_msg_added: list[AssistantTurnStoppedMessage] = []
+        user_msg_added: list[UserMessageAddedMessage] = []
+        assistant_msg_stopped: list[AssistantTurnStoppedMessage] = []
 
         @user.event_handler("on_user_message_added")
         async def _on_um(_a, msg):
             user_msg_added.append(msg)
 
-        @assistant.event_handler("on_assistant_message_added")
-        async def _on_am(_a, msg):
-            assistant_msg_added.append(msg)
+        @assistant.event_handler("on_assistant_turn_stopped")
+        async def _on_ats(_a, msg):
+            assistant_msg_stopped.append(msg)
 
         context = user.context
 
@@ -1782,8 +1783,8 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual([m.content for m in user_msg_added], ["Hello!", "How are you?"])
-        self.assertEqual([m.content for m in assistant_msg_added], ["Hi there!"])
-        for msg in assistant_msg_added:
+        self.assertEqual([m.content for m in assistant_msg_stopped], ["Hi there!"])
+        for msg in assistant_msg_stopped:
             self.assertFalse(msg.interrupted)
 
     async def test_interruption_writes_assistant_immediately(self):
@@ -1792,8 +1793,8 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
 
         assistant_messages: list[AssistantTurnStoppedMessage] = []
 
-        @assistant.event_handler("on_assistant_message_added")
-        async def _on_am(_a, msg):
+        @assistant.event_handler("on_assistant_turn_stopped")
+        async def _on_ats(_a, msg):
             assistant_messages.append(msg)
 
         context = user.context

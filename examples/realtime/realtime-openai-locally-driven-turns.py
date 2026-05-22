@@ -44,7 +44,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
     RealtimeServiceModeConfig,
-    UserTurnStoppedMessage,
+    UserMessageAddedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -239,13 +239,13 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         await task.cancel()
 
     @user_aggregator.event_handler("on_user_message_added")
-    async def on_user_message_added(aggregator, message: UserTurnStoppedMessage):
+    async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    @assistant_aggregator.event_handler("on_assistant_message_added")
-    async def on_assistant_message_added(aggregator, message: AssistantTurnStoppedMessage):
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")

@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
     RealtimeServiceModeConfig,
-    UserTurnStoppedMessage,
+    UserMessageAddedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -256,19 +256,20 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         logger.info(f"Client disconnected")
         await worker.cancel()
 
-    # Log transcript updates. In realtime mode the turn-stopped events
-    # fire before the message text is finalized (UserTurnStoppedMessage
-    # content is None), so subscribe to the *_message_added events
-    # instead — they fire when the message is written to context and
-    # carry the finalized content.
+    # Log transcript updates. In realtime mode the user-turn-stopped
+    # event fires before the message text is finalized
+    # (UserTurnStoppedMessage content is None), so subscribe to
+    # on_user_message_added for the finalized user transcript. The
+    # assistant message is finalized at turn-stop time in both modes,
+    # so on_assistant_turn_stopped carries the content directly.
     @user_aggregator.event_handler("on_user_message_added")
-    async def on_user_message_added(aggregator, message: UserTurnStoppedMessage):
+    async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    @assistant_aggregator.event_handler("on_assistant_message_added")
-    async def on_assistant_message_added(aggregator, message: AssistantTurnStoppedMessage):
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
