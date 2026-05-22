@@ -76,7 +76,9 @@ class WebsocketService(ABC):
         logger.warning(f"{self} reconnecting (attempt: {attempt_number})")
         await self._disconnect_websocket()
         await self._connect_websocket()
-        return await self._verify_connection()
+        if not await self._verify_connection():
+            raise ConnectionError(f"{self} websocket reconnection failed verification")
+        return True
 
     async def _try_reconnect(
         self,

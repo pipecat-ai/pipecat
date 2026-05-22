@@ -293,8 +293,9 @@ class XAISTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             logger.debug(f"{self} connected to xAI STT WebSocket")
         except Exception as e:
+            self._websocket = None
+            self._session_ready.clear()
             await self.push_error(error_msg=f"Unable to connect to xAI STT: {e}", exception=e)
-            raise
 
     async def _disconnect_websocket(self):
         """Close the WebSocket connection."""

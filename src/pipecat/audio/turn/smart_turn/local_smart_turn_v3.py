@@ -16,8 +16,8 @@ import numpy as np
 import onnxruntime as ort
 import soxr
 from loguru import logger
-from transformers import WhisperFeatureExtractor
 
+from pipecat.audio.turn.smart_turn._whisper_features import compute_whisper_log_mel_features
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 from pipecat.utils.env import env_truthy
 
@@ -73,7 +73,6 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         so.intra_op_num_threads = cpu_count
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-        self._feature_extractor = WhisperFeatureExtractor(chunk_length=8)
         self._session = ort.InferenceSession(smart_turn_model_path, sess_options=so)
 
         logger.debug("Loaded Local Smart Turn v3.x")
@@ -161,20 +160,9 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         # Truncate to 8 seconds (keeping the end) or pad to 8 seconds
         audio_array = truncate_audio_to_last_n_seconds(audio_array, n_seconds=8)
 
-        # Process audio using Whisper's feature extractor
-        inputs = self._feature_extractor(
-            audio_array,
-            sampling_rate=_MODEL_SAMPLE_RATE,
-            return_tensors="np",
-            padding="max_length",
-            max_length=8 * _MODEL_SAMPLE_RATE,
-            truncation=True,
-            do_normalize=True,
-        )
-
-        # Extract features and ensure correct shape for ONNX
-        input_features = inputs.input_features.squeeze(0).astype(np.float32)
-        input_features = np.expand_dims(input_features, axis=0)  # Add batch dimension
+        # Compute Whisper-style log-mel features (vendored numpy implementation).
+        log_mel = compute_whisper_log_mel_features(audio_array, do_normalize=True)
+        input_features = np.expand_dims(log_mel, axis=0)  # Add batch dimension
 
         # Run ONNX inference
         outputs = self._session.run(None, {"input_features": input_features})

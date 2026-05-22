@@ -423,8 +423,8 @@ class GradiumSTTService(WebsocketSTTService):
             logger.debug("Connected to Gradium STT")
 
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-            raise
+            self._websocket = None
+            await self.push_error(error_msg=f"Unable to connect to Gradium: {e}", exception=e)
 
     async def _disconnect(self):
         await super()._disconnect()
