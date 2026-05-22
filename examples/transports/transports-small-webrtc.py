@@ -120,7 +120,8 @@ async def run_example(webrtc_connection: SmallWebRTCConnection):
 
     runner = PipelineRunner(handle_sigint=False)
 
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 @app.get("/", include_in_schema=False)

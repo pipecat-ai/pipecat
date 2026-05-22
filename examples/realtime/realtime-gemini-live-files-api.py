@@ -196,7 +196,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Run the pipeline
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
     # Clean up: delete the uploaded file and temporary file
     if file_info:

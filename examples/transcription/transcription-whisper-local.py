@@ -55,7 +55,8 @@ async def main():
 
     runner = PipelineRunner(handle_sigint=False if sys.platform == "win32" else True)
 
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 if __name__ == "__main__":

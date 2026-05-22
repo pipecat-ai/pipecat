@@ -145,7 +145,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

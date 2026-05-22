@@ -238,7 +238,8 @@ There is also a secret menu that changes daily. If the user asks about it, use t
 
     # Run the pipeline
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

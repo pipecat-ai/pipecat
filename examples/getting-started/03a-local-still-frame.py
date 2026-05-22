@@ -57,7 +57,8 @@ async def main():
                 tk_root.update_idletasks()
                 await asyncio.sleep(0.1)
 
-        await asyncio.gather(runner.run(worker), run_tk())
+        await runner.add_workers(worker)
+        await asyncio.gather(runner.run(), run_tk())
 
 
 if __name__ == "__main__":

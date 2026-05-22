@@ -117,7 +117,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-    await asyncio.gather(runner.run(worker), run_tk())
+    await runner.add_workers(worker)
+    await asyncio.gather(runner.run(), run_tk())
 
 
 async def bot(runner_args: RunnerArguments):

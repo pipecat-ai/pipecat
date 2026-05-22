@@ -198,7 +198,8 @@ async def run_test(
             await worker.queue_frame(EndFrame())
 
     runner = PipelineRunner()
-    await asyncio.gather(runner.run(worker), push_frames())
+    await runner.add_workers(worker)
+    await asyncio.gather(runner.run(), push_frames())
 
     #
     # Down frames
