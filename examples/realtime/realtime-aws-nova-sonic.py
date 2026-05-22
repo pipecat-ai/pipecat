@@ -163,16 +163,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # detection may not match Nova Sonic's actual server-side turn
     # decisions and can desynchronize in subtle ways.
     #
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
-    from pipecat.processors.aggregators.llm_response_universal import (
-        LLMUserAggregatorParams,
-    )
+    # from pipecat.audio.vad.silero import SileroVADAnalyzer
+    # from pipecat.processors.aggregators.llm_response_universal import (
+    #     LLMUserAggregatorParams,
+    # )
 
     context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         realtime_service_mode=RealtimeServiceModeConfig(),
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     # Build the pipeline

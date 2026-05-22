@@ -611,7 +611,10 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_stopped: Called when the user turn ends
     - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
-    - on_user_message_added: Called when a user message is written to context
+    - on_user_message_added: Called when a user message is written to context;
+      in realtime mode (i.e. when _realtime_service_mode.context_writes_await_turns=False)
+      this is decoupled from on_user_turn_stopped; use this event to get each
+      new user message as it's written to context
     - on_user_mute_started: Called when the user becomes muted
     - on_user_mute_stopped: Called when the user becomes unmuted
 
@@ -633,6 +636,9 @@ class LLMUserAggregator(LLMContextAggregator):
         async def on_user_turn_idle(aggregator):
             ...
 
+        # In realtime mode (i.e. when _realtime_service_mode.context_writes_await_turns=False)
+        # this is decoupled from on_user_turn_stopped; use this event to get each
+        # new user message
         @aggregator.event_handler("on_user_message_added")
         async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
             ...
