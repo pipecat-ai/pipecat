@@ -324,6 +324,14 @@ class DailyParams(TransportParams):
         api_url: Daily API base URL.
         api_key: Daily API authentication key.
         audio_in_user_tracks: Receive users' audio in separate tracks
+        audio_out_declared_sample_rate: When set, the microphone CustomAudioSource is declared
+            at this rate instead of the true output sample rate. Writing true-rate PCM bytes
+            into a source declared at a higher rate (e.g. 48000 when content is 24000 Hz) causes
+            write_frames() to return faster than real-time, delivering audio to the WebRTC peer
+            ahead of schedule. The web client must be configured with ``fasterThanRealtime: true``
+            to receive and play back the audio at the correct pitch. Pair with
+            ``audio_out_prebuffer_secs`` to absorb TTS jitter before the first frame is sent.
+            Defaults to ``None`` (disabled).
         camera_out_enabled: Whether to enable the main camera output track.
         camera_out_send_settings: Camera output track publishing settings.
         custom_audio_track_params: Per-destination configuration for custom audio tracks.
@@ -337,6 +345,7 @@ class DailyParams(TransportParams):
     api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
     audio_in_user_tracks: bool = True
+    audio_out_declared_sample_rate: int | None = None
     camera_out_enabled: bool = True
     camera_out_send_settings: dict[str, Any] | None = None
     custom_audio_track_params: Mapping[str, DailyCustomAudioTrackParams] | None = None
@@ -824,11 +833,17 @@ class DailyTransportClient(EventHandler):
             and self._params.microphone_out_enabled
             and not self._microphone_track
         ):
+            declared_rate = self._params.audio_out_declared_sample_rate or self._out_sample_rate
             logger.debug(
-                f"Creating custom audio source, auto silence {self._params.audio_out_auto_silence}"
+                f"Creating custom audio source, auto_silence={self._params.audio_out_auto_silence}"
+                + (
+                    f", declared_rate={declared_rate} (true_rate={self._out_sample_rate})"
+                    if declared_rate != self._out_sample_rate
+                    else ""
+                )
             )
             audio_source = CustomAudioSource(
-                self._out_sample_rate,
+                declared_rate,
                 self._params.audio_out_channels,
                 self._params.audio_out_auto_silence,
             )
@@ -2949,6 +2964,18 @@ class DailyTransport(BaseTransport):
         logger.info(f"Participant joined {id}")
 
         if self._input and self._params.audio_in_enabled and self._params.audio_in_user_tracks:
+            if self._params.audio_out_declared_sample_rate:
+                self._client._client.send_app_message(
+                    {
+                        "label": "rtvi-ai",
+                        "type": "audio.faster_than_realtime",
+                        "data": {
+                            "true_sample_rate": self._client.out_sample_rate,
+                            "declared_sample_rate": self._params.audio_out_declared_sample_rate,
+                        },
+                    },
+                    id,
+                )
             await self._input.capture_participant_audio(
                 id, "microphone", self._client.in_sample_rate
             )
