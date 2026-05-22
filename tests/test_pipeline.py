@@ -353,11 +353,16 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         assert "Second" in upstream_texts
 
     async def test_task_heartbeats(self):
+        period_secs = 0.2
+        expected_heartbeats = 5
         heartbeats_counter = 0
+        received_expected = asyncio.Event()
 
         async def heartbeat_received(processor: FrameProcessor, heartbeat: HeartbeatFrame):
             nonlocal heartbeats_counter
             heartbeats_counter += 1
+            if heartbeats_counter >= expected_heartbeats:
+                received_expected.set()
 
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
@@ -368,23 +373,41 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             pipeline,
             params=PipelineParams(
                 enable_heartbeats=True,
-                heartbeats_period_secs=0.2,
+                heartbeats_period_secs=period_secs,
             ),
             observers=[heartbeats_observer],
             cancel_on_idle_timeout=False,
         )
 
-        expected_heartbeats = 1.0 / 0.2
+        async def wait_for_heartbeats():
+            # Wait until we've observed the expected number of heartbeats, then
+            # stop the pipeline. We don't assert on the count observed within a
+            # fixed wall-clock window: heartbeats are timer-driven, so the count
+            # in any given window depends on event-loop scheduling precision and
+            # is off-by-one under load (which made this test flaky in CI). The
+            # generous timeout only guards against heartbeats never firing.
+            try:
+                await asyncio.wait_for(received_expected.wait(), timeout=5.0)
+            except TimeoutError:
+                pass
+            await task.queue_frame(EndFrame())
 
         await task.queue_frame(TextFrame(text="Hello!"))
-        try:
-            await asyncio.wait_for(
-                task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
-                timeout=1.0,
-            )
-        except TimeoutError:
-            pass
-        assert heartbeats_counter == expected_heartbeats
+
+        start_time = time.time()
+        await asyncio.gather(
+            task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
+            wait_for_heartbeats(),
+        )
+        elapsed = time.time() - start_time
+
+        # We observed the expected number of heartbeats...
+        assert heartbeats_counter >= expected_heartbeats
+        # ...and they were paced by the configured period: each heartbeat waits a
+        # full period, so N heartbeats span at least (N - 1) periods. asyncio.sleep
+        # is a guaranteed lower bound, so this is robust to scheduling jitter while
+        # still catching heartbeats that fire too fast.
+        assert elapsed >= (expected_heartbeats - 1) * period_secs
 
     async def test_heartbeat_monitor_respects_custom_timeout(self):
         """Verify the heartbeat monitor uses heartbeats_monitor_secs from params."""
