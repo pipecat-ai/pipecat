@@ -71,9 +71,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
+    # Ultravox doesn't emit user-turn frames. To get them (for RTVI
+    # speech events, turn observers, etc.) uncomment the local-VAD
+    # imports + `user_params=` below. See realtime-ultravox.py for the
+    # full discussion.
+    #
+    # from pipecat.audio.vad.silero import SileroVADAnalyzer
+    # from pipecat.processors.aggregators.llm_response_universal import (
+    #     LLMUserAggregatorParams,
+    # )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         realtime_service_mode=RealtimeServiceModeConfig(),
+        # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
@@ -94,6 +104,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
+
+    # Ultravox doesn't emit user-turn frames, so on_user_turn_stopped
+    # won't fire. If you uncomment the local-VAD opt-in above, also
+    # uncomment the imports and handler below.
+    #
+    # from pipecat.processors.aggregators.llm_response_universal import UserTurnStoppedMessage
+    # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
+    #
+    # @user_aggregator.event_handler("on_user_turn_stopped")
+    # async def on_user_turn_stopped(
+    #     aggregator,
+    #     strategy: BaseUserTurnStopStrategy,
+    #     message: UserTurnStoppedMessage,
+    # ):
+    #     logger.info(f"User turn stopped at {message.timestamp}")
 
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):

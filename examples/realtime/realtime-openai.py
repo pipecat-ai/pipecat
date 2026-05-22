@@ -24,6 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     RealtimeServiceModeConfig,
     UserMessageAddedMessage,
+    UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -40,6 +41,7 @@ from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -256,12 +258,22 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         logger.info(f"Client disconnected")
         await worker.cancel()
 
-    # Log transcript updates. In realtime mode the user-turn-stopped
-    # event fires before the message text is finalized
-    # (UserTurnStoppedMessage content is None), so subscribe to
-    # on_user_message_added for the finalized user transcript. The
-    # assistant message is finalized at turn-stop time in both modes,
-    # so on_assistant_turn_stopped carries the content directly.
+    # Subscribe to user turn lifecycle events. OpenAI Realtime emits its
+    # own user-turn frames from server VAD, so on_user_turn_stopped fires
+    # at the turn boundary. In realtime mode UserTurnStoppedMessage.content
+    # is None because the user transcript isn't finalized at turn-stop
+    # time — subscribe to on_user_message_added for the finalized text
+    # (it's written when the assistant response begins). The assistant
+    # message is finalized at turn-stop time in both modes, so
+    # on_assistant_turn_stopped carries the content directly.
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(
+        aggregator,
+        strategy: BaseUserTurnStopStrategy,
+        message: UserTurnStoppedMessage,
+    ):
+        logger.info(f"User turn stopped at {message.timestamp}")
+
     @user_aggregator.event_handler("on_user_message_added")
     async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""

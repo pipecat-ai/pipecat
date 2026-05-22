@@ -185,15 +185,23 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     # these frames it can't group user transcripts into discrete turns
     # visually.
     #
-    # If you need those frames, uncomment the SileroVADAnalyzer import
-    # above and the `user_params=` argument below. Note: local turn
-    # detection may not match Ultravox's actual server-side turn
-    # decisions and can desynchronize in subtle ways.
+    # Pipecat's own on_user_turn_stopped event on LLMUserAggregator (see
+    # the commented-out handler below) is in the same boat: without
+    # user-turn frames there's nothing to trigger it, so it won't fire
+    # in realtime mode. (Use on_user_message_added instead for finalized
+    # user transcript text.)
+    #
+    # If you need those frames, uncomment the SileroVADAnalyzer and
+    # related imports below and the `user_params=` argument further
+    # down. Note: local turn detection may not match Ultravox's actual
+    # server-side turn decisions and can desynchronize in subtle ways.
     #
     # from pipecat.audio.vad.silero import SileroVADAnalyzer
     # from pipecat.processors.aggregators.llm_response_universal import (
     #     LLMUserAggregatorParams,
+    #     UserTurnStoppedMessage,
     # )
+    # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         realtime_service_mode=RealtimeServiceModeConfig(),
@@ -232,10 +240,23 @@ There is also a secret menu that changes daily. If the user asks about it, use t
         logger.info(f"Client disconnected")
         await worker.cancel()
 
-    # Ultravox doesn't emit user-turn frames so on_user_turn_stopped
-    # would never fire. The *_message_added events fire when messages are
-    # written to context and carry the finalized content; use those for
-    # transcript logging.
+    # Ultravox doesn't emit user-turn frames, so on_user_turn_stopped
+    # won't fire (see the comment above the LLMContextAggregatorPair
+    # call). The on_user_message_added event fires when the user message
+    # is written to context and carries the finalized content; use it
+    # for transcript logging.
+    #
+    # If you uncomment the local-VAD opt-in above, you can also uncomment
+    # the on_user_turn_stopped handler below to get turn-stop callbacks.
+    #
+    # @user_aggregator.event_handler("on_user_turn_stopped")
+    # async def on_user_turn_stopped(
+    #     aggregator,
+    #     strategy: BaseUserTurnStopStrategy,
+    #     message: UserTurnStoppedMessage,
+    # ):
+    #     logger.info(f"User turn stopped at {message.timestamp}")
+
     @user_aggregator.event_handler("on_user_message_added")
     async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""

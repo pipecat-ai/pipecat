@@ -45,6 +45,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
     RealtimeServiceModeConfig,
     UserMessageAddedMessage,
+    UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -60,6 +61,7 @@ from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 
 load_dotenv(override=True)
 
@@ -238,6 +240,19 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         logger.info(f"Client disconnected")
         await task.cancel()
 
+    # In realtime mode the user transcript isn't finalized at turn-stop
+    # time, so on_user_turn_stopped carries no content; subscribe to
+    # on_user_message_added below for the finalized text.
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(
+        aggregator,
+        strategy: BaseUserTurnStopStrategy,
+        message: UserTurnStoppedMessage,
+    ):
+        logger.info(f"User turn stopped at {message.timestamp}")
+
+    # In realtime mode this is the canonical "user said X" event,
+    # decoupled from turn-stop.
     @user_aggregator.event_handler("on_user_message_added")
     async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
