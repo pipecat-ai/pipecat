@@ -1695,7 +1695,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         # it can flush the user on LLMFullResponseStartFrame. The user
         # has no back-ref — the assistant writes its own message on
         # LLMFullResponseEndFrame, so it doesn't need to call back.
-        self.assertIs(pair.assistant()._paired_half, pair.user())
+        self.assertIs(pair.assistant()._paired_user_aggregator, pair.user())
         self.assertFalse(pair.user()._context_writes_await_turns)
         self.assertFalse(pair.user()._turns_await_transcripts)
         self.assertFalse(pair.assistant()._context_writes_await_turns)
@@ -1703,7 +1703,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_pair_omits_realtime_wiring_when_unset(self):
         _, pair = self._build_pair()
-        self.assertIsNone(pair.assistant()._paired_half)
+        self.assertIsNone(pair.assistant()._paired_user_aggregator)
         self.assertTrue(pair.user()._context_writes_await_turns)
         self.assertTrue(pair.assistant()._context_writes_await_turns)
 
@@ -1884,7 +1884,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
         self.assertTrue(user._realtime_recommendation_logged)
 
-    async def test_realtime_mode_assistant_requires_paired_half(self):
+    async def test_realtime_mode_assistant_requires_paired_user_aggregator(self):
         # Direct construction of the assistant half with realtime mode
         # set but no paired user half raises at StartFrame validation.
         # (We call the validation directly so the error isn't swallowed
@@ -1904,7 +1904,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         assistant = LLMAssistantAggregator(
             context,
             _realtime_service_mode=RealtimeServiceModeConfig(turns_await_transcripts=True),
-            _paired_half=user,
+            _paired_user_aggregator=user,
         )
         with self.assertRaises(RuntimeError):
             assistant._validate_realtime_pairing()

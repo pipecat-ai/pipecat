@@ -1259,7 +1259,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         *,
         params: LLMAssistantAggregatorParams | None = None,
         _realtime_service_mode: RealtimeServiceModeConfig | None = None,
-        _paired_half: "LLMUserAggregator | None" = None,
+        _paired_user_aggregator: "LLMUserAggregator | None" = None,
         **kwargs,
     ):
         """Initialize the assistant context aggregator.
@@ -1271,10 +1271,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 configuration propagated from
                 ``LLMContextAggregatorPair``. Not intended for direct use —
                 construct the aggregators via the pair.
-            _paired_half: Pair-internal. Back-reference to the paired
-                user aggregator. Assistant flushes the user half on
-                ``LLMFullResponseStartFrame`` so the user message lands
-                in context before the assistant turn starts.
+            _paired_user_aggregator: Pair-internal. Back-reference to
+                the paired ``LLMUserAggregator``. The assistant flushes
+                it on ``LLMFullResponseStartFrame`` so the user message
+                lands in context before the assistant turn starts.
             **kwargs: Additional arguments.
         """
         params = params or LLMAssistantAggregatorParams()
@@ -1289,7 +1289,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Realtime-mode wiring. Defaults (no config) preserve cascade
         # behavior.
         self._realtime_service_mode = _realtime_service_mode
-        self._paired_half = _paired_half
+        self._paired_user_aggregator = _paired_user_aggregator
         if _realtime_service_mode is not None:
             self._context_writes_await_turns = _realtime_service_mode.context_writes_await_turns
             self._turns_await_transcripts = _realtime_service_mode.turns_await_transcripts
@@ -1459,16 +1459,18 @@ class LLMAssistantAggregator(LLMContextAggregator):
         construction of the assistant with the private realtime kwargs
         bypasses that and is not supported.
         """
-        if not self._context_writes_await_turns and self._paired_half is None:
+        if not self._context_writes_await_turns and self._paired_user_aggregator is None:
             raise RuntimeError(
                 f"{self}: realtime_service_mode is configured but this assistant "
                 "aggregator has no paired user aggregator. Construct the pair "
                 "via LLMContextAggregatorPair("
                 "context, realtime_service_mode=RealtimeServiceModeConfig())."
             )
-        if self._paired_half is not None and (
-            self._context_writes_await_turns != self._paired_half._context_writes_await_turns
-            or self._turns_await_transcripts != self._paired_half._turns_await_transcripts
+        if self._paired_user_aggregator is not None and (
+            self._context_writes_await_turns
+            != self._paired_user_aggregator._context_writes_await_turns
+            or self._turns_await_transcripts
+            != self._paired_user_aggregator._turns_await_transcripts
         ):
             raise RuntimeError(
                 f"{self}: realtime-mode config mismatch between user and "
@@ -1779,8 +1781,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         done talking" trigger and commit any in-flight user transcript to
         context here.
         """
-        if self._paired_half is not None:
-            await self._paired_half._realtime_handoff_flush()
+        if self._paired_user_aggregator is not None:
+            await self._paired_user_aggregator._realtime_handoff_flush()
         await self._trigger_assistant_turn_started()
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
@@ -2050,7 +2052,7 @@ class LLMContextAggregatorPair:
         # nothing to flush back — the assistant writes its own message
         # on ``LLMFullResponseEndFrame`` like cascade mode does.
         if realtime_service_mode is not None:
-            self._assistant._paired_half = self._user
+            self._assistant._paired_user_aggregator = self._user
 
     def user(self) -> LLMUserAggregator:
         """Get the user context aggregator.
