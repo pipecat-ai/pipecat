@@ -6,6 +6,7 @@
 
 """Tests for ElevenLabs TTS alignment handling."""
 
+import unittest
 from typing import Any
 
 from pipecat.services.elevenlabs.tts import (
@@ -254,3 +255,7 @@ def test_select_alignment_works_with_http_field_names():
     )
     assert selected is not None
     assert selected["characters"] == list(" Hi")
+
+
+if __name__ == "__main__":
+    unittest.main()
