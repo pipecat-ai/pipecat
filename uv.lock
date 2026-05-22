@@ -4219,7 +4219,6 @@ dependencies = [
     { name = "pyloudnorm" },
     { name = "resampy" },
     { name = "soxr" },
-    { name = "transformers" },
     { name = "wait-for2", marker = "python_full_version < '3.12'" },
 ]
 
@@ -4566,7 +4565,6 @@ requires-dist = [
     { name = "timm", marker = "extra == 'moondream'", specifier = "~=1.0.13" },
     { name = "torch", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
     { name = "torchaudio", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
-    { name = "transformers", specifier = ">=4.48.0,<6" },
     { name = "transformers", marker = "extra == 'local-smart-turn'", specifier = ">=4.48.0,<6" },
     { name = "transformers", marker = "extra == 'moondream'", specifier = ">=4.48.0,<6" },
     { name = "uvicorn", marker = "extra == 'runner'", specifier = ">=0.32.0,<1.0.0" },
