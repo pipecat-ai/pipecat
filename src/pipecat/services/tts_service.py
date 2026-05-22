@@ -101,6 +101,7 @@ class _WordTimestampEntry:
     word: str
     timestamp: float
     context_id: str
+    includes_inter_frame_spaces: bool = False
 
 
 class TTSService(AIService):
@@ -312,7 +313,7 @@ class TTSService(AIService):
 
         # Word timestamp state
         self._initial_word_timestamp: int = -1
-        self._initial_word_times: list[tuple[str, float, str | None]] = []
+        self._initial_word_times: list[tuple[str, float, str | None, bool]] = []
         # PTS of the last word frame pushed via _add_word_timestamps, used to assign
         # correct PTS to TTSStoppedFrame and LLMFullResponseEndFrame.
         self._word_last_pts: int = 0
@@ -1169,8 +1170,10 @@ class TTSService(AIService):
             if self._initial_word_times:
                 cached = self._initial_word_times.copy()
                 self._initial_word_times = []
-                for word, timestamp_seconds, ctx_id in cached:
-                    await self._add_word_timestamps([(word, timestamp_seconds)], ctx_id)
+                for word, timestamp_seconds, ctx_id, ifs in cached:
+                    await self._add_word_timestamps(
+                        [(word, timestamp_seconds)], ctx_id, includes_inter_frame_spaces=ifs
+                    )
 
     async def reset_word_timestamps(self):
         """Reset word timestamp tracking."""
@@ -1184,6 +1187,7 @@ class TTSService(AIService):
         word_times: list[tuple[str, float]],
         context_id: str | None = None,
         includes_inter_frame_spaces: bool | None = None,
+        pre_merge_tokens: bool = False,
     ):
         """Add word timestamps for processing.
 
@@ -1192,35 +1196,45 @@ class TTSService(AIService):
         playback order by _handle_audio_context. Otherwise they are processed immediately
         via _add_word_timestamps.
 
-        When ``includes_inter_frame_spaces`` is True (e.g. Inworld TTS), punctuation and
-        space-only tokens are merged into the preceding word via ``_merge_punct_tokens``
-        before queuing, so the tracker always receives words with trailing punctuation
-        already attached.  ``includes_inter_frame_spaces`` is reset to None after merging.
-
         Args:
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
             context_id: Unique identifier for the TTS context.
-            includes_inter_frame_spaces: When True, the tokens already embed inter-word
-                spacing (spaces and punctuation are part of the token text). Downstream
-                consumers must not inject additional spaces between tokens. None leaves
-                the frame's own default unchanged.
+            includes_inter_frame_spaces: When True, each emitted TTSTextFrame carries
+                ``includes_inter_frame_spaces=True`` so downstream consumers do not inject
+                extra spaces between consecutive frames (e.g. ElevenLabs for CJK languages
+                where word tokens already self-contain their spacing). None leaves the
+                frame's own default unchanged.
+            pre_merge_tokens: When True, punctuation and space-only tokens are merged into
+                the preceding word via ``merge_punct_tokens`` before queuing (e.g. Inworld
+                TTS, which emits spaces and punctuation as separate tokens). After merging
+                the resulting tokens are clean word strings, so ``includes_inter_frame_spaces``
+                should be left False (its default).
         """
-        if includes_inter_frame_spaces:
+        if pre_merge_tokens:
             word_times = merge_punct_tokens(word_times)
 
+        ifs = bool(includes_inter_frame_spaces)
         if context_id and self.audio_context_available(context_id):
             for word, timestamp in word_times:
                 await self.append_to_audio_context(
                     context_id,
-                    _WordTimestampEntry(word=word, timestamp=timestamp, context_id=context_id),
+                    _WordTimestampEntry(
+                        word=word,
+                        timestamp=timestamp,
+                        context_id=context_id,
+                        includes_inter_frame_spaces=ifs,
+                    ),
                 )
         else:
-            await self._add_word_timestamps(word_times=word_times, context_id=context_id)
+            await self._add_word_timestamps(
+                word_times=word_times, context_id=context_id, includes_inter_frame_spaces=ifs
+            )
 
     async def _add_word_timestamps(
         self,
         word_times: list[tuple[str, float]],
         context_id: str | None = None,
+        includes_inter_frame_spaces: bool = False,
     ):
         """Process word timestamps directly, building and pushing TTSTextFrames inline.
 
@@ -1236,12 +1250,16 @@ class TTSService(AIService):
             ts_ns = seconds_to_nanoseconds(timestamp)
             if self._initial_word_timestamp == -1:
                 # Cache until we have audio and can compute PTS.
-                self._initial_word_times.append((word, timestamp, context_id))
+                self._initial_word_times.append(
+                    (word, timestamp, context_id, includes_inter_frame_spaces)
+                )
             else:
                 pts = self._initial_word_timestamp + ts_ns
                 # Build TTSTextFrame(s) for this word token, advancing the active
                 # slot's tracker and flushing any skipped frames now unblocked.
-                for f in self._aggregated_frame_sequencer.process_word(word, pts, context_id):
+                for f in self._aggregated_frame_sequencer.process_word(
+                    word, pts, context_id, includes_inter_frame_spaces
+                ):
                     if isinstance(f, TTSTextFrame):
                         self._word_last_pts = f.pts
                     await self.push_frame(f)
@@ -1461,6 +1479,7 @@ class TTSService(AIService):
                     await self._add_word_timestamps(
                         [(frame.word, frame.timestamp)],
                         frame.context_id,
+                        includes_inter_frame_spaces=frame.includes_inter_frame_spaces,
                     )
                     continue
                 elif isinstance(frame, TTSAudioRawFrame):

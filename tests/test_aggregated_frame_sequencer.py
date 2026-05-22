@@ -25,6 +25,7 @@ import unittest
 from pipecat.frames.frames import AggregatedTextFrame, AggregationType, TTSTextFrame
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -606,6 +607,113 @@ class TestCJKLanguages(unittest.TestCase):
         tts_frames = [f for f in result if isinstance(f, TTSTextFrame)]
         self.assertEqual(len(tts_frames), 1)
         self.assertEqual(tts_frames[0].text, "你的智能")
+
+
+# ---------------------------------------------------------------------------
+# CJK context assembly — includes_inter_frame_spaces propagation
+# ---------------------------------------------------------------------------
+
+
+class TestCJKContextAssembly(unittest.TestCase):
+    """CJK word-timestamp chunks assembled into assistant context must not include extra spaces.
+
+    Regression: _build_word_frame always created TTSTextFrame(includes_inter_frame_spaces=False).
+    The context aggregator then injected a space between every consecutive word frame,
+    producing "です。 何か" instead of "です。何か" for Japanese/Chinese.
+
+    The fix adds set_includes_inter_frame_spaces(context_id, True) so _build_word_frame
+    stamps the correct flag on each frame and the context aggregator skips the space.
+    """
+
+    @staticmethod
+    def _assemble_context(frames) -> str:
+        """Reassemble TTSTextFrames the same way the context aggregator does."""
+        parts = [
+            TextPartForConcatenation(
+                f.text,
+                includes_inter_part_spaces=f.includes_inter_frame_spaces,
+            )
+            for f in frames
+            if isinstance(f, TTSTextFrame)
+        ]
+        return concatenate_aggregated_text(parts)
+
+    def test_japanese_chunks_no_space_in_context(self):
+        """Japanese ElevenLabs-style word chunks must concatenate without an extra space."""
+        seq = _seq()
+        sentence = "どんなことでも気軽に相談してくださいね。"
+        seq.register_spoken(
+            _spoken_frame(sentence),
+            "ctx1",
+            _tracker(sentence),
+            True,
+            includes_inter_frame_spaces=True,
+        )
+
+        r1 = seq.process_word("どんなことでも気", pts=100, context_id="ctx1")
+        r2 = seq.process_word("軽に相談してくださいね。", pts=200, context_id="ctx1")
+
+        context_text = self._assemble_context(r1 + r2)
+        self.assertEqual(
+            context_text,
+            "どんなことでも気軽に相談してくださいね。",
+            "Japanese CJK chunks must not be separated by a space in context",
+        )
+
+    def test_chinese_chunks_no_space_in_context(self):
+        """Chinese ElevenLabs-style word chunks must concatenate without an extra space."""
+        seq = _seq()
+        sentence = "你好，我是你的智能助手。"
+        seq.register_spoken(
+            _spoken_frame(sentence),
+            "ctx1",
+            _tracker(sentence),
+            True,
+            includes_inter_frame_spaces=True,
+        )
+
+        r1 = seq.process_word("你好，我是", pts=100, context_id="ctx1")
+        r2 = seq.process_word("你的智能助手。", pts=200, context_id="ctx1")
+
+        context_text = self._assemble_context(r1 + r2)
+        self.assertEqual(
+            context_text,
+            "你好，我是你的智能助手。",
+            "Chinese CJK chunks must not be separated by a space in context",
+        )
+
+    def test_english_words_still_have_spaces_in_context(self):
+        """Non-CJK (English) word tokens must still be joined with spaces."""
+        seq = _seq()
+        sentence = "Hello world."
+        seq.register_spoken(_spoken_frame(sentence), "ctx1", _tracker(sentence), True)
+
+        r1 = seq.process_word("Hello", pts=100, context_id="ctx1")
+        r2 = seq.process_word("world.", pts=200, context_id="ctx1")
+
+        context_text = self._assemble_context(r1 + r2)
+        self.assertEqual(context_text, "Hello world.")
+
+    def test_force_complete_cjk_frame_has_flag(self):
+        """force_complete for a CJK slot must also produce a frame with the flag set."""
+        seq = _seq()
+        sentence = "こんにちは、私はあなたの"
+        seq.register_spoken(
+            _spoken_frame(sentence),
+            "ctx1",
+            _tracker(sentence),
+            True,
+            includes_inter_frame_spaces=True,
+        )
+        seq.process_word("こんにちは、私", pts=10, context_id="ctx1")
+
+        result = seq.force_complete(last_word_pts=50)
+        tts_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual(len(tts_frames), 1)
+        self.assertTrue(
+            tts_frames[0].includes_inter_frame_spaces,
+            "force_complete must propagate includes_inter_frame_spaces for CJK slots",
+        )
 
 
 if __name__ == "__main__":

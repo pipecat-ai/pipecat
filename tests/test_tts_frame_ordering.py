@@ -272,6 +272,7 @@ class _MockWordTimestampHttpTTSService(TTSService):
     def __init__(
         self,
         includes_inter_frame_spaces: bool = False,
+        pre_merge_tokens: bool = False,
         word_times: list[tuple[str, float]] | None = None,
         **kwargs,
     ):
@@ -283,6 +284,7 @@ class _MockWordTimestampHttpTTSService(TTSService):
             **kwargs,
         )
         self._includes_inter_frame_spaces = includes_inter_frame_spaces
+        self._pre_merge_tokens = pre_merge_tokens
         self._word_times = word_times
 
     def can_generate_metrics(self) -> bool:
@@ -294,6 +296,7 @@ class _MockWordTimestampHttpTTSService(TTSService):
             word_times,
             context_id=context_id,
             includes_inter_frame_spaces=self._includes_inter_frame_spaces,
+            pre_merge_tokens=self._pre_merge_tokens,
         )
         yield TTSAudioRawFrame(
             audio=_FAKE_AUDIO,
@@ -317,6 +320,7 @@ class _MockWordTimestampWSTTSService(TTSService):
     def __init__(
         self,
         includes_inter_frame_spaces: bool = False,
+        pre_merge_tokens: bool = False,
         word_times: list[tuple[str, float]] | None = None,
         **kwargs,
     ):
@@ -328,6 +332,7 @@ class _MockWordTimestampWSTTSService(TTSService):
             **kwargs,
         )
         self._includes_inter_frame_spaces = includes_inter_frame_spaces
+        self._pre_merge_tokens = pre_merge_tokens
         self._word_times = word_times
 
     def can_generate_metrics(self) -> bool:
@@ -341,6 +346,7 @@ class _MockWordTimestampWSTTSService(TTSService):
                 word_times,
                 context_id=context_id,
                 includes_inter_frame_spaces=self._includes_inter_frame_spaces,
+                pre_merge_tokens=self._pre_merge_tokens,
             )
             await self.append_to_audio_context(
                 context_id,
@@ -597,14 +603,14 @@ async def test_http_word_timestamps_verbatim_tokens():
 
 @pytest.mark.asyncio
 async def test_http_word_timestamps_punctuation_tokens():
-    """Punct-only tokens are merged into the preceding word when includes_inter_frame_spaces=True.
+    """Punct-only tokens are merged into the preceding word when pre_merge_tokens=True.
 
     Models the Inworld API scenario: the TTS returns separate space and punctuation
-    tokens.  add_word_timestamps calls merge_punct_tokens when includes_inter_frame_spaces
-    is True, collapsing those tokens into the preceding word before the tracker sees them.
+    tokens.  add_word_timestamps calls merge_punct_tokens when pre_merge_tokens=True,
+    collapsing those tokens into the preceding word before the tracker sees them.
 
-    With flag=False (default) tokens are forwarded as-is; the tracker strips leading/
-    trailing whitespace from each frame word via get_word_for_frame().
+    With pre_merge_tokens=False (default) tokens are forwarded as-is; the tracker
+    strips leading/trailing whitespace from each frame word via get_word_for_frame().
     """
     verbatim_tokens = [
         ("hello", 0.0),
@@ -616,22 +622,22 @@ async def test_http_word_timestamps_punctuation_tokens():
         ("?", 0.9),
     ]
 
-    # With flag=True: punct-only tokens ("! " and "?") are merged into the preceding
-    # words (" world" → " world! " and " you" → " you?"), then stripped by the tracker.
-    tts_ifs = _MockWordTimestampHttpTTSService(
-        includes_inter_frame_spaces=True,
+    # With pre_merge_tokens=True: punct-only tokens ("! " and "?") are merged into the
+    # preceding words (" world" → " world! " and " you" → " you?"), then stripped.
+    tts_merged = _MockWordTimestampHttpTTSService(
+        pre_merge_tokens=True,
         word_times=verbatim_tokens,
     )
-    frames_ifs = await run_test(
-        tts_ifs,
+    frames_merged = await run_test(
+        tts_merged,
         frames_to_send=[TTSSpeakFrame(text="hello world! How are you?", append_to_context=False)],
     )
-    text_frames_ifs = [f for f in frames_ifs[0] if isinstance(f, TTSTextFrame)]
-    assert [f.text for f in text_frames_ifs] == ["hello", "world!", "How", "are", "you?"], (
+    text_frames_merged = [f for f in frames_merged[0] if isinstance(f, TTSTextFrame)]
+    assert [f.text for f in text_frames_merged] == ["hello", "world!", "How", "are", "you?"], (
         "Punct-only tokens must be merged into the preceding word"
     )
 
-    # With flag=False (default): no merging; tracker strips leading/trailing spaces.
+    # With pre_merge_tokens=False (default): no merging; tracker strips leading/trailing spaces.
     tts_plain = _MockWordTimestampHttpTTSService(
         word_times=verbatim_tokens,
     )
@@ -692,7 +698,7 @@ async def test_websocket_word_timestamps_punctuation_tokens():
         ("?", 0.9),
     ]
     tts = _MockWordTimestampWSTTSService(
-        includes_inter_frame_spaces=True,
+        pre_merge_tokens=True,
         word_times=verbatim_tokens,
     )
     frames_received = await run_test(

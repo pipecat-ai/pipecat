@@ -35,6 +35,7 @@ class _AggregatedFrameSlot:
     tracker: WordCompletionTracker | None = None
     transport_destination: str | None = None
     complete: bool = False
+    includes_inter_frame_spaces: bool = False
 
 
 class AggregatedFrameSequencer:
@@ -72,6 +73,7 @@ class AggregatedFrameSequencer:
         context_id: str,
         tracker: WordCompletionTracker | None,
         append_to_context: bool,
+        includes_inter_frame_spaces: bool = False,
     ) -> None:
         """Register a spoken AggregatedTextFrame slot.
 
@@ -86,6 +88,9 @@ class AggregatedFrameSequencer:
                 push_text_frames=True services (they complete via complete_spoken_slot).
             append_to_context: Whether word frames built for this context should carry
                 append_to_context=True.
+            includes_inter_frame_spaces: When True, every TTSTextFrame emitted for this
+                slot carries ``includes_inter_frame_spaces=True`` so downstream consumers
+                do not inject extra spaces between consecutive frames.
         """
         self._context_append_to_context[context_id] = append_to_context
         self._slots.append(
@@ -94,6 +99,7 @@ class AggregatedFrameSequencer:
                 context_id=context_id,
                 spoken=True,
                 tracker=tracker,
+                includes_inter_frame_spaces=includes_inter_frame_spaces,
             )
         )
 
@@ -133,6 +139,7 @@ class AggregatedFrameSequencer:
         word: str,
         pts: int,
         context_id: str | None,
+        includes_inter_frame_spaces: bool = False,
     ) -> list[Frame]:
         """Process one word-timestamp event and return frames to push downstream.
 
@@ -149,6 +156,8 @@ class AggregatedFrameSequencer:
             word: A word token from the TTS service word-timestamp stream.
             pts: Presentation timestamp (nanoseconds) to assign to the frame.
             context_id: TTS context ID from the word-timestamp event.
+            includes_inter_frame_spaces: Stamped onto the emitted TTSTextFrame so
+                downstream consumers know not to inject extra spaces between frames.
 
         Returns:
             Ordered list of frames (TTSTextFrame and/or AggregatedTextFrame) to push.
@@ -170,10 +179,21 @@ class AggregatedFrameSequencer:
                         f"{self._name} Word '{word}' not recognised by any slot, "
                         "emitting as passthrough"
                     )
-                    return [self._build_word_frame(word, pts, context_id)]
+                    return [
+                        self._build_word_frame(
+                            word,
+                            pts,
+                            context_id,
+                            includes_inter_frame_spaces=includes_inter_frame_spaces,
+                        )
+                    ]
 
             is_complete = active.tracker.add_word_and_check_complete(word)
             raw_overflow_word = active.tracker.get_overflow_word()
+
+        # Use the slot's own flag when available; fall back to the per-call argument
+        # (used for passthrough words that have no active slot).
+        slot_ifs = active.includes_inter_frame_spaces if active else includes_inter_frame_spaces
 
         frame_text = (
             active.tracker.get_word_for_frame() if (active and active.tracker) else word
@@ -183,7 +203,13 @@ class AggregatedFrameSequencer:
 
         # logger.debug(f"{self._name} Word '{word}' → frame_text='{frame_text}', raw='{raw_text}'")
         frames: list[Frame] = [
-            self._build_word_frame(frame_text, pts, emit_context_id, raw_text=raw_text)
+            self._build_word_frame(
+                frame_text,
+                pts,
+                emit_context_id,
+                raw_text=raw_text,
+                includes_inter_frame_spaces=slot_ifs,
+            )
         ]
 
         if is_complete and active:
@@ -281,6 +307,7 @@ class AggregatedFrameSequencer:
                                 last_word_pts,
                                 slot.context_id,
                                 raw_text=raw_remaining,
+                                includes_inter_frame_spaces=slot.includes_inter_frame_spaces,
                             )
                         )
                 slot.complete = True
@@ -320,6 +347,7 @@ class AggregatedFrameSequencer:
         pts: int,
         context_id: str | None,
         raw_text: str | None = None,
+        includes_inter_frame_spaces: bool = False,
     ) -> Frame:
         """Build a TTSTextFrame with all standard word-timestamp attributes set."""
         frame = TTSTextFrame(text, aggregated_by=AggregationType.WORD)
@@ -331,6 +359,7 @@ class AggregatedFrameSequencer:
             else True
         )
         frame.raw_text = raw_text
+        frame.includes_inter_frame_spaces = includes_inter_frame_spaces
         return frame
 
     def _process_overflow(self, raw_overflow_word: str, pts: int) -> list[Frame]:
@@ -346,6 +375,7 @@ class AggregatedFrameSequencer:
                 pts,
                 next_active.context_id,
                 raw_text=next_active.tracker.get_llm_consumed(),
+                includes_inter_frame_spaces=next_active.includes_inter_frame_spaces,
             )
         )
         if overflow_complete:
