@@ -1072,9 +1072,15 @@ class PipelineWorker(BaseWorker):
         """Run ``setup_pipeline_worker`` from each file in ``PIPECAT_SETUP_FILES``.
 
         A setup file may define ``setup_pipeline_worker(worker)`` to attach event
-        handlers, observers, or other per-worker wiring.
+        handlers, observers, or other per-worker wiring. The legacy name
+        ``setup_pipeline_task`` is still recognized but emits a
+        ``DeprecationWarning``.
         """
-        await run_setup_hook(target=self, function_name="setup_pipeline_worker")
+        await run_setup_hook(
+            target=self,
+            function_name="setup_pipeline_worker",
+            deprecated_function_name="setup_pipeline_task",
+        )
 
     def _print_dangling_tasks(self):
         """Log any dangling tasks that haven't been properly cleaned up."""
