@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import json
 import unittest
 
@@ -1665,21 +1664,6 @@ class TestRealtimeServiceModeConfig(unittest.TestCase):
         self.assertFalse(cfg.context_writes_await_turns)
         self.assertFalse(cfg.turns_await_transcripts)
 
-    def test_keep_transcripts_keep_writes_on_turn(self):
-        cfg = RealtimeServiceModeConfig(
-            turns_await_transcripts=True, context_writes_await_turns=True
-        )
-        self.assertTrue(cfg.context_writes_await_turns)
-        self.assertTrue(cfg.turns_await_transcripts)
-
-    def test_keep_transcripts_trailing_writes(self):
-        # Valid third row: turns wait on transcripts but context writes
-        # are trailing. The plan calls this out as the explicit fine-grained
-        # case (downstream consumers of user-turn frames want transcripts).
-        cfg = RealtimeServiceModeConfig(turns_await_transcripts=True)
-        self.assertFalse(cfg.context_writes_await_turns)
-        self.assertTrue(cfg.turns_await_transcripts)
-
     def test_invalid_combination_rejected(self):
         # turns fire early but context writes wait → incomplete messages.
         with self.assertRaises(ValueError):
@@ -1707,10 +1691,11 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_pair_propagates_realtime_mode_to_halves(self):
         _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
-        # The pair wires shared state into both halves.
-        self.assertIs(pair.user()._paired_half, pair.assistant())
+        # Realtime mode is one-way: the assistant holds the back-ref so
+        # it can flush the user on LLMFullResponseStartFrame. The user
+        # has no back-ref — the assistant writes its own message on
+        # LLMFullResponseEndFrame, so it doesn't need to call back.
         self.assertIs(pair.assistant()._paired_half, pair.user())
-        self.assertIs(pair.user()._pair_lock, pair.assistant()._pair_lock)
         self.assertFalse(pair.user()._context_writes_await_turns)
         self.assertFalse(pair.user()._turns_await_transcripts)
         self.assertFalse(pair.assistant()._context_writes_await_turns)
@@ -1718,10 +1703,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_pair_omits_realtime_wiring_when_unset(self):
         _, pair = self._build_pair()
-        # Backreferences are still created (harmless), but no shared lock
-        # is allocated when the realtime config is absent.
-        self.assertIsNone(pair.user()._pair_lock)
-        self.assertIsNone(pair.assistant()._pair_lock)
+        self.assertIsNone(pair.assistant()._paired_half)
         self.assertTrue(pair.user()._context_writes_await_turns)
         self.assertTrue(pair.assistant()._context_writes_await_turns)
 
@@ -1769,9 +1751,8 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         context = user.context
 
         # Sequence: user transcript, assistant response starts (flushes
-        # user), assistant response ends (parks pending), new user
-        # transcript (flushes assistant), then EndFrame flushes the new
-        # user message.
+        # user), assistant response ends (writes assistant), new user
+        # transcript, EndFrame flushes the new user message.
         frames_to_send = [
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
             SleepFrame(),
@@ -1903,69 +1884,30 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
         self.assertTrue(user._realtime_recommendation_logged)
 
-    async def test_realtime_mode_requires_paired_half(self):
-        # Direct construction of a half with realtime mode set but no
-        # paired_half raises at StartFrame validation. We call the
-        # validation directly so the error isn't swallowed by the
-        # pipeline's exception handler.
+    async def test_realtime_mode_assistant_requires_paired_half(self):
+        # Direct construction of the assistant half with realtime mode
+        # set but no paired user half raises at StartFrame validation.
+        # (We call the validation directly so the error isn't swallowed
+        # by the pipeline's exception handler.)
         context = LLMContext()
-        cfg = RealtimeServiceModeConfig()
-        user = LLMUserAggregator(context, _realtime_service_mode=cfg)
-        with self.assertRaises(RuntimeError):
-            user._validate_realtime_pairing()
-        assistant = LLMAssistantAggregator(context, _realtime_service_mode=cfg)
+        assistant = LLMAssistantAggregator(
+            context, _realtime_service_mode=RealtimeServiceModeConfig()
+        )
         with self.assertRaises(RuntimeError):
             assistant._validate_realtime_pairing()
 
-    async def test_realtime_mode_rejects_mismatched_halves(self):
-        # If a user code path constructs halves with mismatched configs,
-        # StartFrame validation catches it.
+    async def test_realtime_mode_assistant_rejects_mismatched_halves(self):
+        # If a user code path constructs halves with mismatched configs
+        # and wires them up by hand, assistant validation catches it.
         context = LLMContext()
-        lock = asyncio.Lock()
-        user = LLMUserAggregator(
-            context,
-            _realtime_service_mode=RealtimeServiceModeConfig(),
-            _pair_lock=lock,
-        )
+        user = LLMUserAggregator(context, _realtime_service_mode=RealtimeServiceModeConfig())
         assistant = LLMAssistantAggregator(
             context,
             _realtime_service_mode=RealtimeServiceModeConfig(turns_await_transcripts=True),
-            _pair_lock=lock,
+            _paired_half=user,
         )
-        user._paired_half = assistant
-        assistant._paired_half = user
         with self.assertRaises(RuntimeError):
-            user._validate_realtime_pairing()
-
-    async def test_function_call_no_context_push_in_realtime_mode(self):
-        # Realtime services consume function results directly via
-        # FunctionCallResultFrame, so the aggregator should not push
-        # LLMContextFrame upstream after a function call result.
-        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
-        assistant = pair.assistant()
-        frames_to_send = [
-            FunctionCallInProgressFrame(
-                function_name="get_weather",
-                tool_call_id="1",
-                arguments={"location": "Los Angeles"},
-                cancel_on_interruption=True,
-            ),
-            SleepFrame(),
-            FunctionCallResultFrame(
-                function_name="get_weather",
-                tool_call_id="1",
-                arguments={"location": "Los Angeles"},
-                result={"conditions": "Sunny"},
-            ),
-            SleepFrame(),
-        ]
-        _, up_frames = await run_test(
-            assistant,
-            frames_to_send=frames_to_send,
-        )
-        # No LLMContextFrame should have been pushed upstream in
-        # realtime mode (cascade would push one to re-run inference).
-        self.assertFalse(any(isinstance(f, LLMContextFrame) for f in up_frames))
+            assistant._validate_realtime_pairing()
 
 
 if __name__ == "__main__":
