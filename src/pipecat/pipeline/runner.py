@@ -29,12 +29,14 @@ For multi-worker setups, register every worker the same way:
     await runner.add_workers(CodeWorker("code_worker", ...), worker)
     await runner.run()
 
-``run()`` blocks until :meth:`PipelineRunner.end` /
-:meth:`PipelineRunner.cancel` is called (or an incoming ``BusEndMessage`` /
-``BusCancelMessage`` triggers the same path). Added workers finishing on
-their own does **not** unblock it — use ``end()`` / ``cancel()`` from an
-event handler (e.g. when the transport disconnects) to shut the runner
-down.
+By default, ``run()`` ends once every root worker has finished — so a
+single-pipeline bot naturally ends when its pipeline does. Multi-worker
+bots whose helpers run forever (e.g. waiting for bus messages) end by
+calling :meth:`PipelineRunner.end` / :meth:`PipelineRunner.cancel` from
+an event handler (typically on transport disconnect). For long-lived
+hosts that add and remove workers over many sessions (e.g. a FastAPI
+server), pass ``auto_end=False`` to ``run()`` so the runner does not
+exit when no workers are left.
 """
 
 import asyncio
@@ -87,11 +89,12 @@ class PipelineRunner(BaseObject, BusSubscriber):
 
     - :meth:`add_workers(*workers)` — register one or more workers on the
       runner's bus and start them in the background. Workers run
-      concurrently and are cancelled when :meth:`end` / :meth:`cancel`
-      is called.
-    - :meth:`run` — block until :meth:`end` / :meth:`cancel` is called
-      (or until an incoming ``BusEndMessage`` / ``BusCancelMessage``
-      triggers the same path).
+      concurrently and remaining workers are cancelled when the runner
+      ends.
+    - :meth:`run` — block until the runner ends. By default
+      (``auto_end=True``) the runner ends once every root worker has
+      finished; pass ``auto_end=False`` to keep the runner up until
+      :meth:`end` / :meth:`cancel` is called.
 
     Event handlers available:
 
@@ -132,6 +135,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         self._entries: dict[str, _WorkerEntry] = {}
         self._known_runners: set[str] = set()
         self._running: bool = False
+        self._auto_end: bool = True
         self._shutdown_event = asyncio.Event()
         self._sig_task: asyncio.Task | None = None
 
@@ -184,15 +188,23 @@ class PipelineRunner(BaseObject, BusSubscriber):
             if self._running:
                 await self._start_worker(entry)
 
-    async def run(self, worker: PipelineWorker | None = None) -> None:
+    async def run(
+        self,
+        worker: PipelineWorker | None = None,
+        *,
+        auto_end: bool = True,
+    ) -> None:
         """Run all added workers until the runner is stopped.
 
-        Blocks until :meth:`end` or :meth:`cancel` is called (or until an
-        incoming ``BusEndMessage`` / ``BusCancelMessage`` triggers the
-        same path). Added workers finishing on their own does **not**
-        unblock the runner — call ``end()`` / ``cancel()`` from an
-        event handler (e.g. when the transport disconnects) to shut the
-        runner down.
+        By default (``auto_end=True``), the runner ends once every root
+        worker has finished — so a single-pipeline bot naturally ends
+        when its pipeline does. Multi-worker bots whose helpers run
+        forever (e.g. waiting for bus messages) end by calling
+        :meth:`end` / :meth:`cancel` from an event handler (typically on
+        transport disconnect). For long-lived hosts that add and remove
+        workers over many sessions (e.g. a FastAPI server), pass
+        ``auto_end=False`` so the runner does not exit when no workers
+        are left.
 
         Args:
             worker: Optional pipeline worker to run.
@@ -201,6 +213,10 @@ class PipelineRunner(BaseObject, BusSubscriber):
                     Register the worker with :meth:`add_workers` before
                     calling ``run()`` instead. Passing ``worker`` here
                     will be removed in a future release.
+            auto_end: When ``True`` (the default), the runner ends once
+                every root worker has finished. When ``False``, the
+                runner blocks until :meth:`end` or :meth:`cancel` is
+                called.
         """
         if worker is not None:
             warnings.warn(
@@ -211,6 +227,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
             )
 
         logger.debug(f"PipelineRunner '{self}': started running")
+        self._auto_end = auto_end
         self._shutdown_event.clear()
 
         # Treat the main worker as any other added worker: ``add_workers`` attaches
@@ -222,15 +239,10 @@ class PipelineRunner(BaseObject, BusSubscriber):
         await self._setup_session()
         await self._call_event_handler("on_ready")
 
-        # Wait for the main worker's background runner worker to finish
-        # (or for an explicit shutdown when there's no main worker).
+        # Wait for shutdown. With ``auto_end=True``, ``_run_worker`` sets
+        # ``_shutdown_event`` as soon as any root worker finishes.
         try:
-            if worker is not None:
-                runner_task = self._entries[worker.name].runner_task
-                if runner_task is not None:
-                    await runner_task
-            else:
-                await self._shutdown_event.wait()
+            await self._shutdown_event.wait()
         except asyncio.CancelledError:
             pass
 
@@ -383,6 +395,18 @@ class PipelineRunner(BaseObject, BusSubscriber):
             await worker.run(params)
         except asyncio.CancelledError:
             pass
+        finally:
+            # End the runner once every root worker has finished. The
+            # current worker's task is still "running" (we're inside its
+            # body), so exclude it from the check.
+            if self._auto_end and worker.parent is None:
+                others_running = any(
+                    e.runner_task is not None and not e.runner_task.done()
+                    for e in self._entries.values()
+                    if e.worker.parent is None and e.worker is not worker
+                )
+                if not others_running:
+                    self._shutdown_event.set()
 
     async def _on_local_worker_ready(self, data: WorkerReadyData) -> None:
         """Called when a local added worker registers as ready."""
