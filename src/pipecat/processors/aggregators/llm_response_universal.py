@@ -57,6 +57,7 @@ from pipecat.frames.frames import (
     LLMThoughtTextFrame,
     RealtimeServiceMetadataFrame,
     StartFrame,
+    STTMetadataFrame,
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
@@ -82,6 +83,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
     SummaryAppliedEvent,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import (
@@ -270,11 +272,14 @@ class RealtimeServiceModeConfig:
     fields to dial back to cascade-style behavior selectively.
 
     Parameters:
-        context_writes_await_turns: When False (default), context writes are
-            triggered by the content stream itself (transcripts and assistant
-            text frames), making writes independent of turn-frame availability
-            and timing. When True, user messages are written to context on
-            user-turn-end frames (cascade behavior).
+        context_writes_await_turns: When False (default), realtime mode treats
+            the assistant response start, rather than
+            ``UserStoppedSpeakingFrame``, as the signal that the user turn
+            has ended for context-writing purposes. A short transcript-arrival
+            window (sized to ``ttfs_p99_latency``) is applied after that
+            signal — mirroring the cascade-mode wait after
+            ``UserStoppedSpeakingFrame``. When True, user messages are
+            written to context on user-turn-end frames (cascade behavior).
         turns_await_transcripts: When False (default), turn-end fires as soon
             as VAD signals end of speech, avoiding latency on the critical
             path when local turn detection drives a realtime conversation.
@@ -319,10 +324,11 @@ class UserTurnStoppedMessage:
 
     Parameters:
         content: The message content/text. ``None`` in realtime mode
-            (``RealtimeServiceModeConfig(context_writes_await_turns=False)``)
-            when fired from a user-turn-stop frame, since the user message
-            hasn't been finalized at that point. Subscribers that need the
-            finalized text should listen to ``on_user_message_added``
+            (``context_writes_await_turns=False``) when fired from a
+            user-turn-stop frame: in realtime mode the user message
+            isn't finalized until the assistant response start acts as
+            the effective end-of-turn signal. Subscribers that need
+            the finalized text should listen to ``on_user_message_added``
             instead.
         timestamp: When the user turn started.
         user_id: Optional identifier for the user.
@@ -338,13 +344,12 @@ class UserTurnStoppedMessage:
 class UserMessageAddedMessage:
     """A message accompanying ``on_user_message_added``.
 
-    Fired when a user message is written to the LLM context. With
-    ``RealtimeServiceModeConfig(context_writes_await_turns=True)``
-    (cascade default) this coincides with ``on_user_turn_stopped``.
-    With ``context_writes_await_turns=False`` (realtime mode default)
-    the write is triggered by the content stream (assistant response
-    start, session end), so this event fires decoupled from turn
-    frames. ``content`` is always populated.
+    Fired when a user message is written to the LLM context. In cascade
+    mode (``context_writes_await_turns=True``) this coincides with
+    ``on_user_turn_stopped``. In realtime mode
+    (``context_writes_await_turns=False``) the write is triggered by
+    the assistant response start (or session end), so this event fires
+    decoupled from user-turn-end frames. ``content`` is always populated.
 
     Parameters:
         content: The aggregated user transcript.
@@ -611,10 +616,11 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_stopped: Called when the user turn ends
     - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
-    - on_user_message_added: Called when a user message is written to context;
-      in realtime mode (i.e. when _realtime_service_mode.context_writes_await_turns=False)
-      this is decoupled from on_user_turn_stopped; use this event to get each
-      new user message as it's written to context
+    - on_user_message_added: Called when a user message is written to context.
+      In realtime mode (``context_writes_await_turns=False``) the write is
+      triggered by the assistant response start rather than the
+      user-turn-end frame, so this fires decoupled from
+      ``on_user_turn_stopped`` — subscribe here for the finalized user text.
     - on_user_mute_started: Called when the user becomes muted
     - on_user_mute_stopped: Called when the user becomes unmuted
 
@@ -636,9 +642,9 @@ class LLMUserAggregator(LLMContextAggregator):
         async def on_user_turn_idle(aggregator):
             ...
 
-        # In realtime mode (i.e. when _realtime_service_mode.context_writes_await_turns=False)
-        # this is decoupled from on_user_turn_stopped; use this event to get each
-        # new user message
+        # In realtime mode (context_writes_await_turns=False) the user
+        # message is written when the assistant response starts, not at
+        # user-turn-end — subscribe here for the finalized text.
         @aggregator.event_handler("on_user_message_added")
         async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
             ...
@@ -727,6 +733,17 @@ class LLMUserAggregator(LLMContextAggregator):
         # Tracks whether the realtime-mode recommendation log has already
         # fired for this session — see _handle_realtime_service_metadata.
         self._realtime_recommendation_logged = False
+        # Realtime-mode deferred-flush state. Realtime mode treats the
+        # assistant response start as the "user turn ended" signal for
+        # context-writing purposes, then waits up to this many seconds
+        # for any in-flight ``TranscriptionFrame`` to land before
+        # flushing — mirroring the cascade-mode pattern of waiting up
+        # to ``ttfs_p99_latency`` after ``UserStoppedSpeakingFrame``.
+        # Captured from the most recent ``STTMetadataFrame`` (which a
+        # realtime LLM service may broadcast for its internal STT
+        # pass), falling back to ``DEFAULT_TTFS_P99``.
+        self._ttfs_p99_latency: float | None = None
+        self._realtime_handoff_flush_task: asyncio.Task | None = None
         # Full transcript across the user turn. Each
         # `_on_user_turn_inference_triggered` push captures only the
         # new segment since the previous push (push_aggregation resets
@@ -839,6 +856,12 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, RealtimeServiceMetadataFrame):
             await self._handle_realtime_service_metadata(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, STTMetadataFrame):
+            # Capture the STT TTFS P99 so the realtime-mode deferred
+            # handoff flush can size itself to the real transcript-arrival
+            # latency. Frame still flows downstream for other consumers.
+            self._ttfs_p99_latency = frame.ttfs_p99_latency
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -876,10 +899,11 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _stop(self, frame: EndFrame):
         if not self._context_writes_await_turns:
-            # Realtime mode (context_writes_await_turns=False): flush
-            # trailing user content directly. The on_user_turn_stopped
-            # event already fired (if turn frames were emitted), so
-            # don't re-fire it from session end.
+            # Realtime mode: cancel any pending deferred handoff flush
+            # and commit trailing user content directly. The
+            # on_user_turn_stopped event already fired (if turn frames
+            # were emitted), so don't re-fire it from session end.
+            await self._cancel_realtime_handoff_flush_task()
             await self.push_aggregation()
         else:
             await self._maybe_emit_user_turn_stopped(on_session_end=True)
@@ -888,6 +912,7 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _cancel(self, frame: CancelFrame):
         # See _stop — same realtime-mode vs cascade dispatch.
         if not self._context_writes_await_turns:
+            await self._cancel_realtime_handoff_flush_task()
             await self.push_aggregation()
         else:
             await self._maybe_emit_user_turn_stopped(on_session_end=True)
@@ -942,7 +967,7 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _handle_realtime_service_metadata(self, frame: RealtimeServiceMetadataFrame):
         """Handle a ``RealtimeServiceMetadataFrame`` broadcast by a realtime LLM service.
 
-        When ``realtime_service_mode`` isn't configured, log a one-time INFO
+        When ``realtime_service_mode`` isn't configured, log a one-time WARNING
         recommendation pointing the user at the option and warning about the
         timing change on ``on_user_turn_stopped``. When it is configured, log
         a confirming debug message. Fires at most once per session.
@@ -952,7 +977,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._realtime_recommendation_logged = True
 
         if self._realtime_service_mode is None:
-            logger.info(
+            logger.warning(
                 f"{self}: detected realtime service `{frame.service_name}` in the "
                 "pipeline. For correct context-write semantics with realtime "
                 "services, consider passing "
@@ -961,7 +986,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 "are written to context — they're written when the assistant "
                 "response starts rather than when the user-turn-end frame fires. "
                 "Subscribe to `on_user_message_added` instead of "
-                "`on_user_turn_stopped` if you need post-write semantics."
+                "`on_user_turn_stopped` to handle new user messages."
             )
         else:
             logger.debug(
@@ -970,19 +995,59 @@ class LLMUserAggregator(LLMContextAggregator):
             )
 
     async def _realtime_handoff_flush(self) -> None:
-        """Flush pending user aggregation to context.
+        """Commit the user message in realtime mode, allowing for late transcripts.
 
-        Called by the paired assistant half from
-        ``_realtime_handle_llm_start`` (i.e. on ``LLMFullResponseStartFrame``)
-        to commit the in-flight user message before the assistant starts
-        its own turn. No-op when there's no pending content.
+        Called by the paired assistant half when the assistant response
+        starts — realtime mode treats that as the user turn's end
+        signal for context-writing purposes (in place of
+        ``UserStoppedSpeakingFrame``). Some realtime services deliver
+        the finalized user ``TranscriptionFrame`` only after the
+        assistant starts responding, so when no aggregated transcript
+        is present yet we defer the flush by ``ttfs_p99_latency`` —
+        the same wait the cascade pipeline applies after
+        ``UserStoppedSpeakingFrame``. If a transcript is already
+        aggregated (chunk-streaming services), flush immediately.
         """
-        if not self._aggregation:
+        # Cancel any prior deferred flush task — a new turn supersedes it.
+        await self._cancel_realtime_handoff_flush_task()
+
+        if self._aggregation:
+            await self.push_aggregation()
+            self._user_turn_start_timestamp = ""
             return
-        # push_aggregation writes the message to context, pushes
-        # LLMContextFrame, and emits on_user_message_added.
-        await self.push_aggregation()
-        self._user_turn_start_timestamp = ""
+
+        self._realtime_handoff_flush_task = self.create_task(
+            self._realtime_deferred_handoff_flush(),
+            name=f"{self}::realtime_handoff_flush",
+        )
+
+    async def _realtime_deferred_handoff_flush(self) -> None:
+        """Wait one ``ttfs_p99_latency`` window, then flush whatever has arrived."""
+        wait = self._ttfs_p99_latency if self._ttfs_p99_latency is not None else DEFAULT_TTFS_P99
+        await asyncio.sleep(wait)
+        if self._aggregation:
+            await self.push_aggregation()
+            self._user_turn_start_timestamp = ""
+
+    async def _realtime_handoff_flush_immediate(self) -> None:
+        """Failsafe flush invoked when the assistant response ends.
+
+        By the time the assistant response has fully completed, even
+        slow transcripts should have landed. Cancel any pending
+        deferred flush and write the user message now so it precedes
+        the assistant message in context.
+        """
+        await self._cancel_realtime_handoff_flush_task()
+        if self._aggregation:
+            await self.push_aggregation()
+            self._user_turn_start_timestamp = ""
+
+    async def _cancel_realtime_handoff_flush_task(self) -> None:
+        if self._realtime_handoff_flush_task is None:
+            return
+        if not self._realtime_handoff_flush_task.done():
+            await self.cancel_task(self._realtime_handoff_flush_task)
+        self._realtime_handoff_flush_task = None
 
     async def _cleanup(self):
         if self._vad_controller:
@@ -1143,10 +1208,10 @@ class LLMUserAggregator(LLMContextAggregator):
         strategy: BaseUserTurnStopStrategy,
     ):
         if not self._context_writes_await_turns:
-            # Realtime mode (context_writes_await_turns=False): turn
-            # frames are supplemental — they don't drive context writes.
-            # Fire the event without pushing aggregation; the
-            # trailing-write path commits the user message instead.
+            # Realtime mode: the assistant response start, not turn
+            # frames, is the signal that the user turn has ended for
+            # context-writing purposes. Fire the event without pushing
+            # aggregation here.
             logger.debug(
                 f"{self}: User turn inference triggered (strategy: {strategy}) "
                 "[realtime mode: event-only, no context push]"
@@ -1187,9 +1252,10 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         if not self._context_writes_await_turns:
-            # Realtime mode (context_writes_await_turns=False): turn
-            # frames are supplemental. The user message isn't finalized
-            # at turn-stop time — content is None. Subscribers wanting
+            # Realtime mode: the user message isn't finalized at
+            # turn-stop time — the assistant response start is the
+            # effective end-of-turn signal, and the user message is
+            # written then. Content is None here; subscribers wanting
             # the finalized text use on_user_message_added instead.
             message = UserTurnStoppedMessage(
                 content=None, timestamp=self._user_turn_start_timestamp
@@ -1798,27 +1864,35 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
-        # Realtime mode (context_writes_await_turns=False) needs to commit
-        # any in-flight user transcript to context before the assistant
-        # turn starts — see _realtime_handle_llm_start.
+        # Realtime mode treats LLMFullResponseStartFrame as the user
+        # turn's end signal for context-writing purposes — see
+        # _realtime_handle_llm_start.
         if not self._context_writes_await_turns:
             await self._realtime_handle_llm_start()
             return
         await self._trigger_assistant_turn_started()
 
     async def _realtime_handle_llm_start(self):
-        """Realtime mode: flush the paired user half before starting the assistant turn.
+        """Realtime mode: commit the paired user message, then start the assistant turn.
 
-        Realtime services rarely give us a reliable user-stop signal, so we
-        treat the first assistant content frame as the implicit "user is
-        done talking" trigger and commit any in-flight user transcript to
-        context here.
+        Realtime mode treats ``LLMFullResponseStartFrame`` as the user
+        turn's end signal for context-writing purposes (in place of
+        ``UserStoppedSpeakingFrame``). The paired user aggregator may
+        defer the actual write for one ``ttfs_p99_latency`` window to
+        allow a late-arriving transcript to land.
         """
         if self._paired_user_aggregator is not None:
             await self._paired_user_aggregator._realtime_handoff_flush()
         await self._trigger_assistant_turn_started()
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
+        # Realtime mode failsafe: by the time the assistant response
+        # fully completes, even slow transcripts should have landed.
+        # Cancel any still-pending deferred handoff flush and commit
+        # the user message now so it precedes the assistant message in
+        # context.
+        if not self._context_writes_await_turns and self._paired_user_aggregator is not None:
+            await self._paired_user_aggregator._realtime_handoff_flush_immediate()
         await self._trigger_assistant_turn_stopped()
 
     async def _handle_push_aggregation(self):
@@ -2076,12 +2150,13 @@ class LLMContextAggregatorPair:
             params=assistant_params,
             _realtime_service_mode=realtime_service_mode,
         )
-        # Cross-half wiring is one-way and only needed in realtime mode:
-        # the assistant flushes the user half on
-        # ``LLMFullResponseStartFrame`` so the user message lands in
+        # Cross-half wiring is one-way and only needed in realtime mode.
+        # Realtime mode treats the assistant response start as the user
+        # turn's end signal: the assistant half triggers a (possibly
+        # deferred) flush of the user half so the user message lands in
         # context before the assistant turn starts. The user side has
         # nothing to flush back — the assistant writes its own message
-        # on ``LLMFullResponseEndFrame`` like cascade mode does.
+        # when its response ends, just like cascade mode does.
         if realtime_service_mode is not None:
             self._assistant._paired_user_aggregator = self._user
 
