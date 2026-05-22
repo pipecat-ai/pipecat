@@ -348,11 +348,11 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             **kwargs,
         )
 
-        # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, private_endpoint=private_endpoint)
-
         if not region and not private_endpoint:
             raise ValueError("Either 'region' or 'private_endpoint' must be provided.")
+
+        # Initialize Azure-specific functionality from mixin
+        self._init_azure_base(api_key=api_key, region=region, private_endpoint=private_endpoint)
 
         self._speech_config = None
         self._speech_synthesizer = None
@@ -867,11 +867,11 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             **kwargs,
         )
 
-        # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, private_endpoint=private_endpoint)
-
         if not region and not private_endpoint:
             raise ValueError("Either 'region' or 'private_endpoint' must be provided.")
+
+        # Initialize Azure-specific functionality from mixin
+        self._init_azure_base(api_key=api_key, region=region, private_endpoint=private_endpoint)
 
         self._speech_config = None
         self._speech_synthesizer = None
