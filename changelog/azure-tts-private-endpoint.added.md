@@ -1,0 +1,1 @@
+- Added `private_endpoint` parameter to `AzureTTSService` and `AzureHttpTTSService` for connecting via Private Link or custom domain endpoints, matching existing `AzureSTTService` support.
