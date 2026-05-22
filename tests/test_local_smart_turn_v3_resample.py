@@ -23,8 +23,8 @@ soxr = pytest.importorskip("soxr")
 ort = pytest.importorskip("onnxruntime")  # noqa: F841 -- needed by LocalSmartTurnAnalyzerV3
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import (  # noqa: E402
-    LocalSmartTurnAnalyzerV3,
     _MODEL_SAMPLE_RATE,
+    LocalSmartTurnAnalyzerV3,
 )
 
 
