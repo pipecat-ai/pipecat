@@ -157,7 +157,8 @@ async def run_bot(pipecat_transport):
 
     runner = PipelineRunner(handle_sigint=False, force_gc=True)
 
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

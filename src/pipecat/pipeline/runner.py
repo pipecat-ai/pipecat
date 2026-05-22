@@ -12,35 +12,36 @@ also acts as the host for spawned :class:`~pipecat.pipeline.base_worker.BaseWork
 instances — owning the shared :class:`~pipecat.bus.WorkerBus`,
 the worker registry, and the worker manager that backs the entire session.
 
-For a typical single-pipeline bot, use :meth:`PipelineRunner.run` with the
-worker:
+For a typical single-pipeline bot, register the worker with
+:meth:`PipelineRunner.add_workers` and then call :meth:`PipelineRunner.run`:
 
 .. code-block:: python
 
     runner = PipelineRunner()
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
-``run()`` returns when ``worker`` finishes.
-
-For multi-worker setups, add the additional workers alongside the main one:
+For multi-worker setups, register every worker the same way:
 
 .. code-block:: python
 
     runner = PipelineRunner()
-    await runner.add_workers(CodeWorker("code_worker", ...))
-    await runner.run(worker)
+    await runner.add_workers(CodeWorker("code_worker", ...), worker)
+    await runner.run()
 
-Optionally, ``add_workers`` every worker (including the main pipeline) and call
-``run()`` with no argument. In that form ``run()`` blocks until
-:meth:`PipelineRunner.end` / :meth:`PipelineRunner.cancel` is called (or an
-incoming ``BusEndMessage`` / ``BusCancelMessage`` triggers the same path) —
-added workers finishing on their own does **not** unblock it.
+``run()`` blocks until :meth:`PipelineRunner.end` /
+:meth:`PipelineRunner.cancel` is called (or an incoming ``BusEndMessage`` /
+``BusCancelMessage`` triggers the same path). Added workers finishing on
+their own does **not** unblock it — use ``end()`` / ``cancel()`` from an
+event handler (e.g. when the transport disconnects) to shut the runner
+down.
 """
 
 import asyncio
 import gc
 import signal
 import uuid
+import warnings
 from dataclasses import dataclass, field
 
 from loguru import logger
@@ -84,12 +85,13 @@ class PipelineRunner(BaseObject, BusSubscriber):
 
     Two entry points:
 
-    - :meth:`run(worker)` — block until the given pipeline worker finishes.
-      The most common case for a single-pipeline bot.
     - :meth:`add_workers(*workers)` — register one or more workers on the
-      runner's bus and start them in the background. Added workers run
-      alongside the main worker and are cancelled when the main worker
-      finishes (or when :meth:`end` / :meth:`cancel` is called).
+      runner's bus and start them in the background. Workers run
+      concurrently and are cancelled when :meth:`end` / :meth:`cancel`
+      is called.
+    - :meth:`run` — block until :meth:`end` / :meth:`cancel` is called
+      (or until an incoming ``BusEndMessage`` / ``BusCancelMessage``
+      triggers the same path).
 
     Event handlers available:
 
@@ -183,25 +185,32 @@ class PipelineRunner(BaseObject, BusSubscriber):
                 await self._start_worker(entry)
 
     async def run(self, worker: PipelineWorker | None = None) -> None:
-        """Run a pipeline worker to completion (optionally alongside added workers).
+        """Run all added workers until the runner is stopped.
 
-        If ``worker`` is provided, blocks until that worker finishes. Any
-        added workers are started in the background and cancelled
-        when the main worker finishes.
-
-        If ``worker`` is None, blocks until :meth:`end` or :meth:`cancel`
-        is called (or until an incoming ``BusEndMessage`` /
-        ``BusCancelMessage`` triggers the same path). Added workers
-        finishing on their own does **not** unblock the runner — use
-        this form for hosts that have no single "main" pipeline and
-        want to stay up across many spawned sessions (e.g. a FastAPI
-        server). If you want the runner to finish when a specific
-        pipeline finishes, pass that pipeline as ``worker``.
+        Blocks until :meth:`end` or :meth:`cancel` is called (or until an
+        incoming ``BusEndMessage`` / ``BusCancelMessage`` triggers the
+        same path). Added workers finishing on their own does **not**
+        unblock the runner — call ``end()`` / ``cancel()`` from an
+        event handler (e.g. when the transport disconnects) to shut the
+        runner down.
 
         Args:
-            worker: The pipeline worker to run, or None.
+            worker: Optional pipeline worker to run.
+
+                .. deprecated:: 1.3.0
+                    Register the worker with :meth:`add_workers` before
+                    calling ``run()`` instead. Passing ``worker`` here
+                    will be removed in a future release.
         """
-        logger.debug(f"PipelineRunner '{self}': started running {worker}")
+        if worker is not None:
+            warnings.warn(
+                "Passing a worker to PipelineRunner.run() is deprecated; "
+                "register it with PipelineRunner.add_workers() before calling run() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        logger.debug(f"PipelineRunner '{self}': started running")
         self._shutdown_event.clear()
 
         # Treat the main worker as any other added worker: ``add_workers`` attaches
@@ -242,7 +251,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         if self._force_gc:
             await self._gc_collect()
 
-        logger.debug(f"PipelineRunner '{self}': finished running {worker}")
+        logger.debug(f"PipelineRunner '{self}': finished running")
 
     async def stop_when_done(self) -> None:
         """Schedule all root pipeline workers to stop when their current processing is complete."""

@@ -127,7 +127,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
     runner = PipelineRunner()
 
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 if __name__ == "__main__":

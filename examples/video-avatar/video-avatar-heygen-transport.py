@@ -113,7 +113,8 @@ async def main():
 
         runner = PipelineRunner()
 
-        await runner.run(worker)
+        await runner.add_workers(worker)
+        await runner.run()
 
 
 if __name__ == "__main__":

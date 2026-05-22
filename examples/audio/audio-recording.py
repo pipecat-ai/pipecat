@@ -191,7 +191,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await save_audio_file(bot_audio, bot_filename, sample_rate, 1)
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

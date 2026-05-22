@@ -152,7 +152,8 @@ Start by asking me for my location. Then, use 'get_weather_current' to give me a
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

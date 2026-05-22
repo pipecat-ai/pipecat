@@ -175,7 +175,8 @@ async def main_async() -> None:
 
     runner = PipelineRunner(bus=bus, handle_sigint=True)
     logger.info(f"Starting {args.worker} worker, waiting for activation...")
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 if __name__ == "__main__":

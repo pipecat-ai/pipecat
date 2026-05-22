@@ -44,7 +44,8 @@ async def main():
 
     runner = PipelineRunner(handle_sigint=False if sys.platform == "win32" else True)
 
-    await asyncio.gather(runner.run(worker), say_something())
+    await runner.add_workers(worker)
+    await asyncio.gather(runner.run(), say_something())
 
 
 if __name__ == "__main__":

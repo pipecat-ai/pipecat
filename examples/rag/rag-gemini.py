@@ -259,7 +259,8 @@ Your response will be turned into speech so use only simple words and punctuatio
         await worker.cancel()
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

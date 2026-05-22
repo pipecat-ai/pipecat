@@ -165,7 +165,8 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
             await worker.queue_frame(EndFrame())
 
         runner = PipelineRunner()
-        await asyncio.gather(runner.run(worker), inject_and_end())
+        await runner.add_workers(worker)
+        await asyncio.gather(runner.run(), inject_and_end())
 
         texts = [f.text for f in received if isinstance(f, TextFrame)]
         self.assertIn("from_child", texts)

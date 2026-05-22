@@ -308,7 +308,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(worker)
+    await runner.add_workers(worker)
+    await runner.run()
 
     # The session has ended; read whatever state the handlers built up.
     logger.info(f"Tool calls logged during session:\n{tool_call_logger.dump()}")
