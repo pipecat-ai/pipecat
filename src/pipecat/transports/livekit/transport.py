@@ -96,10 +96,12 @@ class LiveKitOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame
 class LiveKitParams(TransportParams):
     """Configuration parameters for LiveKit transport.
 
-    Inherits all parameters from TransportParams without additional configuration.
+    Parameters:
+        single_peer_connection: Use a single WebRTC peer connection for both publishing
+            and subscribing. When None, LiveKit uses its default connection behavior.
     """
 
-    pass
+    single_peer_connection: bool | None = None
 
 
 class LiveKitCallbacks(BaseModel):
@@ -112,6 +114,7 @@ class LiveKitCallbacks(BaseModel):
         on_participant_disconnected: Called when a participant leaves the room.
         on_audio_track_subscribed: Called when an audio track is subscribed.
         on_audio_track_unsubscribed: Called when an audio track is unsubscribed.
+        on_track_subscription_failed: Called when a track subscription fails.
         on_data_received: Called when data is received from a participant.
         on_first_participant_joined: Called when the first participant joins.
     """
@@ -125,6 +128,7 @@ class LiveKitCallbacks(BaseModel):
     on_audio_track_unsubscribed: Callable[[str], Awaitable[None]]
     on_video_track_subscribed: Callable[[str], Awaitable[None]]
     on_video_track_unsubscribed: Callable[[str], Awaitable[None]]
+    on_track_subscription_failed: Callable[[str, str, str], Awaitable[None]]
     on_data_received: Callable[[bytes, str], Awaitable[None]]
     on_first_participant_joined: Callable[[str], Awaitable[None]]
 
@@ -215,6 +219,7 @@ class LiveKitTransportClient:
         self.room.on("participant_disconnected")(self._on_participant_disconnected_wrapper)
         self.room.on("track_subscribed")(self._on_track_subscribed_wrapper)
         self.room.on("track_unsubscribed")(self._on_track_unsubscribed_wrapper)
+        self.room.on("track_subscription_failed")(self._on_track_subscription_failed_wrapper)
         self.room.on("data_received")(self._on_data_received_wrapper)
         self.room.on("connected")(self._on_connected_wrapper)
         self.room.on("disconnected")(self._on_disconnected_wrapper)
@@ -243,10 +248,13 @@ class LiveKitTransportClient:
             logger.info(f"Connecting to {self._room_name}")
 
             try:
+                room_options = rtc.RoomOptions(auto_subscribe=True)
+                room_options.single_peer_connection = self._params.single_peer_connection
+
                 await self.room.connect(
                     self._url,
                     self._token,
-                    options=rtc.RoomOptions(auto_subscribe=True),
+                    options=room_options,
                 )
                 self._connected = True
                 # Increment disconnect counter if we successfully connected.
@@ -456,6 +464,18 @@ class LiveKitTransportClient:
             f"{self}::_async_on_track_unsubscribed",
         )
 
+    def _on_track_subscription_failed_wrapper(
+        self,
+        participant: rtc.RemoteParticipant,
+        track_sid: str,
+        error: str,
+    ):
+        """Wrapper for track subscription failed events."""
+        self._task_manager.create_task(
+            self._async_on_track_subscription_failed(participant, track_sid, error),
+            f"{self}::_async_on_track_subscription_failed",
+        )
+
     def _on_data_received_wrapper(self, data: rtc.DataPacket):
         """Wrapper for data received events."""
         self._task_manager.create_task(
@@ -530,6 +550,18 @@ class LiveKitTransportClient:
             await self._callbacks.on_audio_track_unsubscribed(participant.sid)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
             await self._callbacks.on_video_track_unsubscribed(participant.sid)
+
+    async def _async_on_track_subscription_failed(
+        self,
+        participant: rtc.RemoteParticipant,
+        track_sid: str,
+        error: str,
+    ):
+        """Handle track subscription failed events."""
+        logger.warning(
+            f"Track subscription failed: {track_sid} from participant {participant.sid}: {error}"
+        )
+        await self._callbacks.on_track_subscription_failed(participant.sid, track_sid, error)
 
     async def _async_on_data_received(self, data: rtc.DataPacket):
         """Handle data received events."""
@@ -953,6 +985,8 @@ class LiveKitTransport(BaseTransport):
       Args: (participant_id: str)
     - on_video_track_unsubscribed: Called when a video track is unsubscribed.
       Args: (participant_id: str)
+    - on_track_subscription_failed: Called when a track subscription fails.
+      Args: (participant_id: str, track_sid: str, error: str)
     - on_data_received: Called when data is received from a participant.
       Args: (data: bytes, participant_id: str)
 
@@ -998,6 +1032,7 @@ class LiveKitTransport(BaseTransport):
             on_audio_track_unsubscribed=self._on_audio_track_unsubscribed,
             on_video_track_subscribed=self._on_video_track_subscribed,
             on_video_track_unsubscribed=self._on_video_track_unsubscribed,
+            on_track_subscription_failed=self._on_track_subscription_failed,
             on_data_received=self._on_data_received,
             on_first_participant_joined=self._on_first_participant_joined,
         )
@@ -1017,6 +1052,7 @@ class LiveKitTransport(BaseTransport):
         self._register_event_handler("on_audio_track_unsubscribed")
         self._register_event_handler("on_video_track_subscribed")
         self._register_event_handler("on_video_track_unsubscribed")
+        self._register_event_handler("on_track_subscription_failed")
         self._register_event_handler("on_data_received")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_left")
@@ -1160,6 +1196,12 @@ class LiveKitTransport(BaseTransport):
     async def _on_video_track_unsubscribed(self, participant_id: str):
         """Handle video track unsubscribed events."""
         await self._call_event_handler("on_video_track_unsubscribed", participant_id)
+
+    async def _on_track_subscription_failed(self, participant_id: str, track_sid: str, error: str):
+        """Handle track subscription failed events."""
+        await self._call_event_handler(
+            "on_track_subscription_failed", participant_id, track_sid, error
+        )
 
     async def _on_data_received(self, data: bytes, participant_id: str):
         """Handle data received events."""
