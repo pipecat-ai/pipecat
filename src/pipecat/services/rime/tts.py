@@ -50,8 +50,6 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-
-
 def language_to_rime_language(language: Language) -> str:
     """Convert pipecat Language to Rime language code.
 
@@ -87,6 +85,8 @@ class RimeTTSSettings(TTSSettings):
         repetition_penalty: Token repetition penalty (arcana only, 1.0-2.0).
         temperature: Sampling temperature (arcana only, 0.0-1.0).
         top_p: Cumulative probability threshold (arcana only, 0.0-1.0).
+        timeScaleFactor: Audio playback speed factor (arcana, mistv3, and coda only).
+            Values above 1.0 slow down the audio; values below 1.0 speed it up.
     """
 
     segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -100,6 +100,7 @@ class RimeTTSSettings(TTSSettings):
     repetition_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    timeScaleFactor: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {"speaker": "voice"}
 
@@ -113,12 +114,15 @@ class RimeNonJsonTTSSettings(TTSSettings):
         repetition_penalty: Token repetition penalty (arcana only, 1.0-2.0).
         temperature: Sampling temperature (arcana only, 0.0-1.0).
         top_p: Cumulative probability threshold (arcana only, 0.0-1.0).
+        timeScaleFactor: Audio playback speed factor (arcana, mistv3, and coda only).
+            Values above 1.0 slow down the audio; values below 1.0 speed it up.
     """
 
     segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     repetition_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    timeScaleFactor: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {"speaker": "voice"}
 
@@ -231,6 +235,8 @@ class RimeTTSService(WebsocketTTSService):
             phonemizeBetweenBrackets=None,
             noTextNormalization=None,
             saveOovs=None,
+            # Shared with arcana, mistv3, and coda
+            timeScaleFactor=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -343,9 +349,11 @@ class RimeTTSService(WebsocketTTSService):
                 params["temperature"] = self._settings.temperature
             if self._settings.top_p is not None:
                 params["top_p"] = self._settings.top_p
+            if self._settings.timeScaleFactor is not None:
+                params["timeScaleFactor"] = self._settings.timeScaleFactor
         elif self._settings.model == "coda":
-            # Coda accepts no model-specific WS params beyond the shared ones above.
-            pass
+            if self._settings.timeScaleFactor is not None:
+                params["timeScaleFactor"] = self._settings.timeScaleFactor
         else:  # mistv2/mist
             if self._settings.reduceLatency is not None:
                 params["reduceLatency"] = self._settings.reduceLatency
@@ -729,6 +737,7 @@ class RimeHttpTTSService(TTSService):
             repetition_penalty=None,
             temperature=None,
             top_p=None,
+            timeScaleFactor=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -829,9 +838,11 @@ class RimeHttpTTSService(TTSService):
                 payload["temperature"] = self._settings.temperature
             if self._settings.top_p is not None:
                 payload["top_p"] = self._settings.top_p
+            if self._settings.timeScaleFactor is not None:
+                payload["timeScaleFactor"] = self._settings.timeScaleFactor
         elif self._settings.model == "coda":
-            # Coda accepts no model-specific HTTP params beyond the shared ones above.
-            pass
+            if self._settings.timeScaleFactor is not None:
+                payload["timeScaleFactor"] = self._settings.timeScaleFactor
         else:  # mistv2/mist
             if self._settings.reduceLatency is not None:
                 payload["reduceLatency"] = self._settings.reduceLatency
@@ -974,6 +985,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             repetition_penalty=None,
             temperature=None,
             top_p=None,
+            timeScaleFactor=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -1102,6 +1114,11 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                     settings_dict["temperature"] = self._settings.temperature
                 if self._settings.top_p is not None:
                     settings_dict["top_p"] = self._settings.top_p
+                if self._settings.timeScaleFactor is not None:
+                    settings_dict["timeScaleFactor"] = self._settings.timeScaleFactor
+            elif self._settings.model == "coda":
+                if self._settings.timeScaleFactor is not None:
+                    settings_dict["timeScaleFactor"] = self._settings.timeScaleFactor
             # Include extras
             settings_dict.update(self._settings.extra)
             params = "&".join(f"{k}={v}" for k, v in settings_dict.items() if v is not None)
