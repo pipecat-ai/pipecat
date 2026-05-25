@@ -77,7 +77,7 @@ import uuid
 from contextlib import asynccontextmanager
 from http import HTTPMethod
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Dict, TypedDict
 
 import aiohttp
 from fastapi.responses import FileResponse, Response
@@ -830,6 +830,10 @@ def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
     # Track active MOQ sessions
     moq_sessions: Dict[str, Any] = {}
 
+    # In serve mode, /start populates this once the bot has bound so
+    # /api/config can hand the fingerprint to the browser.
+    moq_serve_state: Dict[str, Any] = {"cert_fingerprints": []}
+
     # Mount the frontend
     if MOQPrebuiltUI:
         app.mount("/client", MOQPrebuiltUI)
@@ -839,25 +843,46 @@ def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
         """Redirect root requests to client interface."""
         return RedirectResponse(url="/client/")
 
+    def _cert_hash_from_pem(path: str) -> str | None:
+        """Compute the base64 SHA-256 fingerprint of a PEM-encoded cert."""
+        try:
+            import base64
+            import hashlib
+
+            from cryptography import x509
+            from cryptography.hazmat.primitives import serialization
+
+            with open(path, "rb") as f:
+                cert = x509.load_pem_x509_certificate(f.read())
+            der_bytes = cert.public_bytes(serialization.Encoding.DER)
+            digest = hashlib.sha256(der_bytes).digest()
+            return base64.b64encode(digest).decode()
+        except Exception as e:
+            logger.warning(f"Could not compute cert fingerprint from {path}: {e}")
+            return None
+
+    def _hex_to_b64(hex_str: str) -> str | None:
+        """Convert a hex-encoded SHA-256 digest to base64 (browser expects b64)."""
+        try:
+            import base64
+
+            return base64.b64encode(bytes.fromhex(hex_str)).decode()
+        except Exception as e:
+            logger.warning(f"Could not convert cert hash {hex_str!r}: {e}")
+            return None
+
     @app.get("/api/config")
     async def moq_config():
         """Return MOQ relay connection config for the browser client."""
-        cert_hash = None
-        if getattr(args, "moq_cert", None):
-            try:
-                import base64
-                import hashlib
+        cert_hash: str | None = None
 
-                from cryptography import x509
-                from cryptography.hazmat.primitives import serialization
-
-                with open(args.moq_cert, "rb") as f:
-                    cert = x509.load_pem_x509_certificate(f.read())
-                der_bytes = cert.public_bytes(serialization.Encoding.DER)
-                digest = hashlib.sha256(der_bytes).digest()
-                cert_hash = base64.b64encode(digest).decode()
-            except Exception as e:
-                logger.warning(f"Could not compute cert fingerprint: {e}")
+        # In serve mode the bot just minted (or loaded) its own cert; use
+        # the fingerprint it reported. Otherwise fall back to the PEM
+        # file passed via --moq-cert.
+        if args.moq_serve and moq_serve_state["cert_fingerprints"]:
+            cert_hash = _hex_to_b64(moq_serve_state["cert_fingerprints"][0])
+        elif getattr(args, "moq_cert", None):
+            cert_hash = _cert_hash_from_pem(args.moq_cert)
 
         return {
             "relay_host": args.moq_host,
@@ -866,13 +891,15 @@ def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
             "namespace": args.moq_namespace,
             "insecure": args.moq_insecure,
             "cert_hash": cert_hash,
+            "serve": args.moq_serve,
             # Per-participant broadcast paths. Browser publishes its mic
-            # under <namespace>/<client_id>/<publish_track> and subscribes
-            # to the bot under <namespace>/<bot_id>/<subscribe_track>.
+            # under <namespace>/<client_id> and subscribes to the bot
+            # under <namespace>/<bot_id>. Audio tracks inside each
+            # broadcast are advertised via the catalog (managed by
+            # @moq/publish on the browser side and moq-rs publish_media
+            # on the bot side), so we don't pin track names here.
             "client_id": args.moq_client_id,
             "bot_id": args.moq_bot_id,
-            "publish_track": "user-audio",
-            "subscribe_track": "bot-audio",
             "transcript_track": "transcript",
         }
 
@@ -899,6 +926,11 @@ def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
             participant_id=args.moq_bot_id,
             peer_id=args.moq_client_id,
             verify_ssl=not args.moq_insecure,
+            serve=args.moq_serve,
+            serve_bind=args.moq_serve_bind,
+            serve_tls_host=args.moq_host,
+            serve_tls_cert=args.moq_cert,
+            serve_tls_key=getattr(args, "moq_key", None),
             body=body,
             ready_event=ready_event,
         )
@@ -911,17 +943,21 @@ def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
             "port": args.moq_port,
         }
 
-        # Spawn the bot and wait until it signals it has finished the MOQ
-        # handshake, so the browser's SUBSCRIBE arrives at a publisher the
-        # relay already knows about.
+        # Spawn the bot and wait until it signals it has finished MOQ
+        # bring-up, so the browser's connection arrives at a server that
+        # is ready to accept it.
         asyncio.create_task(bot_module.bot(runner_args))
         try:
             await asyncio.wait_for(ready_event.wait(), timeout=15.0)
         except asyncio.TimeoutError:
             return JSONResponse(
                 status_code=504,
-                content={"error": "Bot did not connect to MOQ relay within 15s"},
+                content={"error": "Bot did not become ready within 15s"},
             )
+
+        # Stash the generated cert fingerprint so /api/config can hand
+        # it to the browser. In client mode this stays empty.
+        moq_serve_state["cert_fingerprints"] = list(runner_args.cert_fingerprints)
 
         return {
             "sessionId": session_id,
@@ -1169,7 +1205,38 @@ def main(parser: argparse.ArgumentParser | None = None):
         "--moq-cert",
         type=str,
         default=None,
-        help="Path to relay TLS certificate (PEM) for WebTransport cert pinning",
+        help=(
+            "Path to a PEM-encoded TLS certificate chain. In client mode, the "
+            "fingerprint is sent to the browser for WebTransport cert pinning. "
+            "In serve mode (--moq-serve), used as the server's TLS cert "
+            "(requires --moq-key)."
+        ),
+    )
+    parser.add_argument(
+        "--moq-key",
+        type=str,
+        default=None,
+        help="Path to the PEM-encoded private key matching --moq-cert (serve mode).",
+    )
+    parser.add_argument(
+        "--moq-serve",
+        action="store_true",
+        default=False,
+        help=(
+            "Run the bot as a MOQ server — the bot binds its own UDP socket "
+            "and accepts the browser's direct connection. Removes the need "
+            "for a separate moq-relay process. If --moq-cert/--moq-key are "
+            "not provided, a self-signed cert is generated on startup."
+        ),
+    )
+    parser.add_argument(
+        "--moq-serve-bind",
+        type=str,
+        default=None,
+        help=(
+            "Address the MOQ server binds to (serve mode). Defaults to "
+            "`[::]:<--moq-port>`."
+        ),
     )
     parser.add_argument(
         "--moq-web-port",
@@ -1240,11 +1307,16 @@ def main(parser: argparse.ArgumentParser | None = None):
     elif args.transport == "moq":
         print()
         print(f"🚀 Bot ready! (MOQ)")
-        print(f"   → Connecting to MOQ relay at {args.moq_host}:{args.moq_port}")
-        print(f"   → Namespace: {args.moq_namespace}")
-        print(f"   → Status page: http://{args.host}:{args.port}")
-        print()
-        print(f"   Connect a MOQ client to the same relay and namespace to start talking.")
+        if args.moq_serve:
+            bind = args.moq_serve_bind or f"[::]:{args.moq_port}"
+            print(f"   → MOQ server: bot serving on {bind} (no separate relay needed)")
+            print(f"   → Namespace: {args.moq_namespace}")
+            print(f"   → Open http://{args.host}:{args.port} in your browser")
+        else:
+            print(f"   → Connecting to MOQ relay at {args.moq_host}:{args.moq_port}")
+            print(f"   → Namespace: {args.moq_namespace}")
+            print(f"   → Status page: http://{args.host}:{args.port}")
+            print(f"   Connect a MOQ client to the same relay and namespace to start talking.")
         print()
 
     RUNNER_DOWNLOADS_FOLDER = args.folder
