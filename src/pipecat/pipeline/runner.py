@@ -246,19 +246,20 @@ class PipelineRunner(BaseObject, BusSubscriber):
         except asyncio.CancelledError:
             pass
 
-        # Cancel any remaining launched workers and wait for them to finish.
-        await self._cancel_spawned_tasks()
+        try:
+            # Cancel any remaining launched workers and wait for them to finish.
+            await self._cancel_spawned_tasks()
 
-        # Cleanup base object.
-        await self.cleanup()
+            # Cleanup base object.
+            await self.cleanup()
 
-        # If we are cancelling through a signal, make sure we wait for it so
-        # everything gets cleaned up nicely.
-        if self._sig_task:
-            await self._sig_task
-
-        await self._bus.stop()
-        self._running = False
+            # If we are cancelling through a signal, make sure we wait for it so
+            # everything gets cleaned up nicely.
+            if self._sig_task:
+                await self._sig_task
+        finally:
+            await self._bus.stop()
+            self._running = False
 
         if self._force_gc:
             await self._gc_collect()
