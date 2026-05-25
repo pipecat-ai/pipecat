@@ -143,7 +143,7 @@ class MOQParams(TransportParams):
     serve_tls_key: Optional[str] = None
     audio_out_sample_rate: int = 24000
     audio_in_sample_rate: int = 16000
-    audio_in_max_latency_ms: int = 100
+    audio_in_max_latency_ms: int = 500
     audio_out_frame_ms: float = 20.0
 
 
