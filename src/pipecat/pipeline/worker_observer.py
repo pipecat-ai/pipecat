@@ -28,12 +28,12 @@ class Proxy:
 
     Parameters:
         queue: Queue for frame data awaiting observer processing.
-        worker: Asyncio worker running the observer's frame processing loop.
+        task: Asyncio task running the observer's frame processing loop.
         observer: The actual observer instance being proxied.
     """
 
     queue: asyncio.Queue
-    worker: asyncio.Task
+    task: asyncio.Task
     observer: BaseObserver
 
 
@@ -102,7 +102,7 @@ class WorkerObserver(BaseObserver):
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
             # Cancel the proxy worker right away.
-            await self.cancel_task(proxy.worker)
+            await self.cancel_task(proxy.task)
 
         # Remove the observer from the list.
         if observer in self._observers:
@@ -118,7 +118,7 @@ class WorkerObserver(BaseObserver):
             return
 
         for proxy in self._proxies.values():
-            await self.cancel_task(proxy.worker)
+            await self.cancel_task(proxy.task)
 
     async def cleanup(self):
         """Cleanup all proxy observers."""
@@ -153,10 +153,8 @@ class WorkerObserver(BaseObserver):
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
         """Create a proxy for a single observer."""
         queue = asyncio.Queue()
-        worker = self.create_task(
-            self._proxy_task_handler(queue, observer), f"{observer}::_proxy_task_handler"
-        )
-        proxy = Proxy(queue=queue, worker=worker, observer=observer)
+        task = self.create_task(self._proxy_task_handler(queue, observer))
+        proxy = Proxy(queue=queue, task=task, observer=observer)
         return proxy
 
     def _create_proxies(self, observers: list[BaseObserver]) -> dict[BaseObserver, Proxy]:
