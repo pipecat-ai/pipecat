@@ -716,5 +716,119 @@ class TestCJKContextAssembly(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# CJK includes_inter_frame_spaces: per-call arg must reach the emitted frame
+# even when register_spoken did not set the flag on the slot.
+#
+# Regression: process_word used slot.includes_inter_frame_spaces exclusively
+# when an active slot existed, ignoring the per-call includes_inter_frame_spaces
+# argument.  tts_service.py calls register_spoken() without setting this flag,
+# so it always defaulted to False even when add_word_timestamps was called
+# with includes_inter_frame_spaces=True (as ElevenLabsTTSService does for CJK).
+# ---------------------------------------------------------------------------
+
+
+class TestCJKProcessWordFlagPropagation(unittest.TestCase):
+    """process_word must propagate includes_inter_frame_spaces to TTSTextFrame.
+
+    These tests simulate the tts_service.py code path: register_spoken is called
+    without includes_inter_frame_spaces (the default False), and then process_word
+    is called with includes_inter_frame_spaces=True (as add_word_timestamps does
+    for ElevenLabs CJK languages).
+
+    The flag must reach the emitted TTSTextFrame so the context aggregator knows
+    not to inject spaces between consecutive CJK word tokens.
+    """
+
+    @staticmethod
+    def _assemble_context(frames) -> str:
+        parts = [
+            TextPartForConcatenation(
+                f.text,
+                includes_inter_part_spaces=f.includes_inter_frame_spaces,
+            )
+            for f in frames
+            if isinstance(f, TTSTextFrame)
+        ]
+        return concatenate_aggregated_text(parts)
+
+    def test_process_word_flag_reaches_frame_when_slot_has_no_flag(self):
+        """includes_inter_frame_spaces=True on process_word must stamp the emitted frame.
+
+        register_spoken is called without includes_inter_frame_spaces (simulating
+        tts_service.py), then process_word is called with includes_inter_frame_spaces=True
+        (simulating add_word_timestamps for ElevenLabs CJK).  The frame must carry
+        includes_inter_frame_spaces=True.
+        """
+        seq = _seq()
+        sentence = "どんなことでも気軽に話しかけてくださいね。"
+        # tts_service.py does NOT pass includes_inter_frame_spaces to register_spoken
+        seq.register_spoken(_spoken_frame(sentence), "ctx1", _tracker(sentence), True)
+
+        # add_word_timestamps passes includes_inter_frame_spaces=True for CJK
+        result = seq.process_word(
+            "どんなことでも気", pts=100, context_id="ctx1", includes_inter_frame_spaces=True
+        )
+
+        tts_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+        self.assertEqual(len(tts_frames), 1)
+        self.assertTrue(
+            tts_frames[0].includes_inter_frame_spaces,
+            "TTSTextFrame must carry includes_inter_frame_spaces=True when process_word "
+            "is called with that flag, even if register_spoken did not set it on the slot",
+        )
+
+    def test_cjk_two_chunks_no_space_when_slot_has_no_flag(self):
+        """Two CJK chunks must concatenate without a space when process_word carries the flag.
+
+        Matches the ElevenLabs runtime: register_spoken gets no flag; both
+        process_word calls get includes_inter_frame_spaces=True.  Context assembly
+        must produce '気軽に' not '気 軽に'.
+        """
+        seq = _seq()
+        sentence = "どんなことでも気軽に話しかけてくださいね。"
+        seq.register_spoken(_spoken_frame(sentence), "ctx1", _tracker(sentence), True)
+
+        r1 = seq.process_word(
+            "どんなことでも気", pts=100, context_id="ctx1", includes_inter_frame_spaces=True
+        )
+        r2 = seq.process_word(
+            "軽に話しかけてくださいね。", pts=200, context_id="ctx1", includes_inter_frame_spaces=True
+        )
+
+        assembled = self._assemble_context(r1 + r2)
+        self.assertEqual(
+            assembled,
+            "どんなことでも気軽に話しかけてくださいね。",
+            "CJK word chunks must concatenate without spaces when process_word "
+            "carries includes_inter_frame_spaces=True",
+        )
+
+    def test_force_complete_cjk_flag_when_slot_has_no_flag(self):
+        """force_complete must also carry the flag for CJK slots registered without it.
+
+        When TTS drops the final token, force_complete emits the remainder.  The
+        flag must still reach that frame so the context assembler doesn't add a space.
+        """
+        seq = _seq()
+        sentence = "どんなことでも気軽に話しかけてくださいね。"
+        seq.register_spoken(_spoken_frame(sentence), "ctx1", _tracker(sentence), True)
+
+        # First chunk arrives with the flag via process_word
+        seq.process_word(
+            "どんなことでも気", pts=100, context_id="ctx1", includes_inter_frame_spaces=True
+        )
+        # Second chunk is dropped by TTS — force_complete emits the remainder
+        result = seq.force_complete(last_word_pts=200)
+        tts_frames = [f for f in result if isinstance(f, TTSTextFrame)]
+
+        self.assertEqual(len(tts_frames), 1)
+        self.assertTrue(
+            tts_frames[0].includes_inter_frame_spaces,
+            "force_complete must propagate includes_inter_frame_spaces for CJK slots "
+            "even when register_spoken did not set the flag",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

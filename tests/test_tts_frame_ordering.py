@@ -57,6 +57,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.text.base_text_aggregator import AggregationType
 
 # ---------------------------------------------------------------------------
@@ -1395,6 +1396,204 @@ async def test_serialization_queue_preserves_uninterruptible_frames_on_interrupt
         f"but {len(uninterruptible_frames)} arrived downstream"
     )
     assert uninterruptible_frames[0].label == "must_survive"
+
+
+# ---------------------------------------------------------------------------
+# CJK (ElevenLabs-style) includes_inter_frame_spaces propagation tests
+# ---------------------------------------------------------------------------
+
+
+class _MockCJKHttpTTSService(TTSService):
+    """HTTP-style TTS that emits word timestamps with includes_inter_frame_spaces=True.
+
+    Models the ElevenLabs CJK path: each run_tts() call consumes a pre-set
+    list of (word, timestamp) pairs and forwards them with
+    includes_inter_frame_spaces=True, as ElevenLabsTTSService does for ja/zh.
+    """
+
+    def __init__(
+        self,
+        word_times_per_call: list[list[tuple[str, float]]],
+        **kwargs,
+    ):
+        super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
+            push_text_frames=False,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+        self._word_times_queue = list(word_times_per_call)
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        word_times = self._word_times_queue.pop(0) if self._word_times_queue else []
+        if word_times:
+            await self.add_word_timestamps(
+                word_times,
+                context_id=context_id,
+                includes_inter_frame_spaces=True,
+            )
+        yield TTSAudioRawFrame(
+            audio=_FAKE_AUDIO,
+            sample_rate=_SAMPLE_RATE,
+            num_channels=1,
+            context_id=context_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_cjk_includes_inter_frame_spaces_propagated_to_tts_text_frames():
+    """TTSTextFrames for CJK word tokens must carry includes_inter_frame_spaces=True.
+
+    When includes_inter_frame_spaces=True is passed to add_word_timestamps (as
+    ElevenLabsTTSService does for Japanese/Chinese), every TTSTextFrame produced
+    for those tokens must have includes_inter_frame_spaces=True so the context
+    aggregator does not inject extra spaces between them.
+
+    Regression: register_spoken() was called without includes_inter_frame_spaces,
+    so the slot's flag was False.  process_word() uses the slot's flag when an
+    active slot exists, ignoring the per-call value — emitting frames with
+    includes_inter_frame_spaces=False and causing spurious spaces in CJK output.
+    """
+    word_times = [("どんなことでも気", 0.0), ("軽に話しかけてくださいね。", 0.2)]
+    tts = _MockCJKHttpTTSService(word_times_per_call=[word_times])
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(text="どんなことでも気軽に話しかけてくださいね。", append_to_context=False)
+        ],
+    )
+    tts_text_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+
+    assert len(tts_text_frames) == 2, f"Expected 2 TTSTextFrames, got {len(tts_text_frames)}"
+    for f in tts_text_frames:
+        assert f.includes_inter_frame_spaces, (
+            f"TTSTextFrame({f.text!r}) must have includes_inter_frame_spaces=True "
+            "for CJK; context assembler will inject spurious spaces otherwise"
+        )
+
+
+class _MockCJKWSTTSService(TTSService):
+    """WebSocket-style TTS that emits word timestamps with includes_inter_frame_spaces=True.
+
+    Like _MockCJKHttpTTSService but uses async audio-context delivery so each
+    context's background task completes cleanly before EndFrame closes the
+    pipeline, avoiding race conditions in multi-sentence tests.
+    """
+
+    def __init__(
+        self,
+        word_times_per_call: list[list[tuple[str, float]]],
+        **kwargs,
+    ):
+        super().__init__(
+            push_start_frame=True,
+            push_text_frames=False,
+            pause_frame_processing=False,
+            sample_rate=_SAMPLE_RATE,
+            **kwargs,
+        )
+        self._word_times_queue = list(word_times_per_call)
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        word_times = self._word_times_queue.pop(0) if self._word_times_queue else []
+
+        async def _deliver():
+            await asyncio.sleep(0.01)
+            if word_times:
+                await self.add_word_timestamps(
+                    word_times,
+                    context_id=context_id,
+                    includes_inter_frame_spaces=True,
+                )
+            await self.append_to_audio_context(
+                context_id,
+                TTSAudioRawFrame(
+                    audio=_FAKE_AUDIO,
+                    sample_rate=_SAMPLE_RATE,
+                    num_channels=1,
+                    context_id=context_id,
+                ),
+            )
+            await self.append_to_audio_context(context_id, TTSStoppedFrame(context_id=context_id))
+            await self.remove_audio_context(context_id)
+
+        self.create_task(_deliver(), name=f"mock_cjk_ws_deliver_{context_id}")
+        if False:
+            yield
+
+
+@pytest.mark.asyncio
+async def test_cjk_two_sentences_no_extra_spaces_in_assembled_context():
+    """Two Japanese TTS sentences assembled into context must not include extra spaces.
+
+    Reproduces the observed bug where CJK output looked like:
+        'こんにちは...です。 どんなことでも気 軽に...'
+    with both an inter-sentence space and an intra-sentence space.
+
+    Both spurious spaces come from includes_inter_frame_spaces not propagating
+    from add_word_timestamps through to the emitted TTSTextFrames.  The fix
+    in the add_word_timestamps → _add_word_timestamps → process_word path is
+    bypassed because process_word prefers the slot's own flag (set by
+    register_spoken, which did not receive includes_inter_frame_spaces).
+
+    Expected assembled context (no spaces anywhere):
+        'こんにちは、私はあなたのお手伝いをするAIアシスタントです。'
+        'どんなことでも気軽に話しかけてくださいね。'
+    """
+    tts = _MockCJKWSTTSService(
+        word_times_per_call=[
+            [
+                ("こんにちは、私はあなたのお手伝いをする", 0.0),
+                ("AIアシスタントです。", 0.5),
+            ],
+            [
+                ("どんなことでも気", 0.0),
+                ("軽に話しかけてくださいね。", 0.3),
+            ],
+        ]
+    )
+    frames_received = await run_test(
+        tts,
+        frames_to_send=[
+            TTSSpeakFrame(
+                text="こんにちは、私はあなたのお手伝いをするAIアシスタントです。",
+                append_to_context=False,
+            ),
+            SleepFrame(sleep=0.05),
+            TTSSpeakFrame(
+                text="どんなことでも気軽に話しかけてくださいね。",
+                append_to_context=False,
+            ),
+            SleepFrame(sleep=0.05),
+        ],
+    )
+    tts_text_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]
+
+    parts = [
+        TextPartForConcatenation(
+            f.text,
+            includes_inter_part_spaces=f.includes_inter_frame_spaces,
+        )
+        for f in tts_text_frames
+    ]
+    assembled = concatenate_aggregated_text(parts)
+
+    expected = (
+        "こんにちは、私はあなたのお手伝いをするAIアシスタントです。"
+        "どんなことでも気軽に話しかけてくださいね。"
+    )
+    assert assembled == expected, (
+        f"Assembled context must not contain extra spaces.\n"
+        f"  Expected: {expected!r}\n"
+        f"  Got:      {assembled!r}"
+    )
 
 
 if __name__ == "__main__":
