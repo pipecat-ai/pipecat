@@ -11,6 +11,8 @@ of audio from both user input and bot output sources, with support for various a
 configurations and event-driven processing.
 """
 
+import time
+
 from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -88,6 +90,7 @@ class AudioBufferProcessor(FrameProcessor):
 
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
+        self._last_user_buffer_update_time: float | None = None
 
         self._register_event_handler("on_audio_data")
         self._register_event_handler("on_track_audio_data")
@@ -201,6 +204,11 @@ class AudioBufferProcessor(FrameProcessor):
             resampled = await self._resample_input_audio(frame)
             # Ignoring in case we don't have audio
             if len(resampled) > 0:
+                now = time.monotonic()
+                # Insert silence for any wall-clock gap since the user buffer was
+                # last written (covers muted microphone and other silent periods).
+                self._fill_user_silence_gap(now, len(resampled))
+                self._last_user_buffer_update_time = now
                 # Sync bot buffer to current user position before adding user audio.
                 # We sync BEFORE extending to align both buffers at the same starting timestamp.
                 # For example, user buffer is at 100 bytes, and you receive 20 bytes of new audio
@@ -232,6 +240,11 @@ class AudioBufferProcessor(FrameProcessor):
                     self._sync_buffer_to_position(
                         self._user_audio_buffer, len(self._bot_audio_buffer)
                     )
+                    # Advance the timestamp so that when user audio resumes we
+                    # only fill the gap *after* the last bot frame, not all the
+                    # way back to the last user frame (which would double-count
+                    # silence already injected by the sync above).
+                    self._last_user_buffer_update_time = time.monotonic()
                 # Add bot audio.
                 self._bot_audio_buffer.extend(resampled)
 
@@ -260,6 +273,31 @@ class AudioBufferProcessor(FrameProcessor):
         if current_len < target_position:
             silence_needed = target_position - current_len
             buffer.extend(b"\x00" * silence_needed)
+
+    def _fill_user_silence_gap(self, now: float, frame_bytes: int):
+        """Insert silence into the user buffer when a gap is detected.
+
+        Called before adding new user audio. Compares the wall-clock time
+        elapsed since the user buffer was last written against the duration
+        of the incoming frame. Any excess time (e.g., from a muted mic) is
+        filled with silence so the two utterances remain temporally separated.
+
+        Args:
+            now: Current monotonic time.
+            frame_bytes: Byte length of the incoming (resampled) audio frame.
+        """
+        if self._last_user_buffer_update_time is None or self._sample_rate == 0:
+            return
+
+        elapsed = now - self._last_user_buffer_update_time
+        frame_duration = frame_bytes / (self._sample_rate * 2)
+        gap = elapsed - frame_duration
+
+        if gap > 0.2:  # 200 ms threshold — safely above normal jitter
+            silence_bytes = int(gap * self._sample_rate * 2)
+            silence_bytes -= silence_bytes % 2  # keep 16-bit alignment
+            if silence_bytes > 0:
+                self._user_audio_buffer.extend(b"\x00" * silence_bytes)
 
     async def _process_turn_recording(self, frame: Frame, resampled_audio: bytes | None = None):
         """Process frames for turn-based audio recording."""
@@ -323,6 +361,7 @@ class AudioBufferProcessor(FrameProcessor):
     def _reset_recording(self):
         """Reset recording state and buffers."""
         self._reset_all_audio_buffers()
+        self._last_user_buffer_update_time = None
 
     def _reset_all_audio_buffers(self):
         """Reset all audio buffers to empty state."""
@@ -333,6 +372,7 @@ class AudioBufferProcessor(FrameProcessor):
         """Clear user and bot buffers while preserving turn buffers and timestamps."""
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+        self._last_user_buffer_update_time = time.monotonic()
 
     def _reset_turn_audio_buffers(self):
         """Clear user and bot turn buffers while preserving primary buffers and timestamps."""
