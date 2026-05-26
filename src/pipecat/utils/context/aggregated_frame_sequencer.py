@@ -191,9 +191,11 @@ class AggregatedFrameSequencer:
             is_complete = active.tracker.add_word_and_check_complete(word)
             raw_overflow_word = active.tracker.get_overflow_word()
 
-        # Use the slot's own flag when available; fall back to the per-call argument
-        # (used for passthrough words that have no active slot).
-        slot_ifs = active.includes_inter_frame_spaces if active else includes_inter_frame_spaces
+        # Give preference to the per-call flag; fall back to the slot's flag.
+        # Also propagate the per-call flag onto the slot so force_complete inherits it.
+        if active and includes_inter_frame_spaces:
+            active.includes_inter_frame_spaces = True
+        slot_ifs = includes_inter_frame_spaces or (active.includes_inter_frame_spaces if active else False)
 
         frame_text = (
             active.tracker.get_word_for_frame() if (active and active.tracker) else word
