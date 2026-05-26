@@ -98,6 +98,28 @@ class BusFrameMessage(BusDataMessage):
 
 
 # ---------------------------------------------------------------------------
+# Pipeline commands
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BusTTSSpeakMessage(BusDataMessage):
+    """Asks a `PipelineWorker` to speak the given text via its TTS service.
+
+    On receipt, the worker queues a `TTSSpeakFrame` into its pipeline.
+    Pipelines without a TTS service let the frame flow through harmlessly.
+
+    Parameters:
+        text: The text to be spoken.
+        append_to_context: Whether the spoken text should also be appended
+            to the conversation context (forwarded to `TTSSpeakFrame`).
+    """
+
+    text: str
+    append_to_context: bool | None = None
+
+
+# ---------------------------------------------------------------------------
 # Worker lifecycle
 # ---------------------------------------------------------------------------
 

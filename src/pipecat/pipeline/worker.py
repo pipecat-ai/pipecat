@@ -20,7 +20,13 @@ from typing import Any, TypeVar
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
-from pipecat.bus import BusCancelWorkerMessage, BusEndWorkerMessage, WorkerBus
+from pipecat.bus import (
+    BusCancelWorkerMessage,
+    BusEndWorkerMessage,
+    BusMessage,
+    BusTTSSpeakMessage,
+    WorkerBus,
+)
 from pipecat.bus.bridge_processor import _BusEdgeProcessor
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
@@ -39,6 +45,7 @@ from pipecat.frames.frames import (
     StartFrame,
     StopFrame,
     StopTaskFrame,
+    TTSSpeakFrame,
     UserSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
@@ -703,6 +710,29 @@ class PipelineWorker(BaseWorker):
         elif isinstance(frames, Iterable):
             for frame in frames:
                 await self.queue_frame(frame, direction)
+
+    async def on_bus_message(self, message: BusMessage) -> None:
+        """Handle pipeline-worker-specific bus messages.
+
+        Dispatches `BusTTSSpeakMessage` by queueing a `TTSSpeakFrame` into
+        the pipeline. All other messages are delegated to the base
+        handler.
+
+        Args:
+            message: The bus message to process.
+        """
+        await super().on_bus_message(message)
+
+        # ``BaseWorker.on_bus_message`` already drops targeted messages
+        # for other workers, but it returns early before reaching here —
+        # re-apply the filter before queueing pipeline frames.
+        if message.target and message.target != self.name:
+            return
+
+        if isinstance(message, BusTTSSpeakMessage):
+            await self.queue_frame(
+                TTSSpeakFrame(text=message.text, append_to_context=message.append_to_context)
+            )
 
     async def _cancel(self, *, reason: str | None = None):
         """Internal cancellation logic for the pipeline worker.
