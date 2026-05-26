@@ -404,9 +404,7 @@ class TestMuteGapSilenceInsertion(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(p._user_audio_buffer), expected_silence + len(audio))
         # Silence prefix.
-        self.assertEqual(
-            bytes(p._user_audio_buffer[:expected_silence]), b"\x00" * expected_silence
-        )
+        self.assertEqual(bytes(p._user_audio_buffer[:expected_silence]), b"\x00" * expected_silence)
         # Audio at the end.
         self.assertEqual(bytes(p._user_audio_buffer[-len(audio) :]), audio)
         await p.cleanup()
