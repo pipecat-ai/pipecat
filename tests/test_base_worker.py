@@ -24,8 +24,9 @@ from pipecat.bus import (
     BusJobStreamEndMessage,
     BusJobStreamStartMessage,
     BusJobUpdateMessage,
+    BusTTSSpeakMessage,
 )
-from pipecat.frames.frames import EndFrame, Frame, TextFrame
+from pipecat.frames.frames import EndFrame, Frame, TextFrame, TTSSpeakFrame
 from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_context import JobStatus
 from pipecat.pipeline.job_decorator import job
@@ -437,6 +438,63 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(received), 2)
         self.assertEqual(received[0].text, "a")
         self.assertEqual(received[1].text, "b")
+
+    async def test_bus_tts_speak_message_queues_tts_speak_frame(self):
+        """BusTTSSpeakMessage queues a TTSSpeakFrame into the pipeline."""
+        worker = make_stub_pipeline_task("test")
+
+        received = []
+        worker.set_reached_downstream_filter((TTSSpeakFrame,))
+
+        @worker.event_handler("on_frame_reached_downstream")
+        async def on_frame(t, frame):
+            received.append(frame)
+
+        async def send_speak():
+            await asyncio.sleep(0.05)
+            await self.bus.send(
+                BusTTSSpeakMessage(
+                    source="other",
+                    target="test",
+                    text="hello there",
+                    append_to_context=True,
+                )
+            )
+            await asyncio.sleep(0.05)
+            await worker.queue_frame(EndFrame())
+
+        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(worker)
+        await asyncio.gather(runner.run(), send_speak())
+
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0].text, "hello there")
+        self.assertTrue(received[0].append_to_context)
+
+    async def test_bus_tts_speak_message_ignored_for_other_target(self):
+        """BusTTSSpeakMessage targeted at another worker is ignored."""
+        worker = make_stub_pipeline_task("test")
+
+        received = []
+        worker.set_reached_downstream_filter((TTSSpeakFrame,))
+
+        @worker.event_handler("on_frame_reached_downstream")
+        async def on_frame(t, frame):
+            received.append(frame)
+
+        async def send_speak():
+            await asyncio.sleep(0.05)
+            await self.bus.send(
+                BusTTSSpeakMessage(source="other", target="someone-else", text="ignored")
+            )
+            await asyncio.sleep(0.05)
+            await worker.queue_frame(EndFrame())
+
+        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        await runner.add_workers(worker)
+        await asyncio.gather(runner.run(), send_speak())
+
+        self.assertEqual(received, [])
 
     async def test_self_handoff(self):
         """A worker can hand off to itself via activate_worker(self.name, deactivate_self=True)."""
