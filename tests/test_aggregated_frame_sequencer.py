@@ -793,7 +793,10 @@ class TestCJKProcessWordFlagPropagation(unittest.TestCase):
             "どんなことでも気", pts=100, context_id="ctx1", includes_inter_frame_spaces=True
         )
         r2 = seq.process_word(
-            "軽に話しかけてくださいね。", pts=200, context_id="ctx1", includes_inter_frame_spaces=True
+            "軽に話しかけてくださいね。",
+            pts=200,
+            context_id="ctx1",
+            includes_inter_frame_spaces=True,
         )
 
         assembled = self._assemble_context(r1 + r2)

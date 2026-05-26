@@ -1463,7 +1463,9 @@ async def test_cjk_includes_inter_frame_spaces_propagated_to_tts_text_frames():
     frames_received = await run_test(
         tts,
         frames_to_send=[
-            TTSSpeakFrame(text="どんなことでも気軽に話しかけてくださいね。", append_to_context=False)
+            TTSSpeakFrame(
+                text="どんなことでも気軽に話しかけてくださいね。", append_to_context=False
+            )
         ],
     )
     tts_text_frames = [f for f in frames_received[0] if isinstance(f, TTSTextFrame)]

@@ -195,7 +195,9 @@ class AggregatedFrameSequencer:
         # Also propagate the per-call flag onto the slot so force_complete inherits it.
         if active and includes_inter_frame_spaces:
             active.includes_inter_frame_spaces = True
-        slot_ifs = includes_inter_frame_spaces or (active.includes_inter_frame_spaces if active else False)
+        slot_ifs = includes_inter_frame_spaces or (
+            active.includes_inter_frame_spaces if active else False
+        )
 
         frame_text = (
             active.tracker.get_word_for_frame() if (active and active.tracker) else word
