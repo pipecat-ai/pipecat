@@ -203,7 +203,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
     Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
     Inworld's server-side VAD events. Pair with
-    ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
+    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
     so context writes are decoupled from those frames. If you wire local
     VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
     service, disable Inworld's server-side turn detection first via
@@ -961,12 +961,14 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
     async def _handle_evt_speech_started(self, evt):
         """Handle speech started event from server-side VAD."""
+        print(f"[pk] Speech started event received: {evt}")
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from server-side VAD."""
+        print(f"[pk] Speech stopped event received: {evt}")
         # Mark that the server is handling this turn (and will auto-create a
         # response when create_response=True).  This prevents _handle_context
         # from sending a duplicate ResponseCreateEvent when the user aggregator

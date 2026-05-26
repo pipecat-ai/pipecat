@@ -32,7 +32,6 @@ from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
-    RealtimeServiceModeConfig,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -206,7 +205,7 @@ Remember, your responses should be short - just one or two sentences usually."""
     context = LLMContext([{"role": "developer", "content": "Say hello!"}], tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=RealtimeServiceModeConfig(),
+        realtime_service_mode=True,
     )
 
     pipeline = Pipeline(

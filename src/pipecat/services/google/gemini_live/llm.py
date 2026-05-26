@@ -368,7 +368,7 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     events, ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn
     recording, ``UserIdleController``, user mute strategies, voicemail
     detector — won't activate with the default server-VAD-only setup. Pair
-    with ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
+    with ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
     so context writes are correct anyway. To produce the turn frames
     locally, see ``examples/realtime/realtime-gemini-live-locally-driven-turns.py``;
     note that locally-generated turn boundaries are a heuristic and may

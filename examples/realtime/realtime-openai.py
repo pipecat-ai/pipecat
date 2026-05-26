@@ -22,7 +22,6 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    RealtimeServiceModeConfig,
     UserMessageAddedMessage,
     UserTurnStoppedMessage,
 )
@@ -194,7 +193,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         # decouples context writes from turn frames and transcript-bound
         # turn-end. See `realtime-openai-locally-driven-turns.py` for the
         # variant that disables server VAD and drives turn detection locally.
-        realtime_service_mode=RealtimeServiceModeConfig(),
+        realtime_service_mode=True,
     )
 
     pipeline = Pipeline(

@@ -56,7 +56,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregator,
     LLMUserAggregatorParams,
-    RealtimeServiceModeConfig,
     UserMessageAddedMessage,
     UserTurnStoppedMessage,
 )
@@ -1659,27 +1658,13 @@ class TestToolChangeMessages(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(pair.assistant()._add_tool_change_messages)
 
 
-class TestRealtimeServiceModeConfig(unittest.TestCase):
-    def test_default_fields_are_realtime(self):
-        cfg = RealtimeServiceModeConfig()
-        self.assertFalse(cfg.context_writes_await_turns)
-        self.assertFalse(cfg.turns_await_transcripts)
-
-    def test_invalid_combination_rejected(self):
-        # turns fire early but context writes wait → incomplete messages.
-        with self.assertRaises(ValueError):
-            RealtimeServiceModeConfig(
-                turns_await_transcripts=False, context_writes_await_turns=True
-            )
-
-
 class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
     """End-to-end tests for the trailing-write realtime mode."""
 
     def _build_pair(
         self,
         *,
-        realtime_service_mode: RealtimeServiceModeConfig | None = None,
+        realtime_service_mode: bool = False,
         user_params: LLMUserAggregatorParams | None = None,
     ) -> tuple[LLMContext, LLMContextAggregatorPair]:
         context = LLMContext()
@@ -1691,25 +1676,23 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         return context, pair
 
     async def test_pair_propagates_realtime_mode_to_halves(self):
-        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        _, pair = self._build_pair(realtime_service_mode=True)
         # Realtime mode is one-way: the assistant holds the back-ref so
         # it can flush the user on LLMFullResponseStartFrame. The user
         # has no back-ref — the assistant writes its own message on
         # LLMFullResponseEndFrame, so it doesn't need to call back.
         self.assertIs(pair.assistant()._paired_user_aggregator, pair.user())
-        self.assertFalse(pair.user()._context_writes_await_turns)
-        self.assertFalse(pair.user()._turns_await_transcripts)
-        self.assertFalse(pair.assistant()._context_writes_await_turns)
-        self.assertFalse(pair.assistant()._turns_await_transcripts)
+        self.assertTrue(pair.user()._realtime_service_mode)
+        self.assertTrue(pair.assistant()._realtime_service_mode)
 
     async def test_pair_omits_realtime_wiring_when_unset(self):
         _, pair = self._build_pair()
         self.assertIsNone(pair.assistant()._paired_user_aggregator)
-        self.assertTrue(pair.user()._context_writes_await_turns)
-        self.assertTrue(pair.assistant()._context_writes_await_turns)
+        self.assertFalse(pair.user()._realtime_service_mode)
+        self.assertFalse(pair.assistant()._realtime_service_mode)
 
     async def test_realtime_strategy_mutations_with_defaults(self):
-        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        _, pair = self._build_pair(realtime_service_mode=True)
         # The mutated strategies live on the UserTurnController owned by
         # the user aggregator.
         strategies = pair.user()._user_turn_controller._user_turn_strategies
@@ -1723,19 +1706,8 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             if hasattr(s, "wait_for_transcript"):
                 self.assertFalse(s.wait_for_transcript)
 
-    async def test_realtime_strategy_mutations_skipped_when_turns_await_transcripts(self):
-        _, pair = self._build_pair(
-            realtime_service_mode=RealtimeServiceModeConfig(turns_await_transcripts=True),
-        )
-        strategies = pair.user()._user_turn_controller._user_turn_strategies
-        # When turns still wait for transcripts, the transcript start
-        # strategy stays in the chain.
-        self.assertTrue(
-            any(isinstance(s, TranscriptionUserTurnStartStrategy) for s in strategies.start)
-        )
-
     async def test_trailing_write_user_then_assistant_then_user(self):
-        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        _, pair = self._build_pair(realtime_service_mode=True)
         user, assistant = pair
 
         user_msg_added: list[UserMessageAddedMessage] = []
@@ -1788,7 +1760,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(msg.interrupted)
 
     async def test_interruption_writes_assistant_immediately(self):
-        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        _, pair = self._build_pair(realtime_service_mode=True)
         user, assistant = pair
 
         assistant_messages: list[AssistantTurnStoppedMessage] = []
@@ -1822,7 +1794,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         # When VAD turn frames fire in realtime mode, the user-turn-stop
         # message carries content=None — the message isn't finalized yet.
         _, pair = self._build_pair(
-            realtime_service_mode=RealtimeServiceModeConfig(),
+            realtime_service_mode=True,
             user_params=LLMUserAggregatorParams(
                 user_turn_strategies=UserTurnStrategies(
                     stop=[
@@ -1874,7 +1846,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         # When realtime mode is opted in, the metadata frame is consumed
         # without firing the recommendation log (we still flag the
         # one-shot bookkeeping).
-        _, pair = self._build_pair(realtime_service_mode=RealtimeServiceModeConfig())
+        _, pair = self._build_pair(realtime_service_mode=True)
         user = pair.user()
 
         frames_to_send = [
@@ -1891,9 +1863,7 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         # (We call the validation directly so the error isn't swallowed
         # by the pipeline's exception handler.)
         context = LLMContext()
-        assistant = LLMAssistantAggregator(
-            context, _realtime_service_mode=RealtimeServiceModeConfig()
-        )
+        assistant = LLMAssistantAggregator(context, _realtime_service_mode=True)
         with self.assertRaises(RuntimeError):
             assistant._validate_realtime_pairing()
 
@@ -1901,10 +1871,10 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         # If a user code path constructs halves with mismatched configs
         # and wires them up by hand, assistant validation catches it.
         context = LLMContext()
-        user = LLMUserAggregator(context, _realtime_service_mode=RealtimeServiceModeConfig())
+        user = LLMUserAggregator(context, _realtime_service_mode=True)
         assistant = LLMAssistantAggregator(
             context,
-            _realtime_service_mode=RealtimeServiceModeConfig(turns_await_transcripts=True),
+            _realtime_service_mode=False,
             _paired_user_aggregator=user,
         )
         with self.assertRaises(RuntimeError):

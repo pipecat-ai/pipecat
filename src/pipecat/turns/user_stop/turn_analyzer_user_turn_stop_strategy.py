@@ -66,8 +66,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
                 (e.g. with a realtime LLM service consuming audio directly),
                 so transcripts are off the latency critical path.
                 ``LLMContextAggregatorPair`` flips this for you when
-                ``realtime_service_mode`` is configured with
-                ``turns_await_transcripts=False``.
+                ``realtime_service_mode=True``.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)

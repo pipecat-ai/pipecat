@@ -180,7 +180,7 @@ class UltravoxRealtimeLLMService(LLMService):
     speech events, ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn
     recording, ``UserIdleController``, user mute strategies, voicemail
     detector — won't activate with the default server-VAD-only setup. Pair
-    with ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
+    with ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
     so context writes are correct anyway. To produce the turn frames
     locally, wire ``vad_analyzer=SileroVADAnalyzer()`` (or similar) into
     ``LLMUserAggregatorParams``; locally-generated turn boundaries are a

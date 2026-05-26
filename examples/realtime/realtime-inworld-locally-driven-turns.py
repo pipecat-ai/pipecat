@@ -44,7 +44,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
-    RealtimeServiceModeConfig,
     UserMessageAddedMessage,
     UserTurnStoppedMessage,
 )
@@ -176,7 +175,7 @@ Always be helpful and proactive in offering assistance.""",
         # aggregator. realtime_service_mode keeps context-write semantics
         # correct and (by default) drops the transcript wait on turn-end so
         # local VAD can drive turn boundaries on the latency critical path.
-        realtime_service_mode=RealtimeServiceModeConfig(),
+        realtime_service_mode=True,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 

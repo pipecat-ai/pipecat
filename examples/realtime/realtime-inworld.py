@@ -46,7 +46,6 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    RealtimeServiceModeConfig,
     UserMessageAddedMessage,
     UserTurnStoppedMessage,
 )
@@ -154,7 +153,7 @@ Always be helpful and proactive in offering assistance.""",
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=RealtimeServiceModeConfig(),
+        realtime_service_mode=True,
     )
 
     # Build the pipeline

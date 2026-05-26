@@ -210,7 +210,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     those frames (RTVI client speech events, ``TurnTrackingObserver``,
     ``AudioBufferProcessor`` turn recording, ``UserIdleController``, user
     mute strategies, voicemail detector) work out of the box. Pair with
-    ``LLMContextAggregatorPair(..., realtime_service_mode=RealtimeServiceModeConfig())``
+    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
     so context writes are decoupled from those frames; see the
     ``examples/realtime/realtime-openai.py`` example.
 

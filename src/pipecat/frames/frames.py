@@ -1447,7 +1447,7 @@ class RealtimeServiceMetadataFrame(ServiceMetadataFrame):
     processors — notably ``LLMContextAggregatorPair`` — can detect that
     a realtime service is in the pipeline. The aggregator uses this to
     surface a one-time recommendation to opt in to
-    ``RealtimeServiceModeConfig`` when it hasn't been configured.
+    ``realtime_service_mode=True`` when it hasn't been configured.
 
     Parameters:
         emits_user_turn_frames: Whether this service emits

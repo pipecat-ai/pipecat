@@ -43,7 +43,6 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    RealtimeServiceModeConfig,
     UserMessageAddedMessage,
     UserTurnStoppedMessage,
 )
@@ -221,7 +220,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        realtime_service_mode=RealtimeServiceModeConfig(),
+        realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(
         #     vad_analyzer=SileroVADAnalyzer(),
         #     user_turn_strategies=UserTurnStrategies(start=[VADUserTurnStartStrategy(
