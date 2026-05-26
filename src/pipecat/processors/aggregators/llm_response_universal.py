@@ -88,10 +88,15 @@ from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
+    ExternalUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
     UserTurnStartedParams,
 )
-from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from pipecat.turns.user_stop import (
+    BaseUserTurnStopStrategy,
+    ExternalUserTurnStopStrategy,
+    UserTurnStoppedParams,
+)
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import (
@@ -662,11 +667,24 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             self._params.user_turn_strategies = user_turn_strategies
 
-        # Realtime-mode mutation: when turns shouldn't wait for
-        # transcripts, drop the transcription-based start strategy and
-        # flip the wait_for_transcript flag on stop strategies that
-        # expose it. The set of strategies that support it intentionally
-        # stays narrow — the flag exists specifically for this path.
+        # Realtime-mode strategy wiring. Only kicks in when the user
+        # didn't pass custom strategies — explicit user choice wins.
+        if self._realtime_service_mode and self._params.user_turn_strategies is None:
+            # Append external strategies so on_user_turn_* events fire
+            # from server-emitted UserStarted/StoppedSpeakingFrame. For
+            # realtime services that don't emit those frames the
+            # appended strategies install harmlessly and never fire.
+            user_turn_strategies.start = (user_turn_strategies.start or []) + [
+                ExternalUserTurnStartStrategy(),
+            ]
+            user_turn_strategies.stop = (user_turn_strategies.stop or []) + [
+                ExternalUserTurnStopStrategy(),
+            ]
+
+        # Realtime-mode mutation: drop the transcription-based start
+        # strategy and flip the wait_for_transcript flag on stop
+        # strategies that expose it, so turn-stop fires as soon as VAD /
+        # the turn analyzer / external frames report end-of-speech.
         if self._realtime_service_mode:
             self._apply_realtime_mode_strategy_mutations(user_turn_strategies)
 

@@ -67,10 +67,14 @@ from pipecat.turns.user_mute import (
     MuteUntilFirstBotCompleteUserMuteStrategy,
 )
 from pipecat.turns.user_start import (
+    ExternalUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
     VADUserTurnStartStrategy,
 )
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_stop import (
+    ExternalUserTurnStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
+)
 from pipecat.turns.user_turn_strategies import (
     FilterIncompleteUserTurnStrategies,
     UserTurnStrategies,
@@ -1701,10 +1705,31 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             self.assertNotIsInstance(s, TranscriptionUserTurnStartStrategy)
         # VAD start strategy is preserved.
         self.assertTrue(any(isinstance(s, VADUserTurnStartStrategy) for s in strategies.start))
-        # Stop strategies that expose wait_for_transcript have it flipped.
+        # External strategies are appended so on_user_turn_* fires from
+        # server-emitted UserStarted/StoppedSpeakingFrame.
+        self.assertTrue(any(isinstance(s, ExternalUserTurnStartStrategy) for s in strategies.start))
+        self.assertTrue(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
+        # Stop strategies that expose wait_for_transcript have it
+        # flipped (including the appended ExternalUserTurnStopStrategy).
         for s in strategies.stop:
             if hasattr(s, "wait_for_transcript"):
                 self.assertFalse(s.wait_for_transcript)
+
+    async def test_realtime_skips_external_append_when_user_strategies_passed(self):
+        # Custom user_turn_strategies opts out of the auto-append.
+        custom = UserTurnStrategies(
+            start=[VADUserTurnStartStrategy()],
+            stop=[SpeechTimeoutUserTurnStopStrategy()],
+        )
+        _, pair = self._build_pair(
+            realtime_service_mode=True,
+            user_params=LLMUserAggregatorParams(user_turn_strategies=custom),
+        )
+        strategies = pair.user()._user_turn_controller._user_turn_strategies
+        self.assertFalse(
+            any(isinstance(s, ExternalUserTurnStartStrategy) for s in strategies.start)
+        )
+        self.assertFalse(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
 
     async def test_trailing_write_user_then_assistant_then_user(self):
         _, pair = self._build_pair(realtime_service_mode=True)
