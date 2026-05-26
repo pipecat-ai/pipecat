@@ -694,9 +694,22 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
-                if evt.error.code in (
-                    "response_cancel_not_active",
-                    "conversation_already_has_active_response",
+                # Match Grok's actual codes/messages for cancel-not-active
+                # and already-active. Grok's error codes diverge from
+                # OpenAI's here, so fall back to substring matching on the
+                # message text. Without this, an otherwise-benign cancel
+                # race ("Cancellation failed: no active response found")
+                # falls through to `_handle_evt_error` + `return`, which
+                # exits the receive loop and stalls the conversation.
+                msg = (evt.error.message or "").lower()
+                if (
+                    evt.error.code
+                    in (
+                        "response_cancel_not_active",
+                        "conversation_already_has_active_response",
+                    )
+                    or "no active response" in msg
+                    or "already has an active response" in msg
                 ):
                     logger.debug(f"{self} {evt.error.message}")
                 else:
