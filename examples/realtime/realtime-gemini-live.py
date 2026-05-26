@@ -131,30 +131,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     context = LLMContext()
-    # Gemini Live drives the conversation server-side and does not emit
-    # UserStartedSpeakingFrame / UserStoppedSpeakingFrame. Context
-    # aggregation still works with realtime_service_mode, but pipeline
-    # processors that depend on those frames (RTVI client speech events,
-    # TurnTrackingObserver, AudioBufferProcessor turn recording,
-    # UserIdleController, user mute strategies, voicemail detector) won't
-    # activate. The Pipecat Prebuilt UI is one such consumer — without
-    # these frames it can't group user transcripts into discrete turns
-    # visually.
+    # Gemini Live drives the conversation server-side.
     #
-    # Pipecat's own on_user_turn_stopped event on LLMUserAggregator (see
-    # the commented-out handler below) is in the same boat: without
-    # user-turn frames there's nothing to trigger it, so it won't fire
-    # in realtime mode. (Use on_user_message_added instead for finalized
-    # user transcript text.)
+    # It does not, however, emit turn frames (UserStartedSpeakingFrame,
+    # UserStoppedSpeakingFrame). realtime_service_mode ensures that context
+    # aggregation will work without those frames, but you can add supplemental
+    # local turn frames for consumption by other pipeline processors that
+    # expect them (like RTVI), or to trigger on_user_turn_* events. WARNING:
+    # you should consider supplemental local turn frames approximate, as they
+    # may not always align with server turns.
     #
-    # If you need those frames, uncomment the SileroVADAnalyzer and
-    # related imports below and the `user_params=` argument further
-    # down. Note: local turn detection may not match Gemini Live's
-    # actual server-side turn decisions and can desynchronize in subtle
-    # ways.
+    # To enable supplemental local turn frames, uncomment the SileroVADAnalyzer
+    # and related imports below and the `user_params=` argument further down.
+    # Doing so enables the on_user_turn_stopped event, which you could then
+    # also uncomment.
     #
-    # For local VAD driving the conversation (server VAD disabled), see
-    # `realtime-gemini-live-locally-driven-turns.py` instead.
+    # For local turn detection fully driving the conversation (server VAD
+    # disabled), see `realtime-gemini-live-locally-driven-turns.py` instead.
     #
     # from pipecat.audio.vad.silero import SileroVADAnalyzer
     # from pipecat.processors.aggregators.llm_response_universal import (
@@ -201,15 +194,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await worker.cancel()
 
-    # Gemini Live doesn't emit user-turn frames, so on_user_turn_stopped
-    # won't fire (see the comment above the LLMContextAggregatorPair
-    # call). The on_user_message_added event fires when the user message
-    # is written to context and carries the finalized content; use it
-    # for transcript logging.
-    #
-    # If you uncomment the local-VAD opt-in above, you can also uncomment
-    # the on_user_turn_stopped handler below to get turn-stop callbacks.
-    #
+    # See comment above the user_aggregator for details on why this is
+    # commented out and instructions for enabling it.
     # @user_aggregator.event_handler("on_user_turn_stopped")
     # async def on_user_turn_stopped(
     #     aggregator,
