@@ -163,3 +163,81 @@ async def test_slng_stt_ws_connect_failure_clears_websocket(monkeypatch):
     await stt._connect_websocket()
 
     assert stt._websocket is None
+
+
+@pytest.mark.asyncio
+async def test_slng_http_stt_transcribes_on_vad_stop():
+    """HTTP STT should fire API call on VADUserStoppedSpeakingFrame and emit TranscriptionFrame."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from pipecat.frames.frames import AudioRawFrame
+    from pipecat.services.slng.stt import SlngHttpSTTService
+
+    mock_alternative = MagicMock()
+    mock_alternative.transcript = "hello from http"
+
+    mock_response = MagicMock()
+    mock_response.alternatives = [mock_alternative]
+
+    mock_stt_resource = MagicMock()
+    mock_stt_resource.create = AsyncMock(return_value=mock_response)
+
+    mock_client = MagicMock()
+    mock_client.speech_to_text = mock_stt_resource
+
+    stt = SlngHttpSTTService(
+        api_key="test-key",
+        model="slng/deepgram/nova:3-en",
+        sample_rate=16000,
+    )
+    stt._client = mock_client
+
+    audio = AudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1)
+
+    down_frames, _ = await run_test(
+        stt,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            audio,
+            SleepFrame(sleep=0.05),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.1),
+        ],
+    )
+
+    frame_types = [type(f) for f in down_frames]
+    assert TranscriptionFrame in frame_types
+
+    final = next(f for f in down_frames if isinstance(f, TranscriptionFrame))
+    assert final.text == "hello from http"
+
+    mock_stt_resource.create.assert_called_once()
+    call_kwargs = mock_stt_resource.create.call_args
+    assert call_kwargs[0][0] == "slng/deepgram/nova:3-en"
+
+
+@pytest.mark.asyncio
+async def test_slng_http_stt_empty_buffer_skips_api_call():
+    """HTTP STT should not call API if no audio was buffered."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from pipecat.services.slng.stt import SlngHttpSTTService
+
+    mock_stt_resource = MagicMock()
+    mock_stt_resource.create = AsyncMock()
+
+    mock_client = MagicMock()
+    mock_client.speech_to_text = mock_stt_resource
+
+    stt = SlngHttpSTTService(api_key="test-key", sample_rate=16000)
+    stt._client = mock_client
+
+    down_frames, _ = await run_test(
+        stt,
+        frames_to_send=[
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.05),
+        ],
+    )
+
+    mock_stt_resource.create.assert_not_called()

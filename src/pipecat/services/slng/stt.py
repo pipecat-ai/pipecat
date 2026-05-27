@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
-from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.services.stt_service import STTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -377,3 +377,162 @@ class SlngSTTService(WebsocketSTTService):
             return changed
         await self._request_reconnect()
         return changed
+
+
+# ---------------------------------------------------------------------------
+# HTTP batch STT (voiceai-sdk)
+# ---------------------------------------------------------------------------
+
+try:
+    from voiceai_sdk import AsyncSlng as _AsyncSlng
+except ModuleNotFoundError:
+    _AsyncSlng = None  # type: ignore[assignment,misc]
+
+
+class SlngHttpSTTService(STTService):
+    """Speech-to-text service using the SLNG HTTP API via voiceai-sdk.
+
+    Buffers audio during a user's speech turn and submits it as a single
+    batch request when ``VADUserStoppedSpeakingFrame`` is received.  This
+    avoids the overhead of a persistent WebSocket connection and is suited
+    for pipelines where low-latency streaming transcription is not required.
+
+    The voiceai-sdk ``AsyncSlng`` client is created at construction time and
+    can be replaced via ``stt._client`` for testing.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = "slng/deepgram/nova:3-en",
+        sample_rate: int | None = None,
+        settings: STTSettings | None = None,
+        **kwargs,
+    ):
+        """Initialize SlngHttpSTTService.
+
+        Args:
+            api_key: Authentication key for the SLNG API.
+            model: The transcription model to use.  Defaults to
+                ``"slng/deepgram/nova:3-en"``.
+            sample_rate: Audio sample rate in Hz.  If ``None``, the value is
+                taken from the pipeline ``StartFrame``.
+            settings: Runtime-updatable settings override.
+            **kwargs: Additional arguments forwarded to the parent
+                ``STTService``.
+        """
+        default_settings = STTSettings(
+            model=model,
+            language=Language.EN,
+        )
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        if _AsyncSlng is not None:
+            self._client = _AsyncSlng(api_key=api_key)
+        else:
+            self._client = None  # type: ignore[assignment]
+        self._audio_buffer: list[bytes] = []
+
+    def can_generate_metrics(self) -> bool:
+        """Check if the service can generate processing metrics.
+
+        Returns:
+            True, indicating metrics are supported.
+        """
+        return True
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+        """Buffer audio data for deferred batch transcription.
+
+        Audio is accumulated in ``_audio_buffer`` and transcribed only when
+        ``VADUserStoppedSpeakingFrame`` arrives.  No frame is yielded here.
+
+        Args:
+            audio: Raw PCM audio bytes to buffer.
+
+        Yields:
+            None — transcription results are delivered via
+            :meth:`_transcribe_buffer`.
+        """
+        self._audio_buffer.append(audio)
+        yield None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process pipeline frames and trigger transcription on VAD stop.
+
+        Calls ``start_processing_metrics`` when the user starts speaking and
+        invokes :meth:`_transcribe_buffer` when they stop.
+
+        Args:
+            frame: The frame to process.
+            direction: Direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            await self.start_processing_metrics()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._transcribe_buffer()
+
+    async def _transcribe_buffer(self):
+        """Submit the accumulated audio buffer to the SLNG HTTP STT API.
+
+        If the buffer is empty the call is skipped entirely.  On success a
+        :class:`~pipecat.frames.frames.TranscriptionFrame` is pushed
+        downstream and processing metrics are stopped.  On failure the error
+        is logged, pushed upstream via ``push_error``, and all metrics are
+        stopped.
+        """
+        if not self._audio_buffer:
+            return
+
+        if self._client is None:
+            raise ImportError(
+                "voiceai-sdk is required for SlngHttpSTTService. "
+                "Install it with `pip install pipecat-ai[slng]`."
+            )
+
+        audio_data = b"".join(self._audio_buffer)
+        self._audio_buffer = []
+
+        language: str | None = None
+        if is_given(self._settings.language) and self._settings.language is not None:
+            language = str(self._settings.language)
+
+        model = self._settings.model or "slng/deepgram/nova:3-en"
+
+        try:
+            response = await self._client.speech_to_text.create(
+                model,
+                audio=audio_data,
+                language=language,
+                enable_partials=False,
+                sample_rate=self.sample_rate,
+                encoding="linear16",
+            )
+
+            if response.alternatives:
+                transcript = response.alternatives[0].transcript
+                await self.push_frame(
+                    TranscriptionFrame(
+                        transcript,
+                        self._user_id,
+                        time_now_iso8601(),
+                        result=response,
+                    )
+                )
+                await self.stop_processing_metrics()
+
+        except Exception as e:
+            logger.error(f"{self}: SLNG HTTP STT error: {e}")
+            await self.push_error(error_msg=f"SLNG HTTP STT error: {e}", exception=e)
+            await self.stop_all_metrics()
