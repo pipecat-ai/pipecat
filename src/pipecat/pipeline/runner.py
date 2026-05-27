@@ -26,7 +26,7 @@ For multi-worker setups, register every worker the same way:
 .. code-block:: python
 
     runner = PipelineRunner()
-    await runner.add_workers(CodeWorker("code_worker", ...), worker)
+    await runner.add_workers(CodeWorker("code-worker", ...), worker)
     await runner.run()
 
 By default, ``run()`` ends once every root worker has finished — so a
