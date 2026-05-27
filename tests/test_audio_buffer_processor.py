@@ -542,5 +542,228 @@ class TestMuteGapSilenceInsertion(unittest.IsolatedAsyncioTestCase):
         await p.cleanup()
 
 
+class TestBotSilenceGapInsertion(unittest.IsolatedAsyncioTestCase):
+    """Tests for _fill_bot_silence_gap.
+
+    Mirror of TestMuteGapSilenceInsertion for the bot-audio path. When the
+    bot is briefly idle between utterances (e.g. progressive hold messages
+    spoken while a slow function call runs), no OutputAudioRawFrame arrives.
+    Without gap detection on the bot side the next utterance is appended
+    directly after the previous one, making two utterances spoken seconds
+    apart sound concatenated in the recording.
+
+    These tests verify that silence proportional to the wall-clock gap is
+    inserted into the bot buffer so the recorded timeline stays accurate.
+    """
+
+    # 16-bit mono at 16 kHz → 2 bytes per sample
+    _BYTES_PER_SECOND = 16000 * 2
+
+    def _silence_for_gap(self, elapsed: float, frame_bytes: int) -> int:
+        """Expected silence bytes for a given elapsed time and incoming frame size."""
+        frame_duration = frame_bytes / self._BYTES_PER_SECOND
+        gap = elapsed - frame_duration
+        if gap <= 0.2:
+            return 0
+        n = int(gap * self._BYTES_PER_SECOND)
+        return n - (n % 2)  # 16-bit alignment
+
+    async def _send_user_frame(
+        self, processor: AudioBufferProcessor, audio: bytes = b"\x01\x02\x03\x04"
+    ):
+        await processor.process_frame(
+            InputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+    async def _send_bot_frame(
+        self, processor: AudioBufferProcessor, audio: bytes = b"\x01\x02\x03\x04"
+    ):
+        await processor.process_frame(
+            OutputAudioRawFrame(audio=audio, sample_rate=16000, num_channels=1),
+            FrameDirection.DOWNSTREAM,
+        )
+
+    async def test_no_silence_when_no_prior_timestamp(self):
+        """First bot frame must not trigger silence insertion when there is no prior timestamp."""
+        p = await _make_processor()
+        p._last_bot_buffer_update_time = None
+
+        audio = b"\x01\x02\x03\x04"
+        await self._send_bot_frame(p, audio)
+
+        self.assertEqual(len(p._bot_audio_buffer), 4)
+        self.assertEqual(bytes(p._bot_audio_buffer), audio)
+        await p.cleanup()
+
+    async def test_no_silence_for_gap_below_threshold(self):
+        """A 100 ms gap (below the 200 ms threshold) must not insert any silence."""
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_bot_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 0.1  # 100 ms later
+            await self._send_bot_frame(p, audio)
+
+        self.assertEqual(len(p._bot_audio_buffer), 4)
+        self.assertEqual(bytes(p._bot_audio_buffer), audio)
+        await p.cleanup()
+
+    async def test_silence_proportional_to_idle_gap(self):
+        """A 1-second idle gap must insert ~1 second of silence before the new audio."""
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_bot_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 1.0  # 1-second gap
+            await self._send_bot_frame(p, audio)
+
+        expected_silence = self._silence_for_gap(1.0, len(audio))
+
+        self.assertEqual(len(p._bot_audio_buffer), expected_silence + len(audio))
+        # Silence prefix.
+        self.assertEqual(bytes(p._bot_audio_buffer[:expected_silence]), b"\x00" * expected_silence)
+        # Audio at the end.
+        self.assertEqual(bytes(p._bot_audio_buffer[-len(audio) :]), audio)
+        await p.cleanup()
+
+    async def test_two_utterances_separated_by_pause_have_silence_gap(self):
+        """Two bot utterances spoken seconds apart must not be concatenated.
+
+        This is the bug report for the progressive hold messages: without
+        the fix the second hold line is appended directly after the first
+        with no silence, making them sound like one continuous utterance
+        in the recording.
+        """
+        p = await _make_processor()
+        utterance = b"\x11\x22\x33\x44"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            # Utterance 1 is already in the buffer at t=0.
+            mock_time.monotonic.return_value = 0.0
+            p._last_bot_buffer_update_time = 0.0
+            p._bot_audio_buffer.extend(utterance)
+
+            # One second later the bot speaks utterance 2.
+            mock_time.monotonic.return_value = 1.0
+            await self._send_bot_frame(p, utterance)
+
+        # Must be longer than both utterances back-to-back (the bug).
+        self.assertGreater(len(p._bot_audio_buffer), len(utterance) * 2)
+        # Utterance 1 at the start.
+        self.assertEqual(bytes(p._bot_audio_buffer[: len(utterance)]), utterance)
+        # Utterance 2 at the end.
+        self.assertEqual(bytes(p._bot_audio_buffer[-len(utterance) :]), utterance)
+        # Everything in between must be silence.
+        silence_region = bytes(p._bot_audio_buffer[len(utterance) : -len(utterance)])
+        self.assertTrue(all(b == 0 for b in silence_region))
+        await p.cleanup()
+
+    async def test_user_audio_during_pause_advances_timestamp_preventing_double_counting(self):
+        """User audio that syncs the bot buffer must advance the bot-buffer timestamp.
+
+        Timeline (all times mocked):
+          t=0.0  prior bot activity — timestamp is pinned here
+          t=1.0  user speaks; _last_bot_buffer_update_time advances to 1.0
+          t=2.0  bot resumes speaking
+
+        The gap fill must measure from t=1.0 (last sync by user audio), not from
+        t=0.0 (last real bot audio). Without this guard the silence would be
+        doubled (~2 s instead of ~1 s).
+        """
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            # Pin bot timestamp at t=0 (simulates prior bot audio with no frames sent).
+            p._last_bot_buffer_update_time = 0.0
+
+            # User speaks at t=1 → must advance _last_bot_buffer_update_time to 1.0.
+            mock_time.monotonic.return_value = 1.0
+            await self._send_user_frame(p, audio)
+
+            # Snapshot the bot buffer size right after the user frame; everything
+            # added after this is from the bot frame (gap fill + new audio).
+            bot_len_after_user = len(p._bot_audio_buffer)
+
+            # Bot resumes at t=2.
+            mock_time.monotonic.return_value = 2.0
+            await self._send_bot_frame(p, audio)
+
+        # New bytes added by the bot frame = gap fill + audio frame.
+        bot_frame_contribution = len(p._bot_audio_buffer) - bot_len_after_user
+        gap_fill_bytes = bot_frame_contribution - len(audio)
+
+        expected_silence_1s = self._silence_for_gap(2.0 - 1.0, len(audio))
+        expected_silence_2s = self._silence_for_gap(2.0 - 0.0, len(audio))
+
+        # Gap fill should reflect a 1 s gap (since user frame advanced the
+        # bot timestamp), not a 2 s gap (which would happen without the
+        # advance, double-counting the silence the user-sync already added).
+        self.assertAlmostEqual(gap_fill_bytes, expected_silence_1s, delta=4)
+        self.assertNotAlmostEqual(gap_fill_bytes, expected_silence_2s, delta=4)
+        await p.cleanup()
+
+    async def test_user_buffer_synced_to_bot_position_after_gap_fill(self):
+        """After gap silence is inserted in the bot buffer, the user buffer is synced.
+
+        The sync targets the bot buffer length *after* the silence is inserted
+        but *before* the new bot audio is appended, so both buffers share the
+        same temporal reference point.
+        """
+        p = await _make_processor()
+        audio = b"\x01\x02\x03\x04"
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            p._last_bot_buffer_update_time = 0.0
+            mock_time.monotonic.return_value = 1.0
+            await self._send_bot_frame(p, audio)
+
+        expected_silence = self._silence_for_gap(1.0, len(audio))
+
+        # User buffer should equal the silence that was inserted (bot position
+        # after silence, before the new audio frame was appended).
+        self.assertEqual(len(p._user_audio_buffer), expected_silence)
+        self.assertEqual(bytes(p._user_audio_buffer), b"\x00" * expected_silence)
+        await p.cleanup()
+
+    async def test_reset_recording_clears_bot_timestamp(self):
+        """stop_recording must reset _last_bot_buffer_update_time to None."""
+        p = await _make_processor()
+        p._last_bot_buffer_update_time = 999.0
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            mock_time.monotonic.return_value = 1000.0
+            await p.stop_recording()
+
+        self.assertIsNone(p._last_bot_buffer_update_time)
+        await p.cleanup()
+
+    async def test_buffer_flush_resets_bot_timestamp_to_flush_time(self):
+        """After a buffer flush, the bot timestamp is set to the flush time (not None)."""
+        audio = b"\x01\x02\x03\x04\x05\x06\x07\x08"  # 8 bytes == buffer_size
+        p = await _make_processor(buffer_size=len(audio))
+
+        with patch("pipecat.processors.audio.audio_buffer_processor.time") as mock_time:
+            mock_time.monotonic.return_value = 5.0
+            p._last_bot_buffer_update_time = 0.0
+
+            flushed = asyncio.Event()
+
+            async def on_audio_data(*_):
+                flushed.set()
+
+            p.add_event_handler("on_audio_data", on_audio_data)
+            await self._send_bot_frame(p, audio)
+            await asyncio.sleep(0)
+
+        # Timestamp should be set to the mocked flush time, not None.
+        self.assertIsNotNone(p._last_bot_buffer_update_time)
+        self.assertEqual(p._last_bot_buffer_update_time, 5.0)
+        await p.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()
