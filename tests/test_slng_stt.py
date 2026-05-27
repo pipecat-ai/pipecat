@@ -37,7 +37,9 @@ async def test_slng_stt_ws_partial_and_final():
             elif msg.get("type") == "audio":
                 captured["audio_msgs"].append(msg)
                 await ws.send(
-                    json.dumps({"type": "partial_transcript", "transcript": "hello", "confidence": 0.8})
+                    json.dumps(
+                        {"type": "partial_transcript", "transcript": "hello", "confidence": 0.8}
+                    )
                 )
                 await asyncio.sleep(0.05)
                 await ws.send(

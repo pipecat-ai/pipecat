@@ -111,7 +111,7 @@ async def test_slng_http_tts_streams_audio_chunks():
 
     from pipecat.services.slng.tts import SlngHttpTTSService
 
-    audio_bytes = b"\xAA\xBB" * 1024
+    audio_bytes = b"\xaa\xbb" * 1024
 
     async def fake_iter_bytes(chunk_size=None):
         half = len(audio_bytes) // 2

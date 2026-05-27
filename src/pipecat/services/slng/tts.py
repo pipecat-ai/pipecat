@@ -215,9 +215,7 @@ class SlngTTSService(WebsocketTTSService):
                 await ws.send(json.dumps({"type": "close"}))
                 await ws.close()
         except Exception as e:
-            await self.push_error(
-                error_msg=f"Error closing SLNG TTS websocket: {e}", exception=e
-            )
+            await self.push_error(error_msg=f"Error closing SLNG TTS websocket: {e}", exception=e)
         finally:
             await self.stop_all_metrics()
             await self.remove_active_audio_context()
@@ -300,9 +298,7 @@ class SlngTTSService(WebsocketTTSService):
         elif msg_type == "flushed":
             ctx_id = self.get_active_audio_context_id()
             if ctx_id:
-                await self.append_to_audio_context(
-                    ctx_id, TTSStoppedFrame(context_id=ctx_id)
-                )
+                await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                 await self.remove_audio_context(ctx_id)
 
         elif msg_type in ("cleared", "segment_start", "segment_end", "audio_end"):
