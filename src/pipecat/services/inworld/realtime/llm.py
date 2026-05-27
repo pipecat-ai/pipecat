@@ -273,8 +273,9 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             tts_model: TTS model to use (e.g. "inworld-tts-2").
                 Shorthand for ``session_properties.audio.output.model``.
             stt_model: STT model for input transcription
-                (e.g. "assemblyai/universal-streaming-multilingual").
-                Shorthand for ``session_properties.audio.input.transcription.model``.
+                (e.g. "inworld/inworld-stt-1"). Defaults to ``"inworld/inworld-stt-1"``;
+                pass ``stt_model=`` to override. Shorthand for
+                ``session_properties.audio.input.transcription.model``.
             base_url: WebSocket base URL for the realtime API.
             auth_type: Authentication type. ``"basic"`` for server-side API key
                 auth, ``"bearer"`` for client-side JWT auth.
@@ -288,7 +289,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         default_model = llm_model or "openai/gpt-4.1-mini"
         default_voice = voice or "Clive"
         default_tts_model = tts_model or "inworld-tts-2"
-        default_stt_model = stt_model or "assemblyai/u3-rt-pro"
+        default_stt_model = stt_model or "inworld/inworld-stt-1"
 
         default_settings = self.Settings(
             model=default_model,
@@ -705,14 +706,16 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 logger.warning(f"Failed to decode server message: {message[:200]}")
                 continue
 
-            # Skip events that don't have a matching Pydantic model
-            if event_type in ("conversation.item.done",):
-                continue
-
             try:
                 evt = events.parse_server_event(message)
             except Exception as e:
                 logger.warning(f"Failed to parse server event: {e}")
+                continue
+
+            # Unrecognized event type (e.g. newer realtime server events without a
+            # model, like response.output_text.done). Benign — log quietly and skip.
+            if evt is None:
+                logger.debug(f"{self} ignoring unhandled server event: {event_type}")
                 continue
 
             if evt.type == "ping":
@@ -757,6 +760,8 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 else:
                     await self._handle_evt_error(evt)
                     return
+            else:
+                logger.debug(f"{self} received known but undispatched server event: {evt.type}")
 
     async def _handle_evt_session_created(self, evt):
         """Handle session.created event — first event after connecting."""
