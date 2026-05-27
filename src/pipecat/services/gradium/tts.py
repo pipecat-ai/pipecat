@@ -103,7 +103,7 @@ class GradiumTTSService(WebsocketTTSService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="default",
-            voice="YTpq7expH9539ERJ",
+            voice="_6Aslh2DxfmnRLmP",
             language=None,
         )
 
