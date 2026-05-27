@@ -82,90 +82,90 @@ class FakeStarletteWebSocket:
         self._receive_queue.put_nowait(data)
 
 
-class TestWebSocketProxyClientTask(unittest.IsolatedAsyncioTestCase):
+class TestWebSocketProxyClient(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
         self.registry = WorkerRegistry(runner_name="test-runner")
         self.serializer = JSONMessageSerializer()
 
     async def _create_client(self, fake_ws):
-        from pipecat.workers.proxy.websocket.client import WebSocketProxyClientTask
+        from pipecat.workers.proxy.websocket.client import WebSocketProxyClient
 
-        task = WebSocketProxyClientTask(
+        worker = WebSocketProxyClient(
             "proxy",
             url="ws://fake",
             remote_worker_name="worker",
             local_worker_name="voice",
             serializer=self.serializer,
         )
-        task.attach(registry=self.registry, bus=self.bus)
-        await task.setup(self.tm)
-        task._ws = fake_ws
-        return task
+        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.setup(self.tm)
+        worker._ws = fake_ws
+        return worker
 
     async def test_forwards_targeted_messages(self):
-        """Messages targeted at the remote task are forwarded."""
+        """Messages targeted at the remote worker are forwarded."""
         fake_ws = FakeWebSocket()
-        task = await self._create_client(fake_ws)
+        worker = await self._create_client(fake_ws)
 
         msg = BusDataMessage(source="voice", target="worker")
-        await task.on_bus_message(msg)
+        await worker.on_bus_message(msg)
 
         self.assertEqual(len(fake_ws._sent), 1)
         restored = self.serializer.deserialize(fake_ws._sent[0])
         self.assertEqual(restored.source, "voice")
         self.assertEqual(restored.target, "worker")
 
-    async def test_skips_messages_for_other_tasks(self):
-        """Messages targeted at other tasks are not forwarded."""
+    async def test_skips_messages_for_other_workers(self):
+        """Messages targeted at other workers are not forwarded."""
         fake_ws = FakeWebSocket()
-        task = await self._create_client(fake_ws)
+        worker = await self._create_client(fake_ws)
 
         msg = BusDataMessage(source="voice", target="other_task")
-        await task.on_bus_message(msg)
+        await worker.on_bus_message(msg)
 
         self.assertEqual(len(fake_ws._sent), 0)
 
     async def test_skips_broadcast_messages(self):
         """Broadcast messages (target=None) are not forwarded."""
         fake_ws = FakeWebSocket()
-        task = await self._create_client(fake_ws)
+        worker = await self._create_client(fake_ws)
 
         msg = BusDataMessage(source="voice")
-        await task.on_bus_message(msg)
+        await worker.on_bus_message(msg)
 
         self.assertEqual(len(fake_ws._sent), 0)
 
     async def test_skips_local_messages(self):
         """BusLocalMessage messages are not forwarded."""
         fake_ws = FakeWebSocket()
-        task = await self._create_client(fake_ws)
+        worker = await self._create_client(fake_ws)
 
         stub = MagicMock(spec=BaseWorker)
         stub.name = "child"
         msg = BusAddWorkerMessage(source="parent", target="worker", worker=stub)
-        await task.on_bus_message(msg)
+        await worker.on_bus_message(msg)
 
         self.assertEqual(len(fake_ws._sent), 0)
 
-    async def test_accepts_inbound_for_local_task(self):
-        """Inbound messages targeted at the local task are accepted."""
+    async def test_accepts_inbound_for_local_worker(self):
+        """Inbound messages targeted at the local worker are accepted."""
         fake_ws = FakeWebSocket()
-        task = await self._create_client(fake_ws)
+        worker = await self._create_client(fake_ws)
 
         sent_to_bus = []
-        original_send = task.send_bus_message
+        original_send = worker.send_bus_message
 
         async def capture_send(message):
             sent_to_bus.append(message)
             await original_send(message)
 
-        task.send_bus_message = capture_send
+        worker.send_bus_message = capture_send
 
         msg = BusDataMessage(source="worker", target="voice")
         fake_ws.inject(self.serializer.serialize(msg))
 
-        receive_task = asyncio.create_task(task._receive_loop())
+        receive_task = asyncio.create_task(worker._receive_loop())
         await asyncio.sleep(0.1)
         receive_task.cancel()
         try:
@@ -177,24 +177,24 @@ class TestWebSocketProxyClientTask(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent_to_bus[0].source, "worker")
         self.assertEqual(sent_to_bus[0].target, "voice")
 
-    async def test_drops_inbound_for_other_tasks(self):
-        """Inbound messages targeted at other tasks are dropped."""
+    async def test_drops_inbound_for_other_workers(self):
+        """Inbound messages targeted at other workers are dropped."""
         fake_ws = FakeWebSocket()
-        task = await self._create_client(fake_ws)
+        worker = await self._create_client(fake_ws)
 
         sent_to_bus = []
-        original_send = task.send_bus_message
+        original_send = worker.send_bus_message
 
         async def capture_send(message):
             sent_to_bus.append(message)
             await original_send(message)
 
-        task.send_bus_message = capture_send
+        worker.send_bus_message = capture_send
 
         msg = BusDataMessage(source="worker", target="other_task")
         fake_ws.inject(self.serializer.serialize(msg))
 
-        receive_task = asyncio.create_task(task._receive_loop())
+        receive_task = asyncio.create_task(worker._receive_loop())
         await asyncio.sleep(0.1)
         receive_task.cancel()
         try:
@@ -205,77 +205,77 @@ class TestWebSocketProxyClientTask(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent_to_bus), 0)
 
 
-class TestWebSocketProxyServerTask(unittest.IsolatedAsyncioTestCase):
+class TestWebSocketProxyServer(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bus, self.tm = await create_test_bus()
         self.registry = WorkerRegistry(runner_name="test-runner")
         self.serializer = JSONMessageSerializer()
 
     async def _create_server(self, fake_ws):
-        from pipecat.workers.proxy.websocket.server import WebSocketProxyServerTask
+        from pipecat.workers.proxy.websocket.server import WebSocketProxyServer
 
-        task = WebSocketProxyServerTask(
+        worker = WebSocketProxyServer(
             "gateway",
             websocket=fake_ws,
             worker_name="worker",
             remote_worker_name="voice",
             serializer=self.serializer,
         )
-        task.attach(registry=self.registry, bus=self.bus)
-        await task.setup(self.tm)
-        return task
+        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.setup(self.tm)
+        return worker
 
-    async def test_forwards_messages_from_local_task(self):
-        """Messages from the local task targeted at the remote task are forwarded."""
+    async def test_forwards_messages_from_local_worker(self):
+        """Messages from the local worker targeted at the remote worker are forwarded."""
         fake_ws = FakeStarletteWebSocket()
-        task = await self._create_server(fake_ws)
+        worker = await self._create_server(fake_ws)
 
         msg = BusDataMessage(source="worker", target="voice")
-        await task.on_bus_message(msg)
+        await worker.on_bus_message(msg)
 
         self.assertEqual(len(fake_ws._sent), 1)
         restored = self.serializer.deserialize(fake_ws._sent[0])
         self.assertEqual(restored.source, "worker")
         self.assertEqual(restored.target, "voice")
 
-    async def test_skips_messages_from_other_tasks(self):
-        """Messages from other tasks are not forwarded."""
+    async def test_skips_messages_from_other_workers(self):
+        """Messages from other workers are not forwarded."""
         fake_ws = FakeStarletteWebSocket()
-        task = await self._create_server(fake_ws)
+        worker = await self._create_server(fake_ws)
 
         msg = BusDataMessage(source="other_task", target="voice")
-        await task.on_bus_message(msg)
+        await worker.on_bus_message(msg)
 
         self.assertEqual(len(fake_ws._sent), 0)
 
     async def test_skips_messages_to_other_targets(self):
-        """Messages from the local task to other targets are not forwarded."""
+        """Messages from the local worker to other targets are not forwarded."""
         fake_ws = FakeStarletteWebSocket()
-        task = await self._create_server(fake_ws)
+        worker = await self._create_server(fake_ws)
 
         msg = BusDataMessage(source="worker", target="other_task")
-        await task.on_bus_message(msg)
+        await worker.on_bus_message(msg)
 
         self.assertEqual(len(fake_ws._sent), 0)
 
-    async def test_accepts_inbound_for_local_task(self):
-        """Inbound messages targeted at the local task are accepted."""
+    async def test_accepts_inbound_for_local_worker(self):
+        """Inbound messages targeted at the local worker are accepted."""
         fake_ws = FakeStarletteWebSocket()
-        task = await self._create_server(fake_ws)
+        worker = await self._create_server(fake_ws)
 
         sent_to_bus = []
-        original_send = task.send_bus_message
+        original_send = worker.send_bus_message
 
         async def capture_send(message):
             sent_to_bus.append(message)
             await original_send(message)
 
-        task.send_bus_message = capture_send
+        worker.send_bus_message = capture_send
 
         msg = BusDataMessage(source="voice", target="worker")
         fake_ws.inject(self.serializer.serialize(msg))
 
-        receive_task = asyncio.create_task(task._receive_loop())
+        receive_task = asyncio.create_task(worker._receive_loop())
         await asyncio.sleep(0.1)
         receive_task.cancel()
         try:
@@ -286,24 +286,24 @@ class TestWebSocketProxyServerTask(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent_to_bus), 1)
         self.assertEqual(sent_to_bus[0].target, "worker")
 
-    async def test_drops_inbound_for_other_tasks(self):
-        """Inbound messages targeted at other tasks are dropped."""
+    async def test_drops_inbound_for_other_workers(self):
+        """Inbound messages targeted at other workers are dropped."""
         fake_ws = FakeStarletteWebSocket()
-        task = await self._create_server(fake_ws)
+        worker = await self._create_server(fake_ws)
 
         sent_to_bus = []
-        original_send = task.send_bus_message
+        original_send = worker.send_bus_message
 
         async def capture_send(message):
             sent_to_bus.append(message)
             await original_send(message)
 
-        task.send_bus_message = capture_send
+        worker.send_bus_message = capture_send
 
         msg = BusDataMessage(source="voice", target="other_task")
         fake_ws.inject(self.serializer.serialize(msg))
 
-        receive_task = asyncio.create_task(task._receive_loop())
+        receive_task = asyncio.create_task(worker._receive_loop())
         await asyncio.sleep(0.1)
         receive_task.cancel()
         try:

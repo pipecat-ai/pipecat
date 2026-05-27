@@ -8,7 +8,7 @@
 
 Runs a FastAPI server that accepts WebSocket connections from a
 ``main.py``-style client. Each connection spins up a
-`WebSocketProxyServerTask` bridging the socket to a local
+`WebSocketProxyServer` bridging the socket to a local
 `PipelineRunner` and an `LLMWorker` that handles the conversation.
 
 Usage::
@@ -34,7 +34,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.workers.llm import LLMWorker, tool
-from pipecat.workers.proxy.websocket import WebSocketProxyServerTask
+from pipecat.workers.proxy.websocket import WebSocketProxyServer
 
 load_dotenv(override=True)
 
@@ -84,7 +84,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     runner = PipelineRunner(handle_sigint=False)
 
-    proxy = WebSocketProxyServerTask(
+    proxy = WebSocketProxyServer(
         "gateway",
         websocket=websocket,
         worker_name="assistant",

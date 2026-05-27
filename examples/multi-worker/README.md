@@ -333,20 +333,20 @@ uv run remote-proxy-assistant/main.py --remote-url ws://server-host:8765/ws
 ### Architecture
 
 ```
-    +-------------+    +-------------+           +-------------+     +-----------------+
-    |             |    |             |           |             |     |                 |
-    |  Main worker  |    | Proxy worker  |  <~~~~~>  | Proxy worker  |     | Assistant worker  |
-    |             |    |  (client)   |           |  (server)   |     |                 |
-    +-------------+    +-------------+           +-------------+     +-----------------+
-        messages           messages                  messages             messages
-            │                 │                         │                    │
-  ══════════╧═════════════════╧════════         ════════╧════════════════════╧═══════════
-                Task Bus                                       Task Bus
-  ═════════════════════════════════════         ═════════════════════════════════════════
+    +-------------+    +--------------+         +--------------+    +------------------+
+    |             |    |              |         |              |    |                  |
+    | Main worker |    | Proxy worker | <~~~~~> | Proxy worker |    | Assistant worker |
+    |             |    |  (client)    |         |  (server)    |    |                  |
+    +-------------+    +--------------+         +--------------+    +------------------+
+        messages           messages                 messages             messages
+            │                 │                        │                    │
+  ══════════╧═════════════════╧════════         ═══════╧════════════════════╧═══════════
+                Worker Bus                                       Worker Bus
+  ═════════════════════════════════════         ════════════════════════════════════════
 ```
 
-- **[main.py](remote-proxy-assistant/main.py)** — Transport worker with STT, TTS, and a `BusBridge`. Spawns a `WebSocketProxyClientTask` that connects to the remote server and forwards `BusFrameMessage`s.
-- **[assistant.py](remote-proxy-assistant/assistant.py)** — FastAPI server. Each WebSocket connection spawns a `WebSocketProxyServerTask` plus a bridged `AcmeAssistant` LLM worker on a per-session `PipelineRunner`.
+- **[main.py](remote-proxy-assistant/main.py)** — Transport worker with STT, TTS, and a `BusBridge`. Spawns a `WebSocketProxyClient` that connects to the remote server and forwards `BusFrameMessage`s.
+- **[assistant.py](remote-proxy-assistant/assistant.py)** — FastAPI server. Each WebSocket connection spawns a `WebSocketProxyServer` plus a bridged `AcmeAssistant` LLM worker on a per-session `PipelineRunner`.
 
 ### Security
 
@@ -359,7 +359,7 @@ The proxy workers filter messages by worker name:
 Pass HTTP headers for authentication:
 
 ```python
-proxy = WebSocketProxyClientTask(
+proxy = WebSocketProxyClient(
     "proxy",
     url="wss://server-host:8765/ws",
     remote_worker_name="assistant",
