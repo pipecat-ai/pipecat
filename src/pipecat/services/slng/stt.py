@@ -4,11 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""SLNG Speech-to-Text service implementation.
-
-This module provides a WebSocket-based STT service that integrates with
-the SLNG bridge API for real-time speech recognition.
-"""
+"""SLNG speech-to-text services."""
 
 import base64
 import json
@@ -29,7 +25,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -238,32 +234,23 @@ class SlngSTTService(WebsocketSTTService):
 
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
 
-            # Determine language string
-            lang = self._settings.language
-            if isinstance(lang, Language):
-                lang_str = lang.value
-            elif isinstance(lang, str):
-                lang_str = lang
-            else:
-                lang_str = "en"
+            config: dict[str, Any] = {
+                "sample_rate": self.sample_rate,
+                "encoding": self._encoding,
+            }
 
-            enable_vad = self._settings.enable_vad
-            if isinstance(enable_vad, _NotGiven):
-                enable_vad = True
+            if is_given(self._settings.language) and self._settings.language is not None:
+                config["language"] = str(self._settings.language)
 
-            enable_partials = self._settings.enable_partials
-            if isinstance(enable_partials, _NotGiven):
-                enable_partials = True
+            if is_given(self._settings.enable_vad):
+                config["enable_vad"] = self._settings.enable_vad
+
+            if is_given(self._settings.enable_partials):
+                config["enable_partials"] = self._settings.enable_partials
 
             init_msg = {
                 "type": "init",
-                "config": {
-                    "sample_rate": self.sample_rate,
-                    "encoding": self._encoding,
-                    "language": lang_str,
-                    "enable_vad": enable_vad,
-                    "enable_partials": enable_partials,
-                },
+                "config": config,
             }
             await self._websocket.send(json.dumps(init_msg))
             await self._call_event_handler("on_connected")
@@ -317,11 +304,18 @@ class SlngSTTService(WebsocketSTTService):
         elif msg_type == "partial_transcript":
             transcript = data.get("transcript", "")
             if transcript:
+                language = None
+                if raw_lang := data.get("language"):
+                    try:
+                        language = Language(raw_lang)
+                    except ValueError:
+                        pass
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript,
                         self._user_id,
                         time_now_iso8601(),
+                        language,
                         result=data,
                     )
                 )
@@ -347,14 +341,14 @@ class SlngSTTService(WebsocketSTTService):
                 await self._handle_transcription(transcript, True, language)
                 await self.stop_processing_metrics()
 
-        elif msg_type == "utterance_end":
-            pass  # ignored
-
         elif msg_type == "error":
             error_msg = data.get("message", "Unknown SLNG STT error")
             logger.error(f"{self}: SLNG STT error: {error_msg}")
             await self.push_error(error_msg=error_msg)
             await self.stop_all_metrics()
+
+        else:
+            logger.debug(f"{self}: unknown message type: {msg_type}")
 
     @traced_stt
     async def _handle_transcription(
