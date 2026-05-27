@@ -492,6 +492,7 @@ class SlngHttpSTTService(STTService):
         stopped.
         """
         if not self._audio_buffer:
+            await self.stop_processing_metrics()
             return
 
         audio_data = b"".join(self._audio_buffer)
