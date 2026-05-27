@@ -77,6 +77,8 @@ class SlngTTSService(WebsocketTTSService):
         voice: str | None = None,
         base_url: str = "api.slng.ai",
         sample_rate: int | None = None,
+        region_override: str | None = None,
+        world_part_override: str | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -89,6 +91,12 @@ class SlngTTSService(WebsocketTTSService):
             base_url: The API host (without scheme) or a full WebSocket URL
                 (e.g. "ws://localhost:8080" for testing). Defaults to "api.slng.ai".
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline sample rate.
+            region_override: Pin requests to a specific datacenter. One of
+                ``"ap-southeast-2"``, ``"eu-north-1"``, ``"us-east-1"``. Sets the
+                ``X-Region-Override`` header (takes precedence over ``world_part_override``).
+            world_part_override: Constrain routing to a broad geographic zone.
+                One of ``"ap"``, ``"eu"``, ``"na"``. Sets the ``X-World-Part-Override``
+                header.
             settings: Runtime-updatable settings override.
             **kwargs: Additional arguments passed to parent WebsocketTTSService.
         """
@@ -112,6 +120,8 @@ class SlngTTSService(WebsocketTTSService):
 
         self._api_key = api_key
         self._base_url = base_url
+        self._region_override = region_override
+        self._world_part_override = world_part_override
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
@@ -178,7 +188,11 @@ class SlngTTSService(WebsocketTTSService):
             else:
                 ws_url = f"wss://{self._base_url}/v1/bridges/unmute/tts/{model}"
 
-            headers = {"Authorization": f"Bearer {self._api_key}"}
+            headers: dict[str, str] = {"Authorization": f"Bearer {self._api_key}"}
+            if self._region_override:
+                headers["X-Region-Override"] = self._region_override
+            if self._world_part_override:
+                headers["X-World-Part-Override"] = self._world_part_override
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
 
             # Build init config
@@ -383,6 +397,8 @@ class SlngHttpTTSService(TTSService):
         model: str = "slng/deepgram/aura:2-en",
         voice: str | None = None,
         sample_rate: int | None = None,
+        region_override: str | None = None,
+        world_part_override: str | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -393,6 +409,13 @@ class SlngHttpTTSService(TTSService):
             model: SLNG model variant (e.g. ``"slng/deepgram/aura:2-en"``).
             voice: Voice identifier (e.g. ``"aura-2-thalia-en"``).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
+            region_override: Pin requests to a specific datacenter. One of
+                ``"ap-southeast-2"``, ``"eu-north-1"``, ``"us-east-1"``. Sets the
+                ``X-Region-Override`` header (takes precedence over
+                ``world_part_override``).
+            world_part_override: Constrain routing to a broad geographic zone.
+                One of ``"ap"``, ``"eu"``, ``"na"``. Sets the
+                ``X-World-Part-Override`` header.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to parent TTSService.
         """
@@ -414,7 +437,13 @@ class SlngHttpTTSService(TTSService):
             **kwargs,
         )
 
-        self._client = AsyncSlng(api_key=api_key)
+        routing_headers: dict[str, str] = {}
+        if region_override:
+            routing_headers["X-Region-Override"] = region_override
+        if world_part_override:
+            routing_headers["X-World-Part-Override"] = world_part_override
+
+        self._client = AsyncSlng(api_key=api_key, default_headers=routing_headers)
 
     def can_generate_metrics(self) -> bool:
         """Return True — SLNG HTTP TTS supports metrics generation."""

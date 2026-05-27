@@ -4526,6 +4526,10 @@ sentry = [
 simli = [
     { name = "simli-ai" },
 ]
+slng = [
+    { name = "voiceai-sdk" },
+    { name = "websockets" },
+]
 smallest = [
     { name = "websockets" },
 ]
@@ -4674,6 +4678,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'resembleai'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'rime'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'sarvam'" },
+    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'slng'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'smallest'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'soniox'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'ultravox'" },
@@ -4710,11 +4715,12 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'local-smart-turn'", specifier = ">=4.48.0,<6" },
     { name = "transformers", marker = "extra == 'moondream'", specifier = ">=4.48.0,<6" },
     { name = "uvicorn", marker = "extra == 'runner'", specifier = ">=0.32.0,<1.0.0" },
+    { name = "voiceai-sdk", marker = "extra == 'slng'", specifier = ">=0.1.0,<1" },
     { name = "vonage-video-connector", marker = "python_full_version == '3.13.*' and sys_platform == 'linux' and extra == 'vonage-video-connector'", specifier = "~=0.2.3b0" },
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "websocket", "websockets-base", "whisper", "xai"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inception", "inworld", "koala", "kokoro", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nebius", "neuphonic", "novita", "nvidia", "openai", "rnnoise", "openrouter", "perplexity", "pgmq", "piper", "qwen", "redis", "resembleai", "rime", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "slng", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-video-connector", "webrtc", "websocket", "websockets-base", "whisper", "xai"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -7509,6 +7515,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/15/ba/1f6e8c957e4932be060dcdc482d339c12e0216351478add3645cdaa53c05/virtualenv-21.3.3.tar.gz", hash = "sha256:f5bda277e553b1c2b3c1a8debfc30496e1288cc93ce6b7b71b3280047e317328", size = 7613784, upload-time = "2026-05-13T18:01:30.19Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/34/a9dbe051de88a63eb7408ea66630bac38e72f7f6077d4be58737106860d9/virtualenv-21.3.3-py3-none-any.whl", hash = "sha256:7d5987d8369e098e41406efb780a3d4ca79280097293899e351a6407ee153ab3", size = 7594554, upload-time = "2026-05-13T18:01:27.815Z" },
+]
+
+[[package]]
+name = "voiceai-sdk"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic", version = "2.11.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.13.*'" },
+    { name = "pydantic", version = "2.13.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.13.*'" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/61/348ec34c81e501f85e21f5464ceb9da3f8fb7b1fe3e6f0d412d16c73996d/voiceai_sdk-0.1.0.tar.gz", hash = "sha256:ad7e51a1bcb128c4491cf2daca963a0940f978bc73c08d7f3082f469968f1ef3", size = 291410, upload-time = "2026-05-13T14:15:21.993Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/84/1a/76b93f73225b9fd0152eb605107f627fa755b332bb496d722a4d32f94cda/voiceai_sdk-0.1.0-py3-none-any.whl", hash = "sha256:d48edd3706d187e8d23be5e23339ebf79b4fade39adc9ea579aa7059a7d40dfc", size = 149695, upload-time = "2026-05-13T14:15:20.574Z" },
 ]
 
 [[package]]

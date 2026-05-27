@@ -77,6 +77,8 @@ class SlngSTTService(WebsocketSTTService):
         base_url: str = "api.slng.ai",
         encoding: str = "linear16",
         sample_rate: int | None = None,
+        region_override: str | None = None,
+        world_part_override: str | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -88,6 +90,12 @@ class SlngSTTService(WebsocketSTTService):
             base_url: The API host (without scheme). Defaults to "api.slng.ai".
             encoding: Audio encoding format. Defaults to "linear16".
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline sample rate.
+            region_override: Pin requests to a specific datacenter. One of
+                ``"ap-southeast-2"``, ``"eu-north-1"``, ``"us-east-1"``. Sets the
+                ``X-Region-Override`` header (takes precedence over ``world_part_override``).
+            world_part_override: Constrain routing to a broad geographic zone.
+                One of ``"ap"``, ``"eu"``, ``"na"``. Sets the ``X-World-Part-Override``
+                header.
             settings: Runtime-updatable settings override.
             **kwargs: Additional arguments passed to parent WebsocketSTTService.
         """
@@ -113,6 +121,8 @@ class SlngSTTService(WebsocketSTTService):
         self._base_url = base_url
         self._encoding = encoding
         self._receive_task = None
+        self._region_override = region_override
+        self._world_part_override = world_part_override
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -230,7 +240,11 @@ class SlngSTTService(WebsocketSTTService):
                 ws_url = f"{self._base_url}/v1/bridges/unmute/stt/{model}"
             else:
                 ws_url = f"wss://{self._base_url}/v1/bridges/unmute/stt/{model}"
-            headers = {"Authorization": f"Bearer {self._api_key}"}
+            headers: dict[str, str] = {"Authorization": f"Bearer {self._api_key}"}
+            if self._region_override:
+                headers["X-Region-Override"] = self._region_override
+            if self._world_part_override:
+                headers["X-World-Part-Override"] = self._world_part_override
 
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
 
@@ -409,6 +423,8 @@ class SlngHttpSTTService(STTService):
         api_key: str,
         model: str = "slng/deepgram/nova:3-en",
         sample_rate: int | None = None,
+        region_override: str | None = None,
+        world_part_override: str | None = None,
         settings: STTSettings | None = None,
         **kwargs,
     ):
@@ -420,6 +436,13 @@ class SlngHttpSTTService(STTService):
                 ``"slng/deepgram/nova:3-en"``.
             sample_rate: Audio sample rate in Hz.  If ``None``, the value is
                 taken from the pipeline ``StartFrame``.
+            region_override: Pin requests to a specific datacenter. One of
+                ``"ap-southeast-2"``, ``"eu-north-1"``, ``"us-east-1"``. Sets the
+                ``X-Region-Override`` header (takes precedence over
+                ``world_part_override``).
+            world_part_override: Constrain routing to a broad geographic zone.
+                One of ``"ap"``, ``"eu"``, ``"na"``. Sets the
+                ``X-World-Part-Override`` header.
             settings: Runtime-updatable settings override.
             **kwargs: Additional arguments forwarded to the parent
                 ``STTService``.
@@ -438,7 +461,13 @@ class SlngHttpSTTService(STTService):
             **kwargs,
         )
 
-        self._client = AsyncSlng(api_key=api_key)
+        routing_headers: dict[str, str] = {}
+        if region_override:
+            routing_headers["X-Region-Override"] = region_override
+        if world_part_override:
+            routing_headers["X-World-Part-Override"] = world_part_override
+
+        self._client = AsyncSlng(api_key=api_key, default_headers=routing_headers)
         self._audio_buffer: list[bytes] = []
 
     def can_generate_metrics(self) -> bool:
