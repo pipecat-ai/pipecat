@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pipecat.frames.frames import SystemFrame
-from pipecat.processors.frameworks.rtvi.models import UITaskData
+from pipecat.processors.frameworks.rtvi.models import UIJobGroupData
 
 
 @dataclass
@@ -56,26 +56,26 @@ class RTVIUICommandFrame(SystemFrame):
 
 
 @dataclass
-class RTVIUITaskFrame(SystemFrame):
-    """A frame for sending a UI task lifecycle envelope to the client.
+class RTVIUIJobGroupFrame(SystemFrame):
+    """A frame for sending a UI job-group lifecycle envelope to the client.
 
-    Pipeline-side counterpart of the ``ui-task`` RTVI message. The
-    observer wraps the ``data`` into a ``UITaskMessage`` envelope
+    Pipeline-side counterpart of the ``ui-job-group`` RTVI message. The
+    observer wraps the ``data`` into a ``UIJobGroupMessage`` envelope
     before pushing it to the transport, so the wire shape is:
-    ``{label, type: "ui-task", data: <one of the four kinds>}``.
+    ``{label, type: "ui-job-group", data: <one of the four kinds>}``.
 
     Parameters:
-        data: One of the four task-lifecycle data models from
-            ``rtvi.models`` (``UITaskGroupStartedData``,
-            ``UITaskUpdateData``, ``UITaskCompletedData``, or
-            ``UITaskGroupCompletedData``). The ``kind`` field on
+        data: One of the four job-group lifecycle data models from
+            ``rtvi.models`` (``UIJobGroupStartedData``,
+            ``UIJobUpdateData``, ``UIJobCompletedData``, or
+            ``UIJobGroupCompletedData``). The ``kind`` field on
             each discriminates which lifecycle phase this is.
     """
 
-    data: UITaskData | None = None
+    data: UIJobGroupData | None = None
 
     def __str__(self):
-        """String representation of the UI task frame."""
+        """String representation of the UI job-group frame."""
         kind = getattr(self.data, "kind", "?")
         return f"{self.name}(kind: {kind})"
 
@@ -90,8 +90,7 @@ class RTVIUIEventFrame(SystemFrame):
     frame-and-event pattern used by ``client-message``: pipeline
     observers and processors that want to react to UI events at the
     pipeline level can match on this frame; code that subscribes to
-    events instead (like the bridge in ``pipecat-ai-subagents``)
-    keeps using the event handler.
+    events instead (like ``UIWorker``) keeps using the event handler.
 
     Parameters:
         msg_id: The RTVI message id, as set by the client.
@@ -130,28 +129,28 @@ class RTVIUISnapshotFrame(SystemFrame):
 
 
 @dataclass
-class RTVIUICancelTaskFrame(SystemFrame):
-    """An inbound user-task-group cancellation request from the client.
+class RTVIUICancelJobGroupFrame(SystemFrame):
+    """An inbound user-job-group cancellation request from the client.
 
     Pushed downstream by ``RTVIProcessor`` whenever a
-    ``ui-cancel-task`` message arrives, alongside firing
+    ``ui-cancel-job-group`` message arrives, alongside firing
     ``on_ui_message``. The server-side framework should look up the
-    matching task group and cancel it (subject to whatever
+    matching job group and cancel it (subject to whatever
     cancellable policy the group was registered with).
 
     Parameters:
         msg_id: The RTVI message id, as set by the client.
-        task_id: The task group id the client wants cancelled.
+        job_id: The job group id the client wants cancelled.
         reason: Optional human-readable reason.
     """
 
     msg_id: str = ""
-    task_id: str = ""
+    job_id: str = ""
     reason: str | None = None
 
     def __str__(self):
-        """String representation of the UI cancel-task frame."""
-        return f"{self.name}(task_id: {self.task_id})"
+        """String representation of the UI cancel-job-group frame."""
+        return f"{self.name}(job_id: {self.job_id})"
 
 
 @dataclass
