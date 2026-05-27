@@ -54,6 +54,7 @@ from pipecat.utils.time import time_now_iso8601
 
 try:
     from websockets.asyncio import client as websocket_client
+    from websockets.exceptions import ConnectionClosed
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Ultravox, you need to `pip install pipecat-ai[ultravox]`.")
@@ -586,60 +587,57 @@ class UltravoxRealtimeLLMService(LLMService):
     #
 
     async def _receive_messages(self):
-        """Receive messages from the Ultravox Realtime WebSocket.
-
-        The ``try`` wraps the ``async for`` itself so that ``ConnectionClosed``
-        raised from the underlying iterator (e.g. when our own close handshake
-        races a client-driven teardown and the peer never echoes a close
-        frame) is covered by the same ``_disconnecting`` guard that suppresses
-        in-flight dispatch errors during shutdown. Without this, the
-        connection-closed exception escapes ``_receive_messages`` and lands in
-        the task manager as an "unexpected exception" log line even though
-        the call ended normally. Fixes #4518.
-        """
+        """Receive messages from the Ultravox Realtime WebSocket."""
         if not self._socket:
             return
         try:
             async for message in self._socket:
-                if isinstance(message, bytes):
-                    await self._handle_audio(message)
-                    continue
+                try:
+                    if isinstance(message, bytes):
+                        await self._handle_audio(message)
+                        continue
 
-                data = json.loads(message)
-                match data.get("type"):
-                    case "state":
-                        if self._bot_responding and data.get("state") != "speaking":
-                            await self._handle_response_end()
-                    case "client_tool_invocation":
-                        await self._handle_tool_invocation(
-                            data.get("toolName"), data.get("invocationId"), data.get("parameters")
-                        )
-                    case "transcript":
-                        match data.get("role"):
-                            case "user":
-                                if not data.get("final"):
-                                    logger.warning(
-                                        "Unexpected non-final user transcript from Ultravox Realtime; ignoring."
+                    data = json.loads(message)
+                    match data.get("type"):
+                        case "state":
+                            if self._bot_responding and data.get("state") != "speaking":
+                                await self._handle_response_end()
+                        case "client_tool_invocation":
+                            await self._handle_tool_invocation(
+                                data.get("toolName"),
+                                data.get("invocationId"),
+                                data.get("parameters"),
+                            )
+                        case "transcript":
+                            match data.get("role"):
+                                case "user":
+                                    if not data.get("final"):
+                                        logger.warning(
+                                            "Unexpected non-final user transcript from Ultravox Realtime; ignoring."
+                                        )
+                                    else:
+                                        await self._handle_user_transcript(data.get("text"))
+                                case "agent":
+                                    await self._handle_agent_transcript(
+                                        data.get("medium"),
+                                        data.get("text"),
+                                        data.get("delta"),
+                                        data.get("final", False),
                                     )
-                                else:
-                                    await self._handle_user_transcript(data.get("text"))
-                            case "agent":
-                                await self._handle_agent_transcript(
-                                    data.get("medium"),
-                                    data.get("text"),
-                                    data.get("delta"),
-                                    data.get("final", False),
-                                )
-                            case _:
-                                logger.debug(
-                                    f"Received transcript with unknown role from Ultravox Realtime: {data}"
-                                )
-                    case _:
-                        logger.debug(f"Received unhandled Ultravox message: {data}")
-        except Exception as e:
+                                case _:
+                                    logger.debug(
+                                        f"Received transcript with unknown role from Ultravox Realtime: {data}"
+                                    )
+                        case _:
+                            logger.debug(f"Received unhandled Ultravox message: {data}")
+                except Exception as e:
+                    if self._disconnecting or not self._socket:
+                        return
+                    await self.push_error("Ultravox websocket receive error", e, fatal=True)
+        except ConnectionClosed:
             if self._disconnecting or not self._socket:
                 return
-            await self.push_error("Ultravox websocket receive error", e, fatal=True)
+            raise
 
     async def _handle_audio(self, audio: bytes):
         """Handle incoming audio bytes from Ultravox Realtime."""
