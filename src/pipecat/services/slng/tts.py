@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
-from pipecat.services.tts_service import WebsocketTTSService
+from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -355,3 +355,111 @@ class SlngTTSService(WebsocketTTSService):
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
+
+
+# ---------------------------------------------------------------------------
+# HTTP streaming TTS (voiceai-sdk)
+# ---------------------------------------------------------------------------
+
+try:
+    from voiceai_sdk import AsyncSlng
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use SLNG, you need to `pip install pipecat-ai[slng]`.")
+    raise Exception(f"Missing module: {e}")
+
+
+class SlngHttpTTSService(TTSService):
+    """SLNG HTTP streaming text-to-speech service.
+
+    Sends text to SLNG's HTTP TTS endpoint via the voiceai-sdk and streams
+    the binary audio response as ``TTSAudioRawFrame`` chunks. Simpler than
+    the WebSocket variant — no persistent connection or flush/clear protocol.
+    """
+
+    Settings = SlngTTSSettings
+    _settings: Settings
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = "slng/deepgram/aura:2-en",
+        voice: str | None = None,
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
+        **kwargs,
+    ):
+        """Initialize the SLNG HTTP TTS service.
+
+        Args:
+            api_key: SLNG API key for authentication.
+            model: SLNG model variant (e.g. ``"slng/deepgram/aura:2-en"``).
+            voice: Voice identifier (e.g. ``"aura-2-thalia-en"``).
+            sample_rate: Audio sample rate in Hz. If None, uses service default.
+            settings: Runtime-updatable settings.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
+        default_settings = self.Settings(
+            model=model,
+            voice=voice,
+            language=Language.EN,
+            speed=NOT_GIVEN,
+        )
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            sample_rate=sample_rate,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._client = AsyncSlng(api_key=api_key)
+
+    def can_generate_metrics(self) -> bool:
+        """Return True — SLNG HTTP TTS supports metrics generation."""
+        return True
+
+    @traced_tts
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
+        """Stream audio from SLNG HTTP TTS endpoint.
+
+        Args:
+            text: Text to synthesize.
+            context_id: Audio context ID for tracking frames.
+
+        Yields:
+            TTSAudioRawFrame: Audio chunks from the streaming response.
+            ErrorFrame: On HTTP or network errors.
+        """
+        logger.debug(f"{self}: Generating TTS [{text}]")
+        try:
+            await self.start_ttfb_metrics()
+            voice = self._settings.voice if is_given(self._settings.voice) else None
+
+            async with self._client.text_to_speech.with_streaming_response.create(
+                self._settings.model,
+                text=text,
+                voice=voice,
+            ) as response:
+                await self.start_tts_usage_metrics(text)
+                first_chunk = True
+                async for chunk in response.iter_bytes(chunk_size=self.chunk_size):
+                    if first_chunk:
+                        await self.stop_ttfb_metrics()
+                        first_chunk = False
+                    if chunk:
+                        yield TTSAudioRawFrame(
+                            audio=chunk,
+                            sample_rate=self.sample_rate,
+                            num_channels=1,
+                            context_id=context_id,
+                        )
+        except Exception as e:
+            yield ErrorFrame(error=f"SLNG HTTP TTS error: {e}")
+        finally:
+            await self.stop_ttfb_metrics()
