@@ -439,19 +439,17 @@ class SlngHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             await self.start_ttfb_metrics()
-            voice = self._settings.voice if is_given(self._settings.voice) else None
+            kwargs = {}
+            if self._settings.voice:
+                kwargs["voice"] = self._settings.voice
 
             async with self._client.text_to_speech.with_streaming_response.create(
                 self._settings.model,
                 text=text,
-                voice=voice,
+                **kwargs,
             ) as response:
                 await self.start_tts_usage_metrics(text)
-                first_chunk = True
                 async for chunk in response.iter_bytes(chunk_size=self.chunk_size):
-                    if first_chunk:
-                        await self.stop_ttfb_metrics()
-                        first_chunk = False
                     if chunk:
                         yield TTSAudioRawFrame(
                             audio=chunk,
