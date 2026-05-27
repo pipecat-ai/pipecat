@@ -41,11 +41,17 @@ message MessageFrame {
     string data = 1;
 }
 
+message InterruptionFrame {
+  uint64 id = 1;
+  string name = 2;
+}
+
 message Frame {
   oneof frame {
     TextFrame text = 1;
     AudioRawFrame audio = 2;
     TranscriptionFrame transcription = 3;
     MessageFrame message = 4;
+    InterruptionFrame interruption = 5;
   }
 }
