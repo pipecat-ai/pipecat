@@ -36,7 +36,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 # Clamp aiortc's SCTP DATA-chunk payload size so the on-wire UDP packet fits
 # inside the smallest-MTU path we're likely to see (IPv6 minimum 1280,

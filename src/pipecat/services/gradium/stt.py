@@ -44,7 +44,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Gradium, you need to `pip install "pipecat-ai[gradium]"`.')
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 # Seconds to wait after a "flushed" message for trailing text tokens to arrive
 # before finalizing the transcription.
