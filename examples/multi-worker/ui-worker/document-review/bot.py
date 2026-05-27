@@ -46,7 +46,7 @@ real NLP.
 
 Run::
 
-    uv run python bot.py
+    uv run bot.py
 
 Then open the client at ``http://localhost:5173`` (see ``README.md``).
 

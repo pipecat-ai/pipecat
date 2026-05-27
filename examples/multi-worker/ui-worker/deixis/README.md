@@ -35,7 +35,7 @@ Two terminals.
 
 ```bash
 cd examples/multi-worker/ui-worker/deixis
-uv run python bot.py
+uv run bot.py
 ```
 
 The bot starts on `http://localhost:7860`.
