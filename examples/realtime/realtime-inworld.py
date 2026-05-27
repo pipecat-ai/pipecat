@@ -127,7 +127,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # See: https://docs.inworld.ai/router/introduction
     llm = InworldRealtimeLLMService(
         api_key=os.environ["INWORLD_API_KEY"],
-        llm_model="openai/gpt-4.1-mini",
+        llm_model="google-ai-studio/gemini-3.1-flash-lite",
         voice="Sarah",
         settings=InworldRealtimeLLMService.Settings(
             system_instruction="""You are a helpful and friendly AI assistant powered by Inworld.
