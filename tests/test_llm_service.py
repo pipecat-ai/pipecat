@@ -34,7 +34,7 @@ class MockLLMService(LLMService):
     def __init__(self, **kwargs):
         settings = LLMSettings(
             model="test-model",
-            system_instruction=None,
+            system_instruction=kwargs.pop("system_instruction", None),
             temperature=None,
             max_tokens=None,
             top_p=None,
@@ -317,3 +317,77 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
             muted = await strategy.process_frame(frame)
 
         self.assertFalse(muted)
+
+
+class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
+    """Coverage for `LLMService.append_system_instruction`."""
+
+    def _service(self, system_instruction: str | None = None) -> MockLLMService:
+        # Construct with the prompt so the base snapshot happens the real way
+        # (in __init__), rather than poking _base_system_instruction directly.
+        return MockLLMService(system_instruction=system_instruction)
+
+    def test_append_preserves_existing_prompt(self):
+        service = self._service("APP")
+        service.append_system_instruction("GUIDE")
+        self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
+
+    def test_append_with_no_base_uses_text_alone(self):
+        service = self._service(None)
+        service.append_system_instruction("GUIDE")
+        self.assertEqual(service._settings.system_instruction, "GUIDE")
+
+    def test_multiple_appends_join_in_order(self):
+        service = self._service("APP")
+        service.append_system_instruction("G1")
+        service.append_system_instruction("G2")
+        self.assertEqual(service._settings.system_instruction, "APP\n\nG1\n\nG2")
+
+    async def test_appended_guide_survives_turn_completion_toggle(self):
+        service = self._service("APP")
+        service.append_system_instruction("GUIDE")
+
+        # Enabling turn completion composes after the appended guide, once.
+        await service._update_settings(LLMSettings(filter_incomplete_user_turns=True))
+        composed = service._settings.system_instruction
+        self.assertTrue(composed.startswith("APP\n\nGUIDE\n\n"))
+        self.assertEqual(composed.count("GUIDE"), 1)
+
+        # Disabling restores base + guide (without the turn instructions).
+        await service._update_settings(LLMSettings(filter_incomplete_user_turns=False))
+        self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
+
+    async def test_runtime_system_instruction_update_preserves_appended(self):
+        service = self._service("APP")
+        service.append_system_instruction("GUIDE")
+
+        # A runtime system_instruction change replaces the base but keeps the
+        # appended guide composed onto the end.
+        await service._update_settings(LLMSettings(system_instruction="NEW"))
+        self.assertEqual(service._settings.system_instruction, "NEW\n\nGUIDE")
+
+    async def test_base_set_after_append_composes(self):
+        # No base at construction; the guide is appended first, then the user
+        # sets a system_instruction at runtime. The guide is retained.
+        service = self._service(None)
+        service.append_system_instruction("GUIDE")
+        self.assertEqual(service._settings.system_instruction, "GUIDE")
+
+        await service._update_settings(LLMSettings(system_instruction="APP"))
+        self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
+
+    async def test_appended_guide_survives_async_tool_cancellation_toggle(self):
+        service = self._service("APP")
+        service.append_system_instruction("GUIDE")
+
+        # Enabling async tool cancellation composes after the appended guide,
+        # without duplicating it.
+        service._setup_async_tool_cancellation()
+        composed = service._settings.system_instruction
+        self.assertTrue(composed.startswith("APP\n\nGUIDE\n\n"))
+        self.assertEqual(composed.count("GUIDE"), 1)
+        self.assertNotEqual(composed, "APP\n\nGUIDE")  # async instructions appended
+
+        # Disabling recomposes back to base + guide.
+        service._teardown_async_tool_cancellation()
+        self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
