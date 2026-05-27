@@ -384,9 +384,11 @@ class SlngSTTService(WebsocketSTTService):
 # ---------------------------------------------------------------------------
 
 try:
-    from voiceai_sdk import AsyncSlng as _AsyncSlng
-except ModuleNotFoundError:
-    _AsyncSlng = None  # type: ignore[assignment,misc]
+    from voiceai_sdk import AsyncSlng
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use SLNG, you need to `pip install pipecat-ai[slng]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 class SlngHttpSTTService(STTService):
@@ -436,10 +438,7 @@ class SlngHttpSTTService(STTService):
             **kwargs,
         )
 
-        if _AsyncSlng is not None:
-            self._client = _AsyncSlng(api_key=api_key)
-        else:
-            self._client = None  # type: ignore[assignment]
+        self._client = AsyncSlng(api_key=api_key)
         self._audio_buffer: list[bytes] = []
 
     def can_generate_metrics(self) -> bool:
@@ -495,18 +494,19 @@ class SlngHttpSTTService(STTService):
         if not self._audio_buffer:
             return
 
-        if self._client is None:
-            raise ImportError(
-                "voiceai-sdk is required for SlngHttpSTTService. "
-                "Install it with `pip install pipecat-ai[slng]`."
-            )
-
         audio_data = b"".join(self._audio_buffer)
         self._audio_buffer = []
 
-        language: str | None = None
+        language_str: str | None = None
         if is_given(self._settings.language) and self._settings.language is not None:
-            language = str(self._settings.language)
+            language_str = str(self._settings.language)
+
+        language_value: Language | None = None
+        if is_given(self._settings.language) and self._settings.language is not None:
+            try:
+                language_value = Language(str(self._settings.language))
+            except ValueError:
+                pass
 
         model = self._settings.model or "slng/deepgram/nova:3-en"
 
@@ -514,25 +514,41 @@ class SlngHttpSTTService(STTService):
             response = await self._client.speech_to_text.create(
                 model,
                 audio=audio_data,
-                language=language,
+                language=language_str,
                 enable_partials=False,
                 sample_rate=self.sample_rate,
                 encoding="linear16",
             )
 
             if response.alternatives:
-                transcript = response.alternatives[0].transcript
-                await self.push_frame(
-                    TranscriptionFrame(
-                        transcript,
-                        self._user_id,
-                        time_now_iso8601(),
-                        result=response,
+                transcript = response.alternatives[0].transcript or ""
+                if transcript:
+                    await self.push_frame(
+                        TranscriptionFrame(
+                            transcript,
+                            self._user_id,
+                            time_now_iso8601(),
+                            language_value,
+                            result=response,
+                        )
                     )
-                )
-                await self.stop_processing_metrics()
+                    await self._handle_transcription(transcript, True, language_value)
+            await self.stop_processing_metrics()
 
         except Exception as e:
             logger.error(f"{self}: SLNG HTTP STT error: {e}")
             await self.push_error(error_msg=f"SLNG HTTP STT error: {e}", exception=e)
             await self.stop_all_metrics()
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Language | None = None
+    ):
+        """Handle a transcription result with tracing.
+
+        Args:
+            transcript: The transcribed text.
+            is_final: Whether this is a final (not interim) transcription.
+            language: Detected or configured language.
+        """
+        pass
