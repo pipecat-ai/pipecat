@@ -230,7 +230,10 @@ class SlngSTTService(WebsocketSTTService):
             logger.debug(f"Connecting to SLNG STT ({self._settings.model})")
 
             model = self._settings.model or "slng/deepgram/nova:3-en"
-            ws_url = f"ws://{self._base_url}/v1/bridges/unmute/stt/{model}"
+            if "://" in self._base_url:
+                ws_url = f"{self._base_url}/v1/bridges/unmute/stt/{model}"
+            else:
+                ws_url = f"wss://{self._base_url}/v1/bridges/unmute/stt/{model}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
 
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)

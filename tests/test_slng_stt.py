@@ -55,7 +55,7 @@ async def test_slng_stt_ws_partial_and_final():
 
     async with serve(handler, "127.0.0.1", 0) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
-        base_url = f"{host}:{port}"
+        base_url = f"ws://{host}:{port}"
 
         from pipecat.services.slng.stt import SlngSTTService
 
