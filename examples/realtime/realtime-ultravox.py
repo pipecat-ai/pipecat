@@ -18,7 +18,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    UserMessageAddedMessage,
+    UserTurnMessageAddedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -243,8 +243,8 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     # ):
     #     logger.info(f"User turn stopped at {message.timestamp}")
 
-    @user_aggregator.event_handler("on_user_message_added")
-    async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
+    @user_aggregator.event_handler("on_user_turn_message_added")
+    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")

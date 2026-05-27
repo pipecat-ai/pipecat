@@ -43,7 +43,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
-    UserMessageAddedMessage,
+    UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -241,7 +241,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
     # In realtime mode the user transcript isn't finalized at turn-stop
     # time, so on_user_turn_stopped carries no content; subscribe to
-    # on_user_message_added below for the finalized text.
+    # on_user_turn_message_added below for the finalized text.
     @user_aggregator.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(
         aggregator,
@@ -252,8 +252,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
     # In realtime mode this is the canonical "user said X" event,
     # decoupled from turn-stop.
-    @user_aggregator.event_handler("on_user_message_added")
-    async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
+    @user_aggregator.event_handler("on_user_turn_message_added")
+    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")

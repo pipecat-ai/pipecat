@@ -281,7 +281,7 @@ class UserTurnStoppedMessage:
             user-turn-stop frame: in realtime mode the user message
             isn't finalized until the assistant response start acts as
             the effective end-of-turn signal. Subscribers that need
-            the finalized text should listen to ``on_user_message_added``
+            the finalized text should listen to ``on_user_turn_message_added``
             instead.
         timestamp: When the user turn started.
         user_id: Optional identifier for the user.
@@ -294,8 +294,8 @@ class UserTurnStoppedMessage:
 
 
 @dataclass
-class UserMessageAddedMessage:
-    """A message accompanying ``on_user_message_added``.
+class UserTurnMessageAddedMessage:
+    """A message accompanying ``on_user_turn_message_added``.
 
     Fired when a user message is written to the LLM context. In cascade
     mode (``realtime_service_mode=False``) this coincides with
@@ -569,7 +569,7 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_stopped: Called when the user turn ends
     - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
-    - on_user_message_added: Called when a user message is written to context.
+    - on_user_turn_message_added: Called when a user message is written to context.
       In realtime mode (``realtime_service_mode=True``) the write is
       triggered by the assistant response start rather than the
       user-turn-end frame, so this fires decoupled from
@@ -598,8 +598,8 @@ class LLMUserAggregator(LLMContextAggregator):
         # In realtime mode (realtime_service_mode=True) the user message
         # is written when the assistant response starts, not at
         # user-turn-end — subscribe here for the finalized text.
-        @aggregator.event_handler("on_user_message_added")
-        async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
+        @aggregator.event_handler("on_user_turn_message_added")
+        async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
             ...
 
         @aggregator.event_handler("on_user_mute_started")
@@ -645,7 +645,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._register_event_handler("on_user_turn_stop_timeout")
         self._register_event_handler("on_user_turn_idle")
         self._register_event_handler("on_user_turn_inference_triggered")
-        self._register_event_handler("on_user_message_added")
+        self._register_event_handler("on_user_turn_message_added")
         self._register_event_handler("on_user_mute_started")
         self._register_event_handler("on_user_mute_stopped")
 
@@ -839,10 +839,10 @@ class LLMUserAggregator(LLMContextAggregator):
         self._context.add_message({"role": self.role, "content": aggregation})
         await self.push_context_frame()
 
-        message = UserMessageAddedMessage(
+        message = UserTurnMessageAddedMessage(
             content=aggregation, timestamp=self._user_turn_start_timestamp
         )
-        await self._call_event_handler("on_user_message_added", message)
+        await self._call_event_handler("on_user_turn_message_added", message)
 
         return aggregation
 
@@ -945,7 +945,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 "Note: this changes when user messages are written to context "
                 "— they're written when the assistant response starts rather "
                 "than when the user-turn-end frame fires. Subscribe to "
-                "`on_user_message_added` instead of `on_user_turn_stopped` to "
+                "`on_user_turn_message_added` instead of `on_user_turn_stopped` to "
                 "handle new user messages."
             )
         else:
@@ -1090,7 +1090,7 @@ class LLMUserAggregator(LLMContextAggregator):
         # frames (Gemini Live, AWS Nova Sonic, Ultravox),
         # ``_on_user_turn_started`` never fires, so seed
         # ``_user_turn_start_timestamp`` here from the first transcript
-        # so the eventual ``on_user_message_added`` event carries one.
+        # so the eventual ``on_user_turn_message_added`` event carries one.
         # Harmless in cascade mode — turn frames set it before this
         # runs (the timestamp check is a no-op).
         if not self._user_turn_start_timestamp:
@@ -1216,7 +1216,7 @@ class LLMUserAggregator(LLMContextAggregator):
             # turn-stop time — the assistant response start is the
             # effective end-of-turn signal, and the user message is
             # written then. Content is None here; subscribers wanting
-            # the finalized text use on_user_message_added instead.
+            # the finalized text use on_user_turn_message_added instead.
             message = UserTurnStoppedMessage(
                 content=None, timestamp=self._user_turn_start_timestamp
             )

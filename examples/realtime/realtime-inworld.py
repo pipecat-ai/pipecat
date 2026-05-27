@@ -46,7 +46,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    UserMessageAddedMessage,
+    UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -192,7 +192,7 @@ Always be helpful and proactive in offering assistance.""",
     # on_user_turn_stopped fires at the turn boundary. In realtime mode
     # UserTurnStoppedMessage.content is None because the user transcript
     # isn't finalized at turn-stop time — subscribe to
-    # on_user_message_added for the finalized text (it's written when
+    # on_user_turn_message_added for the finalized text (it's written when
     # the assistant response begins). The assistant message is finalized
     # at turn-stop time in both modes, so on_assistant_turn_stopped
     # carries the content directly.
@@ -204,8 +204,8 @@ Always be helpful and proactive in offering assistance.""",
     ):
         logger.info(f"User turn stopped at {message.timestamp}")
 
-    @user_aggregator.event_handler("on_user_message_added")
-    async def on_user_message_added(aggregator, message: UserMessageAddedMessage):
+    @user_aggregator.event_handler("on_user_turn_message_added")
+    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         logger.info(f"Transcript: {timestamp}user: {message.content}")
 

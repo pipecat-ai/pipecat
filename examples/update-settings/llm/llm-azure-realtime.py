@@ -91,7 +91,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Azure Realtime emits user-turn frames from server VAD, so
     # on_user_turn_stopped fires at the turn boundary. In realtime mode
     # UserTurnStoppedMessage.content is None (the user transcript isn't
-    # finalized at turn-stop time); subscribe to on_user_message_added
+    # finalized at turn-stop time); subscribe to on_user_turn_message_added
     # if you need the finalized user text.
     @user_aggregator.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(

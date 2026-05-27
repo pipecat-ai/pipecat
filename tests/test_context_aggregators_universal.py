@@ -56,7 +56,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregator,
     LLMUserAggregatorParams,
-    UserMessageAddedMessage,
+    UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -1735,10 +1735,10 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         _, pair = self._build_pair(realtime_service_mode=True)
         user, assistant = pair
 
-        user_msg_added: list[UserMessageAddedMessage] = []
+        user_msg_added: list[UserTurnMessageAddedMessage] = []
         assistant_msg_stopped: list[AssistantTurnStoppedMessage] = []
 
-        @user.event_handler("on_user_message_added")
+        @user.event_handler("on_user_turn_message_added")
         async def _on_um(_a, msg):
             user_msg_added.append(msg)
 
