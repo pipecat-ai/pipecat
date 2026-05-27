@@ -188,7 +188,7 @@ def build_sensor_controller() -> PipelineWorker:
         ]
     )
 
-    worker = PipelineWorker(pipeline, name="controller")
+    worker = PipelineWorker(pipeline, name="sensor-controller")
 
     # The controller handles one job at a time (the LLM pipeline can only
     # run one turn at a time). ``state["job_id"]`` pairs the in-flight
@@ -248,7 +248,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         """
         logger.info(f"Voice agent: forwarding to controller: '{question}'")
         async with params.pipeline_worker.job(
-            "controller", payload={"question": question}, timeout=30
+            "sensor-controller", payload={"question": question}, timeout=30
         ) as t:
             pass
         await params.result_callback(t.response["answer"])
@@ -288,6 +288,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     worker = PipelineWorker(
         pipeline,
+        name="voice-agent",
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
