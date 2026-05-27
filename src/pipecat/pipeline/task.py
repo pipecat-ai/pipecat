@@ -650,6 +650,8 @@ class PipelineTask(BasePipelineTask):
         if not self._cancelled:
             logger.debug(f"Cancelling pipeline task {self}")
             self._cancelled = True
+            if not self._pipeline_start_event.is_set():
+                self._pipeline_start_event.set()
             await self.queue_frame(CancelFrame(reason=reason))
 
     async def _create_tasks(self):
