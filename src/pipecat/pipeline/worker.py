@@ -28,6 +28,17 @@ from pipecat.bus import (
     WorkerBus,
 )
 from pipecat.bus.bridge_processor import _BusEdgeProcessor
+from pipecat.bus.ui.messages import (
+    _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME,
+    _UI_SNAPSHOT_BUS_EVENT_NAME,
+    BusUICommandMessage,
+    BusUIDataMessage,
+    BusUIEventMessage,
+    BusUIJobCompletedMessage,
+    BusUIJobGroupCompletedMessage,
+    BusUIJobGroupStartedMessage,
+    BusUIJobUpdateMessage,
+)
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
@@ -59,6 +70,16 @@ from pipecat.pipeline.utils import run_setup_hook
 from pipecat.pipeline.worker_observer import WorkerObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIObserverParams, RTVIProcessor
+from pipecat.processors.frameworks.rtvi.frames import RTVIUICommandFrame, RTVIUIJobGroupFrame
+from pipecat.processors.frameworks.rtvi.models import (
+    UICancelJobGroupMessage,
+    UIEventMessage,
+    UIJobCompletedData,
+    UIJobGroupCompletedData,
+    UIJobGroupStartedData,
+    UIJobUpdateData,
+    UISnapshotMessage,
+)
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
@@ -383,6 +404,12 @@ class PipelineWorker(BaseWorker):
             @self.rtvi.event_handler("on_client_ready")
             async def on_client_ready(rtvi: RTVIProcessor):
                 await rtvi.set_bot_ready()
+
+            # Republish inbound client UI messages onto the bus so
+            # UIWorker subscribers can dispatch them.
+            @self.rtvi.event_handler("on_ui_message")
+            async def on_ui_message(rtvi: RTVIProcessor, message):
+                await self._republish_ui_message_on_bus(message)
 
         # This is the idle event. When selected frames are pushed from any
         # processor we consider the pipeline is not idle. We use an observer
@@ -712,20 +739,20 @@ class PipelineWorker(BaseWorker):
                 await self.queue_frame(frame, direction)
 
     async def on_bus_message(self, message: BusMessage) -> None:
-        """Handle pipeline-worker-specific bus messages.
+        """Handle outbound bus messages: TTS playback and RTVI UI translation.
 
-        Dispatches `BusTTSSpeakMessage` by queueing a `TTSSpeakFrame` into
-        the pipeline. All other messages are delegated to the base
-        handler.
-
-        Args:
-            message: The bus message to process.
+        Runs the base lifecycle/job dispatch first. A ``BusTTSSpeakMessage``
+        targeted at this worker is queued as a ``TTSSpeakFrame`` (pipelines
+        without a TTS service let it flow through). When this worker owns the
+        RTVI processor, UI carriers produced by a ``UIWorker``
+        (``BusUIDataMessage`` subclasses) are translated into RTVI frames by
+        ``_handle_ui_bus_message``; other workers skip the translation.
         """
         await super().on_bus_message(message)
 
-        # ``BaseWorker.on_bus_message`` already drops targeted messages
-        # for other workers, but it returns early before reaching here —
-        # re-apply the filter before queueing pipeline frames.
+        # ``BaseWorker.on_bus_message`` already drops targeted messages for
+        # other workers, but it returns early before reaching here -- re-apply
+        # the filter before queueing pipeline frames.
         if message.target and message.target != self.name:
             return
 
@@ -733,6 +760,99 @@ class PipelineWorker(BaseWorker):
             await self.queue_frame(
                 TTSSpeakFrame(text=message.text, append_to_context=message.append_to_context)
             )
+            return
+
+        if self._rtvi and isinstance(message, BusUIDataMessage):
+            await self._handle_ui_bus_message(message)
+
+    async def _handle_ui_bus_message(self, message: BusUIDataMessage) -> None:
+        """Translate a UI carrier into the matching RTVI frame and queue it.
+
+        Called only when this worker owns the RTVI processor. The
+        ``RTVIObserver`` later wraps the queued frame into a typed
+        ``ui-command`` / ``ui-job-group`` envelope for the client. Inbound
+        carriers (e.g. ``BusUIEventMessage``) match no branch and are ignored.
+        """
+        frame: Frame | None = None
+        if isinstance(message, BusUICommandMessage):
+            frame = RTVIUICommandFrame(
+                command=message.command_name,
+                payload=message.payload,
+            )
+        elif isinstance(message, BusUIJobGroupStartedMessage):
+            frame = RTVIUIJobGroupFrame(
+                data=UIJobGroupStartedData(
+                    job_id=message.job_id,
+                    workers=list(message.workers or []),
+                    label=message.label,
+                    cancellable=message.cancellable,
+                    at=message.at,
+                )
+            )
+        elif isinstance(message, BusUIJobUpdateMessage):
+            frame = RTVIUIJobGroupFrame(
+                data=UIJobUpdateData(
+                    job_id=message.job_id,
+                    worker_name=message.worker_name,
+                    data=message.data,
+                    at=message.at,
+                )
+            )
+        elif isinstance(message, BusUIJobCompletedMessage):
+            frame = RTVIUIJobGroupFrame(
+                data=UIJobCompletedData(
+                    job_id=message.job_id,
+                    worker_name=message.worker_name,
+                    status=message.status,
+                    response=message.response,
+                    at=message.at,
+                )
+            )
+        elif isinstance(message, BusUIJobGroupCompletedMessage):
+            frame = RTVIUIJobGroupFrame(
+                data=UIJobGroupCompletedData(
+                    job_id=message.job_id,
+                    at=message.at,
+                )
+            )
+
+        if frame is not None:
+            await self.queue_frame(frame)
+
+    async def _republish_ui_message_on_bus(
+        self, message: UIEventMessage | UISnapshotMessage | UICancelJobGroupMessage
+    ) -> None:
+        """Republish an inbound client UI message onto the bus.
+
+        Translates a typed RTVI UI message from the client
+        (``UIEventMessage``, ``UISnapshotMessage``, or
+        ``UICancelJobGroupMessage``) into a single ``BusUIEventMessage``
+        carrier so ``UIWorker`` subscribers can dispatch it. This is the
+        inbound counterpart of :meth:`on_bus_message`. Unrecognized
+        message types are ignored.
+        """
+        if isinstance(message, UIEventMessage):
+            event_name = message.data.event
+            payload = message.data.payload
+        elif isinstance(message, UISnapshotMessage):
+            event_name = _UI_SNAPSHOT_BUS_EVENT_NAME
+            payload = message.data.tree.model_dump(exclude_none=True)
+        elif isinstance(message, UICancelJobGroupMessage):
+            event_name = _UI_CANCEL_JOB_GROUP_BUS_EVENT_NAME
+            payload = {
+                "job_id": message.data.job_id,
+                "reason": message.data.reason,
+            }
+        else:
+            return
+        await self.send_bus_message(
+            BusUIEventMessage(
+                source=self.name,
+                target=None,
+                event_name=event_name,
+                payload=payload,
+            )
+        )
 
     async def _cancel(self, *, reason: str | None = None):
         """Internal cancellation logic for the pipeline worker.
