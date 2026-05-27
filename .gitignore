@@ -64,3 +64,6 @@ docs/api/api
 
 # Pipecat
 whisker_setup.py
+
+# Superpowers (internal planning docs)
+docs/superpowers/
