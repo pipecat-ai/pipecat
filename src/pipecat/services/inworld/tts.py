@@ -466,7 +466,7 @@ class InworldHttpTTSService(TTSService):
                         if word_times:
                             self._current_run_had_timestamps = True
                             await self.add_word_timestamps(
-                                word_times, context_id, includes_inter_frame_spaces=True
+                                word_times, context_id, pre_merge_tokens=True
                             )
                         # Track the maximum end time across all chunks
                         utterance_duration = max(utterance_duration, chunk_end_time)
@@ -504,9 +504,7 @@ class InworldHttpTTSService(TTSService):
             word_times, chunk_end_time = self._calculate_word_times(timestamp_info)
             if word_times:
                 self._current_run_had_timestamps = True
-                await self.add_word_timestamps(
-                    word_times, context_id, includes_inter_frame_spaces=True
-                )
+                await self.add_word_timestamps(word_times, context_id, pre_merge_tokens=True)
             utterance_duration = chunk_end_time
 
         audio_data = base64.b64decode(response_data["audioContent"])
@@ -1086,9 +1084,7 @@ class InworldTTSService(WebsocketTTSService):
                 if word_times:
                     if ctx_id:
                         self._contexts_with_timestamps.add(ctx_id)
-                    await self.add_word_timestamps(
-                        word_times, ctx_id, includes_inter_frame_spaces=True
-                    )
+                    await self.add_word_timestamps(word_times, ctx_id, pre_merge_tokens=True)
 
             # Handle flush completion, which indicates the end of a generation
             if "flushCompleted" in result:
