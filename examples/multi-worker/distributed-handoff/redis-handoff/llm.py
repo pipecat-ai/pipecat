@@ -92,8 +92,7 @@ class AcmeLLMTask(LLMWorker):
     async def start(self) -> None:
         """Register watches for sibling workers once ready."""
         await super().start()
-        for worker_name in self._watch:
-            await self.watch_worker(worker_name)
+        await self.watch_workers(*self._watch)
 
     @tool(cancel_on_interruption=False)
     async def transfer_to_agent(self, params: FunctionCallParams, agent: str, reason: str):

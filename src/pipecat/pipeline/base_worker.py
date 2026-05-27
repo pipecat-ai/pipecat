@@ -107,7 +107,7 @@ class BaseWorker(BaseObject, BusSubscriber):
     - ``on_worker_ready(data)``: Called when another worker is ready
       to receive messages. For local root workers, fires automatically.
       For children, fires only on the parent. For remote workers, fires
-      only for workers watched via ``watch_worker()``.
+      only for workers watched via ``watch_workers()``.
     - ``on_job_request(message)``: Called when a job request is received.
     - ``on_job_response(message)``: Called when a worker sends a response.
     - ``on_job_update(message)``: Called when a worker sends a progress
@@ -271,7 +271,7 @@ class BaseWorker(BaseObject, BusSubscriber):
 
     @property
     def children(self) -> list["BaseWorker"]:
-        """The list of child workers added via ``add_worker()``."""
+        """The list of child workers added via ``add_workers()``."""
         return self._children
 
     @property
@@ -393,7 +393,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         """Called when another worker is ready to receive messages.
 
         For local root workers this fires automatically. For remote workers
-        it fires only for workers watched via ``watch_worker()``. For child
+        it fires only for workers watched via ``watch_workers()``. For child
         workers it fires only on the parent that created them.
 
         Args:
@@ -543,22 +543,35 @@ class BaseWorker(BaseObject, BusSubscriber):
         else:
             await self.send_bus_message(BusWorkerErrorMessage(source=self.name, error=error))
 
-    async def add_worker(self, worker: "BaseWorker") -> None:
-        """Register a child worker under this parent.
+    async def add_workers(self, *workers: "BaseWorker", watch: bool = True) -> None:
+        """Register one or more child workers under this parent.
 
-        The child's lifecycle (end, cancel) is automatically managed
-        by this parent worker. To receive ``on_worker_ready`` when the
-        child starts, call ``watch_worker(worker.name)``.
+        Each child's lifecycle (end, cancel) is automatically managed
+        by this parent worker. By default, the children are also watched
+        so the parent receives ``on_worker_ready`` when each one starts;
+        pass ``watch=False`` to opt out (you can still call
+        :meth:`watch_workers` later).
 
         Args:
-            worker: The child `BaseWorker` instance to add.
+            *workers: One or more child `BaseWorker` instances to add.
+            watch: When ``True`` (the default), watch each newly added
+                child so ``on_worker_ready`` fires once it registers.
+                Workers that were skipped (already parented elsewhere)
+                are not watched.
         """
-        if worker._parent is not None:
-            logger.error(f"Worker '{worker.name}' already has parent '{worker._parent}', skipping")
-            return
-        worker._parent = self.name
-        self._children.append(worker)
-        await self.send_bus_message(BusAddWorkerMessage(source=self.name, worker=worker))
+        added_names: list[str] = []
+        for worker in workers:
+            if worker._parent is not None:
+                logger.warning(
+                    f"Worker '{worker.name}' already has parent '{worker._parent}', skipping"
+                )
+                continue
+            worker._parent = self.name
+            self._children.append(worker)
+            added_names.append(worker.name)
+            await self.send_bus_message(BusAddWorkerMessage(source=self.name, worker=worker))
+        if watch and added_names:
+            await self.watch_workers(*added_names)
 
     async def activate_worker(
         self,
@@ -599,17 +612,19 @@ class BaseWorker(BaseObject, BusSubscriber):
             BusDeactivateWorkerMessage(source=self.name, target=worker_name)
         )
 
-    async def watch_worker(self, worker_name: str) -> None:
-        """Request notification when a worker registers.
+    async def watch_workers(self, *worker_names: str) -> None:
+        """Request notification when one or more workers register.
 
-        If the worker is already registered, ``on_worker_ready`` fires
-        immediately. Otherwise ``on_worker_ready`` fires when the
-        worker eventually registers.
+        For each name: if the worker is already registered,
+        ``on_worker_ready`` fires immediately. Otherwise
+        ``on_worker_ready`` fires when the worker eventually registers.
 
         Args:
-            worker_name: The name of the worker to watch for.
+            *worker_names: Names of workers to watch for.
         """
-        if self._registry:
+        if not self._registry:
+            return
+        for worker_name in worker_names:
             logger.debug(f"Worker '{self}': watching for worker '{worker_name}'")
             await self._registry.watch(worker_name, self._on_watched_worker_ready)
 
@@ -1037,8 +1052,7 @@ class BaseWorker(BaseObject, BusSubscriber):
 
     async def _watch_decorated_workers(self) -> None:
         """Register watches for all ``@worker_ready`` decorated handlers."""
-        for worker_name in self._worker_ready_handlers:
-            await self.watch_worker(worker_name)
+        await self.watch_workers(*self._worker_ready_handlers)
 
     async def _on_watched_worker_ready(self, data: WorkerReadyData) -> None:
         """Called when a watched worker is ready.

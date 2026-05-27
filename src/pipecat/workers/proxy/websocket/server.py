@@ -113,7 +113,7 @@ class WebSocketProxyServer(BaseWorker):
         await asyncio.sleep(0)
 
         # Watch the local worker so we can notify the remote side when it's ready.
-        await self.watch_worker(self._worker_name)
+        await self.watch_workers(self._worker_name)
 
     async def stop(self) -> None:
         """Cancel the receive loop and close the WebSocket connection."""

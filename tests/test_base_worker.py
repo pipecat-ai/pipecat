@@ -241,7 +241,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         parent.attach(registry=self.registry, bus=self.bus)
         worker = BaseWorker("child")
         worker.attach(registry=self.registry, bus=self.bus)
-        await parent.add_worker(worker)
+        await parent.add_workers(worker)
         await worker.end(reason="goodbye")
 
         end_msgs = [m for m in sent if isinstance(m, BusEndMessage)]
@@ -261,14 +261,14 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(cancel_msgs), 1)
         self.assertEqual(cancel_msgs[0].source, "task_a")
 
-    async def test_add_task_sends_bus_add_task_message(self):
-        """add_worker() sends BusAddWorkerMessage."""
+    async def test_add_workers_sends_bus_add_worker_message(self):
+        """add_workers() sends BusAddWorkerMessage."""
         sent = capture_bus(self.bus)
 
         worker = BaseWorker("task_a")
         worker.attach(registry=self.registry, bus=self.bus)
         new_task = BaseWorker("task_b")
-        await worker.add_worker(new_task)
+        await worker.add_workers(new_task)
 
         add_msgs = [m for m in sent if isinstance(m, BusAddWorkerMessage)]
         self.assertEqual(len(add_msgs), 1)
@@ -520,15 +520,15 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(worker.active)
 
-    async def test_add_task_tracks_children(self):
-        """add_worker() populates children list and sets parent."""
+    async def test_add_workers_tracks_children(self):
+        """add_workers() populates children list and sets parent."""
         parent = BaseWorker("parent")
         parent.attach(registry=self.registry, bus=self.bus)
         child_a = BaseWorker("child_a")
         child_b = BaseWorker("child_b")
 
-        await parent.add_worker(child_a)
-        await parent.add_worker(child_b)
+        await parent.add_workers(child_a)
+        await parent.add_workers(child_b)
 
         self.assertEqual(len(parent.children), 2)
         self.assertIs(parent.children[0], child_a)
@@ -542,8 +542,8 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         parent.attach(registry=self.registry, bus=self.bus)
         child_a = BaseWorker("child_a")
         child_b = BaseWorker("child_b")
-        await parent.add_worker(child_a)
-        await parent.add_worker(child_b)
+        await parent.add_workers(child_a)
+        await parent.add_workers(child_b)
 
         # Pre-set children as finished so gather returns immediately
         child_a._finished_event.set()
@@ -563,7 +563,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         parent = BaseWorker("parent")
         parent.attach(registry=self.registry, bus=self.bus)
         child = BaseWorker("child")
-        await parent.add_worker(child)
+        await parent.add_workers(child)
 
         order = []
 
@@ -592,8 +592,8 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         parent.attach(registry=self.registry, bus=self.bus)
         child_a = BaseWorker("child_a")
         child_b = BaseWorker("child_b")
-        await parent.add_worker(child_a)
-        await parent.add_worker(child_b)
+        await parent.add_workers(child_a)
+        await parent.add_workers(child_b)
 
         await parent.on_bus_message(
             BusCancelWorkerMessage(source="runner", target="parent", reason="abort")
