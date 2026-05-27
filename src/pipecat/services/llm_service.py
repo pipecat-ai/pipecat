@@ -416,16 +416,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             and not self._realtime_service_info.emits_user_turn_frames
         ):
             logger.warning(
-                f"{self} does not emit its own turn frames "
-                "(UserStartedSpeakingFrame/UserStoppedSpeakingFrame). You can enable "
-                "local turn frames for this service by configuring a vad_analyzer in "
-                "the LLMUserAggregatorParams. Do this if:\n"
-                "  1) You're choosing to drive the conversation from local turn "
-                "detection (e.g. OpenAI Realtime with turn_detection=False)\n"
-                "  2) You need supplemental turn frames to drive other processors "
-                "that expect them (e.g. RTVI) or to trigger on_user_turn_* events "
-                "(WARNING: in this case you should consider local turn frames as "
-                "approximate, as they may not always align with server turns)"
+                f"{self} doesn't emit turn frames "
+                "(UserStartedSpeakingFrame/UserStoppedSpeakingFrame). A couple "
+                "of things to keep in mind:\n"
+                "  - Other processors in the pipeline (e.g. RTVI) may expect "
+                "turn frames. You can enable local VAD/turn detection by "
+                "setting a vad_analyzer in LLMUserAggregatorParams.\n"
+                "  - Be aware that local turns may NOT perfectly align with "
+                'the "ground truth" of server-decided turns, so they should '
+                "be thought of as APPROXIMATE (unless, of course, you're "
+                "also configuring local turn detection to *drive* the "
+                "realtime service's turns, e.g. by setting "
+                "vad=GeminiVADParams(disabled=True))."
             )
 
     async def stop(self, frame: EndFrame):
