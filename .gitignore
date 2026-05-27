@@ -41,6 +41,8 @@ fly.toml
 examples/**/node_modules/
 examples/**/.expo/
 examples/**/dist/
+examples/**/.vite/
+examples/**/*.local
 examples/**/npm-debug.*
 examples/**/*.jks
 examples/**/*.p8

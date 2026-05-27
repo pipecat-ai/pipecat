@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Task observer for managing pipeline frame observers.
+"""Worker observer for managing pipeline frame observers.
 
 This module provides a proxy observer system that manages multiple observers
 for pipeline frame events, ensuring that observer processing doesn't block
@@ -43,18 +43,18 @@ class _PipelineStartedSignal:
     pass
 
 
-class TaskObserver(BaseObserver):
+class WorkerObserver(BaseObserver):
     """Proxy observer that manages multiple observers without blocking the pipeline.
 
     This is a pipeline frame observer that is meant to be used as a proxy to
     the user provided observers. That is, this is the observer that should be
     passed to the frame processors. Then, every time a frame is pushed this
-    observer will call all the observers registered to the pipeline task.
+    observer will call all the observers registered to the pipeline worker.
 
     This observer makes sure that passing frames to observers doesn't block the
-    pipeline by creating a queue and a task for each user observer. When a frame
+    pipeline by creating a queue and a worker for each user observer. When a frame
     is received, it will be put in a queue for efficiency and later processed by
-    each task.
+    each worker.
     """
 
     def __init__(
@@ -63,7 +63,7 @@ class TaskObserver(BaseObserver):
         observers: list[BaseObserver] | None = None,
         **kwargs,
     ):
-        """Initialize the TaskObserver.
+        """Initialize the WorkerObserver.
 
         Args:
             observers: List of observers to manage. Defaults to empty list.
@@ -101,7 +101,7 @@ class TaskObserver(BaseObserver):
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
-            # Cancel the proxy task right away.
+            # Cancel the proxy worker right away.
             await self.cancel_task(proxy.task)
 
         # Remove the observer from the list.
@@ -153,9 +153,7 @@ class TaskObserver(BaseObserver):
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
         """Create a proxy for a single observer."""
         queue = asyncio.Queue()
-        task = self.create_task(
-            self._proxy_task_handler(queue, observer), f"{observer}::_proxy_task_handler"
-        )
+        task = self.create_task(self._proxy_task_handler(queue, observer))
         proxy = Proxy(queue=queue, task=task, observer=observer)
         return proxy
 

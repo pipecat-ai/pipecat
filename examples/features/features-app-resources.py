@@ -4,27 +4,27 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Example demonstrating ``PipelineTask(app_resources=...)``.
+"""Example demonstrating ``PipelineWorker(app_resources=...)``.
 
 ``app_resources`` is an application-defined bag of anything your
 application code may want to share across a session: database handles,
 HTTP clients, feature flags, per-user state, observability clients,
 in-memory caches — whatever fits your app. Pipecat passes it through
-untouched and exposes it as ``task.app_resources``, so any code with a
-handle on the task can read or mutate it.
+untouched and exposes it as ``worker.app_resources``, so any code with a
+handle on the worker can read or mutate it.
 
 Two of the convenience aliases exercised below:
 
 - Tool handlers read it from ``FunctionCallParams.app_resources``.
 - Custom ``FrameProcessor`` subclasses read it from
-  ``self.pipeline_task.app_resources``.
+  ``self.pipeline_worker.app_resources``.
 
 This example uses two small loggers as stand-ins for that "shared thing":
 ``ToolCallLogger`` (written from tool handlers) and
 ``TranscriptionLogger`` (written from a custom ``FrameProcessor`` that
 sits in the pipeline). A real app might just as easily pass a Postgres
 pool, a Redis client, a Stripe SDK instance, or any combination thereof.
-The mechanics shown here — construct once, hand to the task, read it
+The mechanics shown here — construct once, hand to the worker, read it
 from each site, inspect it after the session — are the same regardless
 of what you put in.
 
@@ -50,7 +50,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, LLMRunFrame, TranscriptionFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -131,7 +131,7 @@ class AppResources:
     get autocomplete and refactor safety:
 
     - In tools: ``cast(AppResources, params.app_resources)``.
-    - In custom processors: ``cast(AppResources, self.pipeline_task.app_resources)``.
+    - In custom processors: ``cast(AppResources, self.pipeline_worker.app_resources)``.
     """
 
     tool_call_logger: ToolCallLogger
@@ -155,8 +155,8 @@ class TranscriptionLoggingProcessor(FrameProcessor):
 
     Demonstrates the second read site for ``app_resources``: any custom
     ``FrameProcessor`` can reach the same bag every tool handler sees by
-    going through ``self.pipeline_task.app_resources``. ``pipeline_task``
-    is ``None`` until the task sets the processor up, so we guard against
+    going through ``self.pipeline_worker.app_resources``. ``pipeline_worker``
+    is ``None`` until the worker sets the processor up, so we guard against
     that case.
     """
 
@@ -164,8 +164,8 @@ class TranscriptionLoggingProcessor(FrameProcessor):
         """Forward all frames; log final user transcriptions on the way through."""
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TranscriptionFrame) and self.pipeline_task is not None:
-            resources = cast(AppResources, self.pipeline_task.app_resources)
+        if isinstance(frame, TranscriptionFrame) and self.pipeline_worker is not None:
+            resources = cast(AppResources, self.pipeline_worker.app_resources)
             resources.transcription_logger.log_transcription(frame.text)
 
         await self.push_frame(frame, direction)
@@ -282,7 +282,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         transcription_logger=transcription_logger,
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -299,16 +299,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
-        await task.queue_frames([LLMRunFrame()])
+        await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()
 
     # The session has ended; read whatever state the handlers built up.
     logger.info(f"Tool calls logged during session:\n{tool_call_logger.dump()}")

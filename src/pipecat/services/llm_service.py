@@ -15,6 +15,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
+    TYPE_CHECKING,
     Any,
     Generic,
     Protocol,
@@ -70,6 +71,10 @@ from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationUtil,
 )
 
+if TYPE_CHECKING:
+    from pipecat.pipeline.worker import PipelineWorker
+
+
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
 
@@ -112,7 +117,7 @@ class FunctionCallParams:
             it with ``properties=FunctionCallResultProperties(is_final=False)``
             to push intermediate updates before the final result.
         app_resources: The application-defined resources passed to
-            ``PipelineTask(..., app_resources=...)``. Same object — passed by
+            ``PipelineWorker(..., app_resources=...)``. Same object — passed by
             reference, not a copy. Use it to share DB handles, clients, state,
             feature flags, etc. across all of a session's tool handlers.
     """
@@ -126,6 +131,7 @@ class FunctionCallParams:
     # treat it invariantly, rejecting `LLMService[XAdapter]` at the call
     # sites that build FunctionCallParams.
     llm: LLMService[Any]
+    pipeline_worker: PipelineWorker
     context: LLMContext
     result_callback: FunctionCallResultCallback
     app_resources: Any = None
@@ -294,7 +300,13 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._enable_async_tool_cancellation: bool = enable_async_tool_cancellation
         self._filter_incomplete_user_turns: bool = False
         self._async_tool_cancellation_enabled: bool = False
-        self._base_system_instruction: str | None = None
+        # The user's base system instruction, without composed addons. Captured
+        # here and refreshed when the user changes ``system_instruction`` at
+        # runtime; ``_compose_system_instruction`` always rebuilds the effective
+        # instruction from this plus any appended / addon instructions.
+        base_si = self._settings.system_instruction
+        self._base_system_instruction: str | None = base_si if isinstance(base_si, str) else None
+        self._appended_system_instructions: list[str] = []
         # `adapter_class` is typed as `type[BaseLLMAdapter]` so subclasses
         # don't need to spell out the generic parameter just to subclass
         # (backward compatibility for 3rd-party providers outside this repo).
@@ -386,15 +398,37 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
 
-    def _compose_system_instruction(self):
-        """Compose system_instruction from the base and all active addon instructions.
+    def append_system_instruction(self, instruction: str) -> None:
+        """Append durable text to the system instruction, preserving the user's prompt.
 
-        Combines the base system instruction with turn completion instructions
-        (when enabled) and async tool cancellation instructions (when enabled),
-        writing the result to ``self._settings.system_instruction``.
+        The text is composed onto the end of the system instruction (joined
+        with a blank line) and re-applied on every inference, so it survives
+        context-message resets (e.g. ``LLMMessagesUpdateFrame(messages=[])``).
+        Intended for framework components that own an LLM and need to add
+        standard guidance to a user-provided prompt — for example, ``UIWorker``
+        appends the UI wire-format guide. Appended instructions compose after
+        the user's base prompt and alongside the turn-completion and
+        async-tool-cancellation instructions.
+
+        Args:
+            instruction: The instruction text to append.
+        """
+        self._appended_system_instructions.append(instruction)
+        self._compose_system_instruction()
+
+    def _compose_system_instruction(self):
+        """Rebuild ``system_instruction`` from the base prompt and all active addons.
+
+        Joins the user's base system instruction (the single source of truth,
+        captured at construction and refreshed on runtime ``system_instruction``
+        updates) with any appended instructions (e.g. the ``UIWorker`` prompt
+        guide), turn completion instructions (when enabled), and async tool
+        cancellation instructions (when enabled). Safe to call repeatedly — it
+        always rebuilds from the base, so it never compounds.
         """
         base = self._base_system_instruction
         parts = [base] if base else []
+        parts.extend(self._appended_system_instructions)
         if self._filter_incomplete_user_turns:
             parts.append(self._user_turn_completion_config.completion_instructions)
         if self._async_tool_cancellation_enabled:
@@ -422,29 +456,24 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f"{self}: Incomplete turn filtering "
                 f"{'enabled' if self._filter_incomplete_user_turns else 'disabled'}"
             )
-            if self._filter_incomplete_user_turns:
-                # Save the current system_instruction before composing
-                self._base_system_instruction = self._settings.system_instruction
-                self._compose_system_instruction()
-            else:
-                # Restore original system_instruction
-                self._settings.system_instruction = self._base_system_instruction
-                self._base_system_instruction = None
+
+        if "system_instruction" in changed:
+            # The user replaced the base prompt; re-snapshot it so composition
+            # rebuilds the effective instruction from the new value.
+            base_si = self._settings.system_instruction
+            self._base_system_instruction = base_si if isinstance(base_si, str) else None
 
         if "user_turn_completion_config" in changed and self._filter_incomplete_user_turns:
             self.set_user_turn_completion_config(
                 assert_given(self._settings.user_turn_completion_config)
             )
-            self._compose_system_instruction()
 
-        if (
-            "system_instruction" in changed
-            and (self._filter_incomplete_user_turns or self._async_tool_cancellation_enabled)
-            and "filter_incomplete_user_turns" not in changed
-        ):
-            # system_instruction changed while composition is active.
-            # Treat the new value as the new base and recompose.
-            self._base_system_instruction = self._settings.system_instruction
+        # Any of these fields changes the composed instruction; rebuild it.
+        if changed.keys() & {
+            "filter_incomplete_user_turns",
+            "system_instruction",
+            "user_turn_completion_config",
+        }:
             self._compose_system_instruction()
 
         return changed
@@ -947,9 +976,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # it starts would leave the coroutine in a "never awaited" state.
         await asyncio.sleep(0)
 
-        # _pipeline_task may be unset when the service is driven without a PipelineTask.
-        app_resources = self._pipeline_task.app_resources if self._pipeline_task else None
-
         try:
             if isinstance(item.handler, DirectFunctionWrapper):
                 # Handler is a DirectFunctionWrapper
@@ -960,9 +986,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                         tool_call_id=runner_item.tool_call_id,
                         arguments=runner_item.arguments,
                         llm=self,
+                        pipeline_worker=self.pipeline_worker,
                         context=runner_item.context,
                         result_callback=function_call_result_callback,
-                        app_resources=app_resources,
+                        app_resources=self.pipeline_worker.app_resources,
                     ),
                 )
             else:
@@ -972,9 +999,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                     tool_call_id=runner_item.tool_call_id,
                     arguments=runner_item.arguments,
                     llm=self,
+                    pipeline_worker=self.pipeline_worker,
                     context=runner_item.context,
                     result_callback=function_call_result_callback,
-                    app_resources=app_resources,
+                    app_resources=self.pipeline_worker.app_resources,
                 )
                 await item.handler(params)
         except Exception as e:
@@ -1055,10 +1083,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         logger.debug(f"{self}: Enabling async tool cancellation")
 
         self._async_tool_cancellation_enabled = True
-
-        if self._base_system_instruction is None:
-            self._base_system_instruction = self._settings.system_instruction
-
         self._compose_system_instruction()
 
         self._adapter.builtin_tools[CANCEL_ASYNC_TOOL_NAME] = CANCEL_ASYNC_TOOL_SCHEMA

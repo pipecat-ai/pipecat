@@ -1374,8 +1374,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # is added to the context. Also, run this in a separate task to make
         # sure we don't block the pipeline.
         if properties and properties.on_context_updated:
-            task_name = f"{frame.function_name}:{frame.tool_call_id}:on_context_updated"
-            task = self.create_task(properties.on_context_updated(), task_name)
+            worker_name = f"{frame.function_name}:{frame.tool_call_id}:on_context_updated"
+            task = self.create_task(properties.on_context_updated(), worker_name)
             self._context_updated_tasks.add(task)
             task.add_done_callback(self._context_updated_task_finished)
 

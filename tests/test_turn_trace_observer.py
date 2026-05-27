@@ -133,7 +133,7 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
             observers=self._all_observers(trace_observer),
         )
 
-        # End conversation to flush the conversation span (normally done by PipelineTask._cleanup)
+        # End conversation to flush the conversation span (normally done by PipelineWorker._cleanup)
         trace_observer.end_conversation_tracing()
 
         conv_spans = self._get_spans_by_name("conversation")
@@ -320,7 +320,7 @@ class TestTurnTraceObserver(unittest.IsolatedAsyncioTestCase):
             observers=self._all_observers(trace_observer),
         )
 
-        # Manually end conversation tracing (as PipelineTask._cleanup does)
+        # Manually end conversation tracing (as PipelineWorker._cleanup does)
         trace_observer.end_conversation_tracing()
 
         self.assertIsNone(tracing_ctx.get_conversation_context())

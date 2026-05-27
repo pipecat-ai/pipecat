@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -177,7 +177,7 @@ async def run_test(
 
     pipeline = Pipeline([source, processor, sink])
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         cancel_on_idle_timeout=False,
         enable_rtvi=enable_rtvi,
@@ -192,13 +192,14 @@ async def run_test(
             if isinstance(frame, SleepFrame):
                 await asyncio.sleep(frame.sleep)
             else:
-                await task.queue_frame(frame, frames_to_send_direction)
+                await worker.queue_frame(frame, frames_to_send_direction)
 
         if send_end_frame:
-            await task.queue_frame(EndFrame())
+            await worker.queue_frame(EndFrame())
 
     runner = PipelineRunner()
-    await asyncio.gather(runner.run(task), push_frames())
+    await runner.add_workers(worker)
+    await asyncio.gather(runner.run(), push_frames())
 
     #
     # Down frames

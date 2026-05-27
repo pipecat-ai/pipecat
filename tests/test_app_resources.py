@@ -14,9 +14,8 @@ from unittest.mock import AsyncMock
 from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import EndFrame, Frame, StartFrame
-from pipecat.pipeline.base_task import PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.worker import PipelineWorker, PipelineWorkerParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import (
@@ -65,6 +64,7 @@ class TestFunctionCallParamsAppResources(unittest.TestCase):
             tool_call_id="1",
             arguments={},
             llm=None,  # type: ignore[arg-type]
+            pipeline_worker=None,  # type: ignore[arg-type]
             context=LLMContext(),
             result_callback=AsyncMock(),
         )
@@ -77,6 +77,7 @@ class TestFunctionCallParamsAppResources(unittest.TestCase):
             tool_call_id="1",
             arguments={},
             llm=None,  # type: ignore[arg-type]
+            pipeline_worker=None,  # type: ignore[arg-type]
             context=LLMContext(),
             result_callback=AsyncMock(),
             app_resources=resources,
@@ -90,6 +91,7 @@ class TestFunctionCallParamsAppResources(unittest.TestCase):
             tool_call_id="1",
             arguments={},
             llm=None,  # type: ignore[arg-type]
+            pipeline_worker=None,  # type: ignore[arg-type]
             context=LLMContext(),
             result_callback=AsyncMock(),
             app_resources=resources,
@@ -103,8 +105,8 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
     async def test_function_call_params_receives_app_resources(self):
         service = _MockLLMService()
         resources = _Resources(user_name="John")
-        # Stub the pipeline task with just the bit LLMService reads.
-        service._pipeline_task = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        # Stub the pipeline worker with just the bit LLMService reads.
+        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
 
         captured: dict[str, Any] = {}
 
@@ -135,7 +137,7 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
     async def test_direct_function_params_receives_app_resources(self):
         service = _MockLLMService()
         resources = _Resources(user_name="John")
-        service._pipeline_task = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
+        service._pipeline_worker = SimpleNamespace(app_resources=resources)  # type: ignore[assignment]
         captured: dict[str, Any] = {}
 
         async def lookup(params: FunctionCallParams):
@@ -160,32 +162,6 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
 
         self.assertIs(captured["params"].app_resources, resources)
 
-    async def test_app_resources_none_when_pipeline_task_unset(self):
-        service = _MockLLMService()
-        captured: dict[str, Any] = {}
-
-        async def handler(params: FunctionCallParams):
-            captured["params"] = params
-            await params.result_callback({"ok": True})
-
-        service._functions["lookup"] = FunctionCallRegistryItem(
-            function_name="lookup",
-            handler=handler,
-            cancel_on_interruption=True,
-        )
-        service.broadcast_frame = AsyncMock()  # type: ignore[method-assign]
-
-        runner_item = FunctionCallRunnerItem(
-            registry_item=service._functions["lookup"],
-            function_name="lookup",
-            tool_call_id="call-1",
-            arguments={},
-            context=LLMContext(),
-        )
-        await service._run_function_call(runner_item)
-
-        self.assertIsNone(captured["params"].app_resources)
-
     async def test_frame_processor_setup_tool_resources_warns_on_read(self):
         # ``FrameProcessorSetup.tool_resources`` is retained for backwards
         # compatibility with custom FrameProcessors whose ``setup()`` overrides
@@ -198,6 +174,7 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
         setup = FrameProcessorSetup(
             clock=SystemClock(),
             task_manager=task_manager,
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
             tool_resources=resources,
         )
 
@@ -209,29 +186,29 @@ class TestLLMServiceFunctionCallReadsAppResources(unittest.IsolatedAsyncioTestCa
 class TestPipelineTaskAppResources(unittest.TestCase):
     def test_getter_returns_constructor_value(self):
         resources = _Resources(user_name="John")
-        task = PipelineTask(Pipeline([]), app_resources=resources)
-        self.assertIs(task.app_resources, resources)
+        worker = PipelineWorker(Pipeline([]), app_resources=resources)
+        self.assertIs(worker.app_resources, resources)
 
     def test_default_app_resources_is_none(self):
-        task = PipelineTask(Pipeline([]))
-        self.assertIsNone(task.app_resources)
+        worker = PipelineWorker(Pipeline([]))
+        self.assertIsNone(worker.app_resources)
 
     def test_tool_resources_kwarg_warns_and_aliases_app_resources(self):
         resources = _Resources(user_name="John")
         with self.assertWarns(DeprecationWarning):
-            task = PipelineTask(Pipeline([]), tool_resources=resources)
-        self.assertIs(task.app_resources, resources)
+            worker = PipelineWorker(Pipeline([]), tool_resources=resources)
+        self.assertIs(worker.app_resources, resources)
 
     def test_app_resources_takes_precedence_over_tool_resources(self):
         new = _Resources(user_name="new")
         old = _Resources(user_name="old")
         with self.assertWarns(DeprecationWarning):
-            task = PipelineTask(Pipeline([]), app_resources=new, tool_resources=old)
-        self.assertIs(task.app_resources, new)
+            worker = PipelineWorker(Pipeline([]), app_resources=new, tool_resources=old)
+        self.assertIs(worker.app_resources, new)
 
 
 class _RecordingProcessor(FrameProcessor):
-    """Records the pipeline_task it sees once StartFrame reaches it."""
+    """Records the pipeline_worker it sees once StartFrame reaches it."""
 
     def __init__(self):
         super().__init__()
@@ -241,10 +218,10 @@ class _RecordingProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
-            # setup() runs before any frame reaches us, so pipeline_task is wired up.
-            assert self.pipeline_task is not None
-            self.observed_task = self.pipeline_task
-            self.observed_app_resources = self.pipeline_task.app_resources
+            # setup() runs before any frame reaches us, so pipeline_worker is wired up.
+            assert self.pipeline_worker is not None
+            self.observed_task = self.pipeline_worker
+            self.observed_app_resources = self.pipeline_worker.app_resources
         await self.push_frame(frame, direction)
 
 
@@ -253,7 +230,7 @@ class _LegacyToolResourcesReader(FrameProcessor):
 
     Models a previously-written user FrameProcessor whose ``setup()``
     override hasn't been migrated yet. The field is populated by
-    ``PipelineTask`` for backwards compatibility; reading it emits a
+    ``PipelineWorker`` for backwards compatibility; reading it emits a
     DeprecationWarning.
     """
 
@@ -267,7 +244,7 @@ class _LegacyToolResourcesReader(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         # Forward all frames so the EndFrame reaches the pipeline sink and
-        # ``task.run()`` can return cleanly.
+        # ``worker.run()`` can return cleanly.
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
 
@@ -277,29 +254,29 @@ class TestFrameProcessorSetupToolResourcesBackwardsCompat(unittest.IsolatedAsync
         resources = _Resources(user_name="John")
         legacy = _LegacyToolResourcesReader()
         pipeline = Pipeline([legacy])
-        task = PipelineTask(pipeline, app_resources=resources)
+        worker = PipelineWorker(pipeline, app_resources=resources)
 
-        await task.queue_frame(EndFrame())
+        await worker.queue_frame(EndFrame())
         with self.assertWarns(DeprecationWarning):
-            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+            await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
 
         self.assertIs(legacy.captured_tool_resources, resources)
 
     async def test_legacy_processor_receives_value_via_deprecated_tool_resources_kwarg(
         self,
     ):
-        # If the user is still constructing PipelineTask with the deprecated
+        # If the user is still constructing PipelineWorker with the deprecated
         # ``tool_resources`` kwarg (and hasn't migrated to ``app_resources``),
         # legacy processors must still see the value too.
         resources = _Resources(user_name="John")
         legacy = _LegacyToolResourcesReader()
         pipeline = Pipeline([legacy])
         with self.assertWarns(DeprecationWarning):
-            task = PipelineTask(pipeline, tool_resources=resources)
+            worker = PipelineWorker(pipeline, tool_resources=resources)
 
-        await task.queue_frame(EndFrame())
+        await worker.queue_frame(EndFrame())
         with self.assertWarns(DeprecationWarning):
-            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+            await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
 
         self.assertIs(legacy.captured_tool_resources, resources)
 
@@ -309,17 +286,18 @@ class TestFrameProcessorPipelineTaskAccess(unittest.IsolatedAsyncioTestCase):
         resources = _Resources(user_name="John")
         recorder = _RecordingProcessor()
         pipeline = Pipeline([recorder])
-        task = PipelineTask(pipeline, app_resources=resources)
+        worker = PipelineWorker(pipeline, app_resources=resources)
 
-        await task.queue_frame(EndFrame())
-        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+        await worker.queue_frame(EndFrame())
+        await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
 
-        self.assertIs(recorder.observed_task, task)
+        self.assertIs(recorder.observed_task, worker)
         self.assertIs(recorder.observed_app_resources, resources)
 
-    def test_pipeline_task_returns_none_when_not_set_up(self):
+    def test_pipeline_task_raises_when_not_set_up(self):
         recorder = _RecordingProcessor()
-        self.assertIsNone(recorder.pipeline_task)
+        with self.assertRaises(Exception):
+            _ = recorder.pipeline_worker
 
 
 if __name__ == "__main__":

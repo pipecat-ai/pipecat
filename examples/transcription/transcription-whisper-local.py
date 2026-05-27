@@ -14,7 +14,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.whisper.stt import WhisperSTTService
@@ -51,11 +51,12 @@ async def main():
 
     pipeline = Pipeline([transport.input(), vad_processor, stt, tl])
 
-    task = PipelineTask(pipeline)
+    worker = PipelineWorker(pipeline)
 
     runner = PipelineRunner(handle_sigint=False if sys.platform == "win32" else True)
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 if __name__ == "__main__":

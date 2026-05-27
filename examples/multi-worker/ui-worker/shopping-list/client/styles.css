@@ -1,0 +1,225 @@
+:root {
+  color-scheme: light;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  --border: #d4d4d8;
+  --muted: #71717a;
+  --highlight: #fbbf24;
+  --done: #16a34a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #fafafa;
+  color: #18181b;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+}
+
+header h1 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+#connect {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+#connect:hover {
+  background: #f4f4f5;
+}
+
+#connect[data-state="connected"] {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.hint {
+  font-size: 0.875rem;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0 0 1.25rem;
+}
+
+.add-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.add-form input {
+  flex: 1;
+  font-size: 0.9375rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+}
+
+.add-form input:focus {
+  outline: none;
+  border-color: #a1a1aa;
+}
+
+.add-form button {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.add-form button:hover {
+  background: #f4f4f5;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.item {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition:
+    opacity 0.2s,
+    border-color 0.2s;
+}
+
+.item label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  cursor: pointer;
+}
+
+.item input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--done);
+  cursor: pointer;
+}
+
+.item-text {
+  font-size: 1rem;
+}
+
+.item.checked {
+  opacity: 0.6;
+}
+
+.item.checked .item-text {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.list-empty {
+  font-size: 0.875rem;
+  color: var(--muted);
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.list-empty[hidden] {
+  display: none;
+}
+
+/* New-item flash so a voice-added item is easy to spot. */
+.item-flash {
+  animation: item-flash 1.2s ease-out;
+}
+
+@keyframes item-flash {
+  0% {
+    background: #fffbeb;
+    border-color: var(--highlight);
+  }
+  100% {
+    background: #fff;
+    border-color: var(--border);
+  }
+}
+
+/* Standard ``highlight`` command: a brief amber pulse, matching the
+   other UI demos. Duration is driven by the server-supplied duration_ms
+   via the --highlight-duration variable. */
+.ui-highlight {
+  animation: ui-highlight-pulse var(--highlight-duration, 2500ms)
+    cubic-bezier(0.2, 0.8, 0.2, 1);
+  z-index: 2;
+}
+
+@keyframes ui-highlight-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    background: #fff;
+    border-color: var(--border);
+  }
+  35% {
+    transform: scale(1.04);
+    box-shadow: 0 0 36px 8px rgba(251, 191, 36, 0.55);
+    background: #fffbeb;
+    border-color: var(--highlight);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    background: #fff;
+    border-color: var(--border);
+  }
+}
+
+#status {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  background: #18181b;
+  color: white;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+#status[data-show="1"] {
+  opacity: 1;
+}
