@@ -38,15 +38,12 @@ async def test_slng_stt_ws_partial_and_final():
         async for raw in ws:
             if isinstance(raw, bytes):
                 captured["audio_bytes"].extend(raw)
-                # Send Results: interim, then final.
                 await ws.send(
                     json.dumps(
                         {
-                            "type": "Results",
-                            "channel": {
-                                "alternatives": [{"transcript": "hello", "confidence": 0.8}]
-                            },
-                            "is_final": False,
+                            "type": "partial_transcript",
+                            "transcript": "hello",
+                            "confidence": 0.8,
                         }
                     )
                 )
@@ -54,17 +51,11 @@ async def test_slng_stt_ws_partial_and_final():
                 await ws.send(
                     json.dumps(
                         {
-                            "type": "Results",
-                            "channel": {
-                                "alternatives": [
-                                    {
-                                        "transcript": "hello world",
-                                        "confidence": 0.95,
-                                        "languages": ["en"],
-                                    }
-                                ]
-                            },
-                            "is_final": True,
+                            "type": "final_transcript",
+                            "transcript": "hello world",
+                            "confidence": 0.95,
+                            "language": "en",
+                            "duration": 1.2,
                         }
                     )
                 )
@@ -74,7 +65,7 @@ async def test_slng_stt_ws_partial_and_final():
                 if msg.get("type") == "init":
                     captured["init"] = msg
                     await ws.send(json.dumps({"type": "ready", "session_id": "test-sess"}))
-                elif msg.get("type") == "Finalize":
+                elif msg.get("type") == "finalize":
                     captured["finalize_sent"] = True
 
     async with serve(handler, "127.0.0.1", 0) as server:
@@ -136,12 +127,17 @@ async def test_slng_stt_ws_error_message_pushes_no_transcription():
     async def handler(ws):
         async for raw in ws:
             if isinstance(raw, bytes):
-                # Server sends a lowercase ``error`` type, like the real bridge.
+                # Real bridge error payload shape from the spec.
                 await ws.send(
                     json.dumps(
                         {
                             "type": "error",
+                            "data": {
+                                "message": "upstream unavailable",
+                                "code": "provider_error",
+                            },
                             "message": "upstream unavailable",
+                            "code": "provider_error",
                         }
                     )
                 )

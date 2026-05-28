@@ -181,7 +181,7 @@ class SlngSTTService(WebsocketSTTService):
             await self.start_processing_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._websocket and self._websocket.state is State.OPEN:
-                await self._websocket.send(json.dumps({"type": "Finalize"}))
+                await self._websocket.send(json.dumps({"type": "finalize"}))
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text transcription.
@@ -227,7 +227,7 @@ class SlngSTTService(WebsocketSTTService):
         if self._websocket is None:
             return
         try:
-            await self._websocket.send(json.dumps({"type": "KeepAlive"}))
+            await self._websocket.send(json.dumps({"type": "keepalive"}))
         except Exception as e:
             logger.warning(f"{self}: keepalive send failed: {e}")
 
@@ -312,7 +312,7 @@ class SlngSTTService(WebsocketSTTService):
         try:
             if ws and ws.state is State.OPEN:
                 logger.debug("Disconnecting from SLNG STT")
-                await ws.send(json.dumps({"type": "CloseStream"}))
+                await ws.send(json.dumps({"type": "close"}))
                 await ws.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing SLNG STT websocket: {e}", exception=e)
@@ -358,22 +358,22 @@ class SlngSTTService(WebsocketSTTService):
             logger.debug(f"{self}: SLNG STT session ready (id={session_id})")
             self._ready_event.set()
 
-        elif type_lc == "results":
-            await self._handle_results(data)
+        elif type_lc == "partial_transcript":
+            await self._handle_transcript(data, is_final=False)
 
-        elif type_lc == "metadata":
-            logger.trace(f"{self}: SLNG STT metadata: {data}")
+        elif type_lc == "final_transcript":
+            await self._handle_transcript(data, is_final=True)
 
-        elif type_lc in ("speechstarted", "utteranceend"):
-            # Server-side VAD events; not surfaced as frames here.
-            logger.trace(f"{self}: SLNG STT {msg_type}: {data}")
+        elif type_lc == "utterance_end":
+            logger.trace(f"{self}: SLNG STT utterance_end: {data}")
 
-        elif type_lc in ("error", "warning") or "error" in data:
+        elif type_lc == "error":
+            err = data.get("data") if isinstance(data.get("data"), dict) else {}
             error_msg = (
-                data.get("description")
+                err.get("message")
                 or data.get("message")
-                or data.get("error")
-                or data.get("reason")
+                or err.get("code")
+                or data.get("code")
                 or f"Unknown SLNG STT error (payload: {data})"
             )
             logger.error(f"{self}: SLNG STT error: {error_msg}")
@@ -383,28 +383,25 @@ class SlngSTTService(WebsocketSTTService):
         else:
             logger.debug(f"{self}: unknown message: {data}")
 
-    async def _handle_results(self, data: dict[str, Any]):
-        """Handle a ``Results`` transcription message."""
-        channel = data.get("channel") or {}
-        alternatives = channel.get("alternatives") or []
-        if not alternatives:
-            return
+    async def _handle_transcript(self, data: dict[str, Any], *, is_final: bool):
+        """Handle a ``partial_transcript`` or ``final_transcript`` message.
 
-        first = alternatives[0]
-        transcript = (first.get("transcript") or "").strip()
+        Per the Unmute bridge spec, ``transcript`` is at the top level. We also
+        fall back to ``channel.alternatives[0].transcript`` because some
+        upstream providers (e.g. Deepgram) include the full Deepgram payload
+        passed through.
+        """
+        transcript = (data.get("transcript") or "").strip()
+        if not transcript:
+            channel = data.get("channel") or {}
+            alternatives = channel.get("alternatives") or []
+            if alternatives:
+                transcript = (alternatives[0].get("transcript") or "").strip()
         if not transcript:
             return
 
-        is_final = bool(data.get("is_final", False))
-
         language: Language | None = None
-        langs = first.get("languages") or []
-        if langs:
-            try:
-                language = Language(langs[0])
-            except ValueError:
-                pass
-        elif raw_lang := data.get("language"):
+        if raw_lang := data.get("language"):
             try:
                 language = Language(raw_lang)
             except ValueError:

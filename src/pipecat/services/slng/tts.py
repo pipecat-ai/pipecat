@@ -183,14 +183,15 @@ class SlngTTSService(WebsocketTTSService):
         await self._disconnect_websocket()
 
     def _build_config(self) -> dict[str, Any]:
-        """Build the Configure-message body from the current settings."""
+        """Build the inner ``config`` object of the init message.
+
+        Per the Unmute TTS bridge spec, ``voice`` is a top-level field on the
+        init message — it is not part of ``config``.
+        """
         config: dict[str, Any] = {
             "encoding": self._encoding,
             "sample_rate": self.sample_rate,
         }
-
-        if self._settings.voice:
-            config["voice"] = str(self._settings.voice)
 
         if is_given(self._settings.language) and self._settings.language is not None:
             config["language"] = str(self._settings.language)
@@ -228,12 +229,11 @@ class SlngTTSService(WebsocketTTSService):
             self._ready_event.clear()
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
 
-            config = self._build_config()
-            # Init message uses a distinct ``init`` tag (separate from the
-            # post-init variant enum). Server emits ``ready`` once it has
-            # been accepted; ``run_tts`` blocks on ``_ready_event`` until then
-            # so Speak cannot race the handshake.
-            await self._websocket.send(json.dumps({"type": "init", "config": config}))
+            init_msg: dict[str, Any] = {"type": "init", "config": self._build_config()}
+            # Per the Unmute TTS spec, ``voice`` is a top-level field on init.
+            if self._settings.voice:
+                init_msg["voice"] = str(self._settings.voice)
+            await self._websocket.send(json.dumps(init_msg))
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -246,7 +246,7 @@ class SlngTTSService(WebsocketTTSService):
         try:
             if ws and ws.state is State.OPEN:
                 logger.debug("Disconnecting from SLNG TTS")
-                await ws.send(json.dumps({"type": "Close"}))
+                await ws.send(json.dumps({"type": "close"}))
                 await ws.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing SLNG TTS websocket: {e}", exception=e)
@@ -271,9 +271,9 @@ class SlngTTSService(WebsocketTTSService):
         await self.stop_all_metrics()
         if self._websocket and self._websocket.state is State.OPEN:
             try:
-                await self._websocket.send(json.dumps({"type": "Clear"}))
+                await self._websocket.send(json.dumps({"type": "clear"}))
             except Exception as e:
-                logger.warning(f"{self}: failed to send Clear on interruption: {e}")
+                logger.warning(f"{self}: failed to send clear on interruption: {e}")
         await super().on_audio_context_interrupted(context_id)
 
     async def flush_audio(self, context_id: str | None = None):
@@ -290,9 +290,9 @@ class SlngTTSService(WebsocketTTSService):
             return
         logger.trace(f"{self}: flushing audio")
         try:
-            await self._websocket.send(json.dumps({"type": "Flush"}))
+            await self._websocket.send(json.dumps({"type": "flush"}))
         except Exception as e:
-            logger.warning(f"{self}: failed to send Flush: {e}")
+            logger.warning(f"{self}: failed to send flush: {e}")
 
     async def _receive_messages(self):
         """Receive and dispatch incoming WebSocket messages.
@@ -351,18 +351,20 @@ class SlngTTSService(WebsocketTTSService):
                 await self.remove_audio_context(ctx_id)
 
         elif type_lc == "cleared":
-            # Server has cleared its buffer after a Clear message.
+            # Server cleared its buffer after a ``clear`` message.
             pass
 
-        elif type_lc == "warning":
-            logger.warning(f"{self}: SLNG TTS warning: {data.get('description', data)}")
+        elif type_lc == "audio_end":
+            # End-of-stream marker from upstream provider (e.g. Deepgram).
+            logger.trace(f"{self}: SLNG TTS audio_end: {data}")
 
-        elif type_lc == "error" or "error" in data:
+        elif type_lc == "error":
+            err = data.get("data") if isinstance(data.get("data"), dict) else {}
             error_msg = (
-                data.get("description")
+                err.get("message")
                 or data.get("message")
-                or data.get("error")
-                or data.get("reason")
+                or err.get("code")
+                or data.get("code")
                 or f"Unknown SLNG TTS error (payload: {data})"
             )
             logger.error(f"{self}: SLNG TTS error: {error_msg}")
@@ -405,7 +407,7 @@ class SlngTTSService(WebsocketTTSService):
                     logger.warning(f"{self}: init ack timed out, sending Speak anyway")
 
             try:
-                await self._websocket.send(json.dumps({"type": "Speak", "text": text}))
+                await self._websocket.send(json.dumps({"type": "text", "text": text}))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"SLNG TTS send error: {e}")

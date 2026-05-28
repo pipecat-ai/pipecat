@@ -41,11 +41,10 @@ async def test_slng_tts_ws_audio_and_flushed():
             if msg.get("type") == "init":
                 captured["init"] = msg
                 await ws.send(json.dumps({"type": "ready", "session_id": "tts-sess"}))
-            elif msg.get("type") == "Speak":
-                # Send audio as binary frames, then Flush triggers Flushed.
+            elif msg.get("type") == "text":
                 await ws.send(audio_bytes)
-            elif msg.get("type") == "Flush":
-                await ws.send(json.dumps({"type": "Flushed"}))
+            elif msg.get("type") == "flush":
+                await ws.send(json.dumps({"type": "flushed"}))
 
     async with serve(handler, "127.0.0.1", 0) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
@@ -80,15 +79,15 @@ async def test_slng_tts_ws_audio_and_flushed():
 
     assert captured["init"] is not None
     assert captured["init"]["type"] == "init"
+    assert captured["init"]["voice"] == "aura-2-thalia-en"
     config = captured["init"]["config"]
     assert config["sample_rate"] == 24000
     assert config["encoding"] == "linear16"
-    assert config["voice"] == "aura-2-thalia-en"
 
     control_types = [m["type"] for m in captured["control_msgs"]]
     assert "init" in control_types
-    assert "Speak" in control_types
-    assert "Flush" in control_types
+    assert "text" in control_types
+    assert "flush" in control_types
 
 
 @pytest.mark.asyncio
