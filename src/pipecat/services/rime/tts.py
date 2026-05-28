@@ -111,18 +111,15 @@ class RimeNonJsonTTSSettings(TTSSettings):
 
     Parameters:
         segment: Text segmentation mode ("immediate", "bySentence", "never").
-        repetition_penalty: Token repetition penalty (arcana only, 1.0-2.0).
-        temperature: Sampling temperature (arcana only, 0.0-1.0).
-        top_p: Cumulative probability threshold (arcana only, 0.0-1.0).
-        timeScaleFactor: Audio playback speed factor (arcana, mistv3, and coda only).
-            Values above 1.0 slow down the audio; values below 1.0 speed it up.
+        repetition_penalty: Token repetition penalty (1.0-2.0).
+        temperature: Sampling temperature (0.0-1.0).
+        top_p: Cumulative probability threshold (0.0-1.0).
     """
 
     segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     repetition_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    timeScaleFactor: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {"speaker": "voice"}
 
@@ -914,9 +911,9 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         Args:
             language: Language for synthesis. Defaults to English.
             segment: Text segmentation mode ("immediate", "bySentence", "never").
-            repetition_penalty: Token repetition penalty (arcana only, 1.0-2.0).
-            temperature: Sampling temperature (arcana only, 0.0-1.0).
-            top_p: Cumulative probability threshold (arcana only, 0.0-1.0).
+            repetition_penalty: Token repetition penalty (1.0-2.0).
+            temperature: Sampling temperature (0.0-1.0).
+            top_p: Cumulative probability threshold (0.0-1.0).
             extra: Additional parameters to pass to the API (for future compatibility).
         """
 
@@ -985,7 +982,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             repetition_penalty=None,
             temperature=None,
             top_p=None,
-            timeScaleFactor=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -1107,18 +1103,12 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                 settings_dict["lang"] = self._settings.language
             if self._settings.segment is not None:
                 settings_dict["segment"] = self._settings.segment
-            if self._settings.model == "arcana":
-                if self._settings.repetition_penalty is not None:
-                    settings_dict["repetition_penalty"] = self._settings.repetition_penalty
-                if self._settings.temperature is not None:
-                    settings_dict["temperature"] = self._settings.temperature
-                if self._settings.top_p is not None:
-                    settings_dict["top_p"] = self._settings.top_p
-                if self._settings.timeScaleFactor is not None:
-                    settings_dict["timeScaleFactor"] = self._settings.timeScaleFactor
-            elif self._settings.model == "coda":
-                if self._settings.timeScaleFactor is not None:
-                    settings_dict["timeScaleFactor"] = self._settings.timeScaleFactor
+            if self._settings.repetition_penalty is not None:
+                settings_dict["repetition_penalty"] = self._settings.repetition_penalty
+            if self._settings.temperature is not None:
+                settings_dict["temperature"] = self._settings.temperature
+            if self._settings.top_p is not None:
+                settings_dict["top_p"] = self._settings.top_p
             # Include extras
             settings_dict.update(self._settings.extra)
             params = "&".join(f"{k}={v}" for k, v in settings_dict.items() if v is not None)
