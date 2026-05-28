@@ -91,6 +91,7 @@ def make_stub_pipeline_task(name, *, bridged=None, active=True):
         name=name,
         bridged=bridged,
         cancel_on_idle_timeout=False,
+        cancel_runner_on_idle_timeout=False,
     )
 
 
@@ -612,6 +613,7 @@ def make_generating_task(name, *, bridged=None):
         name=name,
         bridged=bridged,
         cancel_on_idle_timeout=False,
+        cancel_runner_on_idle_timeout=False,
     )
 
 

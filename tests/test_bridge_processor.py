@@ -143,7 +143,9 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
             worker_name="main_task",
         )
         pipeline = Pipeline([bridge, AppendFrameProcessor()])
-        worker = PipelineWorker(pipeline, cancel_on_idle_timeout=False)
+        worker = PipelineWorker(
+            pipeline, cancel_on_idle_timeout=False, cancel_runner_on_idle_timeout=False
+        )
 
         received = []
         worker.set_reached_downstream_filter((TextFrame,))
