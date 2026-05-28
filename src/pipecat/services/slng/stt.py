@@ -6,6 +6,7 @@
 
 """SLNG speech-to-text services."""
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -126,6 +127,11 @@ class SlngSTTService(WebsocketSTTService):
         self._receive_task = None
         self._region_override = region_override
         self._world_part_override = world_part_override
+        # Signalled by the receive task when the server emits a ``ready`` message
+        # acknowledging the init message. Audio sends block on this event so that
+        # binary frames cannot race ahead of the init handshake on reconnect.
+        self._ready_event = asyncio.Event()
+        self._ready_timeout = 5.0
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -195,6 +201,16 @@ class SlngSTTService(WebsocketSTTService):
             logger.warning(f"{self}: websocket unavailable after reconnect, dropping audio")
             yield None
             return
+
+        # Block until the server has acknowledged the init handshake. Without
+        # this gate, audio frames buffered by the pipeline (or replayed by the
+        # base class on reconnect) can hit the wire before the init message and
+        # the server closes the stream with policy violation 1008.
+        if not self._ready_event.is_set():
+            try:
+                await asyncio.wait_for(self._ready_event.wait(), timeout=self._ready_timeout)
+            except TimeoutError:
+                logger.warning(f"{self}: init ack timed out, sending audio anyway")
 
         try:
             await self._websocket.send(audio)
@@ -275,14 +291,15 @@ class SlngSTTService(WebsocketSTTService):
             if self._world_part_override:
                 headers["X-World-Part-Override"] = self._world_part_override
 
+            self._ready_event.clear()
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
 
             config = self._build_config()
-            # Server requires a ``Configure`` init message before audio
-            # (closes with 1008 otherwise). The previous SLNG client sent
-            # the same shape under a different ``type`` ("init"); only the
-            # tag needed updating.
-            await self._websocket.send(json.dumps({"type": "Configure", "config": config}))
+            # Init message uses a distinct ``init`` tag (separate from the
+            # post-init variant enum CloseStream/Configure/Sync/KeepAlive/
+            # Finalize). Server emits a ``ready`` message once it has been
+            # accepted; ``run_stt`` blocks on ``_ready_event`` until then.
+            await self._websocket.send(json.dumps({"type": "init", "config": config}))
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -336,7 +353,12 @@ class SlngSTTService(WebsocketSTTService):
         msg_type = data.get("type") or ""
         type_lc = msg_type.lower() if isinstance(msg_type, str) else ""
 
-        if type_lc == "results":
+        if type_lc == "ready":
+            session_id = data.get("session_id", "")
+            logger.debug(f"{self}: SLNG STT session ready (id={session_id})")
+            self._ready_event.set()
+
+        elif type_lc == "results":
             await self._handle_results(data)
 
         elif type_lc == "metadata":

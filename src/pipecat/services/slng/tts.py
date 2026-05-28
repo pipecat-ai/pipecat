@@ -6,6 +6,7 @@
 
 """SLNG text-to-speech service."""
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -126,6 +127,10 @@ class SlngTTSService(WebsocketTTSService):
         self._region_override = region_override
         self._world_part_override = world_part_override
         self._receive_task = None
+        # Set by the receive task on ``ready``; ``run_tts`` waits for this
+        # before sending Speak, so synthesis cannot race the init handshake.
+        self._ready_event = asyncio.Event()
+        self._ready_timeout = 5.0
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -220,14 +225,15 @@ class SlngTTSService(WebsocketTTSService):
                 headers["X-Region-Override"] = self._region_override
             if self._world_part_override:
                 headers["X-World-Part-Override"] = self._world_part_override
+            self._ready_event.clear()
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
 
             config = self._build_config()
-            # Server requires a ``Configure`` init message before any Speak
-            # is accepted. The previous SLNG client sent the same shape
-            # under a different ``type`` ("init"); only the tag needed
-            # updating.
-            await self._websocket.send(json.dumps({"type": "Configure", "config": config}))
+            # Init message uses a distinct ``init`` tag (separate from the
+            # post-init variant enum). Server emits ``ready`` once it has
+            # been accepted; ``run_tts`` blocks on ``_ready_event`` until then
+            # so Speak cannot race the handshake.
+            await self._websocket.send(json.dumps({"type": "init", "config": config}))
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -330,7 +336,12 @@ class SlngTTSService(WebsocketTTSService):
         msg_type = data.get("type") or ""
         type_lc = msg_type.lower() if isinstance(msg_type, str) else ""
 
-        if type_lc == "metadata":
+        if type_lc == "ready":
+            session_id = data.get("session_id", "")
+            logger.debug(f"{self}: SLNG TTS session ready (id={session_id})")
+            self._ready_event.set()
+
+        elif type_lc == "metadata":
             logger.trace(f"{self}: SLNG TTS metadata: {data}")
 
         elif type_lc == "flushed":
@@ -384,6 +395,14 @@ class SlngTTSService(WebsocketTTSService):
             if not self._websocket:
                 yield ErrorFrame(error="SLNG TTS websocket not connected")
                 return
+
+            # Block until the server has acknowledged the init handshake so
+            # ``Speak`` cannot race the init message on reconnect.
+            if not self._ready_event.is_set():
+                try:
+                    await asyncio.wait_for(self._ready_event.wait(), timeout=self._ready_timeout)
+                except TimeoutError:
+                    logger.warning(f"{self}: init ack timed out, sending Speak anyway")
 
             try:
                 await self._websocket.send(json.dumps({"type": "Speak", "text": text}))

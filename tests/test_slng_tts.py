@@ -24,7 +24,7 @@ async def test_slng_tts_ws_audio_and_flushed():
     """WS TTS should emit TTSAudioRawFrame chunks and TTSStoppedFrame on Flushed."""
     captured: dict = {
         "path": None,
-        "configure": None,
+        "init": None,
         "control_msgs": [],
         "auth": None,
     }
@@ -38,8 +38,9 @@ async def test_slng_tts_ws_audio_and_flushed():
                 continue
             msg = json.loads(raw)
             captured["control_msgs"].append(msg)
-            if msg.get("type") == "Configure":
-                captured["configure"] = msg
+            if msg.get("type") == "init":
+                captured["init"] = msg
+                await ws.send(json.dumps({"type": "ready", "session_id": "tts-sess"}))
             elif msg.get("type") == "Speak":
                 # Send audio as binary frames, then Flush triggers Flushed.
                 await ws.send(audio_bytes)
@@ -77,14 +78,15 @@ async def test_slng_tts_ws_audio_and_flushed():
     assert captured["auth"] == "Bearer test-key"
     assert captured["path"] == "/v1/bridges/unmute/tts/slng/deepgram/aura:2-en"
 
-    assert captured["configure"] is not None
-    config = captured["configure"]["config"]
+    assert captured["init"] is not None
+    assert captured["init"]["type"] == "init"
+    config = captured["init"]["config"]
     assert config["sample_rate"] == 24000
     assert config["encoding"] == "linear16"
     assert config["voice"] == "aura-2-thalia-en"
 
     control_types = [m["type"] for m in captured["control_msgs"]]
-    assert "Configure" in control_types
+    assert "init" in control_types
     assert "Speak" in control_types
     assert "Flush" in control_types
 

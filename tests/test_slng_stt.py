@@ -25,7 +25,7 @@ async def test_slng_stt_ws_partial_and_final():
     """WS STT should emit InterimTranscriptionFrame then TranscriptionFrame."""
     captured: dict = {
         "path": None,
-        "configure": None,
+        "init": None,
         "audio_bytes": bytearray(),
         "control_msgs": [],
         "auth": None,
@@ -71,8 +71,9 @@ async def test_slng_stt_ws_partial_and_final():
             else:
                 msg = json.loads(raw)
                 captured["control_msgs"].append(msg)
-                if msg.get("type") == "Configure":
-                    captured["configure"] = msg
+                if msg.get("type") == "init":
+                    captured["init"] = msg
+                    await ws.send(json.dumps({"type": "ready", "session_id": "test-sess"}))
                 elif msg.get("type") == "Finalize":
                     captured["finalize_sent"] = True
 
@@ -116,8 +117,9 @@ async def test_slng_stt_ws_partial_and_final():
     assert captured["auth"] == "Bearer test-key"
     assert captured["path"] == "/v1/bridges/unmute/stt/slng/deepgram/nova:3-en"
 
-    assert captured["configure"] is not None
-    config = captured["configure"]["config"]
+    assert captured["init"] is not None
+    assert captured["init"]["type"] == "init"
+    config = captured["init"]["config"]
     assert config["sample_rate"] == 16000
     assert config["encoding"] == "linear16"
     assert config["enable_partials"] is True
@@ -143,6 +145,10 @@ async def test_slng_stt_ws_error_message_pushes_no_transcription():
                         }
                     )
                 )
+            else:
+                msg = json.loads(raw)
+                if msg.get("type") == "init":
+                    await ws.send(json.dumps({"type": "ready", "session_id": "err-sess"}))
 
     async with serve(handler, "127.0.0.1", 0) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
