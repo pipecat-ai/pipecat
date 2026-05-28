@@ -53,7 +53,6 @@ def _make_root(*, enable_rtvi=True):
         name="root",
         enable_rtvi=enable_rtvi,
         cancel_on_idle_timeout=False,
-        cancel_runner_on_idle_timeout=False,
     )
     sent: list = []
     frames: list = []

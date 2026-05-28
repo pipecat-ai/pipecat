@@ -278,17 +278,22 @@ class PipelineWorker(BaseWorker):
                 bridges. A tuple of names like ``("voice",)`` accepts
                 only frames from those bridges. The bus comes from
                 :meth:`attach` (called by the runner).
-            cancel_on_idle_timeout: Whether the pipeline worker should be cancelled if
-                the idle timeout is reached.
-            cancel_runner_on_idle_timeout: Whether reaching the idle timeout
-                should also cancel the entire :class:`PipelineRunner`. The
-                worker is always cancelled first (so standalone usage still
-                works); when this is ``True``, the worker also emits a
-                ``BusCancelMessage`` so the runner broadcasts cancellation to
-                every other root worker. Defaults to ``True`` so a
-                multi-worker bot's helpers shut down with the main pipeline;
-                set to ``False`` for a sidecar ``PipelineWorker`` that should
-                self-cancel on idle without bringing down its peers.
+            cancel_on_idle_timeout: Whether reaching the idle timeout should
+                cancel the pipeline worker. When ``False``, the idle event
+                still fires ``on_idle_timeout`` but the worker is left alone
+                (and ``cancel_runner_on_idle_timeout`` is ignored too: opting
+                out of local cancellation also opts out of the runner-wide
+                cancel).
+            cancel_runner_on_idle_timeout: When ``cancel_on_idle_timeout`` is
+                also ``True``, whether reaching the idle timeout should also
+                cancel the entire :class:`PipelineRunner`. The worker is
+                always cancelled first; when this is ``True`` the worker also
+                emits a ``BusCancelMessage`` so the runner broadcasts
+                cancellation to every other root worker. Defaults to ``True``
+                so a multi-worker bot's helpers shut down with the main
+                pipeline; set to ``False`` for a sidecar ``PipelineWorker``
+                that should self-cancel on idle without bringing down its
+                peers.
             cancel_timeout_secs: Timeout (in seconds) to wait for cancellation to happen
                 cleanly.
             check_dangling_tasks: Whether to check for processors' tasks finishing properly.
@@ -1222,7 +1227,7 @@ class PipelineWorker(BaseWorker):
 
         logger.warning("Idle timeout detected.")
         await self._call_event_handler("on_idle_timeout")
-        if not (self._cancel_on_idle_timeout or self._cancel_runner_on_idle_timeout):
+        if not self._cancel_on_idle_timeout:
             return True
 
         logger.warning("Idle pipeline detected, cancelling pipeline worker...")
