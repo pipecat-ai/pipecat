@@ -6,13 +6,14 @@
 
 # 🎙️ Pipecat: Real-Time Voice & Multimodal AI Agents
 
-**Pipecat** is an open-source Python framework for building real-time voice and multimodal conversational agents. Orchestrate audio and video, AI services, different transports, and conversation pipelines effortlessly—so you can focus on what makes your agent unique.
+**Pipecat** is an open-source Python framework for building real-time voice and multimodal conversational agents. Build a single voice agent or a full multi-agent system where specialists hand off, fan out in parallel, and coordinate over a shared bus, locally or distributed across processes and machines. Orchestrate audio and video, AI services, transports, and conversation pipelines effortlessly, so you can focus on what makes your agents unique.
 
 > Want to dive right in? Run `pipecat init quickstart` or follow the [quickstart guide](https://docs.pipecat.ai/getting-started/quickstart).
 
 ## 🚀 What You Can Build
 
 - **Voice Assistants** – natural, streaming conversations with AI
+- **Multi-Agent Systems** – specialists that hand off, fan out in parallel, or run as sidecars over a shared bus
 - **AI Companions** – coaches, meeting assistants, characters
 - **Multimodal Interfaces** – voice, video, images, and more
 - **Interactive Storytelling** – creative tools with generative media
@@ -24,13 +25,10 @@
 - **Voice-first**: Integrates speech recognition, text-to-speech, and conversation handling
 - **Pluggable**: Supports many AI services and tools
 - **Composable Pipelines**: Build complex behavior from modular components
+- **Multi-Agent Ready**: Each pipeline is an agent. Compose them with handoff, parallel fan-out, sidecar workers, or distributed deployments
 - **Real-Time**: Ultra-low latency interaction with different transports (e.g. WebSockets or WebRTC)
 
 ## 🌐 Pipecat Ecosystem
-
-### 🧩 Multi-agent systems
-
-Need multiple AI agents working together? [Pipecat Subagents](https://github.com/pipecat-ai/pipecat-subagents) lets you build distributed multi-agent systems where each agent runs its own pipeline and communicates through a shared message bus. Hand off conversations between specialists, dispatch background tasks, and scale agents across processes or machines.
 
 ### 📱 Client SDKs
 
