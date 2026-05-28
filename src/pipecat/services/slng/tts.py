@@ -131,14 +131,6 @@ class SlngTTSService(WebsocketTTSService):
         # before sending text, so synthesis cannot race the init handshake.
         self._ready_event = asyncio.Event()
         self._ready_timeout = 5.0
-        # Some upstream providers (currently Cartesia) close their synthesis
-        # context after each ``audio_end`` — subsequent ``text`` messages on
-        # the same WebSocket are rejected with ``Context closed``. For those
-        # providers we proactively reconnect after every ``audio_end`` so the
-        # next ``text`` starts a fresh context. Set dynamically too: if we
-        # ever observe a ``Context closed`` error from any provider, we flip
-        # this on for the rest of the session.
-        self._reconnect_after_audio_end = "cartesia" in (model or "").lower()
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -270,22 +262,6 @@ class SlngTTSService(WebsocketTTSService):
             return self._websocket
         raise Exception("SLNG TTS websocket not connected")
 
-    async def _reset_for_next_context(self):
-        """Tear down the current WebSocket so ``run_tts`` reconnects.
-
-        Used as a workaround for providers (Cartesia) whose synthesis context
-        closes after each ``audio_end``. Closing the WS here makes the next
-        ``run_tts`` invocation see a non-OPEN connection and trigger a full
-        re-init, starting a fresh context for the next utterance.
-        """
-        self._ready_event.clear()
-        ws = self._websocket
-        if ws and ws.state is State.OPEN:
-            try:
-                await ws.close()
-            except Exception:
-                pass
-
     async def on_audio_context_interrupted(self, context_id: str):
         """Send a ``Clear`` message to the server when the bot is interrupted.
 
@@ -379,12 +355,8 @@ class SlngTTSService(WebsocketTTSService):
             pass
 
         elif type_lc == "audio_end":
+            # End-of-stream marker from upstream provider.
             logger.trace(f"{self}: SLNG TTS audio_end: {data}")
-            if self._reconnect_after_audio_end:
-                # Provider closes synthesis context after each utterance;
-                # tear down the WS so the next ``run_tts`` reconnects with a
-                # fresh init.
-                await self._reset_for_next_context()
 
         elif type_lc == "error":
             err = data.get("data") if isinstance(data.get("data"), dict) else {}
@@ -395,20 +367,6 @@ class SlngTTSService(WebsocketTTSService):
                 or data.get("code")
                 or f"Unknown SLNG TTS error (payload: {data})"
             )
-
-            # Some upstream providers (e.g. Cartesia) close their synthesis
-            # context after each ``audio_end`` and reject subsequent ``text``
-            # messages on the same WebSocket with a non-fatal ``Context
-            # closed`` error. Treat that as an end-of-context lifecycle
-            # event, flip on the proactive-reconnect flag for the rest of
-            # the session, and tear down the WS so the next ``run_tts``
-            # transparently reconnects. Do NOT surface as a pipeline error.
-            if "context closed" in str(error_msg).lower():
-                logger.debug(f"{self}: provider context closed; reconnecting")
-                self._reconnect_after_audio_end = True
-                await self._reset_for_next_context()
-                return
-
             logger.error(f"{self}: SLNG TTS error: {error_msg}")
             await self.push_error(error_msg=str(error_msg))
             await self.stop_all_metrics()
