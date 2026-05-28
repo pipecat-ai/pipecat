@@ -982,26 +982,25 @@ class LLMUserAggregator(LLMContextAggregator):
         Called by the paired assistant half when the assistant response
         starts — realtime mode treats that as the user turn's end
         signal for context-writing purposes (in place of
-        ``UserStoppedSpeakingFrame``). Some realtime services deliver
-        the finalized user ``TranscriptionFrame`` only after the
-        assistant starts responding, so when no aggregated transcript
-        is present yet we defer the flush by ``ttfs_p99_latency`` —
-        the same wait the cascade pipeline applies after
-        ``UserStoppedSpeakingFrame``. If a transcript is already
-        aggregated (chunk-streaming services), flush immediately.
+        ``UserStoppedSpeakingFrame``). Realtime services may deliver
+        the finalized user ``TranscriptionFrame`` in pieces, and some
+        deliver it only after the assistant starts responding, so we
+        always defer the flush by ``ttfs_p99_latency`` to let any
+        in-flight transcript land. The ``_realtime_handoff_flush_immediate``
+        failsafe on ``LLMFullResponseEndFrame`` catches any stragglers.
         """
         # Cancel any prior deferred flush task — a new turn supersedes it.
         await self._cancel_realtime_handoff_flush_task()
-
-        if self._aggregation:
-            await self.push_aggregation()
-            self._user_turn_start_timestamp = ""
-            return
 
         self._realtime_handoff_flush_task = self.create_task(
             self._realtime_deferred_handoff_flush(),
             name=f"{self}::realtime_handoff_flush",
         )
+        # Yield so the task's wrapper coroutine starts running before
+        # any immediate cancellation by the failsafe path — otherwise
+        # asyncio GCs the inner coroutine without ever entering it and
+        # emits a "coroutine was never awaited" warning.
+        await asyncio.sleep(0)
 
     async def _realtime_deferred_handoff_flush(self) -> None:
         """Wait one ``ttfs_p99_latency`` window, then flush whatever has arrived."""
