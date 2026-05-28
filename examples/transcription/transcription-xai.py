@@ -9,10 +9,12 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -30,6 +32,8 @@ class TranscriptionLogger(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             print(f"Transcription: {frame.text}")
+        elif isinstance(frame, InterimTranscriptionFrame):
+            print(f"Interim transcription: {frame.text}")
 
         # Push all frames through
         await self.push_frame(frame, direction)
@@ -52,12 +56,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = XAISTTService(
-        api_key=os.getenv("XAI_API_KEY"),
+        api_key=os.environ["XAI_API_KEY"],
     )
 
     tl = TranscriptionLogger()
 
-    pipeline = Pipeline([transport.input(), stt, tl])
+    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
+
+    pipeline = Pipeline([transport.input(), vad_processor, stt, tl, transport.output()])
 
     worker = PipelineWorker(
         pipeline,

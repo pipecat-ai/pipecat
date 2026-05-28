@@ -9,10 +9,12 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, TranscriptionFrame, TranslationFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -78,7 +80,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tl = TranscriptionLogger()
 
-    pipeline = Pipeline([transport.input(), stt, tl])
+    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
+
+    pipeline = Pipeline([transport.input(), vad_processor, stt, tl, transport.output()])
 
     worker = PipelineWorker(
         pipeline,
