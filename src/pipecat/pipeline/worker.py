@@ -1226,14 +1226,14 @@ class PipelineWorker(BaseWorker):
             return True
 
         logger.warning("Idle pipeline detected, cancelling pipeline worker...")
-        await self.cancel()
+        await self.cancel(reason="idle timeout")
         if self._cancel_runner_on_idle_timeout:
             logger.warning("...and cancelling the runner.")
             # ``BaseWorker.cancel`` sends ``BusCancelMessage`` on the bus
             # so the runner broadcasts cancellation to every other root
             # worker too. This worker's pipeline is already cancelling
             # from the call above.
-            await BaseWorker.cancel(self)
+            await BaseWorker.cancel(self, reason="idle timeout")
         return False
 
     async def _load_setup_files(self):

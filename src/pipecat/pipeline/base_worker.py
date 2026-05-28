@@ -362,9 +362,14 @@ class BaseWorker(BaseObject, BusSubscriber):
         """
         await self.send_bus_message(BusEndMessage(source=self.name, reason=reason))
 
-    async def cancel(self) -> None:
-        """Request an immediate cancellation of all workers."""
-        await self.send_bus_message(BusCancelMessage(source=self.name))
+    async def cancel(self, *, reason: str | None = None) -> None:
+        """Request an immediate cancellation of all workers.
+
+        Args:
+            reason: Optional human-readable reason. Propagated through the
+                runner to every root worker's ``BusCancelWorkerMessage``.
+        """
+        await self.send_bus_message(BusCancelMessage(source=self.name, reason=reason))
 
     async def wait(self) -> None:
         """Wait for this worker to finish."""
