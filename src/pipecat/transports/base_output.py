@@ -819,7 +819,13 @@ class BaseOutputTransport(FrameProcessor):
             silence_frame = OutputAudioRawFrame(
                 audio=silence, sample_rate=self.sample_rate, num_channels=1
             )
-            await self._transport.write_audio_frame(silence_frame)
+            try:
+                await asyncio.wait_for(
+                    self._transport.write_audio_frame(silence_frame),
+                    timeout=secs + 1,
+                )
+            except TimeoutError:
+                logger.warning(f"{self} timed out writing end-frame silence")
 
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
