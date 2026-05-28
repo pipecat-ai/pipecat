@@ -679,7 +679,10 @@ class LLMUserAggregator(LLMContextAggregator):
         # to know whether the service is emitting turn frames at
         # start time).
         if self._realtime_service_mode:
-            self._apply_realtime_mode_strategy_mutations(user_turn_strategies)
+            self._apply_realtime_mode_strategy_mutations(
+                user_turn_strategies,
+                are_user_provided_custom_strategies=self._params.user_turn_strategies is not None,
+            )
 
         self._user_is_muted = False
         self._user_turn_start_timestamp = ""
@@ -872,7 +875,7 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._cleanup()
 
     def _apply_realtime_mode_strategy_mutations(
-        self, user_turn_strategies: UserTurnStrategies
+        self, user_turn_strategies: UserTurnStrategies, are_user_provided_custom_strategies: bool
     ) -> None:
         """Mutate turn strategies for realtime mode.
 
@@ -882,8 +885,6 @@ class LLMUserAggregator(LLMContextAggregator):
         strategies that expose the flag, so end-of-turn fires as soon as VAD /
         the turn analyzer reports end-of-speech.
         """
-        custom_strategies = self._params.user_turn_strategies is not None
-
         start_strategies = user_turn_strategies.start or []
         dropped: list[str] = []
         kept_start: list[BaseUserTurnStartStrategy] = []
@@ -912,7 +913,7 @@ class LLMUserAggregator(LLMContextAggregator):
             f"dropped {dropped or 'no'} start strategy(ies); set "
             f"wait_for_transcript=False on {flipped or 'no'} stop strategy(ies)."
         )
-        if custom_strategies:
+        if are_user_provided_custom_strategies:
             logger.warning(msg)
         else:
             logger.debug(msg)
@@ -965,7 +966,9 @@ class LLMUserAggregator(LLMContextAggregator):
                 start=[ExternalUserTurnStartStrategy()],
                 stop=[ExternalUserTurnStopStrategy()],
             )
-            self._apply_realtime_mode_strategy_mutations(new_strategies)
+            self._apply_realtime_mode_strategy_mutations(
+                new_strategies, are_user_provided_custom_strategies=False
+            )
             await self._user_turn_controller.update_strategies(new_strategies)
             logger.debug(
                 f"{self}: replaced default turn strategies with "
