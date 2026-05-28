@@ -667,24 +667,17 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             self._params.user_turn_strategies = user_turn_strategies
 
-        # Realtime-mode strategy wiring. Only kicks in when the user
-        # didn't pass custom strategies — explicit user choice wins.
-        if self._realtime_service_mode and self._params.user_turn_strategies is None:
-            # Append external strategies so on_user_turn_* events fire
-            # from server-emitted UserStarted/StoppedSpeakingFrame. For
-            # realtime services that don't emit those frames the
-            # appended strategies install harmlessly and never fire.
-            user_turn_strategies.start = (user_turn_strategies.start or []) + [
-                ExternalUserTurnStartStrategy(),
-            ]
-            user_turn_strategies.stop = (user_turn_strategies.stop or []) + [
-                ExternalUserTurnStopStrategy(),
-            ]
-
         # Realtime-mode mutation: drop the transcription-based start
         # strategy and flip the wait_for_transcript flag on stop
         # strategies that expose it, so turn-stop fires as soon as VAD /
         # the turn analyzer / external frames report end-of-speech.
+        #
+        # The other realtime-mode strategy hook — swapping defaults out
+        # for external strategies when the realtime service emits its
+        # own turn frames — runs later in
+        # ``_handle_realtime_service_metadata`` (we need the broadcast
+        # to know whether the service is emitting turn frames at
+        # start time).
         if self._realtime_service_mode:
             self._apply_realtime_mode_strategy_mutations(user_turn_strategies)
 
@@ -915,7 +908,7 @@ class LLMUserAggregator(LLMContextAggregator):
             return
 
         msg = (
-            f"{self}: realtime_service_mode=True — "
+            f"{self}: realtime_service_mode=True — mutated turn strategies: "
             f"dropped {dropped or 'no'} start strategy(ies); set "
             f"wait_for_transcript=False on {flipped or 'no'} stop strategy(ies)."
         )
@@ -930,7 +923,12 @@ class LLMUserAggregator(LLMContextAggregator):
         When ``realtime_service_mode`` is not enabled, log a one-time WARNING
         recommendation pointing the user at the option and warning about the
         timing change on ``on_user_turn_stopped``. When it is enabled, log
-        a confirming debug message. Fires at most once per session.
+        a confirming debug message and — if the service advertises
+        ``emits_user_turn_frames=True`` and the user didn't pass custom
+        ``user_turn_strategies`` — swap the default turn strategies for
+        ``ExternalUserTurnStart/StopStrategy`` so ``on_user_turn_*`` events
+        fire from the server-emitted ``UserStarted/StoppedSpeakingFrame``.
+        Fires at most once per session.
         """
         if self._realtime_recommendation_logged:
             return
@@ -948,10 +946,31 @@ class LLMUserAggregator(LLMContextAggregator):
                 "`on_user_turn_message_added` instead of `on_user_turn_stopped` to "
                 "handle new user messages."
             )
-        else:
+            return
+
+        logger.debug(
+            f"{self}: detected realtime service `{frame.service_name}`; "
+            "realtime_service_mode is enabled."
+        )
+
+        # Realtime-mode strategy swap. Only kicks in when (a) the
+        # service advertises that it emits its own
+        # UserStarted/StoppedSpeakingFrame and (b) the user didn't
+        # pass custom strategies — explicit user choice wins, and
+        # services that don't emit their own turn frames need to keep
+        # the default strategies so locally-driven turns (e.g. local
+        # VAD) can fire on_user_turn_* events.
+        if frame.emits_user_turn_frames and self._params.user_turn_strategies is None:
+            new_strategies = UserTurnStrategies(
+                start=[ExternalUserTurnStartStrategy()],
+                stop=[ExternalUserTurnStopStrategy()],
+            )
+            self._apply_realtime_mode_strategy_mutations(new_strategies)
+            await self._user_turn_controller.update_strategies(new_strategies)
             logger.debug(
-                f"{self}: detected realtime service `{frame.service_name}`; "
-                "realtime_service_mode is enabled."
+                f"{self}: replaced default turn strategies with "
+                f"ExternalUserTurnStart/StopStrategy for realtime service "
+                f"`{frame.service_name}` (emits_user_turn_frames=True)."
             )
 
     async def _realtime_handoff_flush(self) -> None:

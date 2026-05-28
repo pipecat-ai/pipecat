@@ -119,11 +119,14 @@ class RealtimeServiceInfo:
     the aggregator's one-time recommendation log.
 
     Parameters:
-        emits_user_turn_frames: Whether the service emits
-            ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``
-            from server-side turn signals. False for services with no
-            server-side turn signals (e.g. Gemini Live, AWS Nova Sonic,
-            Ultravox).
+        emits_user_turn_frames: Class-level capability — whether the
+            service is ever able to emit ``UserStartedSpeakingFrame`` /
+            ``UserStoppedSpeakingFrame`` from server-side turn signals.
+            False for services with no server-side turn signals at all
+            (e.g. Gemini Live, AWS Nova Sonic, Ultravox). Services with
+            configurable turn detection (e.g. OpenAI Realtime) keep this
+            True and reflect the live setting by overriding
+            ``LLMService._emits_user_turn_frames()``.
     """
 
     emits_user_turn_frames: bool = True
@@ -400,6 +403,24 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
 
+    def _emits_user_turn_frames(self) -> bool:
+        """Whether this instance emits server-driven user-speaking turn frames at runtime.
+
+        Defaults to ``RealtimeServiceInfo.emits_user_turn_frames`` — the
+        class-level capability (False for services with no server-side
+        turn signals, e.g. Gemini Live, Nova Sonic, Ultravox; True
+        otherwise). Subclasses with configurable turn detection
+        (e.g. OpenAI Realtime with ``turn_detection=False``) should
+        override this to return the live value so the broadcast
+        ``RealtimeServiceMetadataFrame.emits_user_turn_frames`` reflects
+        the actual configuration. ``LLMContextAggregatorPair`` reads
+        the broadcast value when deciding whether to swap default turn
+        strategies for ``ExternalUserTurnStart/StopStrategy``.
+        """
+        if self._realtime_service_info is None:
+            return False
+        return self._realtime_service_info.emits_user_turn_frames
+
     async def start(self, frame: StartFrame):
         """Start the LLM service.
 
@@ -592,7 +613,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self.broadcast_frame(
                 RealtimeServiceMetadataFrame,
                 service_name=self.name,
-                emits_user_turn_frames=self._realtime_service_info.emits_user_turn_frames,
+                emits_user_turn_frames=self._emits_user_turn_frames(),
             )
 
     async def _push_llm_text(self, text: str):

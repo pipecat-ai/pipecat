@@ -1696,27 +1696,65 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(pair.assistant()._realtime_service_mode)
 
     async def test_realtime_strategy_mutations_with_defaults(self):
+        # At __init__ time only the mutations apply (drop the
+        # transcription start strategy, flip wait_for_transcript on
+        # default stops). The external-strategy replacement is deferred
+        # to the RealtimeServiceMetadataFrame handler.
         _, pair = self._build_pair(realtime_service_mode=True)
-        # The mutated strategies live on the UserTurnController owned by
-        # the user aggregator.
         strategies = pair.user()._user_turn_controller._user_turn_strategies
-        # TranscriptionUserTurnStartStrategy is dropped.
         for s in strategies.start:
             self.assertNotIsInstance(s, TranscriptionUserTurnStartStrategy)
-        # VAD start strategy is preserved.
+        # Default VAD start strategy is preserved; no External strategies
+        # installed yet.
         self.assertTrue(any(isinstance(s, VADUserTurnStartStrategy) for s in strategies.start))
-        # External strategies are appended so on_user_turn_* fires from
-        # server-emitted UserStarted/StoppedSpeakingFrame.
-        self.assertTrue(any(isinstance(s, ExternalUserTurnStartStrategy) for s in strategies.start))
-        self.assertTrue(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
-        # Stop strategies that expose wait_for_transcript have it
-        # flipped (including the appended ExternalUserTurnStopStrategy).
+        self.assertFalse(
+            any(isinstance(s, ExternalUserTurnStartStrategy) for s in strategies.start)
+        )
+        self.assertFalse(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
         for s in strategies.stop:
             if hasattr(s, "wait_for_transcript"):
                 self.assertFalse(s.wait_for_transcript)
 
-    async def test_realtime_skips_external_append_when_user_strategies_passed(self):
-        # Custom user_turn_strategies opts out of the auto-append.
+    async def test_realtime_metadata_replaces_defaults_when_service_emits_turn_frames(self):
+        # When the service advertises emits_user_turn_frames=True and
+        # the user didn't pass custom strategies, the handler swaps the
+        # defaults out for ExternalUserTurnStart/StopStrategy.
+        _, pair = self._build_pair(realtime_service_mode=True)
+        frames_to_send = [
+            RealtimeServiceMetadataFrame(
+                service_name="FakeRealtimeLLM", emits_user_turn_frames=True
+            ),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
+        strategies = pair.user()._user_turn_controller._user_turn_strategies
+        self.assertEqual(len(strategies.start), 1)
+        self.assertIsInstance(strategies.start[0], ExternalUserTurnStartStrategy)
+        self.assertEqual(len(strategies.stop), 1)
+        self.assertIsInstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+        # Realtime-mode mutation is reapplied to the new stop strategy.
+        self.assertFalse(strategies.stop[0].wait_for_transcript)
+
+    async def test_realtime_metadata_keeps_defaults_when_service_does_not_emit_turn_frames(self):
+        # Services advertising emits_user_turn_frames=False keep the
+        # default strategies so locally-driven turns (e.g. local VAD)
+        # can fire on_user_turn_* events.
+        _, pair = self._build_pair(realtime_service_mode=True)
+        frames_to_send = [
+            RealtimeServiceMetadataFrame(
+                service_name="FakeRealtimeLLM", emits_user_turn_frames=False
+            ),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
+        strategies = pair.user()._user_turn_controller._user_turn_strategies
+        self.assertFalse(
+            any(isinstance(s, ExternalUserTurnStartStrategy) for s in strategies.start)
+        )
+        self.assertFalse(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
+        self.assertTrue(any(isinstance(s, VADUserTurnStartStrategy) for s in strategies.start))
+
+    async def test_realtime_metadata_keeps_custom_strategies(self):
+        # Custom user_turn_strategies opts out of the swap — explicit
+        # user choice wins, regardless of what the service advertises.
         custom = UserTurnStrategies(
             start=[VADUserTurnStartStrategy()],
             stop=[SpeechTimeoutUserTurnStopStrategy()],
@@ -1725,11 +1763,18 @@ class TestRealtimeServiceModeAggregator(unittest.IsolatedAsyncioTestCase):
             realtime_service_mode=True,
             user_params=LLMUserAggregatorParams(user_turn_strategies=custom),
         )
+        frames_to_send = [
+            RealtimeServiceMetadataFrame(
+                service_name="FakeRealtimeLLM", emits_user_turn_frames=True
+            ),
+        ]
+        await run_test(Pipeline([pair.user(), pair.assistant()]), frames_to_send=frames_to_send)
         strategies = pair.user()._user_turn_controller._user_turn_strategies
         self.assertFalse(
             any(isinstance(s, ExternalUserTurnStartStrategy) for s in strategies.start)
         )
         self.assertFalse(any(isinstance(s, ExternalUserTurnStopStrategy) for s in strategies.stop))
+        self.assertTrue(any(isinstance(s, VADUserTurnStartStrategy) for s in strategies.start))
 
     async def test_trailing_write_user_then_assistant_then_user(self):
         _, pair = self._build_pair(realtime_service_mode=True)

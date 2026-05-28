@@ -378,6 +378,11 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             return session_properties.turn_detection.type == "server_vad"
         return False
 
+    def _emits_user_turn_frames(self) -> bool:
+        # Without server-side VAD the service stays silent on user
+        # turn frames, so the broadcast advertises False.
+        return self._is_turn_detection_enabled()
+
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech."""
         if not self._is_turn_detection_enabled():

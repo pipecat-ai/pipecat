@@ -441,6 +441,11 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             and session_properties.audio.input.turn_detection is None
         )
 
+    def _emits_user_turn_frames(self) -> bool:
+        # In manual mode the server doesn't emit VAD events, so we
+        # don't broadcast UserStarted/StoppedSpeakingFrame.
+        return not self._is_manual_turn_detection()
+
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech.
 
@@ -961,14 +966,20 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
     async def _handle_evt_speech_started(self, evt):
         """Handle speech started event from server-side VAD."""
-        print(f"[pk] Speech started event received: {evt}")
+        if self._is_manual_turn_detection():
+            # In manual mode, the client is responsible for broadcasting user turn frames
+            return
+
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from server-side VAD."""
-        print(f"[pk] Speech stopped event received: {evt}")
+        if self._is_manual_turn_detection():
+            # In manual mode, the client is responsible for broadcasting user turn frames
+            return
+
         # Mark that the server is handling this turn (and will auto-create a
         # response when create_response=True).  This prevents _handle_context
         # from sending a duplicate ResponseCreateEvent when the user aggregator

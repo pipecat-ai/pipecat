@@ -1450,11 +1450,14 @@ class RealtimeServiceMetadataFrame(ServiceMetadataFrame):
     ``realtime_service_mode=True`` when it hasn't been configured.
 
     Parameters:
-        emits_user_turn_frames: Whether this service emits
-            ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``
-            from server-side turn signals. False for services with no
-            server-side turn signals (e.g. Gemini Live, AWS Nova Sonic,
-            Ultravox).
+        emits_user_turn_frames: Whether this service is currently
+            configured to emit ``UserStartedSpeakingFrame`` /
+            ``UserStoppedSpeakingFrame`` from server-side turn signals.
+            False for services with no server-side turn signals at all
+            (e.g. Gemini Live, AWS Nova Sonic, Ultravox), and also
+            False for services whose server-side turn detection has
+            been disabled by configuration (e.g. OpenAI Realtime with
+            ``turn_detection=False``).
     """
 
     emits_user_turn_frames: bool = True
