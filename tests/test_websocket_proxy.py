@@ -98,7 +98,7 @@ class TestWebSocketProxyClient(unittest.IsolatedAsyncioTestCase):
             local_worker_name="voice",
             serializer=self.serializer,
         )
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
         await worker.setup(self.tm)
         worker._ws = fake_ws
         return worker
@@ -221,7 +221,7 @@ class TestWebSocketProxyServer(unittest.IsolatedAsyncioTestCase):
             remote_worker_name="voice",
             serializer=self.serializer,
         )
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
         await worker.setup(self.tm)
         return worker
 

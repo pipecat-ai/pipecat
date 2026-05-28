@@ -284,12 +284,14 @@ class BaseWorker(BaseObject, BusSubscriber):
         """Active job groups launched by this worker, keyed by job_id."""
         return self._job_groups
 
-    def attach(self, *, registry: WorkerRegistry, bus: WorkerBus) -> None:
+    async def attach(self, *, registry: WorkerRegistry, bus: WorkerBus) -> None:
         """Attach the worker to a runner-provided registry and bus.
 
-        Called by the runner (typically from ``add_workers()``) before the
-        worker is run. After this call, :attr:`registry` and :attr:`bus`
-        return the provided instances.
+        Called by the runner (typically from ``add_workers()``) before
+        the worker is run. After this call, :attr:`registry` and
+        :attr:`bus` return the provided instances, and the worker is
+        subscribed to the bus — so workers added later are listening
+        before any worker emits its first message.
 
         Args:
             registry: The shared worker registry.
@@ -297,6 +299,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         """
         self._registry = registry
         self._bus = bus
+        await self._bus.subscribe(self)
 
     async def cleanup(self) -> None:
         """Clean up the worker and release resources.
@@ -322,9 +325,6 @@ class BaseWorker(BaseObject, BusSubscriber):
         task_manager = TaskManager()
         task_manager.setup(TaskManagerParams(loop=params.loop))
         await super().setup(task_manager)
-
-        if self._bus is not None:
-            await self._bus.subscribe(self)
 
         await self.start()
         try:

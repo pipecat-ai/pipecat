@@ -179,7 +179,11 @@ class PipelineRunner(BaseObject, BusSubscriber):
                     f"PipelineRunner '{self}': worker '{worker.name}' already exists, skipping"
                 )
                 continue
-            worker.attach(registry=self._registry, bus=self._bus)
+            # ``attach`` is async because it also subscribes the worker
+            # to the bus — eager subscription is required so workers
+            # added later are listening before earlier workers emit
+            # their first messages.
+            await worker.attach(registry=self._registry, bus=self._bus)
             await self._registry.watch(worker.name, self._on_local_worker_ready)
             entry = _WorkerEntry(worker=worker)
             self._entries[worker.name] = entry

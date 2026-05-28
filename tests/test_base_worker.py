@@ -111,7 +111,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         worker = make_stub_pipeline_task("test", bridged=())
         worker._active = False
         worker._pending_activation = False
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
 
         handoff_done = asyncio.Event()
         handoff_args_received = []
@@ -209,7 +209,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         worker = make_stub_pipeline_task("task_a", bridged=())
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
 
         await worker.activate_worker("task_b", deactivate_self=True)
 
@@ -225,7 +225,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         worker = BaseWorker("task_a")
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
         await worker.end(reason="done")
 
         end_msgs = [m for m in sent if isinstance(m, BusEndMessage)]
@@ -238,9 +238,9 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         parent = BaseWorker("parent_task")
-        parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus)
         worker = BaseWorker("child")
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
         await parent.add_workers(worker)
         await worker.end(reason="goodbye")
 
@@ -254,7 +254,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         worker = BaseWorker("task_a")
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
         await worker.cancel()
 
         cancel_msgs = [m for m in sent if isinstance(m, BusCancelMessage)]
@@ -266,7 +266,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         worker = BaseWorker("task_a")
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
         new_task = BaseWorker("task_b")
         await worker.add_workers(new_task)
 
@@ -342,7 +342,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         """activate_worker(deactivate_self=True) sends a deactivate for the calling worker."""
         sent = capture_bus(self.bus)
         worker = make_stub_pipeline_task("test", bridged=())
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
 
         self.assertTrue(worker.active)
         await worker.activate_worker("other", deactivate_self=True)
@@ -523,7 +523,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_add_workers_tracks_children(self):
         """add_workers() populates children list and sets parent."""
         parent = BaseWorker("parent")
-        parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus)
         child_a = BaseWorker("child_a")
         child_b = BaseWorker("child_b")
 
@@ -539,7 +539,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         parent = BaseWorker("parent")
-        parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus)
         child_a = BaseWorker("child_a")
         child_b = BaseWorker("child_b")
         await parent.add_workers(child_a)
@@ -561,7 +561,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_end_waits_for_children(self):
         """Parent waits for children to finish before completing _handle_worker_end."""
         parent = BaseWorker("parent")
-        parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus)
         child = BaseWorker("child")
         await parent.add_workers(child)
 
@@ -589,7 +589,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
         sent = capture_bus(self.bus)
 
         parent = BaseWorker("parent")
-        parent.attach(registry=self.registry, bus=self.bus)
+        await parent.attach(registry=self.registry, bus=self.bus)
         child_a = BaseWorker("child_a")
         child_b = BaseWorker("child_b")
         await parent.add_workers(child_a)
@@ -931,7 +931,7 @@ class TestJobLifecycle(unittest.IsolatedAsyncioTestCase):
         self.registry = create_test_registry()
 
     async def _attach(self, worker):
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
         await worker.setup(self.tm)
         return worker
 
@@ -1306,7 +1306,7 @@ class TestJobDecorator(unittest.IsolatedAsyncioTestCase):
         self.registry = create_test_registry()
 
     async def _attach(self, worker):
-        worker.attach(registry=self.registry, bus=self.bus)
+        await worker.attach(registry=self.registry, bus=self.bus)
         await worker.setup(self.tm)
         return worker
 

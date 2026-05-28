@@ -968,9 +968,6 @@ class PipelineWorker(BaseWorker):
         """Set up the pipeline worker and all processors."""
         await super().setup(self._pipeline_task_manager)
 
-        if self._bus is not None:
-            await self._bus.subscribe(self)
-
         mgr_params = TaskManagerParams(loop=params.loop)
         self.task_manager.setup(mgr_params)
 
