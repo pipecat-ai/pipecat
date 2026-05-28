@@ -168,7 +168,6 @@ class AudioChunkIterator:
         """
         self._event_loop = event_loop
         self._queue: asyncio.Queue[bytes | object] = asyncio.Queue()
-        self._broken = False
         self._closed = False
 
     @property
@@ -182,7 +181,7 @@ class AudioChunkIterator:
         Args:
             audio: Raw PCM audio bytes to send to the server.
         """
-        if self._closed or self._broken:
+        if self._closed:
             return
         await self._queue.put(audio)
 
@@ -350,7 +349,6 @@ class NvidiaSTTService(STTService):
 
         self._asr_service = None
         self._audio_iterator: AudioChunkIterator | None = None
-        self._pending_audio_chunks: list[bytes] = []
         self._config = None
         self._thread_task = None
 
@@ -475,7 +473,6 @@ class NvidiaSTTService(STTService):
         await super().start(frame)
         self._initialize_client()
         self._config = self._create_recognition_config()
-        self._pending_audio_chunks.clear()
         self._audio_iterator = AudioChunkIterator(self.get_event_loop())
 
         if not self._thread_task:
@@ -501,12 +498,17 @@ class NvidiaSTTService(STTService):
         await super().cancel(frame)
         await self._stop_tasks()
 
-    async def _stop_tasks(self, clear_pending_audio: bool = True):
+    async def _stop_tasks(self, close_iterator: bool = True):
+        """Stop the active stream thread and optionally close the shared iterator.
+
+        ``close_iterator=False`` is used during reconnect so we can tear down the
+        current gRPC stream but keep buffering audio on the same iterator until
+        the replacement stream starts consuming it.
+        """
         iterator = self._audio_iterator
-        self._audio_iterator = None
-        if clear_pending_audio:
-            self._pending_audio_chunks.clear()
-        if iterator is not None:
+        if close_iterator:
+            self._audio_iterator = None
+        if close_iterator and iterator is not None:
             await iterator.close()
 
         if self._thread_task:
@@ -514,25 +516,13 @@ class NvidiaSTTService(STTService):
             self._thread_task = None
 
     async def _do_reconnect(self):
-        old_iterator = self._audio_iterator
-        buffered_audio = []
-        if old_iterator is not None:
-            while True:
-                try:
-                    audio = old_iterator._queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-                if audio is not old_iterator._QUEUE_SENTINEL:
-                    buffered_audio.append(audio)
-        await self._stop_tasks(clear_pending_audio=False)
+        iterator = self._audio_iterator
+        if iterator is None or iterator.closed:
+            return
+
+        await self._stop_tasks(close_iterator=False)
         self._initialize_client()
         self._config = self._create_recognition_config()
-        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
-        for audio in buffered_audio:
-            await self._audio_iterator.put(audio)
-        for audio in self._pending_audio_chunks:
-            await self._audio_iterator.put(audio)
-        self._pending_audio_chunks.clear()
         self._thread_task = self.create_task(self._thread_task_handler())
 
     async def _handle_stream_drop(self, iterator: AudioChunkIterator, reason: str):
@@ -565,7 +555,6 @@ class NvidiaSTTService(STTService):
             logger.error(f"{self} unexpected streaming error: {e}")
 
         if drop_reason:
-            iterator._broken = True
             asyncio.run_coroutine_threadsafe(
                 self._handle_stream_drop(iterator, drop_reason),
                 self.get_event_loop(),
@@ -637,10 +626,8 @@ class NvidiaSTTService(STTService):
         """
         await self.start_processing_metrics()
         iterator = self._audio_iterator
-        if iterator is not None and not iterator.closed and not iterator._broken:
+        if iterator is not None and not iterator.closed:
             await iterator.put(audio)
-        elif iterator is not None and not iterator.closed:
-            self._pending_audio_chunks.append(audio)
         yield None
 
 
