@@ -173,6 +173,11 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         """
         return True
 
+    @property
+    def supports_ttfs(self) -> bool:
+        """TTFS doesn't apply: the server defines turn boundaries directly."""
+        return False
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
