@@ -56,18 +56,18 @@ class SlngSTTSettings(STTSettings):
 
 
 class SlngSTTService(WebsocketSTTService):
-    """Speech-to-text service using the SLNG bridge WebSocket API.
+    """Speech-to-text service using the SLNG Unmute STT bridge WebSocket API.
 
-    Provides real-time speech transcription through a WebSocket connection
-    to the SLNG STT bridge:
+    Provides real-time speech transcription through a persistent WebSocket
+    connection to ``wss://api.slng.ai/v1/bridges/unmute/stt/{model}``:
 
     - Audio is sent as raw binary WebSocket frames (no JSON wrapping).
     - Connection-level config (``sample_rate``, ``encoding``, ``language``,
-      ``enable_partials``, ``enable_vad``) is supplied via URL query parameters.
-    - Control messages are JSON text frames with a PascalCase ``type`` field:
-      ``KeepAlive``, ``Finalize``, ``CloseStream``.
-    - Transcription results arrive as ``Results`` messages
-      (``channel.alternatives[0].transcript``, ``is_final``, ``from_finalize``).
+      ``enable_partials``, ``enable_vad``) is sent in an ``init`` text message.
+    - Client control messages use lowercase ``type``: ``keepalive``,
+      ``finalize``, ``close``.
+    - Server emits ``ready``, ``partial_transcript``, ``final_transcript``,
+      ``utterance_end``, and ``error`` JSON text frames.
     """
 
     Settings = SlngSTTSettings
@@ -92,14 +92,11 @@ class SlngSTTService(WebsocketSTTService):
             api_key: Authentication key for the SLNG API.
             model: The transcription model to use. Defaults to "slng/deepgram/nova:3-en".
             base_url: The API host (without scheme). Defaults to "api.slng.ai".
-            encoding: Audio encoding format. Defaults to "linear16".
+            encoding: Audio encoding format. One of ``"linear16"``, ``"mp3"``,
+                or ``"opus"``. Defaults to ``"linear16"``.
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline sample rate.
-            region_override: Pin requests to a specific datacenter. One of
-                ``"ap-southeast-2"``, ``"eu-north-1"``, ``"us-east-1"``. Sets the
-                ``X-Region-Override`` header (takes precedence over ``world_part_override``).
+            region_override: Pin requests to a specific datacenter.
             world_part_override: Constrain routing to a broad geographic zone.
-                One of ``"ap"``, ``"eu"``, ``"na"``. Sets the ``X-World-Part-Override``
-                header.
             settings: Runtime-updatable settings override.
             **kwargs: Additional arguments passed to parent WebsocketSTTService.
         """
@@ -127,9 +124,6 @@ class SlngSTTService(WebsocketSTTService):
         self._receive_task = None
         self._region_override = region_override
         self._world_part_override = world_part_override
-        # Signalled by the receive task when the server emits a ``ready`` message
-        # acknowledging the init message. Audio sends block on this event so that
-        # binary frames cannot race ahead of the init handshake on reconnect.
         self._ready_event = asyncio.Event()
         self._ready_timeout = 5.0
 
@@ -186,7 +180,10 @@ class SlngSTTService(WebsocketSTTService):
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text transcription.
 
-        Sends raw PCM audio bytes as a binary WebSocket frame.
+        Sends raw PCM audio bytes as a binary WebSocket frame. Waits for the
+        server ``ready`` acknowledgement before sending; audio arriving before
+        the server is ready causes the connection to close with WebSocket policy
+        violation 1008.
 
         Args:
             audio: Raw PCM audio bytes to transcribe.
@@ -202,10 +199,6 @@ class SlngSTTService(WebsocketSTTService):
             yield None
             return
 
-        # Block until the server has acknowledged the init handshake. Without
-        # this gate, audio frames buffered by the pipeline (or replayed by the
-        # base class on reconnect) can hit the wire before the init message and
-        # the server closes the stream with policy violation 1008.
         if not self._ready_event.is_set():
             try:
                 await asyncio.wait_for(self._ready_event.wait(), timeout=self._ready_timeout)
@@ -265,11 +258,12 @@ class SlngSTTService(WebsocketSTTService):
         return config
 
     async def _connect_websocket(self):
-        """Establish the WebSocket connection and send the initial ``Configure``.
+        """Establish the WebSocket connection and send the initial ``init`` message.
 
-        The SLNG bridge requires a ``Configure`` text message before any audio
-        bytes are accepted; otherwise the server closes with policy violation
-        ``1008``.
+        The SLNG STT bridge requires an ``init`` text message before any audio
+        bytes are accepted; otherwise the server closes the connection with
+        WebSocket policy violation 1008. The server responds with a ``ready``
+        message once the session is established.
         """
         try:
             if self._websocket and self._websocket.state is State.OPEN:
@@ -277,8 +271,6 @@ class SlngSTTService(WebsocketSTTService):
             logger.debug(f"Connecting to SLNG STT ({self._settings.model})")
 
             model = self._settings.model or "slng/deepgram/nova:3-en"
-            # Model may contain slashes (e.g. "slng/deepgram/nova:3-en") that are
-            # part of the path; encode any other reserved chars with quote(safe="/").
             model_path = quote(model, safe="/:")
             if "://" in self._base_url:
                 ws_url = f"{self._base_url}/v1/bridges/unmute/stt/{model_path}"
@@ -295,10 +287,6 @@ class SlngSTTService(WebsocketSTTService):
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
 
             config = self._build_config()
-            # Init message uses a distinct ``init`` tag (separate from the
-            # post-init variant enum CloseStream/Configure/Sync/KeepAlive/
-            # Finalize). Server emits a ``ready`` message once it has been
-            # accepted; ``run_stt`` blocks on ``_ready_event`` until then.
             await self._websocket.send(json.dumps({"type": "init", "config": config}))
 
             await self._call_event_handler("on_connected")
@@ -330,7 +318,6 @@ class SlngSTTService(WebsocketSTTService):
         """Receive and dispatch incoming WebSocket messages."""
         async for message in self._get_websocket():
             if isinstance(message, bytes):
-                # Server should not push binary frames for STT; ignore.
                 continue
             try:
                 data = json.loads(message)
@@ -460,10 +447,6 @@ class SlngSTTService(WebsocketSTTService):
         await self._request_reconnect()
         return changed
 
-
-# ---------------------------------------------------------------------------
-# HTTP batch STT (voiceai-sdk)
-# ---------------------------------------------------------------------------
 
 try:
     from voiceai_sdk import AsyncSlng

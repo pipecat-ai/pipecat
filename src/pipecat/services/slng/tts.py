@@ -52,19 +52,19 @@ class SlngTTSSettings(TTSSettings):
 
 
 class SlngTTSService(WebsocketTTSService):
-    """Text-to-speech service using the SLNG bridge WebSocket API.
+    """Text-to-speech service using the SLNG Unmute TTS bridge WebSocket API.
 
     Provides real-time speech synthesis through a persistent WebSocket
-    connection to the SLNG TTS bridge:
+    connection to ``wss://api.slng.ai/v1/bridges/unmute/tts/{model}``:
 
     - Connection-level config (``voice``, ``encoding``, ``sample_rate``,
-      ``speed``, ``language``) is supplied via URL query parameters.
-    - Text to synthesise is sent as ``{"type": "Speak", "text": "..."}``.
-    - ``{"type": "Flush"}`` signals end of an utterance.
-    - ``{"type": "Clear"}`` cancels in-flight audio on interruption.
-    - ``{"type": "Close"}`` gracefully closes the connection.
-    - Audio arrives as raw binary WebSocket frames; ``Metadata``, ``Flushed``,
-      ``Cleared``, and ``Warning`` arrive as JSON text frames.
+      ``speed``, ``language``) is sent in an ``init`` text message.
+    - Text to synthesise is sent as ``{"type": "text", "text": "..."}``.
+    - ``{"type": "flush"}`` signals end of an utterance.
+    - ``{"type": "clear"}`` cancels in-flight audio on interruption.
+    - ``{"type": "close"}`` gracefully closes the connection.
+    - Audio arrives as raw binary WebSocket frames; ``ready``, ``flushed``,
+      ``audio_end``, and ``error`` arrive as JSON text frames.
     """
 
     Settings = SlngTTSSettings
@@ -92,7 +92,8 @@ class SlngTTSService(WebsocketTTSService):
             voice: Voice identifier for synthesis (e.g. "aura-2-thalia-en").
             base_url: The API host (without scheme) or a full WebSocket URL
                 (e.g. "ws://localhost:8080" for testing). Defaults to "api.slng.ai".
-            encoding: Audio encoding format. Defaults to "linear16".
+            encoding: Audio encoding format. One of ``"linear16"``, ``"mp3"``,
+                ``"opus"``, ``"mulaw"``, or ``"alaw"``. Defaults to ``"linear16"``.
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline sample rate.
             region_override: Pin requests to a specific datacenter. One of
                 ``"ap-southeast-2"``, ``"eu-north-1"``, ``"us-east-1"``. Sets the
@@ -127,8 +128,6 @@ class SlngTTSService(WebsocketTTSService):
         self._region_override = region_override
         self._world_part_override = world_part_override
         self._receive_task = None
-        # Set by the receive task on ``ready``; ``run_tts`` waits for this
-        # before sending text, so synthesis cannot race the init handshake.
         self._ready_event = asyncio.Event()
         self._ready_timeout = 5.0
 
@@ -202,11 +201,12 @@ class SlngTTSService(WebsocketTTSService):
         return config
 
     async def _connect_websocket(self):
-        """Establish the WebSocket connection and send the initial ``Configure``.
+        """Establish the WebSocket connection and send the initial ``init`` message.
 
-        The SLNG TTS bridge requires a ``Configure`` text message before any
-        ``Speak``/``Flush`` is accepted; otherwise the server replies with an
-        error and ignores subsequent messages.
+        The SLNG TTS bridge requires an ``init`` text message before any
+        ``text``/``flush`` messages are accepted; otherwise the server replies
+        with an error and ignores subsequent messages. The server responds with
+        a ``ready`` message once the session is established.
         """
         try:
             if self._websocket and self._websocket.state is State.OPEN:
@@ -230,7 +230,6 @@ class SlngTTSService(WebsocketTTSService):
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
 
             init_msg: dict[str, Any] = {"type": "init", "config": self._build_config()}
-            # Per the Unmute TTS spec, ``voice`` is a top-level field on init.
             if self._settings.voice:
                 init_msg["voice"] = str(self._settings.voice)
             await self._websocket.send(json.dumps(init_msg))
@@ -351,11 +350,9 @@ class SlngTTSService(WebsocketTTSService):
                 await self.remove_audio_context(ctx_id)
 
         elif type_lc == "cleared":
-            # Server cleared its buffer after a ``clear`` message.
             pass
 
         elif type_lc == "audio_end":
-            # End-of-stream marker from upstream provider.
             logger.trace(f"{self}: SLNG TTS audio_end: {data}")
 
         elif type_lc == "error":
@@ -378,8 +375,10 @@ class SlngTTSService(WebsocketTTSService):
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using the SLNG TTS API.
 
-        Sends a ``Speak`` message over the WebSocket. Audio arrives asynchronously
-        via the receive task as binary frames.
+        Sends a ``text`` message over the WebSocket. Waits for the server
+        ``ready`` acknowledgement before sending; this prevents synthesis
+        messages from racing the ``init`` handshake on reconnect. Audio arrives
+        asynchronously via the receive task as binary frames.
 
         Args:
             text: The text to synthesise into speech.
@@ -398,8 +397,6 @@ class SlngTTSService(WebsocketTTSService):
                 yield ErrorFrame(error="SLNG TTS websocket not connected")
                 return
 
-            # Block until the server has acknowledged the init handshake so
-            # ``Speak`` cannot race the init message on reconnect.
             if not self._ready_event.is_set():
                 try:
                     await asyncio.wait_for(self._ready_event.wait(), timeout=self._ready_timeout)
@@ -421,10 +418,6 @@ class SlngTTSService(WebsocketTTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-
-# ---------------------------------------------------------------------------
-# HTTP streaming TTS (voiceai-sdk)
-# ---------------------------------------------------------------------------
 
 try:
     from voiceai_sdk import AsyncSlng
