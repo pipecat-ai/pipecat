@@ -218,15 +218,27 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # from pipecat.audio.vad.silero import SileroVADAnalyzer
     # from pipecat.turns.user_turn_strategies import UserTurnStrategies
     # from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
+    # from pipecat.turns.user_start.external_user_turn_start_strategy import (
+    #     ExternalUserTurnStartStrategy,
+    # )
+    # from pipecat.turns.user_stop.external_user_turn_stop_strategy import (
+    #     ExternalUserTurnStopStrategy,
+    # )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         realtime_service_mode=True,
         # user_params=LLMUserAggregatorParams(
         #     vad_analyzer=SileroVADAnalyzer(),
-        #     user_turn_strategies=UserTurnStrategies(start=[VADUserTurnStartStrategy(
-        #         enable_interruptions=True,
-        #         enable_user_speaking_frames=False,  # Grok already emits turn frames
-        #     )], stop=[]) # Grok already emits turn frames
+        #     user_turn_strategies=UserTurnStrategies(
+        #         start=[
+        #             VADUserTurnStartStrategy(
+        #                 enable_interruptions=True,
+        #                 enable_user_speaking_frames=False,  # Grok already emits turn frames
+        #             ),
+        #             ExternalUserTurnStartStrategy(),
+        #         ],
+        #         stop=[ExternalUserTurnStopStrategy()],
+        #     ),  # Grok already emits turn frames
         # ),
     )
 

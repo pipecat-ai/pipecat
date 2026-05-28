@@ -876,12 +876,20 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
 
     async def _handle_evt_speech_started(self, evt):
         """Handle speech started event from VAD."""
+        if not self._is_turn_detection_enabled():
+            # In local turn detection mode, the client is responsible for broadcasting user turn frames
+            return
+
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from VAD."""
+        if not self._is_turn_detection_enabled():
+            # In local turn detection mode, the client is responsible for broadcasting user turn frames
+            return
+
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self.broadcast_frame(UserStoppedSpeakingFrame)
