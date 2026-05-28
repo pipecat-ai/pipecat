@@ -208,7 +208,9 @@ class AudioBufferProcessor(FrameProcessor):
                 now = time.monotonic()
                 # Insert silence for any wall-clock gap since the user buffer was
                 # last written (covers muted microphone and other silent periods).
-                self._fill_user_silence_gap(now, len(resampled))
+                self._fill_buffer_silence_gap(
+                    self._user_audio_buffer, self._last_user_buffer_update_time, now, len(resampled)
+                )
                 self._last_user_buffer_update_time = now
                 # Sync bot buffer to current user position before adding user audio.
                 # We sync BEFORE extending to align both buffers at the same starting timestamp.
@@ -243,7 +245,9 @@ class AudioBufferProcessor(FrameProcessor):
                 # Insert silence for any wall-clock gap since the bot buffer was
                 # last written (covers idle periods between bot utterances, e.g.
                 # while a slow function call runs).
-                self._fill_bot_silence_gap(now, len(resampled))
+                self._fill_buffer_silence_gap(
+                    self._bot_audio_buffer, self._last_bot_buffer_update_time, now, len(resampled)
+                )
                 self._last_bot_buffer_update_time = now
                 # Sync user buffer to current bot position before adding bot audio.
                 # Skip silence injection if the user is actively speaking to avoid
@@ -286,22 +290,32 @@ class AudioBufferProcessor(FrameProcessor):
             silence_needed = target_position - current_len
             buffer.extend(b"\x00" * silence_needed)
 
-    def _fill_user_silence_gap(self, now: float, frame_bytes: int):
-        """Insert silence into the user buffer when a gap is detected.
+    def _fill_buffer_silence_gap(
+        self,
+        buffer: bytearray,
+        last_update_time: float | None,
+        now: float,
+        frame_bytes: int,
+    ):
+        """Insert silence into a buffer when a wall-clock gap is detected.
 
-        Called before adding new user audio. Compares the wall-clock time
-        elapsed since the user buffer was last written against the duration
-        of the incoming frame. Any excess time (e.g., from a muted mic) is
-        filled with silence so the two utterances remain temporally separated.
+        Called before adding new audio to a buffer. Compares the elapsed
+        wall-clock time since the buffer was last written against the duration
+        of the incoming frame. Any excess time (e.g., a muted mic or an idle
+        period between bot utterances) is filled with silence so the recorded
+        utterances remain temporally separated.
 
         Args:
+            buffer: The audio buffer to pad (user or bot).
+            last_update_time: Monotonic time of the last write to this buffer,
+                or None if the buffer has never been written.
             now: Current monotonic time.
             frame_bytes: Byte length of the incoming (resampled) audio frame.
         """
-        if self._last_user_buffer_update_time is None or self._sample_rate == 0:
+        if last_update_time is None or self._sample_rate == 0:
             return
 
-        elapsed = now - self._last_user_buffer_update_time
+        elapsed = now - last_update_time
         frame_duration = frame_bytes / (self._sample_rate * 2)
         gap = elapsed - frame_duration
 
@@ -309,33 +323,7 @@ class AudioBufferProcessor(FrameProcessor):
             silence_bytes = int(gap * self._sample_rate * 2)
             silence_bytes -= silence_bytes % 2  # keep 16-bit alignment
             if silence_bytes > 0:
-                self._user_audio_buffer.extend(b"\x00" * silence_bytes)
-
-    def _fill_bot_silence_gap(self, now: float, frame_bytes: int):
-        """Insert silence into the bot buffer when a gap is detected.
-
-        Called before adding new bot audio. Compares the wall-clock time
-        elapsed since the bot buffer was last written against the duration
-        of the incoming frame. Any excess time (e.g., the wait between
-        progressive hold messages while a slow function call runs) is filled
-        with silence so the recorded utterances remain temporally separated.
-
-        Args:
-            now: Current monotonic time.
-            frame_bytes: Byte length of the incoming (resampled) audio frame.
-        """
-        if self._last_bot_buffer_update_time is None or self._sample_rate == 0:
-            return
-
-        elapsed = now - self._last_bot_buffer_update_time
-        frame_duration = frame_bytes / (self._sample_rate * 2)
-        gap = elapsed - frame_duration
-
-        if gap > 0.2:  # 200 ms threshold — safely above normal jitter
-            silence_bytes = int(gap * self._sample_rate * 2)
-            silence_bytes -= silence_bytes % 2  # keep 16-bit alignment
-            if silence_bytes > 0:
-                self._bot_audio_buffer.extend(b"\x00" * silence_bytes)
+                buffer.extend(b"\x00" * silence_bytes)
 
     async def _process_turn_recording(self, frame: Frame, resampled_audio: bytes | None = None):
         """Process frames for turn-based audio recording."""

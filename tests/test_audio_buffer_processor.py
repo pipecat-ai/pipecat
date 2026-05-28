@@ -326,7 +326,7 @@ class TestSilenceInjectionGuards(unittest.IsolatedAsyncioTestCase):
 
 
 class TestMuteGapSilenceInsertion(unittest.IsolatedAsyncioTestCase):
-    """Tests for _fill_user_silence_gap.
+    """Tests for _fill_buffer_silence_gap (user buffer path).
 
     When the microphone is muted, no InputAudioRawFrame arrives. Without gap
     detection the next utterance is appended directly after the previous one,
@@ -543,7 +543,7 @@ class TestMuteGapSilenceInsertion(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBotSilenceGapInsertion(unittest.IsolatedAsyncioTestCase):
-    """Tests for _fill_bot_silence_gap.
+    """Tests for _fill_buffer_silence_gap (bot buffer path).
 
     Mirror of TestMuteGapSilenceInsertion for the bot-audio path. When the
     bot is briefly idle between utterances (e.g. progressive hold messages
