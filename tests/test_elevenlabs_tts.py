@@ -6,9 +6,14 @@
 
 """Tests for ElevenLabs TTS alignment handling."""
 
+import json
 from typing import Any
 
+import pytest
+from websockets.protocol import State
+
 from pipecat.services.elevenlabs.tts import (
+    ElevenLabsTTSService,
     _select_alignment,
     _strip_utterance_leading_spaces,
     calculate_word_times,
@@ -200,3 +205,87 @@ def test_select_alignment_works_with_http_field_names():
     )
     assert selected is not None
     assert selected["characters"] == list(" Hi")
+
+
+# ---------------------------------------------------------------------------
+# Keepalive vs context-init race
+#
+# The keepalive must only stamp a context_id once its context-init (carrying
+# voice_settings) has been sent. Stamping it earlier makes the keepalive the
+# context's first message, with no voice_settings, and ElevenLabs rejects the
+# later context-init with a 1008 policy violation.
+# ---------------------------------------------------------------------------
+
+
+class _FakeWebSocket:
+    """Minimal stand-in for the ElevenLabs websocket that records sends."""
+
+    def __init__(self):
+        self.state = State.OPEN
+        self.sent: list[dict] = []
+
+    async def send(self, data: str):
+        self.sent.append(json.loads(data))
+
+
+def _make_service() -> ElevenLabsTTSService:
+    return ElevenLabsTTSService(
+        api_key="test-key",
+        settings=ElevenLabsTTSService.Settings(
+            voice="test-voice",
+            stability=0.55,
+            similarity_boost=0.85,
+            use_speaker_boost=True,
+            speed=0.81,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_keepalive_does_not_stamp_context_before_init():
+    """During the pre-init window the keepalive must not stamp the new context_id."""
+    service = _make_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+
+    # Simulate the start of an LLM turn: TTSService sets the turn context id on
+    # LLMFullResponseStartFrame, before run_tts sends the voice_settings init.
+    service._turn_context_id = "ctx-1"
+    service._playing_context_id = None
+    assert "ctx-1" not in service._context_init_sent
+
+    await service._send_keepalive()
+
+    # Context-less keepalive: the real context-init stays the context's first
+    # message, so ElevenLabs won't reject it with 1008.
+    assert ws.sent == [{"text": ""}]
+
+
+@pytest.mark.asyncio
+async def test_keepalive_stamps_context_after_init():
+    """Once the context-init has been sent, the keepalive targets that context."""
+    service = _make_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+    service._turn_context_id = "ctx-1"
+    service._playing_context_id = None
+    # run_tts records the context once its voice_settings init has gone out.
+    service._context_init_sent.add("ctx-1")
+
+    await service._send_keepalive()
+
+    assert ws.sent == [{"text": "", "context_id": "ctx-1"}]
+
+
+@pytest.mark.asyncio
+async def test_keepalive_without_active_context_sends_empty():
+    """With no active context, the keepalive sends a plain empty message."""
+    service = _make_service()
+    ws = _FakeWebSocket()
+    service._websocket = ws
+    service._turn_context_id = None
+    service._playing_context_id = None
+
+    await service._send_keepalive()
+
+    assert ws.sent == [{"text": ""}]
