@@ -599,12 +599,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
 
         await super().push_frame(frame, direction)
 
-        # Broadcast realtime-service metadata immediately after the
-        # StartFrame propagates downstream, mirroring the order STT
-        # services use for STTMetadataFrame. The aggregator (upstream)
-        # already received its own StartFrame and is ready to process
-        # the broadcast; downstream processors see StartFrame then the
-        # metadata in their queues.
+        # Broadcast realtime-service metadata right after StartFrame goes
+        # downstream, so downstream sees StartFrame then metadata (and the
+        # upstream aggregator, already started, can act on it). We hook
+        # push_frame rather than process_frame because realtime subclasses
+        # forward StartFrame from their own trailing push_frame, not the
+        # base process_frame — this is the one spot that catches them all.
         if (
             self._realtime_service_info is not None
             and isinstance(frame, StartFrame)
