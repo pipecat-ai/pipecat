@@ -10,7 +10,7 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 from loguru import logger
 
@@ -54,8 +54,7 @@ class SlngTTSService(WebsocketTTSService):
     """Text-to-speech service using the SLNG bridge WebSocket API.
 
     Provides real-time speech synthesis through a persistent WebSocket
-    connection to the SLNG TTS bridge. The bridge speaks a Deepgram-compatible
-    protocol:
+    connection to the SLNG TTS bridge:
 
     - Connection-level config (``voice``, ``encoding``, ``sample_rate``,
       ``speed``, ``language``) is supplied via URL query parameters.
@@ -107,7 +106,7 @@ class SlngTTSService(WebsocketTTSService):
             model=model,
             voice=voice,
             language=Language.EN,
-            speed=NOT_GIVEN,
+            speed=None,
         )
 
         if settings is not None:
@@ -178,26 +177,31 @@ class SlngTTSService(WebsocketTTSService):
 
         await self._disconnect_websocket()
 
-    def _build_query_params(self) -> str:
-        """Build URL query string from the current settings."""
-        params: dict[str, str] = {
+    def _build_config(self) -> dict[str, Any]:
+        """Build the Configure-message body from the current settings."""
+        config: dict[str, Any] = {
             "encoding": self._encoding,
-            "sample_rate": str(self.sample_rate),
+            "sample_rate": self.sample_rate,
         }
 
         if self._settings.voice:
-            params["voice"] = str(self._settings.voice)
+            config["voice"] = str(self._settings.voice)
 
         if is_given(self._settings.language) and self._settings.language is not None:
-            params["language"] = str(self._settings.language)
+            config["language"] = str(self._settings.language)
 
-        if is_given(self._settings.speed):
-            params["speed"] = str(self._settings.speed)
+        if is_given(self._settings.speed) and self._settings.speed is not None:
+            config["speed"] = float(self._settings.speed)
 
-        return urlencode(params)
+        return config
 
     async def _connect_websocket(self):
-        """Establish the WebSocket connection with config in URL query params."""
+        """Establish the WebSocket connection and send the initial ``Configure``.
+
+        The SLNG TTS bridge requires a ``Configure`` text message before any
+        ``Speak``/``Flush`` is accepted; otherwise the server replies with an
+        error and ignores subsequent messages.
+        """
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -206,12 +210,10 @@ class SlngTTSService(WebsocketTTSService):
             logger.debug(f"Connecting to SLNG TTS ({model})")
 
             model_path = quote(model, safe="/:")
-            query = self._build_query_params()
-
             if "://" in self._base_url:
-                ws_url = f"{self._base_url}/v1/bridges/unmute/tts/{model_path}?{query}"
+                ws_url = f"{self._base_url}/v1/bridges/unmute/tts/{model_path}"
             else:
-                ws_url = f"wss://{self._base_url}/v1/bridges/unmute/tts/{model_path}?{query}"
+                ws_url = f"wss://{self._base_url}/v1/bridges/unmute/tts/{model_path}"
 
             headers: dict[str, str] = {"Authorization": f"Bearer {self._api_key}"}
             if self._region_override:
@@ -219,6 +221,13 @@ class SlngTTSService(WebsocketTTSService):
             if self._world_part_override:
                 headers["X-World-Part-Override"] = self._world_part_override
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+
+            config = self._build_config()
+            # Server requires a ``Configure`` init message before any Speak
+            # is accepted. The previous SLNG client sent the same shape
+            # under a different ``type`` ("init"); only the tag needed
+            # updating.
+            await self._websocket.send(json.dumps({"type": "Configure", "config": config}))
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -313,42 +322,44 @@ class SlngTTSService(WebsocketTTSService):
         await self.append_to_audio_context(ctx_id, frame)
 
     async def _process_message(self, data: dict[str, Any]):
-        """Dispatch a decoded server text message.
+        """Dispatch a decoded server text message (case-insensitive).
 
         Args:
             data: Decoded JSON payload from the server.
         """
-        msg_type = data.get("type")
+        msg_type = data.get("type") or ""
+        type_lc = msg_type.lower() if isinstance(msg_type, str) else ""
 
-        if msg_type == "Metadata":
+        if type_lc == "metadata":
             logger.trace(f"{self}: SLNG TTS metadata: {data}")
 
-        elif msg_type == "Flushed":
+        elif type_lc == "flushed":
             ctx_id = self.get_active_audio_context_id()
             if ctx_id:
                 await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                 await self.remove_audio_context(ctx_id)
 
-        elif msg_type == "Cleared":
+        elif type_lc == "cleared":
             # Server has cleared its buffer after a Clear message.
             pass
 
-        elif msg_type == "Warning":
+        elif type_lc == "warning":
             logger.warning(f"{self}: SLNG TTS warning: {data.get('description', data)}")
 
-        elif "error" in data or msg_type == "Error":
+        elif type_lc == "error" or "error" in data:
             error_msg = (
                 data.get("description")
                 or data.get("message")
                 or data.get("error")
-                or "Unknown SLNG TTS error"
+                or data.get("reason")
+                or f"Unknown SLNG TTS error (payload: {data})"
             )
             logger.error(f"{self}: SLNG TTS error: {error_msg}")
             await self.push_error(error_msg=str(error_msg))
             await self.stop_all_metrics()
 
         else:
-            logger.debug(f"{self}: unknown message type: {msg_type!r}")
+            logger.debug(f"{self}: unknown message: {data}")
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:

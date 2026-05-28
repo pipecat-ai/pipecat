@@ -7,7 +7,6 @@
 
 import asyncio
 import json
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 from websockets.asyncio.server import serve
@@ -26,7 +25,7 @@ async def test_slng_stt_ws_partial_and_final():
     """WS STT should emit InterimTranscriptionFrame then TranscriptionFrame."""
     captured: dict = {
         "path": None,
-        "query": None,
+        "configure": None,
         "audio_bytes": bytearray(),
         "control_msgs": [],
         "auth": None,
@@ -36,12 +35,10 @@ async def test_slng_stt_ws_partial_and_final():
     async def handler(ws):
         captured["auth"] = ws.request.headers.get("Authorization")
         captured["path"] = ws.request.path
-        parsed = urlparse(ws.request.path)
-        captured["query"] = parse_qs(parsed.query)
         async for raw in ws:
             if isinstance(raw, bytes):
                 captured["audio_bytes"].extend(raw)
-                # Send Deepgram-style Results: interim, then final.
+                # Send Results: interim, then final.
                 await ws.send(
                     json.dumps(
                         {
@@ -74,7 +71,9 @@ async def test_slng_stt_ws_partial_and_final():
             else:
                 msg = json.loads(raw)
                 captured["control_msgs"].append(msg)
-                if msg.get("type") == "Finalize":
+                if msg.get("type") == "Configure":
+                    captured["configure"] = msg
+                elif msg.get("type") == "Finalize":
                     captured["finalize_sent"] = True
 
     async with serve(handler, "127.0.0.1", 0) as server:
@@ -115,10 +114,14 @@ async def test_slng_stt_ws_partial_and_final():
     assert final.text == "hello world"
 
     assert captured["auth"] == "Bearer test-key"
-    assert captured["path"].startswith("/v1/bridges/unmute/stt/slng/deepgram/nova:3-en")
-    assert captured["query"]["sample_rate"] == ["16000"]
-    assert captured["query"]["encoding"] == ["linear16"]
-    assert captured["query"]["enable_partials"] == ["true"]
+    assert captured["path"] == "/v1/bridges/unmute/stt/slng/deepgram/nova:3-en"
+
+    assert captured["configure"] is not None
+    config = captured["configure"]["config"]
+    assert config["sample_rate"] == 16000
+    assert config["encoding"] == "linear16"
+    assert config["enable_partials"] is True
+    assert config["enable_vad"] is True
 
     assert bytes(captured["audio_bytes"]) == b"\x00" * 320
     assert captured["finalize_sent"] is True
@@ -131,11 +134,12 @@ async def test_slng_stt_ws_error_message_pushes_no_transcription():
     async def handler(ws):
         async for raw in ws:
             if isinstance(raw, bytes):
+                # Server sends a lowercase ``error`` type, like the real bridge.
                 await ws.send(
                     json.dumps(
                         {
-                            "type": "Error",
-                            "description": "upstream unavailable",
+                            "type": "error",
+                            "message": "upstream unavailable",
                         }
                     )
                 )

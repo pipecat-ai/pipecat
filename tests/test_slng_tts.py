@@ -6,7 +6,6 @@
 """Tests for SlngTTSService."""
 
 import json
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 from websockets.asyncio.server import serve
@@ -25,7 +24,7 @@ async def test_slng_tts_ws_audio_and_flushed():
     """WS TTS should emit TTSAudioRawFrame chunks and TTSStoppedFrame on Flushed."""
     captured: dict = {
         "path": None,
-        "query": None,
+        "configure": None,
         "control_msgs": [],
         "auth": None,
     }
@@ -34,14 +33,14 @@ async def test_slng_tts_ws_audio_and_flushed():
     async def handler(ws):
         captured["auth"] = ws.request.headers.get("Authorization")
         captured["path"] = ws.request.path
-        parsed = urlparse(ws.request.path)
-        captured["query"] = parse_qs(parsed.query)
         async for raw in ws:
             if isinstance(raw, bytes):
                 continue
             msg = json.loads(raw)
             captured["control_msgs"].append(msg)
-            if msg.get("type") == "Speak":
+            if msg.get("type") == "Configure":
+                captured["configure"] = msg
+            elif msg.get("type") == "Speak":
                 # Send audio as binary frames, then Flush triggers Flushed.
                 await ws.send(audio_bytes)
             elif msg.get("type") == "Flush":
@@ -76,12 +75,16 @@ async def test_slng_tts_ws_audio_and_flushed():
     assert all(f.sample_rate == 24000 for f in audio_frames)
 
     assert captured["auth"] == "Bearer test-key"
-    assert captured["path"].startswith("/v1/bridges/unmute/tts/slng/deepgram/aura:2-en")
-    assert captured["query"]["sample_rate"] == ["24000"]
-    assert captured["query"]["encoding"] == ["linear16"]
-    assert captured["query"]["voice"] == ["aura-2-thalia-en"]
+    assert captured["path"] == "/v1/bridges/unmute/tts/slng/deepgram/aura:2-en"
+
+    assert captured["configure"] is not None
+    config = captured["configure"]["config"]
+    assert config["sample_rate"] == 24000
+    assert config["encoding"] == "linear16"
+    assert config["voice"] == "aura-2-thalia-en"
 
     control_types = [m["type"] for m in captured["control_msgs"]]
+    assert "Configure" in control_types
     assert "Speak" in control_types
     assert "Flush" in control_types
 

@@ -10,7 +10,7 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 from loguru import logger
 
@@ -58,14 +58,14 @@ class SlngSTTService(WebsocketSTTService):
     """Speech-to-text service using the SLNG bridge WebSocket API.
 
     Provides real-time speech transcription through a WebSocket connection
-    to the SLNG STT bridge. The bridge speaks a Deepgram-compatible protocol:
+    to the SLNG STT bridge:
 
     - Audio is sent as raw binary WebSocket frames (no JSON wrapping).
     - Connection-level config (``sample_rate``, ``encoding``, ``language``,
       ``enable_partials``, ``enable_vad``) is supplied via URL query parameters.
     - Control messages are JSON text frames with a PascalCase ``type`` field:
       ``KeepAlive``, ``Finalize``, ``CloseStream``.
-    - Transcription results arrive as Deepgram-style ``Results`` messages
+    - Transcription results arrive as ``Results`` messages
       (``channel.alternatives[0].transcript``, ``is_final``, ``from_finalize``).
     """
 
@@ -203,7 +203,7 @@ class SlngSTTService(WebsocketSTTService):
         yield None
 
     async def _send_keepalive(self, silence: bytes):
-        """Send a Deepgram-style ``KeepAlive`` text frame.
+        """Send a ``KeepAlive`` JSON control frame.
 
         Args:
             silence: Silent PCM bytes (ignored; a ``KeepAlive`` JSON frame is sent instead).
@@ -230,26 +230,31 @@ class SlngSTTService(WebsocketSTTService):
 
         await self._disconnect_websocket()
 
-    def _build_query_params(self) -> str:
-        """Build URL query string from the current settings."""
-        params: dict[str, str] = {
-            "sample_rate": str(self.sample_rate),
+    def _build_config(self) -> dict[str, Any]:
+        """Build the Configure-message body from the current settings."""
+        config: dict[str, Any] = {
+            "sample_rate": self.sample_rate,
             "encoding": self._encoding,
         }
 
         if is_given(self._settings.language) and self._settings.language is not None:
-            params["language"] = str(self._settings.language)
+            config["language"] = str(self._settings.language)
 
         if is_given(self._settings.enable_vad):
-            params["enable_vad"] = str(self._settings.enable_vad).lower()
+            config["enable_vad"] = bool(self._settings.enable_vad)
 
         if is_given(self._settings.enable_partials):
-            params["enable_partials"] = str(self._settings.enable_partials).lower()
+            config["enable_partials"] = bool(self._settings.enable_partials)
 
-        return urlencode(params)
+        return config
 
     async def _connect_websocket(self):
-        """Establish the WebSocket connection with config in URL query params."""
+        """Establish the WebSocket connection and send the initial ``Configure``.
+
+        The SLNG bridge requires a ``Configure`` text message before any audio
+        bytes are accepted; otherwise the server closes with policy violation
+        ``1008``.
+        """
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -259,11 +264,10 @@ class SlngSTTService(WebsocketSTTService):
             # Model may contain slashes (e.g. "slng/deepgram/nova:3-en") that are
             # part of the path; encode any other reserved chars with quote(safe="/").
             model_path = quote(model, safe="/:")
-            query = self._build_query_params()
             if "://" in self._base_url:
-                ws_url = f"{self._base_url}/v1/bridges/unmute/stt/{model_path}?{query}"
+                ws_url = f"{self._base_url}/v1/bridges/unmute/stt/{model_path}"
             else:
-                ws_url = f"wss://{self._base_url}/v1/bridges/unmute/stt/{model_path}?{query}"
+                ws_url = f"wss://{self._base_url}/v1/bridges/unmute/stt/{model_path}"
 
             headers: dict[str, str] = {"Authorization": f"Bearer {self._api_key}"}
             if self._region_override:
@@ -272,6 +276,14 @@ class SlngSTTService(WebsocketSTTService):
                 headers["X-World-Part-Override"] = self._world_part_override
 
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+
+            config = self._build_config()
+            # Server requires a ``Configure`` init message before audio
+            # (closes with 1008 otherwise). The previous SLNG client sent
+            # the same shape under a different ``type`` ("init"); only the
+            # tag needed updating.
+            await self._websocket.send(json.dumps({"type": "Configure", "config": config}))
+
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
@@ -314,41 +326,43 @@ class SlngSTTService(WebsocketSTTService):
     async def _process_message(self, data: dict[str, Any]):
         """Dispatch a decoded server message.
 
-        Handles Deepgram-style messages emitted by the SLNG bridge:
-        ``Results`` (transcription), ``Metadata``, ``SpeechStarted``,
-        ``UtteranceEnd``, and error payloads.
+        Handles messages emitted by the SLNG bridge, case-insensitively. The
+        bridge typically emits ``Results`` (transcription) and ``Metadata``
+        text frames, plus ``error`` payloads in either case.
 
         Args:
             data: Decoded JSON payload from the server.
         """
-        msg_type = data.get("type")
+        msg_type = data.get("type") or ""
+        type_lc = msg_type.lower() if isinstance(msg_type, str) else ""
 
-        if msg_type == "Results":
+        if type_lc == "results":
             await self._handle_results(data)
 
-        elif msg_type == "Metadata":
+        elif type_lc == "metadata":
             logger.trace(f"{self}: SLNG STT metadata: {data}")
 
-        elif msg_type in ("SpeechStarted", "UtteranceEnd"):
+        elif type_lc in ("speechstarted", "utteranceend"):
             # Server-side VAD events; not surfaced as frames here.
             logger.trace(f"{self}: SLNG STT {msg_type}: {data}")
 
-        elif "error" in data or msg_type == "Error":
+        elif type_lc in ("error", "warning") or "error" in data:
             error_msg = (
                 data.get("description")
                 or data.get("message")
                 or data.get("error")
-                or "Unknown SLNG STT error"
+                or data.get("reason")
+                or f"Unknown SLNG STT error (payload: {data})"
             )
             logger.error(f"{self}: SLNG STT error: {error_msg}")
             await self.push_error(error_msg=str(error_msg))
             await self.stop_all_metrics()
 
         else:
-            logger.debug(f"{self}: unknown message type: {msg_type}")
+            logger.debug(f"{self}: unknown message: {data}")
 
     async def _handle_results(self, data: dict[str, Any]):
-        """Handle a Deepgram-style ``Results`` message."""
+        """Handle a ``Results`` transcription message."""
         channel = data.get("channel") or {}
         alternatives = channel.get("alternatives") or []
         if not alternatives:
