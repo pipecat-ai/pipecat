@@ -18,8 +18,7 @@ from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gradium.stt import GradiumSTTService
-from pipecat.transcriptions.language import Language
+from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -40,9 +39,8 @@ class TranscriptionLogger(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(audio_in_enabled=True),
     "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True),
@@ -53,11 +51,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = GradiumSTTService(
-        api_key=os.environ["GRADIUM_API_KEY"],
-        settings=GradiumSTTService.Settings(
-            language=Language.EN,
-            delay_in_frames=8,
+    stt = DeepgramFluxSTTService(
+        api_key=os.environ["DEEPGRAM_API_KEY"],
+        settings=DeepgramFluxSTTService.Settings(
+            min_confidence=0.3,
         ),
     )
 

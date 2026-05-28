@@ -11,7 +11,12 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import Frame, TranscriptionFrame, UserStoppedSpeakingFrame
+from pipecat.frames.frames import (
+    Frame,
+    InterimTranscriptionFrame,
+    TranscriptionFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -49,9 +54,10 @@ class TranscriptionLogger(FrameProcessor):
             logger.debug(
                 f"Transcription latency: {(STOP_SECS - (time.time() - self._last_transcription_time)):.2f}"
             )
-
-        if isinstance(frame, TranscriptionFrame):
+        elif isinstance(frame, TranscriptionFrame):
             self._last_transcription_time = time.time()
+        elif isinstance(frame, InterimTranscriptionFrame):
+            print(f"Interim transcription: {frame.text}")
 
         # Push all frames through
         await self.push_frame(frame, direction)
@@ -82,11 +88,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     tl = TranscriptionLogger()
+
     vad_processor = VADProcessor(
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=STOP_SECS))
     )
 
-    pipeline = Pipeline([transport.input(), vad_processor, stt, tl])
+    pipeline = Pipeline([transport.input(), vad_processor, stt, tl, transport.output()])
 
     worker = PipelineWorker(
         pipeline,
