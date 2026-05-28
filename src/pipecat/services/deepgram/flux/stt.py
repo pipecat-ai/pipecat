@@ -239,6 +239,11 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         self._websocket_url = None
         self._receive_task = None
 
+    @property
+    def supports_ttfs(self) -> bool:
+        """TTFS doesn't apply: Flux defines turn boundaries directly."""
+        return False
+
     # ------------------------------------------------------------------
     # Transport interface implementation
     # ------------------------------------------------------------------
