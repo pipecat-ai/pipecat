@@ -60,12 +60,12 @@ from pipecat.bus import (
     WorkerBus,
 )
 from pipecat.bus.subscriber import BusSubscriber
-from pipecat.pipeline.utils import run_setup_hook
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData, WorkerRegistryEntry
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.startup import run_setup_hook
 from pipecat.workers.base_worker import BaseWorker, WorkerParams
 
 
