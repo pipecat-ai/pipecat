@@ -6,11 +6,11 @@
 
 """SLNG speech-to-text services."""
 
-import base64
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote, urlencode
 
 from loguru import logger
 
@@ -58,12 +58,15 @@ class SlngSTTService(WebsocketSTTService):
     """Speech-to-text service using the SLNG bridge WebSocket API.
 
     Provides real-time speech transcription through a WebSocket connection
-    to the SLNG STT bridge. Supports partial (interim) and final transcriptions,
-    server-side VAD, and configurable models and languages.
+    to the SLNG STT bridge. The bridge speaks a Deepgram-compatible protocol:
 
-    The SLNG protocol requires an ``init`` message immediately after connection
-    followed by base64-encoded audio frames. Finalization is triggered on
-    ``VADUserStoppedSpeakingFrame`` via a ``finalize`` message.
+    - Audio is sent as raw binary WebSocket frames (no JSON wrapping).
+    - Connection-level config (``sample_rate``, ``encoding``, ``language``,
+      ``enable_partials``, ``enable_vad``) is supplied via URL query parameters.
+    - Control messages are JSON text frames with a PascalCase ``type`` field:
+      ``KeepAlive``, ``Finalize``, ``CloseStream``.
+    - Transcription results arrive as Deepgram-style ``Results`` messages
+      (``channel.alternatives[0].transcript``, ``is_final``, ``from_finalize``).
     """
 
     Settings = SlngSTTSettings
@@ -172,12 +175,12 @@ class SlngSTTService(WebsocketSTTService):
             await self.start_processing_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._websocket and self._websocket.state is State.OPEN:
-                await self._websocket.send(json.dumps({"type": "finalize"}))
+                await self._websocket.send(json.dumps({"type": "Finalize"}))
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
         """Process audio data for speech-to-text transcription.
 
-        Encodes audio as base64 and sends it over the WebSocket connection.
+        Sends raw PCM audio bytes as a binary WebSocket frame.
 
         Args:
             audio: Raw PCM audio bytes to transcribe.
@@ -194,22 +197,21 @@ class SlngSTTService(WebsocketSTTService):
             return
 
         try:
-            msg = json.dumps({"type": "audio", "data": base64.b64encode(audio).decode("utf-8")})
-            await self._websocket.send(msg)
+            await self._websocket.send(audio)
         except Exception as e:
             logger.warning(f"{self}: send failed: {e}")
         yield None
 
     async def _send_keepalive(self, silence: bytes):
-        """Send a JSON keepalive message instead of raw silence bytes.
+        """Send a Deepgram-style ``KeepAlive`` text frame.
 
         Args:
-            silence: Silent PCM bytes (ignored; a JSON keepalive is sent instead).
+            silence: Silent PCM bytes (ignored; a ``KeepAlive`` JSON frame is sent instead).
         """
         if self._websocket is None:
             return
         try:
-            await self._websocket.send(json.dumps({"type": "keepalive"}))
+            await self._websocket.send(json.dumps({"type": "KeepAlive"}))
         except Exception as e:
             logger.warning(f"{self}: keepalive send failed: {e}")
 
@@ -228,18 +230,41 @@ class SlngSTTService(WebsocketSTTService):
 
         await self._disconnect_websocket()
 
+    def _build_query_params(self) -> str:
+        """Build URL query string from the current settings."""
+        params: dict[str, str] = {
+            "sample_rate": str(self.sample_rate),
+            "encoding": self._encoding,
+        }
+
+        if is_given(self._settings.language) and self._settings.language is not None:
+            params["language"] = str(self._settings.language)
+
+        if is_given(self._settings.enable_vad):
+            params["enable_vad"] = str(self._settings.enable_vad).lower()
+
+        if is_given(self._settings.enable_partials):
+            params["enable_partials"] = str(self._settings.enable_partials).lower()
+
+        return urlencode(params)
+
     async def _connect_websocket(self):
-        """Establish the WebSocket connection and send the init message."""
+        """Establish the WebSocket connection with config in URL query params."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug(f"Connecting to SLNG STT ({self._settings.model})")
 
             model = self._settings.model or "slng/deepgram/nova:3-en"
+            # Model may contain slashes (e.g. "slng/deepgram/nova:3-en") that are
+            # part of the path; encode any other reserved chars with quote(safe="/").
+            model_path = quote(model, safe="/:")
+            query = self._build_query_params()
             if "://" in self._base_url:
-                ws_url = f"{self._base_url}/v1/bridges/unmute/stt/{model}"
+                ws_url = f"{self._base_url}/v1/bridges/unmute/stt/{model_path}?{query}"
             else:
-                ws_url = f"wss://{self._base_url}/v1/bridges/unmute/stt/{model}"
+                ws_url = f"wss://{self._base_url}/v1/bridges/unmute/stt/{model_path}?{query}"
+
             headers: dict[str, str] = {"Authorization": f"Bearer {self._api_key}"}
             if self._region_override:
                 headers["X-Region-Override"] = self._region_override
@@ -247,38 +272,18 @@ class SlngSTTService(WebsocketSTTService):
                 headers["X-World-Part-Override"] = self._world_part_override
 
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
-
-            config: dict[str, Any] = {
-                "sample_rate": self.sample_rate,
-                "encoding": self._encoding,
-            }
-
-            if is_given(self._settings.language) and self._settings.language is not None:
-                config["language"] = str(self._settings.language)
-
-            if is_given(self._settings.enable_vad):
-                config["enable_vad"] = self._settings.enable_vad
-
-            if is_given(self._settings.enable_partials):
-                config["enable_partials"] = self._settings.enable_partials
-
-            init_msg = {
-                "type": "init",
-                "config": config,
-            }
-            await self._websocket.send(json.dumps(init_msg))
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
             await self.push_error(error_msg=f"Unable to connect to SLNG STT: {e}", exception=e)
 
     async def _disconnect_websocket(self):
-        """Send a close message and shut down the WebSocket."""
+        """Send a ``CloseStream`` message and shut down the WebSocket."""
         ws = self._websocket
         try:
             if ws and ws.state is State.OPEN:
                 logger.debug("Disconnecting from SLNG STT")
-                await ws.send(json.dumps({"type": "close"}))
+                await ws.send(json.dumps({"type": "CloseStream"}))
                 await ws.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing SLNG STT websocket: {e}", exception=e)
@@ -295,6 +300,9 @@ class SlngSTTService(WebsocketSTTService):
     async def _receive_messages(self):
         """Receive and dispatch incoming WebSocket messages."""
         async for message in self._get_websocket():
+            if isinstance(message, bytes):
+                # Server should not push binary frames for STT; ignore.
+                continue
             try:
                 data = json.loads(message)
                 await self._process_message(data)
@@ -306,63 +314,90 @@ class SlngSTTService(WebsocketSTTService):
     async def _process_message(self, data: dict[str, Any]):
         """Dispatch a decoded server message.
 
+        Handles Deepgram-style messages emitted by the SLNG bridge:
+        ``Results`` (transcription), ``Metadata``, ``SpeechStarted``,
+        ``UtteranceEnd``, and error payloads.
+
         Args:
             data: Decoded JSON payload from the server.
         """
         msg_type = data.get("type")
 
-        if msg_type == "ready":
-            session_id = data.get("session_id", "")
-            logger.debug(f"{self}: SLNG STT session ready (id={session_id})")
+        if msg_type == "Results":
+            await self._handle_results(data)
 
-        elif msg_type == "partial_transcript":
-            transcript = data.get("transcript", "")
-            if transcript:
-                language = None
-                if raw_lang := data.get("language"):
-                    try:
-                        language = Language(raw_lang)
-                    except ValueError:
-                        pass
-                await self.push_frame(
-                    InterimTranscriptionFrame(
-                        transcript,
-                        self._user_id,
-                        time_now_iso8601(),
-                        language,
-                        result=data,
-                    )
-                )
+        elif msg_type == "Metadata":
+            logger.trace(f"{self}: SLNG STT metadata: {data}")
 
-        elif msg_type == "final_transcript":
-            transcript = data.get("transcript", "")
-            language = None
-            if "language" in data:
-                try:
-                    language = Language(data["language"])
-                except (ValueError, KeyError):
-                    pass
-            if transcript:
-                await self.push_frame(
-                    TranscriptionFrame(
-                        transcript,
-                        self._user_id,
-                        time_now_iso8601(),
-                        language,
-                        result=data,
-                    )
-                )
-                await self._handle_transcription(transcript, True, language)
-                await self.stop_processing_metrics()
+        elif msg_type in ("SpeechStarted", "UtteranceEnd"):
+            # Server-side VAD events; not surfaced as frames here.
+            logger.trace(f"{self}: SLNG STT {msg_type}: {data}")
 
-        elif msg_type == "error":
-            error_msg = data.get("message", "Unknown SLNG STT error")
+        elif "error" in data or msg_type == "Error":
+            error_msg = (
+                data.get("description")
+                or data.get("message")
+                or data.get("error")
+                or "Unknown SLNG STT error"
+            )
             logger.error(f"{self}: SLNG STT error: {error_msg}")
-            await self.push_error(error_msg=error_msg)
+            await self.push_error(error_msg=str(error_msg))
             await self.stop_all_metrics()
 
         else:
             logger.debug(f"{self}: unknown message type: {msg_type}")
+
+    async def _handle_results(self, data: dict[str, Any]):
+        """Handle a Deepgram-style ``Results`` message."""
+        channel = data.get("channel") or {}
+        alternatives = channel.get("alternatives") or []
+        if not alternatives:
+            return
+
+        first = alternatives[0]
+        transcript = (first.get("transcript") or "").strip()
+        if not transcript:
+            return
+
+        is_final = bool(data.get("is_final", False))
+
+        language: Language | None = None
+        langs = first.get("languages") or []
+        if langs:
+            try:
+                language = Language(langs[0])
+            except ValueError:
+                pass
+        elif raw_lang := data.get("language"):
+            try:
+                language = Language(raw_lang)
+            except ValueError:
+                pass
+
+        if is_final:
+            if data.get("from_finalize"):
+                self.confirm_finalize()
+            await self.push_frame(
+                TranscriptionFrame(
+                    transcript,
+                    self._user_id,
+                    time_now_iso8601(),
+                    language,
+                    result=data,
+                )
+            )
+            await self._handle_transcription(transcript, True, language)
+            await self.stop_processing_metrics()
+        else:
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    transcript,
+                    self._user_id,
+                    time_now_iso8601(),
+                    language,
+                    result=data,
+                )
+            )
 
     @traced_stt
     async def _handle_transcription(

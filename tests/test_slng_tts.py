@@ -5,9 +5,8 @@
 #
 """Tests for SlngTTSService."""
 
-import asyncio
-import base64
 import json
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from websockets.asyncio.server import serve
@@ -22,31 +21,31 @@ from pipecat.tests.utils import SleepFrame, run_test
 
 
 @pytest.mark.asyncio
-async def test_slng_tts_ws_audio_chunk_and_flushed():
-    """WS TTS should emit TTSAudioRawFrame chunks and TTSStoppedFrame on flushed."""
-    captured: dict = {"init": None, "messages": [], "auth": None}
+async def test_slng_tts_ws_audio_and_flushed():
+    """WS TTS should emit TTSAudioRawFrame chunks and TTSStoppedFrame on Flushed."""
+    captured: dict = {
+        "path": None,
+        "query": None,
+        "control_msgs": [],
+        "auth": None,
+    }
     audio_bytes = b"\x10\x20\x30\x40" * 512
 
     async def handler(ws):
         captured["auth"] = ws.request.headers.get("Authorization")
+        captured["path"] = ws.request.path
+        parsed = urlparse(ws.request.path)
+        captured["query"] = parse_qs(parsed.query)
         async for raw in ws:
+            if isinstance(raw, bytes):
+                continue
             msg = json.loads(raw)
-            captured["messages"].append(msg)
-            if msg.get("type") == "init":
-                captured["init"] = msg
-                await ws.send(json.dumps({"type": "ready", "session_id": "test-sess"}))
-            elif msg.get("type") == "text":
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "audio_chunk",
-                            "data": base64.b64encode(audio_bytes).decode("ascii"),
-                            "sequence": 1,
-                        }
-                    )
-                )
-            elif msg.get("type") == "flush":
-                await ws.send(json.dumps({"type": "flushed"}))
+            captured["control_msgs"].append(msg)
+            if msg.get("type") == "Speak":
+                # Send audio as binary frames, then Flush triggers Flushed.
+                await ws.send(audio_bytes)
+            elif msg.get("type") == "Flush":
+                await ws.send(json.dumps({"type": "Flushed"}))
 
     async with serve(handler, "127.0.0.1", 0) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
@@ -77,15 +76,14 @@ async def test_slng_tts_ws_audio_chunk_and_flushed():
     assert all(f.sample_rate == 24000 for f in audio_frames)
 
     assert captured["auth"] == "Bearer test-key"
-    assert captured["init"]["type"] == "init"
-    assert captured["init"]["config"]["sample_rate"] == 24000
-    assert captured["init"]["config"]["encoding"] == "linear16"
-    assert captured["init"]["voice"] == "aura-2-thalia-en"
+    assert captured["path"].startswith("/v1/bridges/unmute/tts/slng/deepgram/aura:2-en")
+    assert captured["query"]["sample_rate"] == ["24000"]
+    assert captured["query"]["encoding"] == ["linear16"]
+    assert captured["query"]["voice"] == ["aura-2-thalia-en"]
 
-    msg_types = [m["type"] for m in captured["messages"]]
-    assert "init" in msg_types
-    assert "text" in msg_types
-    assert "flush" in msg_types
+    control_types = [m["type"] for m in captured["control_msgs"]]
+    assert "Speak" in control_types
+    assert "Flush" in control_types
 
 
 @pytest.mark.asyncio

@@ -6,12 +6,11 @@
 """Tests for SlngSTTService."""
 
 import asyncio
-import base64
 import json
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from websockets.asyncio.server import serve
-from websockets.protocol import State
 
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
@@ -25,35 +24,58 @@ from pipecat.tests.utils import SleepFrame, run_test
 @pytest.mark.asyncio
 async def test_slng_stt_ws_partial_and_final():
     """WS STT should emit InterimTranscriptionFrame then TranscriptionFrame."""
-    captured: dict = {"init": None, "audio_msgs": [], "auth": None, "finalize_sent": False}
+    captured: dict = {
+        "path": None,
+        "query": None,
+        "audio_bytes": bytearray(),
+        "control_msgs": [],
+        "auth": None,
+        "finalize_sent": False,
+    }
 
     async def handler(ws):
         captured["auth"] = ws.request.headers.get("Authorization")
+        captured["path"] = ws.request.path
+        parsed = urlparse(ws.request.path)
+        captured["query"] = parse_qs(parsed.query)
         async for raw in ws:
-            msg = json.loads(raw)
-            if msg.get("type") == "init":
-                captured["init"] = msg
-                await ws.send(json.dumps({"type": "ready", "session_id": "test-sess"}))
-            elif msg.get("type") == "audio":
-                captured["audio_msgs"].append(msg)
+            if isinstance(raw, bytes):
+                captured["audio_bytes"].extend(raw)
+                # Send Deepgram-style Results: interim, then final.
                 await ws.send(
                     json.dumps(
-                        {"type": "partial_transcript", "transcript": "hello", "confidence": 0.8}
+                        {
+                            "type": "Results",
+                            "channel": {
+                                "alternatives": [{"transcript": "hello", "confidence": 0.8}]
+                            },
+                            "is_final": False,
+                        }
                     )
                 )
                 await asyncio.sleep(0.05)
                 await ws.send(
                     json.dumps(
                         {
-                            "type": "final_transcript",
-                            "transcript": "hello world",
-                            "confidence": 0.95,
-                            "language": "en",
+                            "type": "Results",
+                            "channel": {
+                                "alternatives": [
+                                    {
+                                        "transcript": "hello world",
+                                        "confidence": 0.95,
+                                        "languages": ["en"],
+                                    }
+                                ]
+                            },
+                            "is_final": True,
                         }
                     )
                 )
-            elif msg.get("type") == "finalize":
-                captured["finalize_sent"] = True
+            else:
+                msg = json.loads(raw)
+                captured["control_msgs"].append(msg)
+                if msg.get("type") == "Finalize":
+                    captured["finalize_sent"] = True
 
     async with serve(handler, "127.0.0.1", 0) as server:
         host, port = next(iter(server.sockets)).getsockname()[:2]
@@ -93,16 +115,13 @@ async def test_slng_stt_ws_partial_and_final():
     assert final.text == "hello world"
 
     assert captured["auth"] == "Bearer test-key"
-    assert captured["init"] is not None
-    assert captured["init"]["type"] == "init"
-    assert captured["init"]["config"]["sample_rate"] == 16000
-    assert captured["init"]["config"]["encoding"] == "linear16"
-    assert captured["init"]["config"]["enable_partials"] is True
+    assert captured["path"].startswith("/v1/bridges/unmute/stt/slng/deepgram/nova:3-en")
+    assert captured["query"]["sample_rate"] == ["16000"]
+    assert captured["query"]["encoding"] == ["linear16"]
+    assert captured["query"]["enable_partials"] == ["true"]
 
-    assert captured["audio_msgs"], "audio messages should have been sent"
-    audio_msg = captured["audio_msgs"][0]
-    assert audio_msg["type"] == "audio"
-    assert base64.b64decode(audio_msg["data"]) == b"\x00" * 320
+    assert bytes(captured["audio_bytes"]) == b"\x00" * 320
+    assert captured["finalize_sent"] is True
 
 
 @pytest.mark.asyncio
@@ -111,16 +130,12 @@ async def test_slng_stt_ws_error_message_pushes_no_transcription():
 
     async def handler(ws):
         async for raw in ws:
-            msg = json.loads(raw)
-            if msg.get("type") == "init":
-                await ws.send(json.dumps({"type": "ready", "session_id": "err-sess"}))
-            elif msg.get("type") == "audio":
+            if isinstance(raw, bytes):
                 await ws.send(
                     json.dumps(
                         {
-                            "type": "error",
-                            "code": "provider_error",
-                            "message": "upstream unavailable",
+                            "type": "Error",
+                            "description": "upstream unavailable",
                         }
                     )
                 )

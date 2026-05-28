@@ -6,11 +6,11 @@
 
 """SLNG text-to-speech service."""
 
-import base64
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote, urlencode
 
 from loguru import logger
 
@@ -54,16 +54,17 @@ class SlngTTSService(WebsocketTTSService):
     """Text-to-speech service using the SLNG bridge WebSocket API.
 
     Provides real-time speech synthesis through a persistent WebSocket
-    connection to the SLNG TTS bridge. Audio is streamed back as base64-encoded
-    ``audio_chunk`` messages and a ``flushed`` message signals end of speech.
+    connection to the SLNG TTS bridge. The bridge speaks a Deepgram-compatible
+    protocol:
 
-    Protocol overview:
-
-    1. Connect with ``Authorization: Bearer <api_key>`` header.
-    2. Send ``init`` with voice and audio config immediately after connecting.
-    3. Send ``text`` messages for each text chunk to synthesise.
-    4. Send ``flush`` to signal end of the current utterance.
-    5. Receive ``audio_chunk`` messages (base64 PCM) and a ``flushed`` message.
+    - Connection-level config (``voice``, ``encoding``, ``sample_rate``,
+      ``speed``, ``language``) is supplied via URL query parameters.
+    - Text to synthesise is sent as ``{"type": "Speak", "text": "..."}``.
+    - ``{"type": "Flush"}`` signals end of an utterance.
+    - ``{"type": "Clear"}`` cancels in-flight audio on interruption.
+    - ``{"type": "Close"}`` gracefully closes the connection.
+    - Audio arrives as raw binary WebSocket frames; ``Metadata``, ``Flushed``,
+      ``Cleared``, and ``Warning`` arrive as JSON text frames.
     """
 
     Settings = SlngTTSSettings
@@ -76,6 +77,7 @@ class SlngTTSService(WebsocketTTSService):
         model: str = "slng/deepgram/aura:2-en",
         voice: str | None = None,
         base_url: str = "api.slng.ai",
+        encoding: str = "linear16",
         sample_rate: int | None = None,
         region_override: str | None = None,
         world_part_override: str | None = None,
@@ -90,6 +92,7 @@ class SlngTTSService(WebsocketTTSService):
             voice: Voice identifier for synthesis (e.g. "aura-2-thalia-en").
             base_url: The API host (without scheme) or a full WebSocket URL
                 (e.g. "ws://localhost:8080" for testing). Defaults to "api.slng.ai".
+            encoding: Audio encoding format. Defaults to "linear16".
             sample_rate: Audio sample rate in Hz. If None, uses the pipeline sample rate.
             region_override: Pin requests to a specific datacenter. One of
                 ``"ap-southeast-2"``, ``"eu-north-1"``, ``"us-east-1"``. Sets the
@@ -120,6 +123,7 @@ class SlngTTSService(WebsocketTTSService):
 
         self._api_key = api_key
         self._base_url = base_url
+        self._encoding = encoding
         self._region_override = region_override
         self._world_part_override = world_part_override
         self._receive_task = None
@@ -174,8 +178,26 @@ class SlngTTSService(WebsocketTTSService):
 
         await self._disconnect_websocket()
 
+    def _build_query_params(self) -> str:
+        """Build URL query string from the current settings."""
+        params: dict[str, str] = {
+            "encoding": self._encoding,
+            "sample_rate": str(self.sample_rate),
+        }
+
+        if self._settings.voice:
+            params["voice"] = str(self._settings.voice)
+
+        if is_given(self._settings.language) and self._settings.language is not None:
+            params["language"] = str(self._settings.language)
+
+        if is_given(self._settings.speed):
+            params["speed"] = str(self._settings.speed)
+
+        return urlencode(params)
+
     async def _connect_websocket(self):
-        """Establish the WebSocket connection and send the init message."""
+        """Establish the WebSocket connection with config in URL query params."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -183,10 +205,13 @@ class SlngTTSService(WebsocketTTSService):
             model = self._settings.model or "slng/deepgram/aura:2-en"
             logger.debug(f"Connecting to SLNG TTS ({model})")
 
+            model_path = quote(model, safe="/:")
+            query = self._build_query_params()
+
             if "://" in self._base_url:
-                ws_url = f"{self._base_url}/v1/bridges/unmute/tts/{model}"
+                ws_url = f"{self._base_url}/v1/bridges/unmute/tts/{model_path}?{query}"
             else:
-                ws_url = f"wss://{self._base_url}/v1/bridges/unmute/tts/{model}"
+                ws_url = f"wss://{self._base_url}/v1/bridges/unmute/tts/{model_path}?{query}"
 
             headers: dict[str, str] = {"Authorization": f"Bearer {self._api_key}"}
             if self._region_override:
@@ -195,38 +220,18 @@ class SlngTTSService(WebsocketTTSService):
                 headers["X-World-Part-Override"] = self._world_part_override
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
 
-            # Build init config
-            config: dict[str, Any] = {
-                "sample_rate": self.sample_rate,
-                "encoding": "linear16",
-            }
-
-            if is_given(self._settings.language) and self._settings.language is not None:
-                config["language"] = str(self._settings.language)
-
-            if is_given(self._settings.speed):
-                config["speed"] = self._settings.speed
-
-            init_msg: dict[str, Any] = {
-                "type": "init",
-                "config": config,
-            }
-            if self._settings.voice:
-                init_msg["voice"] = self._settings.voice
-
-            await self._websocket.send(json.dumps(init_msg))
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
             await self.push_error(error_msg=f"Unable to connect to SLNG TTS: {e}", exception=e)
 
     async def _disconnect_websocket(self):
-        """Send a close message and shut down the WebSocket."""
+        """Send a ``Close`` message and shut down the WebSocket."""
         ws = self._websocket
         try:
             if ws and ws.state is State.OPEN:
                 logger.debug("Disconnecting from SLNG TTS")
-                await ws.send(json.dumps({"type": "close"}))
+                await ws.send(json.dumps({"type": "Close"}))
                 await ws.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing SLNG TTS websocket: {e}", exception=e)
@@ -243,7 +248,7 @@ class SlngTTSService(WebsocketTTSService):
         raise Exception("SLNG TTS websocket not connected")
 
     async def on_audio_context_interrupted(self, context_id: str):
-        """Send a clear message to the server when the bot is interrupted.
+        """Send a ``Clear`` message to the server when the bot is interrupted.
 
         Args:
             context_id: The ID of the interrupted audio context.
@@ -251,16 +256,16 @@ class SlngTTSService(WebsocketTTSService):
         await self.stop_all_metrics()
         if self._websocket and self._websocket.state is State.OPEN:
             try:
-                await self._websocket.send(json.dumps({"type": "clear"}))
+                await self._websocket.send(json.dumps({"type": "Clear"}))
             except Exception as e:
-                logger.warning(f"{self}: failed to send clear on interruption: {e}")
+                logger.warning(f"{self}: failed to send Clear on interruption: {e}")
         await super().on_audio_context_interrupted(context_id)
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush pending audio for the current utterance.
 
-        Sends a ``flush`` message to the server, which will respond with a
-        ``flushed`` message when all audio has been sent.
+        Sends a ``Flush`` message to the server, which will respond with a
+        ``Flushed`` message when all audio has been sent.
 
         Args:
             context_id: The specific context to flush. If None, falls back to
@@ -270,13 +275,21 @@ class SlngTTSService(WebsocketTTSService):
             return
         logger.trace(f"{self}: flushing audio")
         try:
-            await self._websocket.send(json.dumps({"type": "flush"}))
+            await self._websocket.send(json.dumps({"type": "Flush"}))
         except Exception as e:
-            logger.warning(f"{self}: failed to send flush: {e}")
+            logger.warning(f"{self}: failed to send Flush: {e}")
 
     async def _receive_messages(self):
-        """Receive and dispatch incoming WebSocket messages."""
+        """Receive and dispatch incoming WebSocket messages.
+
+        Binary frames carry audio (PCM in the configured encoding); text
+        frames are JSON control messages (``Metadata``/``Flushed``/``Cleared``/
+        ``Warning``).
+        """
         async for message in self._get_websocket():
+            if isinstance(message, bytes):
+                await self._handle_audio_bytes(message)
+                continue
             try:
                 data = json.loads(message)
                 await self._process_message(data)
@@ -285,43 +298,53 @@ class SlngTTSService(WebsocketTTSService):
             except Exception as e:
                 logger.error(f"{self}: error processing message: {e}")
 
+    async def _handle_audio_bytes(self, audio: bytes):
+        """Append a binary audio chunk to the active audio context."""
+        if not audio:
+            return
+        ctx_id = self.get_active_audio_context_id()
+        frame = TTSAudioRawFrame(
+            audio=audio,
+            sample_rate=self.sample_rate,
+            num_channels=1,
+            context_id=ctx_id,
+        )
+        await self.stop_ttfb_metrics()
+        await self.append_to_audio_context(ctx_id, frame)
+
     async def _process_message(self, data: dict[str, Any]):
-        """Dispatch a decoded server message.
+        """Dispatch a decoded server text message.
 
         Args:
             data: Decoded JSON payload from the server.
         """
         msg_type = data.get("type")
 
-        if msg_type == "ready":
-            session_id = data.get("session_id", "")
-            logger.debug(f"{self}: SLNG TTS session ready (id={session_id})")
+        if msg_type == "Metadata":
+            logger.trace(f"{self}: SLNG TTS metadata: {data}")
 
-        elif msg_type == "audio_chunk":
-            raw_audio = base64.b64decode(data["data"])
-            ctx_id = self.get_active_audio_context_id()
-            frame = TTSAudioRawFrame(
-                audio=raw_audio,
-                sample_rate=self.sample_rate,
-                num_channels=1,
-                context_id=ctx_id,
-            )
-            await self.stop_ttfb_metrics()
-            await self.append_to_audio_context(ctx_id, frame)
-
-        elif msg_type == "flushed":
+        elif msg_type == "Flushed":
             ctx_id = self.get_active_audio_context_id()
             if ctx_id:
                 await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
                 await self.remove_audio_context(ctx_id)
 
-        elif msg_type in ("cleared", "segment_start", "segment_end", "audio_end"):
-            pass  # No-op
+        elif msg_type == "Cleared":
+            # Server has cleared its buffer after a Clear message.
+            pass
 
-        elif msg_type == "error":
-            error_msg = data.get("message", "Unknown SLNG TTS error")
+        elif msg_type == "Warning":
+            logger.warning(f"{self}: SLNG TTS warning: {data.get('description', data)}")
+
+        elif "error" in data or msg_type == "Error":
+            error_msg = (
+                data.get("description")
+                or data.get("message")
+                or data.get("error")
+                or "Unknown SLNG TTS error"
+            )
             logger.error(f"{self}: SLNG TTS error: {error_msg}")
-            await self.push_error(error_msg=error_msg)
+            await self.push_error(error_msg=str(error_msg))
             await self.stop_all_metrics()
 
         else:
@@ -331,8 +354,8 @@ class SlngTTSService(WebsocketTTSService):
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         """Generate speech from text using the SLNG TTS API.
 
-        Sends a ``text`` message over the WebSocket. Audio arrives asynchronously
-        via the receive task as ``audio_chunk`` messages.
+        Sends a ``Speak`` message over the WebSocket. Audio arrives asynchronously
+        via the receive task as binary frames.
 
         Args:
             text: The text to synthesise into speech.
@@ -352,7 +375,7 @@ class SlngTTSService(WebsocketTTSService):
                 return
 
             try:
-                await self._websocket.send(json.dumps({"type": "text", "text": text}))
+                await self._websocket.send(json.dumps({"type": "Speak", "text": text}))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"SLNG TTS send error: {e}")
