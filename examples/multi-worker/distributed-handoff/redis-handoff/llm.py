@@ -29,10 +29,10 @@ from loguru import logger
 from redis.asyncio import Redis
 
 from pipecat.bus.network.redis import RedisBus
-from pipecat.pipeline.runner import WorkerRunner
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 

@@ -66,7 +66,6 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -82,6 +81,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.llm import tool
+from pipecat.workers.runner import WorkerRunner
 from pipecat.workers.ui import UIWorker
 
 load_dotenv(override=True)

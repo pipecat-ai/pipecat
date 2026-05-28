@@ -30,11 +30,11 @@ from fastapi import FastAPI, WebSocket
 from loguru import logger
 
 from pipecat.bus import BusFrameMessage
-from pipecat.pipeline.runner import WorkerRunner
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.workers.llm import LLMWorker, tool
 from pipecat.workers.proxy.websocket import WebSocketProxyServer
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 

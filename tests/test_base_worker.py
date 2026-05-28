@@ -31,13 +31,13 @@ from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_context import JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.workers.runner import WorkerRunner
 
 
 class _FrameGenerator(FrameProcessor):

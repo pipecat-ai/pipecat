@@ -16,7 +16,8 @@ from pipecat.bus import (
     BusEndWorkerMessage,
 )
 from pipecat.pipeline.base_worker import BaseWorker
-from pipecat.pipeline.runner import PipelineRunner, WorkerRunner
+from pipecat.pipeline.runner import PipelineRunner  # deprecated alias, kept at the legacy path
+from pipecat.workers.runner import WorkerRunner
 
 
 class StubTask(BaseWorker):

@@ -30,13 +30,13 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.daily.transport import DailyCustomVideoTrackParams, DailyParams
+from pipecat.workers.runner import WorkerRunner
 
 WIDTH = 320
 HEIGHT = 240
