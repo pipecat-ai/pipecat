@@ -25,7 +25,7 @@ try:
 except ModuleNotFoundError as e:  # pragma: no cover - exercised only when extra is missing
     logger.error(f"Exception: {e}")
     logger.error("In order to use PgmqBus, you need to `pip install pipecat-ai[pgmq]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class PgmqBus(WorkerBus):
