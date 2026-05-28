@@ -194,7 +194,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
 
     async def run(
         self,
-        worker: PipelineWorker | None = None,
+        worker: BaseWorker | None = None,
         *,
         auto_end: bool = True,
     ) -> None:
@@ -211,7 +211,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
         are left.
 
         Args:
-            worker: Optional pipeline worker to run.
+            worker: Optional worker to run.
 
                 .. deprecated:: 1.3.0
                     Register the worker with :meth:`add_workers` before
