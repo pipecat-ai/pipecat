@@ -98,7 +98,7 @@ EVAL_COMPLETE_TURN = EvalConfig(
 
 TESTS_VOICE = [
     ("voice/voice-cartesia-turns.py", EVAL_SIMPLE_MATH),
-    ("voice/voice-cartesia-manual.py", EVAL_SIMPLE_MATH),
+    ("voice/voice-cartesia.py", EVAL_SIMPLE_MATH),
     ("voice/voice-cartesia-http.py", EVAL_SIMPLE_MATH),
     ("voice/voice-speechmatics.py", EVAL_SIMPLE_MATH),
     ("voice/voice-speechmatics-vad.py", EVAL_SIMPLE_MATH),

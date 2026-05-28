@@ -39,7 +39,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
@@ -413,7 +413,9 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
                 await self._handle_message(data)
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-                # Let WebsocketService._receive_task_handler drive reconnect.
+                # Re-raise so WebsocketService._receive_task_handler tears down
+                # the receive loop. With reconnect_on_error=False, it reports
+                # the error and exits — no reconnect happens here.
                 raise
 
     @traced_stt
@@ -473,15 +475,15 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         transcript = data.get("transcript", "")
         if transcript:
             logger.trace(f"Cartesia Ink-2 ASR turn.update: {transcript}")
-        await self.push_frame(
-            InterimTranscriptionFrame(
-                transcript,
-                self._user_id,
-                time_now_iso8601(),
-                self._language,
-                result=data,
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    transcript,
+                    self._user_id,
+                    time_now_iso8601(),
+                    self._language,
+                    result=data,
+                )
             )
-        )
         await self._call_event_handler("on_turn_update", transcript)
 
     async def _handle_turn_eager_end(self, data: dict):
@@ -497,17 +499,23 @@ class CartesiaTurnsSTTService(WebsocketSTTService):
         transcript = data.get("transcript", "")
         logger.debug(f"Cartesia Ink-2 ASR turn.end: {transcript}")
         self._user_is_speaking = False
-        await self.push_frame(
-            TranscriptionFrame(
-                transcript,
-                self._user_id,
-                time_now_iso8601(),
-                self._language,
-                result=data,
-                finalized=True,
+        # The watchdog injects silence to force turn.end when audio stops
+        # mid-turn, so a turn that captured only silence/noise can end with
+        # an empty transcript. Skip the TranscriptionFrame in that case to
+        # avoid an empty user message downstream; the lifecycle frames below
+        # still fire so the turn closes cleanly.
+        if transcript:
+            await self.push_frame(
+                TranscriptionFrame(
+                    transcript,
+                    self._user_id,
+                    time_now_iso8601(),
+                    self._language,
+                    result=data,
+                    finalized=True,
+                )
             )
-        )
-        await self._handle_transcription(transcript, True, self._language)
+            await self._handle_transcription(transcript, True, self._language)
         await self.stop_processing_metrics()
         await self.broadcast_frame(UserStoppedSpeakingFrame)
         await self._call_event_handler("on_turn_end", transcript)
