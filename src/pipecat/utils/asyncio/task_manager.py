@@ -188,6 +188,16 @@ class TaskManager(BaseTaskManager):
             timeout: The optional timeout in seconds to wait for the task to cancel.
         """
         name = task.get_name()
+        if task is asyncio.current_task():
+            # Self-cancellation: we cannot await our own task. Cancel and raise
+            # CancelledError so the current task unwinds immediately. Returning
+            # normally here would let the caller keep running with the
+            # cancellation silently suppressed, which can leave shared state in
+            # a half-torn-down condition (e.g. a receive loop that nulls out
+            # its session and then iterates one more time).
+            logger.trace(f"{name}: self-cancellation")
+            task.cancel()
+            raise asyncio.CancelledError()
         task.cancel()
         try:
             if timeout:
