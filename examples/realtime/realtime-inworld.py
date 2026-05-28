@@ -41,7 +41,7 @@ from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -192,7 +192,7 @@ Always be helpful and proactive in offering assistance.""",
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         logger.info(f"Transcript: {timestamp}assistant: {message.content}")
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
     await runner.run()

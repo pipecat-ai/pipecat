@@ -14,7 +14,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -85,7 +85,7 @@ async def main():
     context.add_message({"role": "developer", "content": "Please introduce yourself to the user."})
     await worker.queue_frames([LLMRunFrame()])
 
-    runner = PipelineRunner()
+    runner = WorkerRunner()
 
     await runner.add_workers(worker)
     await runner.run()

@@ -124,7 +124,7 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         """Frames from the bus are injected at the bridge position and
         travel downstream alongside frames from later pipeline processors."""
         from pipecat.frames.frames import EndFrame
-        from pipecat.pipeline.runner import PipelineRunner
+        from pipecat.pipeline.runner import WorkerRunner
         from pipecat.pipeline.worker import PipelineWorker
         from pipecat.processors.frame_processor import FrameProcessor
 
@@ -164,7 +164,7 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.02)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner()
+        runner = WorkerRunner()
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), inject_and_end())
 

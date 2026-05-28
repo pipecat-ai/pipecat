@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     TextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.sync_parallel_pipeline import FrameOrder, SyncParallelPipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -204,7 +204,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             await worker.cancel()
 
         # Run the pipeline
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
         await runner.add_workers(worker)
         await runner.run()
 

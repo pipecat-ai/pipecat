@@ -4,20 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Pipeline runner for managing pipeline worker execution and orchestration.
+"""Worker runner for managing worker execution and orchestration.
 
-This module provides the :class:`PipelineRunner` class. It runs
-:class:`~pipecat.pipeline.worker.PipelineWorker` instances to completion and
-also acts as the host for spawned :class:`~pipecat.pipeline.base_worker.BaseWorker`
-instances — owning the shared :class:`~pipecat.bus.WorkerBus`,
-the worker registry, and the worker manager that backs the entire session.
+This module provides the :class:`WorkerRunner` class. It runs
+:class:`~pipecat.pipeline.base_worker.BaseWorker` instances (including
+:class:`~pipecat.pipeline.worker.PipelineWorker`) to completion, owning the
+shared :class:`~pipecat.bus.WorkerBus`, the worker registry, and the worker
+manager that backs the entire session.
 
 For a typical single-pipeline bot, register the worker with
-:meth:`PipelineRunner.add_workers` and then call :meth:`PipelineRunner.run`:
+:meth:`WorkerRunner.add_workers` and then call :meth:`WorkerRunner.run`:
 
 .. code-block:: python
 
-    runner = PipelineRunner()
+    runner = WorkerRunner()
     await runner.add_workers(worker)
     await runner.run()
 
@@ -25,14 +25,14 @@ For multi-worker setups, register every worker the same way:
 
 .. code-block:: python
 
-    runner = PipelineRunner()
+    runner = WorkerRunner()
     await runner.add_workers(CodeWorker("code-worker", ...), worker)
     await runner.run()
 
 By default, ``run()`` ends once every root worker has finished — so a
 single-pipeline bot naturally ends when its pipeline does. Multi-worker
 bots whose helpers run forever (e.g. waiting for bus messages) end by
-calling :meth:`PipelineRunner.end` / :meth:`PipelineRunner.cancel` from
+calling :meth:`WorkerRunner.end` / :meth:`WorkerRunner.cancel` from
 an event handler (typically on transport disconnect). For long-lived
 hosts that add and remove workers over many sessions (e.g. a FastAPI
 server), pass ``auto_end=False`` to ``run()`` so the runner does not
@@ -77,10 +77,10 @@ class _WorkerEntry:
     runner_task: asyncio.Task | None = field(default=None, repr=False)
 
 
-class PipelineRunner(BaseObject, BusSubscriber):
-    """Manages pipeline worker execution.
+class WorkerRunner(BaseObject, BusSubscriber):
+    """Manages worker execution.
 
-    Provides a high-level interface for running pipeline workers with
+    Provides a high-level interface for running workers with
     automatic signal handling (SIGINT/SIGTERM), optional garbage
     collection, proper cleanup of resources, and a worker bus + registry
     for multi-worker orchestration.
@@ -113,7 +113,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         force_gc: bool = False,
         loop: asyncio.AbstractEventLoop | None = None,
     ):
-        """Initialize the pipeline runner.
+        """Initialize the worker runner.
 
         Args:
             name: Optional name for the runner instance. Defaults to a
@@ -176,7 +176,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         for worker in workers:
             if worker.name in self._entries:
                 logger.error(
-                    f"PipelineRunner '{self}': worker '{worker.name}' already exists, skipping"
+                    f"WorkerRunner '{self}': worker '{worker.name}' already exists, skipping"
                 )
                 continue
             # ``attach`` is async because it also subscribes the worker
@@ -187,7 +187,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
             await self._registry.watch(worker.name, self._on_local_worker_ready)
             entry = _WorkerEntry(worker=worker)
             self._entries[worker.name] = entry
-            logger.debug(f"PipelineRunner '{self}': added worker '{worker.name}'")
+            logger.debug(f"WorkerRunner '{self}': added worker '{worker.name}'")
 
             if self._running:
                 await self._start_worker(entry)
@@ -224,13 +224,13 @@ class PipelineRunner(BaseObject, BusSubscriber):
         """
         if worker is not None:
             warnings.warn(
-                "Passing a worker to PipelineRunner.run() is deprecated; "
-                "register it with PipelineRunner.add_workers() before calling run() instead.",
+                "Passing a worker to WorkerRunner.run() is deprecated; "
+                "register it with WorkerRunner.add_workers() before calling run() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
 
-        logger.debug(f"PipelineRunner '{self}': started running")
+        logger.debug(f"WorkerRunner '{self}': started running")
         self._auto_end = auto_end
         self._shutdown_event.clear()
 
@@ -268,11 +268,11 @@ class PipelineRunner(BaseObject, BusSubscriber):
         if self._force_gc:
             await self._gc_collect()
 
-        logger.debug(f"PipelineRunner '{self}': finished running")
+        logger.debug(f"WorkerRunner '{self}': finished running")
 
     async def stop_when_done(self) -> None:
         """Schedule all root pipeline workers to stop when their current processing is complete."""
-        logger.debug(f"PipelineRunner '{self}': scheduled to stop when all workers are done")
+        logger.debug(f"WorkerRunner '{self}': scheduled to stop when all workers are done")
         await asyncio.gather(
             *[
                 entry.worker.stop_when_done()
@@ -291,7 +291,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         """
         if self._shutdown_event.is_set():
             return
-        logger.debug(f"PipelineRunner '{self}': ending gracefully (reason={reason})")
+        logger.debug(f"WorkerRunner '{self}': ending gracefully (reason={reason})")
         self._shutdown_event.set()
         for name, entry in self._entries.items():
             if entry.worker.parent is None:
@@ -309,7 +309,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         """
         if self._shutdown_event.is_set():
             return
-        logger.debug(f"PipelineRunner '{self}': cancelling (reason={reason})")
+        logger.debug(f"WorkerRunner '{self}': cancelling (reason={reason})")
         self._shutdown_event.set()
         for name, entry in self._entries.items():
             if entry.worker.parent is None:
@@ -373,18 +373,18 @@ class PipelineRunner(BaseObject, BusSubscriber):
         await asyncio.gather(*remaining, return_exceptions=True)
 
     async def _load_setup_files(self) -> None:
-        """Run ``setup_pipeline_runner`` from each file in ``PIPECAT_SETUP_FILES``.
+        """Run ``setup_worker_runner`` from each file in ``PIPECAT_SETUP_FILES``.
 
-        A setup file may define ``setup_pipeline_runner(runner)`` to add
+        A setup file may define ``setup_worker_runner(runner)`` to add
         workers, attach event handlers, or wire other runner-level
         configuration.
         """
-        await run_setup_hook(target=self, function_name="setup_pipeline_runner")
+        await run_setup_hook(target=self, function_name="setup_worker_runner")
 
     async def _start_worker(self, entry: _WorkerEntry) -> None:
         """Run a registered worker as a background asyncio worker."""
         worker = entry.worker
-        logger.debug(f"PipelineRunner '{self}': starting worker '{worker.name}'")
+        logger.debug(f"WorkerRunner '{self}': starting worker '{worker.name}'")
 
         entry.runner_task = self.create_task(
             self._run_worker(worker),
@@ -436,7 +436,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         ]
         if workers:
             names = [w.name for w in workers]
-            logger.debug(f"PipelineRunner '{self}': broadcasting registry: {names}")
+            logger.debug(f"WorkerRunner '{self}': broadcasting registry: {names}")
             await self._bus.send(
                 BusWorkerRegistryMessage(
                     source=self.name,
@@ -449,7 +449,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         """Handle a registry message from a remote runner."""
         worker_names = [w.name for w in message.workers]
         logger.debug(
-            f"PipelineRunner '{self}': received registry from '{message.runner}' "
+            f"WorkerRunner '{self}': received registry from '{message.runner}' "
             f"with workers: {worker_names}"
         )
         for entry in message.workers:
@@ -459,7 +459,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
         if message.runner not in self._known_runners:
             self._known_runners.add(message.runner)
             logger.debug(
-                f"PipelineRunner '{self}': new runner '{message.runner}', sending our registry back"
+                f"WorkerRunner '{self}': new runner '{message.runner}', sending our registry back"
             )
             await self._send_registry()
 
@@ -488,7 +488,7 @@ class PipelineRunner(BaseObject, BusSubscriber):
 
     async def _sig_cancel(self) -> None:
         """Cancel the runner due to signal interruption."""
-        logger.warning(f"PipelineRunner '{self}': interruption detected, cancelling.")
+        logger.warning(f"WorkerRunner '{self}': interruption detected, cancelling.")
         await self.cancel(reason="interrupt signal")
 
     async def _gc_collect(self) -> None:
@@ -496,3 +496,23 @@ class PipelineRunner(BaseObject, BusSubscriber):
         collected = await asyncio.to_thread(gc.collect)
         logger.debug(f"Garbage collector: collected {collected} objects.")
         logger.debug(f"Garbage collector: uncollectable objects {gc.garbage}")
+
+
+class PipelineRunner(WorkerRunner):
+    """Deprecated alias for :class:`WorkerRunner`.
+
+    .. deprecated:: 1.3.0
+        Use :class:`WorkerRunner` instead. The runner now runs workers (of
+        which :class:`~pipecat.pipeline.worker.PipelineWorker` is one kind),
+        not just pipelines. ``PipelineRunner`` will be removed in a future
+        release.
+    """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize the worker runner (deprecated)."""
+        warnings.warn(
+            "PipelineRunner is deprecated, use WorkerRunner instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)

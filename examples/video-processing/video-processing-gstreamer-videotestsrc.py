@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.gstreamer.pipeline_source import GStreamerPipelineSource
 from pipecat.runner.types import RunnerArguments
@@ -59,7 +59,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
     await runner.run()

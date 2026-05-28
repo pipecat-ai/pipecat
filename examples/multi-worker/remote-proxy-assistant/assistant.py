@@ -9,7 +9,7 @@
 Runs a FastAPI server that accepts WebSocket connections from a
 ``main.py``-style client. Each connection spins up a
 `WebSocketProxyServer` bridging the socket to a local
-`PipelineRunner` and an `LLMWorker` that handles the conversation.
+`WorkerRunner` and an `LLMWorker` that handles the conversation.
 
 Usage::
 
@@ -30,7 +30,7 @@ from fastapi import FastAPI, WebSocket
 from loguru import logger
 
 from pipecat.bus import BusFrameMessage
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import WorkerRunner
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.workers.llm import LLMWorker, tool
@@ -82,7 +82,7 @@ async def websocket_endpoint(websocket: WebSocket):
     """Handle a WebSocket connection from the main bot's proxy."""
     await websocket.accept()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = WorkerRunner(handle_sigint=False)
 
     proxy = WebSocketProxyServer(
         "gateway",

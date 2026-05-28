@@ -6,6 +6,7 @@
 
 import asyncio
 import unittest
+import warnings
 
 from pipecat.bus import (
     BusAddWorkerMessage,
@@ -15,7 +16,7 @@ from pipecat.bus import (
     BusEndWorkerMessage,
 )
 from pipecat.pipeline.base_worker import BaseWorker
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import PipelineRunner, WorkerRunner
 
 
 class StubTask(BaseWorker):
@@ -30,10 +31,21 @@ class StubTask(BaseWorker):
         self._finished_event.set()
 
 
-class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
+class TestWorkerRunner(unittest.IsolatedAsyncioTestCase):
+    async def test_pipeline_runner_alias_is_deprecated(self):
+        """PipelineRunner still works but emits a DeprecationWarning."""
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            runner = PipelineRunner(handle_sigint=False)
+
+        self.assertIsInstance(runner, WorkerRunner)
+        deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertTrue(deprecations)
+        self.assertIn("WorkerRunner", str(deprecations[0].message))
+
     async def test_spawn_registers_task(self):
         """add_workers() registers the task by name (duplicate is silently skipped)."""
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         task = StubTask("task_a")
 
         await runner.add_workers(task)
@@ -43,7 +55,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_starts_bus_and_tasks(self):
         """run() starts bus, starts all tasks, fires on_ready."""
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         task = StubTask("task_a")
         await runner.add_workers(task)
 
@@ -61,7 +73,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
 
     async def test_end_is_idempotent(self):
         """end() is idempotent — subsequent calls are no-ops."""
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         task = StubTask("task_a")
         await runner.add_workers(task)
 
@@ -75,7 +87,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_is_idempotent(self):
         """cancel() is idempotent — subsequent calls are no-ops."""
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         task = StubTask("task_a")
         await runner.add_workers(task)
 
@@ -91,7 +103,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
 
     async def test_end_sends_end_task_message_to_root_tasks_only(self):
         """end() sends BusEndWorkerMessage only to root tasks (no parent)."""
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         root = StubTask("root")
         child = StubTask("child")
         # Manually mark child as having root as parent
@@ -119,7 +131,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_sends_cancel_task_message_to_root_tasks_only(self):
         """cancel() sends BusCancelWorkerMessage only to root tasks (no parent)."""
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         root = StubTask("root")
         child = StubTask("child")
         child._parent = root.name
@@ -146,7 +158,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
 
     async def test_bus_end_message_triggers_end(self):
         """BusEndMessage on bus triggers runner.end()."""
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         task = StubTask("task_a")
         await runner.add_workers(task)
 
@@ -162,7 +174,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
 
     async def test_bus_cancel_message_triggers_cancel(self):
         """BusCancelMessage on bus triggers runner.cancel()."""
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         task = StubTask("task_a")
         await runner.add_workers(task)
 
@@ -179,7 +191,7 @@ class TestPipelineRunner(unittest.IsolatedAsyncioTestCase):
 
     async def test_bus_add_task_message_triggers_add(self):
         """BusAddWorkerMessage on bus triggers add_workers()."""
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         task_a = StubTask("task_a")
         await runner.add_workers(task_a)
 

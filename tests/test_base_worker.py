@@ -31,7 +31,7 @@ from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_context import JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -129,7 +129,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(handoff_done.wait(), timeout=2.0)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), handoff_after_start())
 
@@ -151,7 +151,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(activated.wait(), timeout=2.0)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), wait_and_end())
 
@@ -188,7 +188,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(deactivated.wait(), timeout=2.0)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), drive())
 
@@ -294,7 +294,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(worker.started_at)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), wait_and_end())
 
@@ -312,7 +312,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(started.wait(), timeout=2.0)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), wait_and_end())
 
@@ -332,7 +332,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), end_pipeline())
 
@@ -367,7 +367,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
                 BusEndWorkerMessage(source="runner", target="test", reason="shutdown")
             )
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), send_end_message())
 
@@ -381,7 +381,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await self.bus.send(BusCancelWorkerMessage(source="runner", target="test"))
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         try:
             await runner.add_workers(worker)
             await asyncio.gather(runner.run(), send_cancel_message())
@@ -407,7 +407,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), push_frames())
 
@@ -431,7 +431,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), push_frames())
 
@@ -463,7 +463,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), send_speak())
 
@@ -490,7 +490,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), send_speak())
 
@@ -514,7 +514,7 @@ class TestPipelineTaskLifecycle(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(handoff_done.wait(), timeout=2.0)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), self_handoff())
 
@@ -632,7 +632,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), push_frames())
 
@@ -661,7 +661,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), inject_frame())
 
@@ -693,7 +693,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), push_frames())
 
@@ -723,7 +723,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), inject_frame())
 
@@ -742,7 +742,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), push_frames())
 
@@ -776,7 +776,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), inject_frame())
 
@@ -807,7 +807,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), inject_frame())
 
@@ -852,7 +852,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), inject_frames())
 
@@ -898,7 +898,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), inject_frames())
 
@@ -917,7 +917,7 @@ class TestEdgeToBus(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             await worker.queue_frame(EndFrame())
 
-        runner = PipelineRunner(bus=self.bus, handle_sigint=False)
+        runner = WorkerRunner(bus=self.bus, handle_sigint=False)
         await runner.add_workers(worker)
         await asyncio.gather(runner.run(), push_frames())
 

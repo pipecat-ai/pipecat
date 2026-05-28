@@ -36,7 +36,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -148,7 +148,7 @@ async def debate(params: FunctionCallParams, topic: str):
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting parallel-debate bot")
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     tts = CartesiaTTSService(

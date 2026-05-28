@@ -34,7 +34,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.bus.network.pgmq import PgmqBus
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -85,7 +85,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     pgmq = pgmq_from_url(runner_args.cli_args.database_url)
     await pgmq.init()
     bus = PgmqBus(pgmq=pgmq, channel=runner_args.cli_args.channel)
-    runner = PipelineRunner(bus=bus, handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(bus=bus, handle_sigint=runner_args.handle_sigint)
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     tts = CartesiaTTSService(

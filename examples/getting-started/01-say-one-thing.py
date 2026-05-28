@@ -11,7 +11,7 @@ from loguru import logger
 
 from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -52,7 +52,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         await worker.queue_frames([TTSSpeakFrame(f"Hello there!"), EndFrame()])
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
     await runner.run()

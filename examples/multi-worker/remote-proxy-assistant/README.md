@@ -50,7 +50,7 @@ uv run remote-proxy-assistant/main.py --remote-url ws://server-host:8765/ws
 ```
 
 - **[main.py](main.py)** — Transport worker with STT, TTS, and a `BusBridge`. Spawns a `WebSocketProxyClient` that connects to the remote server and forwards `BusFrameMessage`s.
-- **[assistant.py](assistant.py)** — FastAPI server. Each WebSocket connection spawns a `WebSocketProxyServer` plus a bridged `AcmeAssistant` LLM worker on a per-session `PipelineRunner`.
+- **[assistant.py](assistant.py)** — FastAPI server. Each WebSocket connection spawns a `WebSocketProxyServer` plus a bridged `AcmeAssistant` LLM worker on a per-session `WorkerRunner`.
 
 ## Security
 

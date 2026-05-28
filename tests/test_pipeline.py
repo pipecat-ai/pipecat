@@ -464,7 +464,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         """
         from pipecat.bus import BusCancelWorkerMessage
         from pipecat.pipeline.base_worker import BaseWorker
-        from pipecat.pipeline.runner import PipelineRunner
+        from pipecat.pipeline.runner import WorkerRunner
 
         class PeerWorker(BaseWorker):
             """Bus-only worker that exits on cancel so the runner can finish."""
@@ -483,7 +483,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         )
         peer = PeerWorker("peer")
 
-        runner = PipelineRunner(handle_sigint=False)
+        runner = WorkerRunner(handle_sigint=False)
         await runner.add_workers(peer, main_worker)
 
         await asyncio.wait_for(runner.run(), timeout=5.0)
