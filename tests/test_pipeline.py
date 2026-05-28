@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker, PipelineWorkerParams
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
 from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -134,7 +134,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         await worker.queue_frame(TextFrame(text="Hello!"))
         await worker.queue_frames([TextFrame(text="Bye!"), EndFrame()])
-        await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
         assert worker.has_finished()
 
     async def test_task_observers(self):
@@ -152,7 +152,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         worker = PipelineWorker(pipeline, observers=[CustomObserver()])
 
         await worker.queue_frames([TextFrame(text="Hello Downstream!"), EndFrame()])
-        await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
         assert frame_received
 
     async def test_task_add_observer(self):
@@ -208,7 +208,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await worker.queue_frame(EndFrame())
 
         await asyncio.gather(
-            worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())), delayed_add_observer()
+            worker.run(WorkerParams(loop=asyncio.get_event_loop())), delayed_add_observer()
         )
 
         assert frame_received
@@ -234,7 +234,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             end_received = isinstance(frame, EndFrame)
 
         await worker.queue_frame(EndFrame())
-        await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
 
         assert start_received
         assert end_received
@@ -252,7 +252,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             stop_received = isinstance(frame, StopFrame)
 
         await worker.queue_frame(StopFrame())
-        await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
 
         assert stop_received
 
@@ -285,7 +285,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         try:
             await asyncio.wait_for(
-                worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())),
+                worker.run(WorkerParams(loop=asyncio.get_event_loop())),
                 timeout=1.0,
             )
         except TimeoutError:
@@ -313,7 +313,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         try:
             await asyncio.wait_for(
-                worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())),
+                worker.run(WorkerParams(loop=asyncio.get_event_loop())),
                 timeout=1.0,
             )
         except TimeoutError:
@@ -342,7 +342,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         try:
             await asyncio.wait_for(
-                worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())),
+                worker.run(WorkerParams(loop=asyncio.get_event_loop())),
                 timeout=1.0,
             )
         except TimeoutError:
@@ -395,7 +395,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         start_time = time.time()
         await asyncio.gather(
-            worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())),
+            worker.run(WorkerParams(loop=asyncio.get_event_loop())),
             wait_for_heartbeats(),
         )
         elapsed = time.time() - start_time
@@ -436,7 +436,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
             try:
                 await asyncio.wait_for(
-                    worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())),
+                    worker.run(WorkerParams(loop=asyncio.get_event_loop())),
                     timeout=0.6,
                 )
             except TimeoutError:
@@ -452,7 +452,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([identity])
         worker = PipelineWorker(pipeline, idle_timeout_secs=0.2)
         # This shouldn't freeze, so nothing to check really.
-        await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
 
     async def test_cancel_runner_on_idle_timeout_cancels_peers(self):
         """``cancel_runner_on_idle_timeout`` brings down the whole runner, not just the worker.
@@ -517,7 +517,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await worker.queue_frame(EndFrame())
 
         await asyncio.wait_for(
-            worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())),
+            worker.run(WorkerParams(loop=asyncio.get_event_loop())),
             timeout=2.0,
         )
         self.assertTrue(idle_fired.is_set())
@@ -532,7 +532,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         )
         try:
             await asyncio.wait_for(
-                worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())),
+                worker.run(WorkerParams(loop=asyncio.get_event_loop())),
                 timeout=0.3,
             )
         except TimeoutError:
@@ -551,7 +551,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             ),
             idle_timeout_secs=0.3,
         )
-        await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
 
     async def test_idle_task_event_handler_no_frames(self):
         identity = IdentityFilter()
@@ -570,7 +570,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             idle_timeout = True
             await worker.cancel()
 
-        await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
         assert idle_timeout
 
     async def test_idle_task_event_handler_quiet_user(self):
@@ -604,9 +604,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 )
                 await asyncio.sleep(0.01)
 
-        await asyncio.gather(
-            send_audio(), worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
-        )
+        await asyncio.gather(send_audio(), worker.run(WorkerParams(loop=asyncio.get_event_loop())))
         assert idle_timeout == 1
 
     async def test_idle_task_frames(self):
@@ -639,7 +637,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         start_time = time.time()
 
         tasks = [
-            asyncio.create_task(worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))),
+            asyncio.create_task(worker.run(WorkerParams(loop=asyncio.get_event_loop()))),
             asyncio.create_task(delayed_frames()),
         ]
 
@@ -684,7 +682,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await worker.queue_frame(TextFrame("Hello Pipecat!"))
 
         tasks = [
-            asyncio.create_task(worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))),
+            asyncio.create_task(worker.run(WorkerParams(loop=asyncio.get_event_loop()))),
             asyncio.create_task(delayed_frames()),
         ]
 
@@ -723,7 +721,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             cancelled = isinstance(frame, CancelFrame)
 
         try:
-            await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
         except asyncio.CancelledError:
             assert cancelled
 
@@ -747,9 +745,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([StartBlocker(start_received=start_received)])
         worker = PipelineWorker(pipeline, cancel_timeout_secs=0.1)
 
-        run_task = asyncio.create_task(
-            worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
-        )
+        run_task = asyncio.create_task(worker.run(WorkerParams(loop=asyncio.get_event_loop())))
         await start_received.wait()
         await worker.cancel()
         await asyncio.wait_for(run_task, timeout=1.0)
@@ -783,7 +779,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await worker.queue_frame(TextFrame(text="Hello from Pipecat!"))
 
         try:
-            await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
         except asyncio.CancelledError:
             assert error_received
 

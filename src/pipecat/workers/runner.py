@@ -60,9 +60,9 @@ from pipecat.bus import (
     WorkerBus,
 )
 from pipecat.bus.subscriber import BusSubscriber
-from pipecat.pipeline.base_worker import BaseWorker
+from pipecat.pipeline.base_worker import BaseWorker, WorkerParams
 from pipecat.pipeline.utils import run_setup_hook
-from pipecat.pipeline.worker import PipelineWorker, PipelineWorkerParams
+from pipecat.pipeline.worker import PipelineWorker
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData, WorkerRegistryEntry
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
@@ -396,7 +396,7 @@ class WorkerRunner(BaseObject, BusSubscriber):
     async def _run_worker(self, worker: BaseWorker) -> None:
         """Drive a registered worker to completion."""
         try:
-            params = PipelineWorkerParams(loop=self._loop)
+            params = WorkerParams(loop=self._loop)
             await worker.run(params)
         except asyncio.CancelledError:
             pass

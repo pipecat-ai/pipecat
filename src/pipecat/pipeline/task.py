@@ -18,7 +18,6 @@ from pipecat.pipeline.worker import (
     PipelineTask,
     PipelineTaskParams,
     PipelineWorker,
-    PipelineWorkerParams,
 )
 
 __all__ = [
@@ -27,5 +26,4 @@ __all__ = [
     "PipelineTask",
     "PipelineTaskParams",
     "PipelineWorker",
-    "PipelineWorkerParams",
 ]
