@@ -80,13 +80,23 @@ class WorkerRegistry:
     async def watch(self, worker_name: str, handler: WatchHandler) -> None:
         """Watch for a specific worker's registration.
 
+        Idempotent: registering the same ``(worker_name, handler)`` pair
+        more than once is a no-op (otherwise the handler would fire
+        multiple times when the worker registers — e.g. when a parent
+        both calls ``add_workers(child)`` (which auto-watches) and
+        declares a ``@worker_ready(name=child.name)`` handler that the
+        framework also installs).
+
         If the worker is already registered, the handler fires immediately.
 
         Args:
             worker_name: The worker name to watch for.
             handler: Async callable invoked with the worker's data.
         """
-        self._watches[worker_name].append(handler)
+        handlers = self._watches[worker_name]
+        if handler in handlers:
+            return
+        handlers.append(handler)
         existing = self.get(worker_name)
         if existing:
             await handler(existing)
