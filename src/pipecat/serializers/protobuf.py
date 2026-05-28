@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
@@ -49,6 +50,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         OutputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
         MessageFrame: "message",
+        InterruptionFrame: "interruption",
     }
     SERIALIZABLE_FIELDS = {v: k for k, v in SERIALIZABLE_TYPES.items()}
 
@@ -57,6 +59,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         InputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
         MessageFrame: "message",
+        InterruptionFrame: "interruption",
     }
     DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 

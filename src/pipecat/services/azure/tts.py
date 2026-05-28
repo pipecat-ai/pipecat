@@ -42,7 +42,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Azure, you need to `pip install pipecat-ai[azure]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputFormat:

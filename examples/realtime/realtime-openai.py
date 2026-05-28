@@ -19,7 +19,7 @@ from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
@@ -200,7 +200,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         ]
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -214,27 +214,27 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames([LLMRunFrame()])
+        await worker.queue_frames([LLMRunFrame()])
 
         # Add a new tool at runtime after a delay.
         await asyncio.sleep(15)
         new_tools = ToolsSchema(
             standard_tools=[weather_function, restaurant_function, get_news_function]
         )
-        await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
+        await worker.queue_frames([LLMSetToolsFrame(tools=new_tools)])
         # Alternative pattern, useful if you're changing other session properties, too.
         # (Though note that tools in your LLMContext take precedence over those
         # in session properties, so if you have context-provided tools, prefer
         # LLMSetToolsFrame instead, as it updates your context. Ditto for
         # updating system instructions: send an LLMMessagesUpdateFrame with
         # context messages updated with your new desired system message.)
-        # await task.queue_frames(
+        # await worker.queue_frames(
         #     [LLMUpdateSettingsFrame(settings=SessionProperties(tools=new_tools).model_dump())]
         # )
 
         # Reasoning effort can be changed at runtime too. Only
         # reasoning-capable Realtime models (e.g. gpt-realtime-2) support this.
-        # await task.queue_frames(
+        # await worker.queue_frames(
         #     [
         #         LLMUpdateSettingsFrame(
         #             delta=OpenAIRealtimeLLMService.Settings(
@@ -249,7 +249,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
     # Log transcript updates
     @user_aggregator.event_handler("on_user_turn_stopped")
@@ -266,7 +266,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

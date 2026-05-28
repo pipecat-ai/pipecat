@@ -33,14 +33,14 @@ if TYPE_CHECKING:
     except ModuleNotFoundError as e:
         logger.error(f"Exception: {e}")
         logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
-        raise Exception(f"Missing module: {e}")
+        raise ImportError(f"Missing module: {e}") from e
 
     try:
         import mlx_whisper  # noqa: F401
     except ModuleNotFoundError as e:
         logger.error(f"Exception: {e}")
         logger.error("In order to use Whisper, you need to `pip install pipecat-ai[mlx-whisper]`.")
-        raise Exception(f"Missing module: {e}")
+        raise ImportError(f"Missing module: {e}") from e
 
 
 class Model(Enum):

@@ -7,6 +7,7 @@
 import asyncio
 import struct
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from pipecat.clocks.system_clock import SystemClock
@@ -45,7 +46,13 @@ async def _make_processor(*, buffer_size: int = 0) -> AudioBufferProcessor:
     loop = asyncio.get_event_loop()
     task_manager = TaskManager()
     task_manager.setup(TaskManagerParams(loop=loop))
-    await processor.setup(FrameProcessorSetup(clock=SystemClock(), task_manager=task_manager))
+    await processor.setup(
+        FrameProcessorSetup(
+            clock=SystemClock(),
+            task_manager=task_manager,
+            pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+        )
+    )
 
     await processor.process_frame(
         StartFrame(audio_out_sample_rate=16000), FrameDirection.DOWNSTREAM

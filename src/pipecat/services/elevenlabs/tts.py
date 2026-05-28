@@ -56,7 +56,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 # Models that support language codes
 # The following models are excluded as they don't support language codes:
@@ -147,6 +147,17 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
         f"ElevenLabsTTSService: No output format available for {sample_rate} sample rate"
     )
     return "pcm_24000"
+
+
+def _is_chinese_or_japanese_language(language: str) -> bool:
+    """Check if the given language is Chinese or Japanese."""
+    base_lang = language.split("-")[0].lower()
+    return base_lang in {"zh", "ja"}
+
+
+def _word_timestamps_include_inter_frame_spaces(language: str | None) -> bool:
+    """Whether timestamp text should be treated as carrying its own spacing."""
+    return bool(language and _is_chinese_or_japanese_language(language))
 
 
 def build_elevenlabs_voice_settings(
@@ -896,7 +907,17 @@ class ElevenLabsTTSService(WebsocketTTSService):
                 )
 
                 if word_times:
-                    await self.add_word_timestamps(word_times, received_ctx_id)
+                    await self.add_word_timestamps(
+                        word_times,
+                        received_ctx_id,
+                        includes_inter_frame_spaces=(
+                            True
+                            if _word_timestamps_include_inter_frame_spaces(
+                                assert_given(self._settings.language)
+                            )
+                            else None
+                        ),
+                    )
 
                     # Calculate the actual end time of this audio chunk
                     char_start_times_ms = alignment.get("charStartTimesMs", [])
@@ -1438,7 +1459,17 @@ class ElevenLabsHttpTTSService(TTSService):
                             # Calculate word timestamps
                             word_times = self.calculate_word_times(alignment)
                             if word_times:
-                                await self.add_word_timestamps(word_times, context_id)
+                                await self.add_word_timestamps(
+                                    word_times,
+                                    context_id,
+                                    includes_inter_frame_spaces=(
+                                        True
+                                        if _word_timestamps_include_inter_frame_spaces(
+                                            assert_given(self._settings.language)
+                                        )
+                                        else None
+                                    ),
+                                )
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse JSON from stream: {e}")
                         continue
@@ -1450,7 +1481,17 @@ class ElevenLabsHttpTTSService(TTSService):
                 # since this is the end of the utterance
                 if self._partial_word:
                     final_word_time = [(self._partial_word, self._partial_word_start_time)]
-                    await self.add_word_timestamps(final_word_time, context_id)
+                    await self.add_word_timestamps(
+                        final_word_time,
+                        context_id,
+                        includes_inter_frame_spaces=(
+                            True
+                            if _word_timestamps_include_inter_frame_spaces(
+                                assert_given(self._settings.language)
+                            )
+                            else None
+                        ),
+                    )
                     self._partial_word = ""
                     self._partial_word_start_time = 0.0
 

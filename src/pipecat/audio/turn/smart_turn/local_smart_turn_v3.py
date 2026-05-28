@@ -133,7 +133,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         if actual_rate == _MODEL_SAMPLE_RATE:
             return audio_array
 
-        return soxr.resample(audio_array, actual_rate, _MODEL_SAMPLE_RATE, quality="VHQ")
+        return soxr.resample(audio_array, actual_rate, _MODEL_SAMPLE_RATE, quality="HQ")
 
     def _predict_endpoint(self, audio_array: np.ndarray) -> dict[str, Any]:
         """Predict end-of-turn using local ONNX model."""

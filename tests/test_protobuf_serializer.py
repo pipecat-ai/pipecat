@@ -7,6 +7,7 @@
 import unittest
 
 from pipecat.frames.frames import (
+    InterruptionFrame,
     OutputAudioRawFrame,
     TextFrame,
     TranscriptionFrame,
@@ -38,6 +39,13 @@ class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.audio, audio_frame.audio)
         self.assertEqual(frame.sample_rate, audio_frame.sample_rate)
         self.assertEqual(frame.num_channels, audio_frame.num_channels)
+
+    async def test_interruption_frame_roundtrip(self):
+        interruption_frame = InterruptionFrame()
+        frame = await self.serializer.deserialize(
+            await self.serializer.serialize(interruption_frame)
+        )
+        self.assertIsInstance(frame, InterruptionFrame)
 
 
 if __name__ == "__main__":

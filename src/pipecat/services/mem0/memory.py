@@ -28,7 +28,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use Mem0, you need to `pip install mem0ai`. Also, set the environment variable MEM0_API_KEY."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class Mem0MemoryService(FrameProcessor):

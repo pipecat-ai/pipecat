@@ -52,7 +52,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use LiveKit, you need to `pip install pipecat-ai[livekit]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 # DTMF mapping according to RFC 4733
 DTMF_CODE_MAP = {

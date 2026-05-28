@@ -18,24 +18,27 @@ When to use the SOXRAudioResampler:
 import numpy as np
 import soxr
 
-from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler, SoxrQuality
 
 
 class SOXRAudioResampler(BaseAudioResampler):
     """Audio resampler implementation using the SoX resampler library.
 
     This resampler uses the SoX resampler library configured for very high
-    quality (VHQ) resampling, providing excellent audio quality at the cost
-    of additional computational overhead.
+    quality (VHQ) resampling by default, providing excellent audio quality at
+    the cost of additional computational overhead.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, quality: SoxrQuality = "VHQ", **kwargs):
         """Initialize the SoX audio resampler.
 
         Args:
-            **kwargs: Additional keyword arguments (currently unused).
+            quality: SOXR quality preset. Higher quality means higher CPU cost.
+                One of "VHQ" (default, very high quality), "HQ", "MQ", "LQ",
+                or "QQ" (quick, lowest latency).
+            **kwargs: Reserved for forward compatibility; currently ignored.
         """
-        pass
+        self._quality = quality
 
     async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
         """Resample audio data using SoX resampler library.
@@ -51,6 +54,6 @@ class SOXRAudioResampler(BaseAudioResampler):
         if in_rate == out_rate:
             return audio
         audio_data = np.frombuffer(audio, dtype=np.int16)
-        resampled_audio = soxr.resample(audio_data, in_rate, out_rate, quality="VHQ")
+        resampled_audio = soxr.resample(audio_data, in_rate, out_rate, quality=self._quality)
         result = resampled_audio.astype(np.int16).tobytes()
         return result

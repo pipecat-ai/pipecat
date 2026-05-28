@@ -33,7 +33,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Gradium, you need to `pip install pipecat-ai[gradium]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 SAMPLE_RATE = 48000
 
@@ -103,7 +103,7 @@ class GradiumTTSService(WebsocketTTSService):
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="default",
-            voice="YTpq7expH9539ERJ",
+            voice="_6Aslh2DxfmnRLmP",
             language=None,
         )
 

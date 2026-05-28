@@ -46,7 +46,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use NVIDIA Nemotron Speech STT, you need to `pip install pipecat-ai[nvidia]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_nvidia_nemotron_speech_language(language: Language) -> str:
