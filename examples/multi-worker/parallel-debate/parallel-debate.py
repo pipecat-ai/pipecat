@@ -191,6 +191,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     worker = PipelineWorker(
         pipeline,
+        name="parallel-debate",
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,

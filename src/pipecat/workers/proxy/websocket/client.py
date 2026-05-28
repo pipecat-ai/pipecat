@@ -22,12 +22,12 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use WebSocketProxyClientTask, you need to `pip install pipecat-ai[websockets-base]`."
+        "In order to use WebSocketProxyClient, you need to `pip install pipecat-ai[websockets-base]`."
     )
     raise Exception(f"Missing module: {e}")
 
 
-class WebSocketProxyClientTask(BaseWorker):
+class WebSocketProxyClient(BaseWorker):
     """Forwards bus messages to a remote worker over WebSocket.
 
     Connects to a WebSocket URL and forwards messages between a local
@@ -41,7 +41,7 @@ class WebSocketProxyClientTask(BaseWorker):
 
     Example::
 
-        proxy = WebSocketProxyClientTask(
+        proxy = WebSocketProxyClient(
             "proxy",
             url="ws://remote-server:8765/ws",
             remote_worker_name="worker",
@@ -71,7 +71,7 @@ class WebSocketProxyClientTask(BaseWorker):
         serializer: MessageSerializer | None = None,
         active: bool = False,
     ):
-        """Initialize the WebSocketProxyClientTask.
+        """Initialize the WebSocketProxyClient.
 
         Args:
             name: Unique name for this worker.

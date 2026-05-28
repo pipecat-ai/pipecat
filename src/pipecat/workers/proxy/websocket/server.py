@@ -21,11 +21,11 @@ try:
     from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use WebSocketProxyServerTask, you need to `pip install starlette`.")
+    logger.error("In order to use WebSocketProxyServer, you need to `pip install starlette`.")
     raise Exception(f"Missing module: {e}")
 
 
-class WebSocketProxyServerTask(BaseWorker):
+class WebSocketProxyServer(BaseWorker):
     """Receives bus messages from a remote client over WebSocket.
 
     Accepts a FastAPI/Starlette WebSocket connection and forwards
@@ -43,7 +43,7 @@ class WebSocketProxyServerTask(BaseWorker):
         @app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()
-            proxy = WebSocketProxyServerTask(
+            proxy = WebSocketProxyServer(
                 "gateway",
                 websocket=websocket,
                 worker_name="worker",
@@ -71,7 +71,7 @@ class WebSocketProxyServerTask(BaseWorker):
         forward_messages: tuple[type[BusMessage], ...] = (),
         serializer: MessageSerializer | None = None,
     ):
-        """Initialize the WebSocketProxyServerTask.
+        """Initialize the WebSocketProxyServer.
 
         Args:
             name: Unique name for this worker.
@@ -113,7 +113,7 @@ class WebSocketProxyServerTask(BaseWorker):
         await asyncio.sleep(0)
 
         # Watch the local worker so we can notify the remote side when it's ready.
-        await self.watch_worker(self._worker_name)
+        await self.watch_workers(self._worker_name)
 
     async def stop(self) -> None:
         """Cancel the receive loop and close the WebSocket connection."""

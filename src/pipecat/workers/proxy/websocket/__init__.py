@@ -6,10 +6,10 @@
 
 """WebSocket proxy workers for forwarding bus messages."""
 
-from pipecat.workers.proxy.websocket.client import WebSocketProxyClientTask
-from pipecat.workers.proxy.websocket.server import WebSocketProxyServerTask
+from pipecat.workers.proxy.websocket.client import WebSocketProxyClient
+from pipecat.workers.proxy.websocket.server import WebSocketProxyServer
 
 __all__ = [
-    "WebSocketProxyClientTask",
-    "WebSocketProxyServerTask",
+    "WebSocketProxyClient",
+    "WebSocketProxyServer",
 ]

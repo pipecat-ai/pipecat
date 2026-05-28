@@ -13,8 +13,8 @@ def worker_ready(*, name: str):
     """Mark a method as a handler for a specific worker becoming ready.
 
     Decorated methods are automatically collected by `BaseWorker` at
-    initialization. When the worker starts, it calls `watch_worker` for
-    each decorated handler. When the watched worker registers, the
+    initialization. When the worker starts, it calls `watch_workers` for
+    the decorated handlers. When a watched worker registers, the
     decorated method is called with the ready data.
 
     Example::

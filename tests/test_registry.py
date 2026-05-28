@@ -85,6 +85,21 @@ class TestTaskRegistry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(received), 1)
         self.assertIs(received[0], data)
 
+    async def test_watch_is_idempotent_for_same_handler(self):
+        """Re-watching with the same handler does not double-fire on registration."""
+        received = []
+
+        async def handler(task_data):
+            received.append(task_data)
+
+        await self.registry.watch("greeter", handler)
+        await self.registry.watch("greeter", handler)  # duplicate, should be no-op
+
+        data = WorkerReadyData(worker_name="greeter", runner="runner_a")
+        await self.registry.register(data)
+
+        self.assertEqual(len(received), 1)
+
     async def test_watch_does_not_fire_for_other_tasks(self):
         """Watch handler does not fire for a different task."""
         received = []

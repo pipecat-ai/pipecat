@@ -237,6 +237,7 @@ class PipelineWorker(BaseWorker):
         app_resources: Any = None,
         bridged: tuple[str, ...] | None = None,
         cancel_on_idle_timeout: bool = True,
+        cancel_runner_on_idle_timeout: bool = True,
         cancel_timeout_secs: float = CANCEL_TIMEOUT_SECS,
         check_dangling_tasks: bool = True,
         clock: BaseClock | None = None,
@@ -277,8 +278,22 @@ class PipelineWorker(BaseWorker):
                 bridges. A tuple of names like ``("voice",)`` accepts
                 only frames from those bridges. The bus comes from
                 :meth:`attach` (called by the runner).
-            cancel_on_idle_timeout: Whether the pipeline worker should be cancelled if
-                the idle timeout is reached.
+            cancel_on_idle_timeout: Whether reaching the idle timeout should
+                cancel the pipeline worker. When ``False``, the idle event
+                still fires ``on_idle_timeout`` but the worker is left alone
+                (and ``cancel_runner_on_idle_timeout`` is ignored too: opting
+                out of local cancellation also opts out of the runner-wide
+                cancel).
+            cancel_runner_on_idle_timeout: When ``cancel_on_idle_timeout`` is
+                also ``True``, whether reaching the idle timeout should also
+                cancel the entire :class:`PipelineRunner`. The worker is
+                always cancelled first; when this is ``True`` the worker also
+                emits a ``BusCancelMessage`` so the runner broadcasts
+                cancellation to every other root worker. Defaults to ``True``
+                so a multi-worker bot's helpers shut down with the main
+                pipeline; set to ``False`` for a sidecar ``PipelineWorker``
+                that should self-cancel on idle without bringing down its
+                peers.
             cancel_timeout_secs: Timeout (in seconds) to wait for cancellation to happen
                 cleanly.
             check_dangling_tasks: Whether to check for processors' tasks finishing properly.
@@ -323,6 +338,7 @@ class PipelineWorker(BaseWorker):
         self._params = params or PipelineParams()
         self._additional_span_attributes = additional_span_attributes or {}
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
+        self._cancel_runner_on_idle_timeout = cancel_runner_on_idle_timeout
         self._cancel_timeout_secs = cancel_timeout_secs
         self._check_dangling_tasks = check_dangling_tasks
         self._clock = clock or SystemClock()
@@ -968,9 +984,6 @@ class PipelineWorker(BaseWorker):
         """Set up the pipeline worker and all processors."""
         await super().setup(self._pipeline_task_manager)
 
-        if self._bus is not None:
-            await self._bus.subscribe(self)
-
         mgr_params = TaskManagerParams(loop=params.loop)
         self.task_manager.setup(mgr_params)
 
@@ -1214,11 +1227,19 @@ class PipelineWorker(BaseWorker):
 
         logger.warning("Idle timeout detected.")
         await self._call_event_handler("on_idle_timeout")
-        if self._cancel_on_idle_timeout:
-            logger.warning(f"Idle pipeline detected, cancelling pipeline worker...")
-            await self.cancel()
-            return False
-        return True
+        if not self._cancel_on_idle_timeout:
+            return True
+
+        logger.warning("Idle pipeline detected, cancelling pipeline worker...")
+        await self.cancel(reason="idle timeout")
+        if self._cancel_runner_on_idle_timeout:
+            logger.warning("...and cancelling the runner.")
+            # ``BaseWorker.cancel`` sends ``BusCancelMessage`` on the bus
+            # so the runner broadcasts cancellation to every other root
+            # worker too. This worker's pipeline is already cancelling
+            # from the call above.
+            await BaseWorker.cancel(self, reason="idle timeout")
+        return False
 
     async def _load_setup_files(self):
         """Run ``setup_pipeline_worker`` from each file in ``PIPECAT_SETUP_FILES``.

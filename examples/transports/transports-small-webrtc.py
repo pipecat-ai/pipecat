@@ -151,7 +151,7 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
             pcs_map.pop(webrtc_connection.pc_id, None)
 
         # Run example function with SmallWebRTC transport arguments.
-        background_tasks.add_worker(run_example, pipecat_connection)
+        background_tasks.add_task(run_example, pipecat_connection)
 
     answer = pipecat_connection.get_answer()
     # Updating the peer connection inside the map

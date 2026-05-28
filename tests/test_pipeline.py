@@ -454,10 +454,82 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         # This shouldn't freeze, so nothing to check really.
         await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
 
+    async def test_cancel_runner_on_idle_timeout_cancels_peers(self):
+        """``cancel_runner_on_idle_timeout`` brings down the whole runner, not just the worker.
+
+        Build a runner with a forever-running peer ``BaseWorker`` and a
+        ``PipelineWorker`` set to time out quickly. Without the new flag the
+        runner would hang on the peer; with it, the idle timeout sends a
+        ``BusCancelMessage`` and the runner shuts everything down.
+        """
+        from pipecat.bus import BusCancelWorkerMessage
+        from pipecat.pipeline.base_worker import BaseWorker
+        from pipecat.pipeline.runner import PipelineRunner
+
+        class PeerWorker(BaseWorker):
+            """Bus-only worker that exits on cancel so the runner can finish."""
+
+            async def _handle_worker_cancel(self, message: BusCancelWorkerMessage) -> None:
+                await super()._handle_worker_cancel(message)
+                self._finished_event.set()
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        main_worker = PipelineWorker(
+            pipeline,
+            name="main",
+            idle_timeout_secs=0.2,
+            cancel_runner_on_idle_timeout=True,
+        )
+        peer = PeerWorker("peer")
+
+        runner = PipelineRunner(handle_sigint=False)
+        await runner.add_workers(peer, main_worker)
+
+        await asyncio.wait_for(runner.run(), timeout=5.0)
+
+        # Runner finishes only when both root workers stop. If
+        # ``cancel_runner_on_idle_timeout`` worked, the peer received a
+        # BusCancelWorkerMessage and exited; otherwise this test times out.
+        self.assertTrue(peer._finished_event.is_set())
+
+    async def test_cancel_on_idle_timeout_false_overrides_runner_flag(self):
+        """``cancel_on_idle_timeout=False`` keeps the worker alive even with the runner flag on.
+
+        Opting out of local cancellation also opts out of the runner-wide
+        cancel — the worker keeps running past the idle timeout and the
+        ``on_idle_timeout`` event handler is responsible for the response.
+        """
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        worker = PipelineWorker(
+            pipeline,
+            idle_timeout_secs=0.2,
+            cancel_on_idle_timeout=False,
+            # Default-True; the gating by cancel_on_idle_timeout=False should win.
+        )
+
+        idle_fired = asyncio.Event()
+
+        @worker.event_handler("on_idle_timeout")
+        async def on_idle(worker):
+            idle_fired.set()
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.wait_for(
+            worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())),
+            timeout=2.0,
+        )
+        self.assertTrue(idle_fired.is_set())
+
     async def test_no_idle_task(self):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
-        worker = PipelineWorker(pipeline, idle_timeout_secs=0.2, cancel_on_idle_timeout=False)
+        worker = PipelineWorker(
+            pipeline,
+            idle_timeout_secs=0.2,
+            cancel_on_idle_timeout=False,
+        )
         try:
             await asyncio.wait_for(
                 worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop())),
@@ -484,7 +556,11 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
     async def test_idle_task_event_handler_no_frames(self):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
-        worker = PipelineWorker(pipeline, idle_timeout_secs=0.2, cancel_on_idle_timeout=False)
+        worker = PipelineWorker(
+            pipeline,
+            idle_timeout_secs=0.2,
+            cancel_on_idle_timeout=False,
+        )
 
         idle_timeout = False
 
@@ -500,7 +576,11 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
     async def test_idle_task_event_handler_quiet_user(self):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
-        worker = PipelineWorker(pipeline, idle_timeout_secs=0.2, cancel_on_idle_timeout=False)
+        worker = PipelineWorker(
+            pipeline,
+            idle_timeout_secs=0.2,
+            cancel_on_idle_timeout=False,
+        )
 
         idle_timeout = 0
 

@@ -7,7 +7,7 @@
 """Main transport worker with a WebSocket proxy to a remote LLM server.
 
 Handles audio I/O (STT, TTS) and bridges frames to the bus. A
-`WebSocketProxyClientTask` forwards bus messages to a remote LLM
+`WebSocketProxyClient` forwards bus messages to a remote LLM
 server (see ``assistant.py``) over WebSocket.
 
 Usage::
@@ -44,7 +44,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.llm import LLMWorkerActivationArgs
-from pipecat.workers.proxy.websocket import WebSocketProxyClientTask
+from pipecat.workers.proxy.websocket import WebSocketProxyClient
 
 load_dotenv(override=True)
 
@@ -109,7 +109,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Forward bus frame messages over the WebSocket so the remote
     # assistant sees user-side context and can ship back its replies.
-    proxy = WebSocketProxyClientTask(
+    proxy = WebSocketProxyClient(
         "proxy",
         url=runner_args.cli_args.remote_url,
         local_worker_name=MAIN_NAME,

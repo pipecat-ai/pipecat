@@ -119,7 +119,7 @@ async def create_test_env():
 
 async def setup_task(bus, registry, task):
     """Subscribe a task to the bus and register it as ready."""
-    task.attach(registry=registry, bus=bus)
+    await task.attach(registry=registry, bus=bus)
     await task.setup(bus.task_manager)
     await bus.subscribe(task)
     await registry.register(WorkerReadyData(worker_name=task.name, runner="test-runner"))

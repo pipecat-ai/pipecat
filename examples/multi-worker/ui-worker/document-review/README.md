@@ -53,7 +53,7 @@ Two terminals.
 
 ```bash
 cd examples/multi-worker/ui-worker/document-review
-uv run python bot.py
+uv run bot.py
 ```
 
 The bot starts on `http://localhost:7860`.

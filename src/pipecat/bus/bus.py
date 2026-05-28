@@ -94,16 +94,19 @@ class WorkerBus(BaseObject):
     async def subscribe(self, subscriber: BusSubscriber) -> None:
         """Register a subscriber to receive messages from the bus.
 
+        Idempotent: re-subscribing an already-registered subscriber is
+        a no-op.
+
         Args:
             subscriber: The `BusSubscriber` to register.
         """
+        if subscriber.name in self._subscriptions:
+            return
         sub = BusSubscription(subscriber=subscriber)
         if self._running:
             self._start_dispatch_task(sub)
             # Schedule worker right away.
             await asyncio.sleep(0)
-        if subscriber.name in self._subscriptions:
-            raise ValueError(f"Subscriber '{subscriber.name}' is already registered on the bus")
         self._subscriptions[subscriber.name] = sub
 
     async def unsubscribe(self, subscriber: BusSubscriber) -> None:

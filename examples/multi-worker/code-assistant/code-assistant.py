@@ -77,7 +77,7 @@ async def ask_code(params: FunctionCallParams, question: str):
             dependencies, or anything in the project.
     """
     logger.info(f"Asking code worker: '{question}'")
-    async with params.pipeline_worker.job("code_worker", payload={"question": question}) as job:
+    async with params.pipeline_worker.job("code-worker", payload={"question": question}) as job:
         await params.llm.queue_frame(
             LLMMessagesAppendFrame(
                 messages=[{"role": "developer", "content": "Give me a moment."}],
@@ -116,7 +116,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    llm.register_direct_function(ask_code, cancel_on_interruption=False, timeout_secs=60)
+    llm.register_direct_function(ask_code, cancel_on_interruption=False)
 
     context = LLMContext(tools=ToolsSchema(standard_tools=[ask_code]))
     aggregators = LLMContextAggregatorPair(
@@ -138,6 +138,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     worker = PipelineWorker(
         pipeline,
+        name="code-assistant",
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
@@ -161,7 +162,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await runner.cancel()
 
-    await runner.add_workers(CodeWorker("code_worker", project_path=PROJECT_PATH), worker)
+    await runner.add_workers(CodeWorker("code-worker", project_path=PROJECT_PATH), worker)
 
     await runner.run()
 

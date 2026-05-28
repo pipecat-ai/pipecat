@@ -7,11 +7,11 @@
 """Proxy workers for forwarding bus messages over network transports."""
 
 from pipecat.workers.proxy.websocket import (
-    WebSocketProxyClientTask,
-    WebSocketProxyServerTask,
+    WebSocketProxyClient,
+    WebSocketProxyServer,
 )
 
 __all__ = [
-    "WebSocketProxyClientTask",
-    "WebSocketProxyServerTask",
+    "WebSocketProxyClient",
+    "WebSocketProxyServer",
 ]
