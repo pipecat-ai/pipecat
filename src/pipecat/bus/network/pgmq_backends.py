@@ -43,7 +43,7 @@ try:
 except ModuleNotFoundError as e:  # pragma: no cover - exercised only when extra is missing
     logger.error(f"Exception: {e}")
     logger.error("In order to use PgmqBus backends, you need to `pip install pipecat-ai[pgmq]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 _INVALID_CHANNEL_CHARS = re.compile(r"[^A-Za-z0-9_]")
