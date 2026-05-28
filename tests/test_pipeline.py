@@ -463,7 +463,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         ``BusCancelMessage`` and the runner shuts everything down.
         """
         from pipecat.bus import BusCancelWorkerMessage
-        from pipecat.pipeline.base_worker import BaseWorker
+        from pipecat.workers.base_worker import BaseWorker
         from pipecat.workers.runner import WorkerRunner
 
         class PeerWorker(BaseWorker):

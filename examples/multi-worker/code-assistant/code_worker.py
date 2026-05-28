@@ -11,8 +11,8 @@ import asyncio
 from loguru import logger
 
 from pipecat.bus import BusJobRequestMessage
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_context import JobStatus
+from pipecat.workers.base_worker import BaseWorker
 
 try:
     from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient

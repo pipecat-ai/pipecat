@@ -25,7 +25,6 @@ from pipecat.bus import (
     BusEndWorkerMessage,
     BusMessage,
     BusTTSSpeakMessage,
-    WorkerBus,
 )
 from pipecat.bus.bridge_processor import _BusEdgeProcessor
 from pipecat.bus.ui.messages import (
@@ -64,7 +63,6 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
-from pipecat.pipeline.base_worker import BaseWorker, WorkerParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.utils import run_setup_hook
 from pipecat.pipeline.worker_observer import WorkerObserver
@@ -84,6 +82,7 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, Tas
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
+from pipecat.workers.base_worker import BaseWorker, WorkerParams
 
 HEARTBEAT_SECS = 1.0
 HEARTBEAT_MONITOR_SECS = 10.0
@@ -1291,10 +1290,10 @@ class PipelineTask(PipelineWorker):
 
 @dataclass
 class PipelineTaskParams(WorkerParams):
-    """Deprecated alias for :class:`~pipecat.pipeline.base_worker.WorkerParams`.
+    """Deprecated alias for :class:`~pipecat.workers.base_worker.WorkerParams`.
 
     .. deprecated:: 1.3.0
-        Use :class:`~pipecat.pipeline.base_worker.WorkerParams` instead.
+        Use :class:`~pipecat.workers.base_worker.WorkerParams` instead.
         ``PipelineTaskParams`` will be removed in a future release.
     """
 

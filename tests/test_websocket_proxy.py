@@ -14,9 +14,9 @@ from pipecat.bus import (
     BusDataMessage,
 )
 from pipecat.bus.serializers import JSONMessageSerializer
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.registry import WorkerRegistry
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.workers.base_worker import BaseWorker
 
 
 async def create_test_bus():

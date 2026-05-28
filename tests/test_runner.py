@@ -15,8 +15,8 @@ from pipecat.bus import (
     BusEndMessage,
     BusEndWorkerMessage,
 )
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.runner import PipelineRunner  # deprecated alias, kept at the legacy path
+from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.runner import WorkerRunner
 
 

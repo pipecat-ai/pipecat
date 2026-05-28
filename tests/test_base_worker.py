@@ -27,7 +27,6 @@ from pipecat.bus import (
     BusTTSSpeakMessage,
 )
 from pipecat.frames.frames import EndFrame, Frame, TextFrame, TTSSpeakFrame
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_context import JobStatus
 from pipecat.pipeline.job_decorator import job
 from pipecat.pipeline.pipeline import Pipeline
@@ -37,6 +36,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.runner import WorkerRunner
 
 

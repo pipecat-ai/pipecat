@@ -20,8 +20,8 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.registry.types import WorkerRegistryEntry
 
 if TYPE_CHECKING:
-    from pipecat.pipeline.base_worker import BaseWorker
     from pipecat.pipeline.job_context import JobStatus
+    from pipecat.workers.base_worker import BaseWorker
 
 # ---------------------------------------------------------------------------
 # Base types and mixins
