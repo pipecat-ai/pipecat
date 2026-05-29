@@ -29,6 +29,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -51,6 +52,7 @@ class SwitchLanguage(ParallelPipeline):
         spanish_tts = CartesiaTTSService(
             api_key=os.environ["CARTESIA_API_KEY"],
             settings=CartesiaTTSService.Settings(
+                language=Language.ES,
                 voice="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
             ),
         )
