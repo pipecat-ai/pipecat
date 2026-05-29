@@ -33,6 +33,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
@@ -200,7 +201,12 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         # correct and (by default) drops the transcript wait on turn-end so
         # local VAD can drive turn boundaries on the latency critical path.
         realtime_service_mode=True,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            # stop_secs is intentionally longer than Pipecat's 0.2s default so
+            # brief mid-utterance pauses don't prematurely commit the user turn
+            # and trigger a response while the user is still speaking.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+        ),
     )
 
     pipeline = Pipeline(
