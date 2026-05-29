@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
+    ClassVar,
     Generic,
     Protocol,
     cast,
@@ -49,6 +50,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
+    RealtimeServiceMetadataFrame,
     StartFrame,
 )
 from pipecat.processors.aggregators.llm_context import (
@@ -100,6 +102,34 @@ class FunctionCallResultCallback(Protocol):
                 intermediate update instead of the final result.
         """
         ...
+
+
+@dataclass(frozen=True)
+class RealtimeServiceInfo:
+    """Per-service metadata for realtime (speech-to-speech) LLM services.
+
+    Realtime LLM subclasses set ``LLMService._realtime_service_info`` to a
+    populated instance; the presence of a non-None value is what marks a
+    service as realtime. Non-realtime services keep the default ``None``.
+
+    Carries the configuration ``LLMService`` and
+    ``LLMContextAggregatorPair`` need to wire up realtime behavior:
+    auto-broadcasting ``RealtimeServiceMetadataFrame`` at start, the
+    startup INFO log for services with no server-side turn signals, and
+    the aggregator's one-time recommendation log.
+
+    Parameters:
+        emits_user_turn_frames: Class-level capability — whether the
+            service is ever able to emit ``UserStartedSpeakingFrame`` /
+            ``UserStoppedSpeakingFrame`` from server-side turn signals.
+            False for services with no server-side turn signals at all
+            (e.g. Gemini Live, AWS Nova Sonic, Ultravox). Services with
+            configurable turn detection (e.g. OpenAI Realtime) keep this
+            True and reflect the live setting by overriding
+            ``LLMService._emits_user_turn_frames()``.
+    """
+
+    emits_user_turn_frames: bool = True
 
 
 @dataclass
@@ -250,6 +280,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
     # However, subclasses should override this with a more specific adapter when necessary.
     adapter_class: type[BaseLLMAdapter] = OpenAILLMAdapter
 
+    # Marker + per-service config for realtime (speech-to-speech) LLM
+    # services. Realtime subclasses override this with a populated
+    # ``RealtimeServiceInfo`` instance — the presence of a non-None value
+    # is what marks the service as realtime. Non-realtime services keep
+    # the default ``None`` and the realtime-specific machinery
+    # (auto-broadcast of ``RealtimeServiceMetadataFrame``, startup INFO
+    # log for services without server-side turn signals) stays inert.
+    _realtime_service_info: ClassVar[RealtimeServiceInfo | None] = None
+
     # Returned to the LLM as the tool result when an unavailable function is
     # called. Deliberately neutral about future availability so the LLM can
     # pick the function up again if it returns (e.g. via the
@@ -364,6 +403,24 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
 
+    def _emits_user_turn_frames(self) -> bool:
+        """Whether this instance emits server-driven user-speaking turn frames at runtime.
+
+        Defaults to ``RealtimeServiceInfo.emits_user_turn_frames`` — the
+        class-level capability (False for services with no server-side
+        turn signals, e.g. Gemini Live, Nova Sonic, Ultravox; True
+        otherwise). Subclasses with configurable turn detection
+        (e.g. OpenAI Realtime with ``turn_detection=False``) should
+        override this to return the live value so the broadcast
+        ``RealtimeServiceMetadataFrame.emits_user_turn_frames`` reflects
+        the actual configuration. ``LLMContextAggregatorPair`` reads
+        the broadcast value when deciding whether to swap default turn
+        strategies for ``ExternalUserTurnStart/StopStrategy``.
+        """
+        if self._realtime_service_info is None:
+            return False
+        return self._realtime_service_info.emits_user_turn_frames
+
     async def start(self, frame: StartFrame):
         """Start the LLM service.
 
@@ -375,6 +432,24 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self._create_sequential_runner_task()
         if self._enable_async_tool_cancellation and self._has_async_tools():
             self._setup_async_tool_cancellation()
+        if (
+            self._realtime_service_info is not None
+            and not self._realtime_service_info.emits_user_turn_frames
+        ):
+            logger.warning(
+                f"{self} doesn't emit turn frames "
+                "(UserStartedSpeakingFrame/UserStoppedSpeakingFrame). A couple "
+                "of things to keep in mind:\n"
+                "  - Other processors in the pipeline (e.g. RTVI) may expect "
+                "turn frames. You can enable local VAD/turn detection by "
+                "setting a vad_analyzer in LLMUserAggregatorParams.\n"
+                "  - Be aware that local turns may NOT perfectly align with "
+                'the "ground truth" of server-decided turns, so they should '
+                "be thought of as APPROXIMATE (unless, of course, you're "
+                "also configuring local turn detection to *drive* the "
+                "realtime service's turns, e.g. by setting "
+                "vad=GeminiVADParams(disabled=True))."
+            )
 
     async def stop(self, frame: EndFrame):
         """Stop the LLM service.
@@ -523,6 +598,23 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 frame.skip_tts = self._skip_tts
 
         await super().push_frame(frame, direction)
+
+        # Broadcast realtime-service metadata right after StartFrame goes
+        # downstream, so downstream sees StartFrame then metadata (and the
+        # upstream aggregator, already started, can act on it). We hook
+        # push_frame rather than process_frame because realtime subclasses
+        # forward StartFrame from their own trailing push_frame, not the
+        # base process_frame — this is the one spot that catches them all.
+        if (
+            self._realtime_service_info is not None
+            and isinstance(frame, StartFrame)
+            and direction == FrameDirection.DOWNSTREAM
+        ):
+            await self.broadcast_frame(
+                RealtimeServiceMetadataFrame,
+                service_name=self.name,
+                emits_user_turn_frames=self._emits_user_turn_frames(),
+            )
 
     async def _push_llm_text(self, text: str):
         """Push LLM text, using turn completion detection if enabled.

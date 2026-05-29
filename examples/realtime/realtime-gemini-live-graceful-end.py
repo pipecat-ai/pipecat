@@ -16,7 +16,9 @@ from pipecat.frames.frames import EndTaskFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -147,8 +149,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(
         [{"role": "developer", "content": "Say hello."}],
     )
-    # Server-side VAD is enabled by default; no local VAD is added.
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    # Gemini Live doesn't emit user-turn frames. Server-side VAD is
+    # enabled by default; to surface turn frames (for RTVI speech
+    # events, turn observers, etc.) uncomment the local-VAD imports +
+    # `user_params=` below. See realtime-gemini-live.py for the full
+    # discussion.
+    #
+    # from pipecat.audio.vad.silero import SileroVADAnalyzer
+    # from pipecat.processors.aggregators.llm_response_universal import (
+    #     LLMUserAggregatorParams,
+    # )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        realtime_service_mode=True,
+        # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+    )
 
     pipeline = Pipeline(
         [

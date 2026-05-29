@@ -4,6 +4,29 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Gemini Live with locally-driven turn detection.
+
+By default Gemini Live drives the conversation with its own server-side VAD
+(see `realtime-gemini-live.py`). That setup doesn't surface
+``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``, so pipeline
+processors that depend on those frames (RTVI client speech events,
+``TurnTrackingObserver``, ``AudioBufferProcessor`` turn recording,
+``UserIdleController``, user mute strategies, voicemail detector) don't
+activate.
+
+This variant disables Gemini Live's server-side VAD
+(``GeminiVADParams(disabled=True)``) and instead drives turn boundaries
+locally with ``SileroVADAnalyzer`` wired into the user aggregator. Use this
+variant if you need those downstream processors, or if you want a turn
+analyzer like ``LocalSmartTurnV3`` to decide when the user is done speaking.
+
+Caveat: locally-generated turn boundaries are a heuristic and may not match
+the provider's actual server-side turn decisions, which is what really
+drives the conversation. The two can drift apart in subtle, hard-to-debug
+ways, especially around interruptions and overlapping speech. Prefer
+server-emitted turn frames (i.e. the base `realtime-gemini-live.py` example)
+unless you have a specific reason to drive turn detection locally.
+"""
 
 import os
 
@@ -19,6 +42,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
+    UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -27,6 +51,7 @@ from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, Gemini
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -72,6 +97,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
+        realtime_service_mode=True,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
         ),
@@ -107,8 +133,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await worker.cancel()
 
+    # In realtime mode the user transcript isn't finalized at turn-stop
+    # time, so on_user_turn_stopped carries no content; subscribe to
+    # on_user_turn_message_added below for the finalized text.
     @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    async def on_user_turn_stopped(
+        aggregator,
+        strategy: BaseUserTurnStopStrategy,
+        message: UserTurnStoppedMessage,
+    ):
+        logger.info(f"User turn stopped at {message.timestamp}")
+
+    # In realtime mode this is the canonical "user said X" event,
+    # decoupled from turn-stop.
+    @user_aggregator.event_handler("on_user_turn_message_added")
+    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")

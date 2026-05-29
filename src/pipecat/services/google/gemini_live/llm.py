@@ -62,7 +62,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMe
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.google.utils import update_google_client_http_options
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
 from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, assert_given
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.string import match_endofsentence
@@ -361,6 +361,18 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
     This service enables real-time conversations with Gemini, supporting both
     text and audio modalities. It handles voice transcription, streaming audio
     responses, and tool usage.
+
+    Does NOT emit ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``
+    (the API exposes an ``interrupted`` event but no turn-start/-end), so
+    pipeline processors that depend on those frames — RTVI client speech
+    events, ``TurnTrackingObserver``, ``AudioBufferProcessor`` turn
+    recording, ``UserIdleController``, user mute strategies, voicemail
+    detector — won't activate with the default server-VAD-only setup. Pair
+    with ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
+    so context writes are correct anyway. To produce the turn frames
+    locally, see ``examples/realtime/realtime-gemini-live-locally-driven-turns.py``;
+    note that locally-generated turn boundaries are a heuristic and may
+    not match Gemini Live's server-side turn decisions.
     """
 
     Settings = GeminiLiveLLMSettings
@@ -368,6 +380,11 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
+
+    # Realtime (speech-to-speech) service. Does NOT emit
+    # UserStarted/StoppedSpeakingFrame from server-side turn signals —
+    # the API exposes an `interrupted` event but no turn-start/-end.
+    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=False)
 
     @property
     def _is_gemini_3(self) -> bool:

@@ -4,27 +4,22 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""
-Inworld Realtime Example
+"""Inworld Realtime with locally-driven turn detection.
 
-This example demonstrates using Inworld's Realtime API for real-time voice
-conversations. The Inworld Realtime API is OpenAI-compatible and operates
-as a cascade STT/LLM/TTS pipeline under the hood, with built-in semantic
-voice activity detection for turn management.
+By default Inworld Realtime drives the conversation with its own
+server-side semantic VAD (see `realtime-inworld.py`). This variant
+disables server-side turn detection (``turn_detection=None``, the
+"manual" mode in Inworld's session properties) and instead drives turn
+boundaries locally with ``SileroVADAnalyzer`` wired into the user
+aggregator. Use this variant if you want a turn analyzer like
+``LocalSmartTurnV3`` to decide when the user is done speaking, or if you
+need ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` to fire
+from the same source as ``InterruptionFrame``.
 
-Features:
-- Real-time audio streaming with low latency
-- Built-in semantic VAD (voice activity detection)
-- Streaming user transcription
-- Text and audio input
-
-Requirements:
-    - INWORLD_API_KEY environment variable set
-    - pip install pipecat-ai[inworld]
-
-Usage:
-    python realtime-inworld.py --transport webrtc
-    python realtime-inworld.py --transport daily
+Caveat: locally-generated turn boundaries are a heuristic and may not
+match the provider's actual server-side turn decisions. Prefer
+server-emitted turn frames (i.e. the base `realtime-inworld.py` example)
+unless you have a specific reason to drive turn detection locally.
 """
 
 import os
@@ -36,6 +31,7 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
@@ -46,11 +42,20 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
     UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.inworld.realtime.events import (
+    AudioConfiguration,
+    AudioInput,
+    AudioOutput,
+    InputTranscription,
+    PCMAudioFormat,
+    SessionProperties,
+)
 from pipecat.services.inworld.realtime.llm import InworldRealtimeLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -72,7 +77,6 @@ async def fetch_weather_from_api(params: FunctionCallParams):
         {
             "conditions": "nice",
             "temperature": temperature,
-            "location": params.arguments["location"],
             "format": params.arguments["format"],
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
@@ -90,7 +94,7 @@ weather_function = FunctionSchema(
         "format": {
             "type": "string",
             "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use. Infer this from the users location.",
+            "description": "The temperature unit to use.",
         },
     },
     required=["location", "format"],
@@ -99,9 +103,6 @@ weather_function = FunctionSchema(
 tools = ToolsSchema(standard_tools=[weather_function])
 
 
-# --- Transport Configuration ---
-
-# No local VAD needed — Inworld's server-side semantic VAD handles turn detection.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -119,18 +120,35 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info("Starting Inworld Realtime bot")
+    logger.info("Starting Inworld Realtime bot (local VAD)")
 
-    # Create the Inworld Realtime LLM service.
-    # Common params (llm_model, voice, tts_model, stt_model) are top-level.
-    # For full control, use settings=InworldRealtimeLLMService.Settings(session_properties=...)
-    #
-    # llm_model can be any supported model or an Inworld Router.
-    # See: https://docs.inworld.ai/router/introduction
+    model = "openai/gpt-4.1-mini"
+    voice = "Sarah"
+    tts_model = "inworld-tts-2"
+    stt_model = "assemblyai/u3-rt-pro"
+
+    # Setting session_properties here replaces Inworld's defaults wholesale,
+    # so we provide a complete SessionProperties — with turn_detection=None
+    # (manual mode) so local VAD drives turn boundaries instead.
+    session_properties = SessionProperties(
+        model=model,
+        output_modalities=["audio", "text"],
+        audio=AudioConfiguration(
+            input=AudioInput(
+                format=PCMAudioFormat(rate=24000),
+                transcription=InputTranscription(model=stt_model),
+                turn_detection=None,
+            ),
+            output=AudioOutput(
+                format=PCMAudioFormat(rate=24000),
+                model=tts_model,
+                voice=voice,
+            ),
+        ),
+    )
+
     llm = InworldRealtimeLLMService(
         api_key=os.environ["INWORLD_API_KEY"],
-        llm_model="google-ai-studio/gemini-3.1-flash-lite",
-        voice="Sarah",
         settings=InworldRealtimeLLMService.Settings(
             system_instruction="""You are a helpful and friendly AI assistant powered by Inworld.
 
@@ -138,6 +156,7 @@ Your voice and personality should be warm and engaging. Keep your responses
 concise and conversational since this is a voice interaction.
 
 Always be helpful and proactive in offering assistance.""",
+            session_properties=session_properties,
         ),
     )
 
@@ -145,7 +164,6 @@ Always be helpful and proactive in offering assistance.""",
     # function-calling-capable model
     llm.register_function("get_current_weather", fetch_weather_from_api)
 
-    # Create context with initial message + tools
     context = LLMContext(
         [{"role": "developer", "content": "Say hello and introduce yourself!"}],
         tools,
@@ -153,15 +171,19 @@ Always be helpful and proactive in offering assistance.""",
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
+        # Drive turn detection locally via SileroVAD wired into the user
+        # aggregator. realtime_service_mode keeps context-write semantics
+        # correct and (by default) drops the transcript wait on turn-end so
+        # local VAD can drive turn boundaries on the latency critical path.
         realtime_service_mode=True,
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
-    # Build the pipeline
     pipeline = Pipeline(
         [
             transport.input(),
             user_aggregator,
-            llm,  # Inworld Realtime (handles STT + LLM + TTS)
+            llm,
             transport.output(),
             assistant_aggregator,
         ]
@@ -187,15 +209,9 @@ Always be helpful and proactive in offering assistance.""",
         logger.info("Client disconnected")
         await worker.cancel()
 
-    # Subscribe to user turn lifecycle events. Inworld emits its own
-    # user-turn frames from server-side semantic VAD, so
-    # on_user_turn_stopped fires at the turn boundary. In realtime mode
-    # UserTurnStoppedMessage.content is None because the user transcript
-    # isn't finalized at turn-stop time — subscribe to
-    # on_user_turn_message_added for the finalized text (it's written when
-    # the assistant response begins). The assistant message is finalized
-    # at turn-stop time in both modes, so on_assistant_turn_stopped
-    # carries the content directly.
+    # In realtime mode the user transcript isn't finalized at turn-stop
+    # time, so on_user_turn_stopped carries no content; subscribe to
+    # on_user_turn_message_added below for the finalized text.
     @user_aggregator.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(
         aggregator,
@@ -204,6 +220,8 @@ Always be helpful and proactive in offering assistance.""",
     ):
         logger.info(f"User turn stopped at {message.timestamp}")
 
+    # In realtime mode this is the canonical "user said X" event,
+    # decoupled from turn-stop.
     @user_aggregator.event_handler("on_user_turn_message_added")
     async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""

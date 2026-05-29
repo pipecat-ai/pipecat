@@ -33,9 +33,6 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-
-# Note: Grok has built-in server-side VAD, so we don't need local VAD
-# from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
@@ -46,6 +43,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
+    UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -56,6 +54,7 @@ from pipecat.services.xai.realtime.llm import GrokRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -212,7 +211,36 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         tools,
     )
 
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    # It appears that Grok Realtime can sometimes be slow to detect the start
+    # of a user's turn; uncomment the below imports and user_params to
+    # enable "supplemental" interruptions.
+    # from pipecat.turns.user_start.vad_user_turn_start_strategy import VADUserTurnStartStrategy
+    # from pipecat.audio.vad.silero import SileroVADAnalyzer
+    # from pipecat.turns.user_turn_strategies import UserTurnStrategies
+    # from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
+    # from pipecat.turns.user_start.external_user_turn_start_strategy import (
+    #     ExternalUserTurnStartStrategy,
+    # )
+    # from pipecat.turns.user_stop.external_user_turn_stop_strategy import (
+    #     ExternalUserTurnStopStrategy,
+    # )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        realtime_service_mode=True,
+        # user_params=LLMUserAggregatorParams(
+        #     vad_analyzer=SileroVADAnalyzer(),
+        #     user_turn_strategies=UserTurnStrategies(
+        #         start=[
+        #             VADUserTurnStartStrategy(
+        #                 enable_interruptions=True,
+        #                 enable_user_speaking_frames=False,  # Grok already emits turn frames
+        #             ),
+        #             ExternalUserTurnStartStrategy(),
+        #         ],
+        #         stop=[ExternalUserTurnStopStrategy()],
+        #     ),  # Grok already emits turn frames
+        # ),
+    )
 
     # Build the pipeline
     # Note: In realtime mode, transcription comes from Grok (upstream),
@@ -248,9 +276,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await worker.cancel()
 
-    # Log transcript updates
+    # Subscribe to user turn lifecycle events. Grok emits its own
+    # user-turn frames from server VAD, so on_user_turn_stopped fires at
+    # the turn boundary. In realtime mode UserTurnStoppedMessage.content
+    # is None because the user transcript isn't finalized at turn-stop
+    # time — subscribe to on_user_turn_message_added for the finalized text
+    # (it's written when the assistant response begins). The assistant
+    # message is finalized at turn-stop time in both modes, so
+    # on_assistant_turn_stopped carries the content directly.
     @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    async def on_user_turn_stopped(
+        aggregator,
+        strategy: BaseUserTurnStopStrategy,
+        message: UserTurnStoppedMessage,
+    ):
+        logger.info(f"User turn stopped at {message.timestamp}")
+
+    @user_aggregator.event_handler("on_user_turn_message_added")
+    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")

@@ -29,21 +29,41 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     """
 
-    def __init__(self, *, timeout: float = 0.5, **kwargs):
+    def __init__(self, *, timeout: float = 0.5, wait_for_transcript: bool = True, **kwargs):
         """Initialize the external user turn stop strategy.
 
         Args:
             timeout: A short delay used internally to handle consecutive or
                 slightly delayed transcriptions.
+            wait_for_transcript: When True (default), turn-stop signaling
+                waits for transcript text to arrive after the external
+                ``UserStoppedSpeakingFrame``. When False, the strategy
+                signals turn-stop as soon as that frame arrives —
+                independent of transcripts. Set this to False when local
+                turn detection is the intended driver of the conversation
+                (e.g. with a realtime LLM service consuming audio
+                directly), so transcripts are off the latency critical
+                path. ``LLMContextAggregatorPair`` flips this for you
+                when ``realtime_service_mode=True``.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(enable_user_speaking_frames=False, **kwargs)
         self._timeout = timeout
+        self._wait_for_transcript = wait_for_transcript
         self._text = ""
         self._user_speaking = False
         self._seen_interim_results = False
         self._event = asyncio.Event()
         self._task: asyncio.Task | None = None
+
+    @property
+    def wait_for_transcript(self) -> bool:
+        """Whether turn-stop signaling waits for transcript text."""
+        return self._wait_for_transcript
+
+    @wait_for_transcript.setter
+    def wait_for_transcript(self, value: bool):
+        self._wait_for_transcript = value
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -128,5 +148,12 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
                 await self._maybe_trigger_user_turn_stopped()
 
     async def _maybe_trigger_user_turn_stopped(self):
-        if not self._user_speaking and not self._seen_interim_results and self._text:
+        if self._user_speaking:
+            return
+        if not self._wait_for_transcript:
+            # Fire as soon as the external stop signal arrives —
+            # transcripts (if any) are off the latency critical path.
+            await self.trigger_user_turn_stopped()
+            return
+        if not self._seen_interim_results and self._text:
             await self.trigger_user_turn_stopped()
