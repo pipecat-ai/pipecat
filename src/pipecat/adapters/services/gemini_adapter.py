@@ -491,9 +491,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         - Sequential tool calls: each have their own thought_signature
 
         Algorithm: A tool call message with a thought_signature starts a new
-        parallel group. Any tool call messages after it without a
-        thought_signature get merged into that group, regardless of what
-        messages appear in between.
+        parallel group. Following tool call messages without a
+        thought_signature are merged only while they remain adjacent to the
+        current tool-call/response exchange.
 
         Args:
             thought_signature_dicts: A list of thought signature dicts, used
@@ -531,6 +531,14 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 return False
             return any(getattr(part, "thought_signature", None) for part in msg.parts)
 
+        def is_tool_response_message(msg: Content) -> bool:
+            """Check if message contains only function_response parts."""
+            return bool(
+                msg.role == "user"
+                and msg.parts
+                and all(getattr(part, "function_response", None) for part in msg.parts)
+            )
+
         merged_messages = []
         i = 0
 
@@ -540,28 +548,31 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             # If this is a tool call message with a thought signature, start merging
             if is_tool_call_message(current) and message_has_thought_signature(current):
                 merged_parts = list(current.parts)
-                other_messages = []
+                response_parts = []
                 j = i + 1
 
-                # Scan forward, merging tool calls without signatures, collecting others
+                if j < len(messages) and is_tool_response_message(messages[j]):
+                    response_parts.extend(messages[j].parts)
+                    j += 1
+
+                # Merge only the immediately related tool-call/response group.
                 while j < len(messages):
                     next_msg = messages[j]
-                    if is_tool_call_message(next_msg):
-                        if message_has_thought_signature(next_msg):
-                            # New parallel group starts, stop here
-                            break
-                        else:
-                            # Merge this call into the current group
-                            merged_parts.extend(next_msg.parts)
-                            j += 1
-                    else:
-                        # Collect non-tool-call message, keep scanning
-                        other_messages.append(next_msg)
+                    if not is_tool_call_message(next_msg) or message_has_thought_signature(
+                        next_msg
+                    ):
+                        break
+
+                    merged_parts.extend(next_msg.parts)
+                    j += 1
+
+                    if j < len(messages) and is_tool_response_message(messages[j]):
+                        response_parts.extend(messages[j].parts)
                         j += 1
 
-                # Output merged calls, then collected other messages
                 merged_messages.append(Content(role="model", parts=merged_parts))
-                merged_messages.extend(other_messages)
+                if response_parts:
+                    merged_messages.append(Content(role="user", parts=response_parts))
                 i = j
             else:
                 merged_messages.append(current)

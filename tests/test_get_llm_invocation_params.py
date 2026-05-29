@@ -66,7 +66,7 @@ For BaseLLMAdapter helpers:
 import unittest
 from unittest.mock import patch
 
-from google.genai.types import Content, Part
+from google.genai.types import Content, FunctionCall, FunctionResponse, Part
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -368,6 +368,28 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         """Sets up a common adapter instance for all tests."""
         self.adapter = GeminiLLMAdapter()
 
+    def _gemini_tool_call(self, call_id: str, *, signature: bytes | None = None) -> Content:
+        part = Part(
+            function_call=FunctionCall(id=call_id, name=f"tool_{call_id}", args={"q": call_id})
+        )
+        if signature:
+            part.thought_signature = signature
+        return Content(role="model", parts=[part])
+
+    def _gemini_tool_response(self, call_id: str) -> Content:
+        return Content(
+            role="user",
+            parts=[
+                Part(
+                    function_response=FunctionResponse(
+                        id=call_id,
+                        name=f"tool_{call_id}",
+                        response={"ok": True},
+                    )
+                )
+            ],
+        )
+
     def test_standard_messages_converted_to_gemini_format(self):
         """Test that LLMStandardMessage objects are converted to Gemini Content format."""
         # Create standard messages (OpenAI format)
@@ -402,6 +424,67 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(model_msg.role, "model")
         self.assertEqual(len(model_msg.parts), 1)
         self.assertEqual(model_msg.parts[0].text, "I'm doing well, thank you for asking!")
+
+    def test_parallel_tool_call_merge_merges_matching_responses(self):
+        """Thinking merge keeps Gemini function calls and responses grouped."""
+        messages = [
+            self._gemini_tool_call("call_1", signature=b"sig-1"),
+            self._gemini_tool_response("call_1"),
+            self._gemini_tool_call("call_2"),
+            self._gemini_tool_response("call_2"),
+        ]
+
+        merged = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [{"bookmark": {"function_call": "call_1"}}],
+            messages,
+        )
+
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0].role, "model")
+        self.assertEqual(merged[1].role, "user")
+        self.assertEqual([part.function_call.id for part in merged[0].parts], ["call_1", "call_2"])
+        self.assertEqual(
+            [part.function_response.id for part in merged[1].parts],
+            ["call_1", "call_2"],
+        )
+
+    def test_sequential_tool_calls_with_signatures_are_not_merged(self):
+        """A fresh thought signature starts a new Gemini tool-call turn."""
+        messages = [
+            self._gemini_tool_call("call_1", signature=b"sig-1"),
+            self._gemini_tool_response("call_1"),
+            self._gemini_tool_call("call_2", signature=b"sig-2"),
+            self._gemini_tool_response("call_2"),
+        ]
+
+        merged = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [
+                {"bookmark": {"function_call": "call_1"}},
+                {"bookmark": {"function_call": "call_2"}},
+            ],
+            messages,
+        )
+
+        self.assertEqual(len(merged), 4)
+        self.assertEqual([msg.role for msg in merged], ["model", "user", "model", "user"])
+
+    def test_tool_call_merge_stops_at_text_boundary(self):
+        """Thinking merge does not scan through unrelated text messages."""
+        messages = [
+            self._gemini_tool_call("call_1", signature=b"sig-1"),
+            self._gemini_tool_response("call_1"),
+            Content(role="model", parts=[Part(text="done")]),
+            self._gemini_tool_call("call_2"),
+            self._gemini_tool_response("call_2"),
+        ]
+
+        merged = self.adapter._merge_parallel_tool_calls_for_thinking(
+            [{"bookmark": {"function_call": "call_1"}}],
+            messages,
+        )
+
+        self.assertEqual(len(merged), 5)
+        self.assertEqual([msg.role for msg in merged], ["model", "user", "model", "model", "user"])
 
     def test_llm_specific_message_filtering(self):
         """Test that Gemini-specific messages are included and others are filtered out."""
