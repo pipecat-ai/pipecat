@@ -104,6 +104,14 @@ class AssemblyAISTTSettings(STTSettings):
             audio frames as silence. Only applicable to u3-rt-pro.
         domain: Optional domain for specialized recognition modes. For example,
             set to "medical-v1" to enable Medical Mode for healthcare transcription.
+        continuous_partials: Emit partial transcripts at a steady cadence during
+            long turns, rather than only one early partial near the turn start.
+            Only applicable to u3-rt-pro; not sent for other models. Defaults to
+            True in this plugin so voice agents receive continuous interim updates.
+        interruption_delay: Override, in milliseconds (0–1000), for how soon the
+            first partial is emitted. The server adds 256ms (MIN_TURN_DURATION_MS)
+            on top, so 0 → 256ms effective. Only applicable to u3-rt-pro. Defaults
+            to None (use the server default).
     """
 
     formatted_finals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -122,6 +130,8 @@ class AssemblyAISTTSettings(STTSettings):
     speaker_labels: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     domain: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    continuous_partials: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interruption_delay: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AssemblyAISTTService(WebsocketSTTService):
@@ -219,6 +229,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             speaker_labels=None,
             vad_threshold=None,
             domain=None,
+            continuous_partials=True,
+            interruption_delay=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -281,6 +293,18 @@ class AssemblyAISTTService(WebsocketSTTService):
                 "voice agents. Bad prompts may lead to bad results. If you'd like to create "
                 "your own prompt, check out our prompting guide at: "
                 "https://www.assemblyai.com/docs/streaming/prompting"
+            )
+
+        # continuous_partials and interruption_delay are u3-rt-pro-only.
+        # isinstance(int) narrows away None/NOT_GIVEN so the range check is type-safe.
+        interruption_delay = default_settings.interruption_delay
+        if isinstance(interruption_delay, int) and not (0 <= interruption_delay <= 1000):
+            raise ValueError("interruption_delay must be between 0 and 1000 ms")
+
+        if not is_u3_pro and isinstance(interruption_delay, int):
+            logger.warning(
+                "interruption_delay is only supported by u3-rt-pro and will be ignored "
+                f"for model '{default_settings.model}'."
             )
 
         # 6. Configure pipecat turn mode (mutates default_settings)
@@ -494,6 +518,11 @@ class AssemblyAISTTService(WebsocketSTTService):
             "vad_threshold": s.vad_threshold,
             "domain": s.domain,
         }
+
+        # continuous_partials and interruption_delay only apply to u3-rt-pro.
+        if s.model == "u3-rt-pro":
+            optional_fields["continuous_partials"] = s.continuous_partials
+            optional_fields["interruption_delay"] = s.interruption_delay
 
         for k, v in optional_fields.items():
             if v is not None:
