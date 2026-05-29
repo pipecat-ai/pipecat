@@ -16,7 +16,6 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -36,6 +35,7 @@ from pipecat.turns.user_mute import (
     FunctionCallUserMuteStrategy,
     MuteUntilFirstBotCompleteUserMuteStrategy,
 )
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -162,7 +162,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_user_mute_stopped(aggregator):
         logger.info(f"User mute stopped")
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
     await runner.run()

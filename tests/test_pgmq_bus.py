@@ -21,9 +21,9 @@ from pipecat.bus import (
 )
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.frames.frames import TextFrame
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.workers.base_worker import BaseWorker
 
 try:
     from pipecat.bus.network.pgmq import PgmqBus

@@ -25,7 +25,6 @@ from pipecat.bus import (
     BusEndWorkerMessage,
     BusMessage,
     BusTTSSpeakMessage,
-    WorkerBus,
 )
 from pipecat.bus.bridge_processor import _BusEdgeProcessor
 from pipecat.bus.ui.messages import (
@@ -64,9 +63,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
-from pipecat.pipeline.utils import run_setup_hook
 from pipecat.pipeline.worker_observer import WorkerObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIObserverParams, RTVIProcessor
@@ -81,9 +78,11 @@ from pipecat.processors.frameworks.rtvi.models import (
     UISnapshotMessage,
 )
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
+from pipecat.utils.startup import run_setup_hook
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.tracing_context import TracingContext
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
+from pipecat.workers.base_worker import BaseWorker, WorkerParams
 
 HEARTBEAT_SECS = 1.0
 HEARTBEAT_MONITOR_SECS = 10.0
@@ -94,17 +93,6 @@ CANCEL_TIMEOUT_SECS = 20.0
 
 
 T = TypeVar("T")
-
-
-@dataclass
-class PipelineWorkerParams:
-    """Configuration parameters for pipeline worker execution.
-
-    Parameters:
-        loop: The asyncio event loop to use for worker execution.
-    """
-
-    loop: asyncio.AbstractEventLoop
 
 
 class IdleFrameObserver(BaseObserver):
@@ -286,7 +274,7 @@ class PipelineWorker(BaseWorker):
                 cancel).
             cancel_runner_on_idle_timeout: When ``cancel_on_idle_timeout`` is
                 also ``True``, whether reaching the idle timeout should also
-                cancel the entire :class:`PipelineRunner`. The worker is
+                cancel the entire :class:`WorkerRunner`. The worker is
                 always cancelled first; when this is ``True`` the worker also
                 emits a ``BusCancelMessage`` so the runner broadcasts
                 cancellation to every other root worker. Defaults to ``True``
@@ -675,7 +663,7 @@ class PipelineWorker(BaseWorker):
         if not self._finished:
             await self._cancel(reason=reason)
 
-    async def run(self, params: PipelineWorkerParams):
+    async def run(self, params: WorkerParams):
         """Start and manage the pipeline execution until completion or cancellation.
 
         Args:
@@ -980,7 +968,7 @@ class PipelineWorker(BaseWorker):
             await self._process_push_task
             self._process_push_task = None
 
-    async def _setup(self, params: PipelineWorkerParams):
+    async def _setup(self, params: WorkerParams):
         """Set up the pipeline worker and all processors."""
         await super().setup(self._pipeline_task_manager)
 
@@ -1301,18 +1289,18 @@ class PipelineTask(PipelineWorker):
 
 
 @dataclass
-class PipelineTaskParams(PipelineWorkerParams):
-    """Deprecated alias for :class:`PipelineWorkerParams`.
+class PipelineTaskParams(WorkerParams):
+    """Deprecated alias for :class:`~pipecat.workers.base_worker.WorkerParams`.
 
     .. deprecated:: 1.3.0
-        Use :class:`PipelineWorkerParams` instead. ``PipelineTaskParams`` will
-        be removed in a future release.
+        Use :class:`~pipecat.workers.base_worker.WorkerParams` instead.
+        ``PipelineTaskParams`` will be removed in a future release.
     """
 
     def __post_init__(self):
         """Warn on construction."""
         warnings.warn(
-            "PipelineTaskParams is deprecated, use PipelineWorkerParams instead.",
+            "PipelineTaskParams is deprecated, use WorkerParams instead.",
             DeprecationWarning,
             stacklevel=2,
         )

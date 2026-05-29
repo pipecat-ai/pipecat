@@ -13,10 +13,10 @@ from loguru import logger
 
 from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -42,7 +42,7 @@ async def main():
         await asyncio.sleep(1)
         await worker.queue_frames([TTSSpeakFrame("Hello there, how is it going!"), EndFrame()])
 
-    runner = PipelineRunner(handle_sigint=False if sys.platform == "win32" else True)
+    runner = WorkerRunner(handle_sigint=False if sys.platform == "win32" else True)
 
     await runner.add_workers(worker)
     await asyncio.gather(runner.run(), say_something())

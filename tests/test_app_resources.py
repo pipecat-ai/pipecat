@@ -15,7 +15,7 @@ from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import EndFrame, Frame, StartFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker, PipelineWorkerParams
+from pipecat.pipeline.worker import PipelineWorker, WorkerParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import (
@@ -258,7 +258,7 @@ class TestFrameProcessorSetupToolResourcesBackwardsCompat(unittest.IsolatedAsync
 
         await worker.queue_frame(EndFrame())
         with self.assertWarns(DeprecationWarning):
-            await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
 
         self.assertIs(legacy.captured_tool_resources, resources)
 
@@ -276,7 +276,7 @@ class TestFrameProcessorSetupToolResourcesBackwardsCompat(unittest.IsolatedAsync
 
         await worker.queue_frame(EndFrame())
         with self.assertWarns(DeprecationWarning):
-            await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+            await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
 
         self.assertIs(legacy.captured_tool_resources, resources)
 
@@ -289,7 +289,7 @@ class TestFrameProcessorPipelineTaskAccess(unittest.IsolatedAsyncioTestCase):
         worker = PipelineWorker(pipeline, app_resources=resources)
 
         await worker.queue_frame(EndFrame())
-        await worker.run(PipelineWorkerParams(loop=asyncio.get_event_loop()))
+        await worker.run(WorkerParams(loop=asyncio.get_event_loop()))
 
         self.assertIs(recorder.observed_task, worker)
         self.assertIs(recorder.observed_app_resources, resources)

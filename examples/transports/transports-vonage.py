@@ -19,7 +19,6 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -40,6 +39,7 @@ from pipecat.transports.vonage.video_connector import (
     VonageVideoConnectorTransport,
     VonageVideoConnectorTransportParams,
 )
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -125,7 +125,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         logger.info("Client connected")
         await worker.queue_frames([LLMRunFrame()])
 
-    runner = PipelineRunner()
+    runner = WorkerRunner()
 
     await runner.add_workers(worker)
     await runner.run()

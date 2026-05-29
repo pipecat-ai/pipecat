@@ -13,7 +13,6 @@ from pipecat.bus import (
     BusJobRequestMessage,
     BusJobResponseMessage,
 )
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_context import (
     JobError,
     JobEvent,
@@ -24,6 +23,7 @@ from pipecat.pipeline.job_context import (
 from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerReadyData
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
+from pipecat.workers.base_worker import BaseWorker
 
 
 class StubTask(BaseWorker):

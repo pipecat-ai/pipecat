@@ -19,9 +19,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.workers.runner import WorkerRunner
 
 
 @dataclass
@@ -197,7 +197,7 @@ async def run_test(
         if send_end_frame:
             await worker.queue_frame(EndFrame())
 
-    runner = PipelineRunner()
+    runner = WorkerRunner()
     await runner.add_workers(worker)
     await asyncio.gather(runner.run(), push_frames())
 

@@ -25,7 +25,6 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -44,6 +43,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -184,7 +184,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
     await runner.run()

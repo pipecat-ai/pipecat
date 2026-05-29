@@ -14,7 +14,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
-    from pipecat.pipeline.base_worker import BaseWorker
+    from pipecat.workers.base_worker import BaseWorker
 
 
 class JobStatus(StrEnum):

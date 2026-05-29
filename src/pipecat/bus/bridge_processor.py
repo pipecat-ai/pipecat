@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 if TYPE_CHECKING:
-    from pipecat.pipeline.base_worker import BaseWorker
+    from pipecat.workers.base_worker import BaseWorker
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
 _PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)

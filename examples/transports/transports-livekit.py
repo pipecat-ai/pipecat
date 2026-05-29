@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -33,6 +32,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -129,7 +129,7 @@ async def main():
             ],
         )
 
-    runner = PipelineRunner()
+    runner = WorkerRunner()
 
     await runner.add_workers(worker)
     await runner.run()

@@ -29,7 +29,6 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor, BusFrameMessage
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -45,6 +44,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.llm import LLMWorkerActivationArgs
 from pipecat.workers.proxy.websocket import WebSocketProxyClient
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -63,7 +63,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     tts = CartesiaTTSService(

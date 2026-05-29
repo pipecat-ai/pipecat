@@ -16,12 +16,9 @@ import dataclasses
 import time
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Self
+from typing import Self
 
 from loguru import logger
-
-if TYPE_CHECKING:
-    from pipecat.pipeline.worker import PipelineWorkerParams
 
 from pipecat.bus import (
     BusActivateWorkerMessage,
@@ -64,6 +61,17 @@ from pipecat.registry import WorkerRegistry
 from pipecat.registry.types import WorkerErrorData, WorkerReadyData
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 from pipecat.utils.base_object import BaseObject
+
+
+@dataclass
+class WorkerParams:
+    """Configuration parameters for worker execution.
+
+    Parameters:
+        loop: The asyncio event loop to use for worker execution.
+    """
+
+    loop: asyncio.AbstractEventLoop
 
 
 @dataclass
@@ -310,7 +318,7 @@ class BaseWorker(BaseObject, BusSubscriber):
         await super().cleanup()
         await self.stop()
 
-    async def run(self, params: "PipelineWorkerParams") -> None:
+    async def run(self, params: WorkerParams) -> None:
         """Run this worker until it finishes.
 
         The default implementation is for bus-only workers: it subscribes

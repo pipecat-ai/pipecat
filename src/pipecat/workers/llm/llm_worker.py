@@ -26,11 +26,11 @@ from pipecat.frames.frames import (
     LLMSetToolsFrame,
     UninterruptibleFrame,
 )
-from pipecat.pipeline.base_worker import WorkerActivationArgs
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.workers.base_worker import WorkerActivationArgs
 from pipecat.workers.llm.tool_decorator import _collect_tools
 
 FunctionCallResultCallback = Callable[..., Any]

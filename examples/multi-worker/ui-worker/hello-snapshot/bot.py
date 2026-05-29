@@ -60,7 +60,6 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.job_context import JobError
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -76,6 +75,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.llm import tool
+from pipecat.workers.runner import WorkerRunner
 from pipecat.workers.ui import UIWorker
 
 load_dotenv(override=True)
@@ -191,7 +191,7 @@ async def answer_about_screen(params: FunctionCallParams, query: str):
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting hello-snapshot bot")
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     tts = CartesiaTTSService(

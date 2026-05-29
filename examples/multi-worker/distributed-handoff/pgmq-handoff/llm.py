@@ -32,10 +32,10 @@ from loguru import logger
 from pgmq.async_queue import PGMQueue
 
 from pipecat.bus.network.pgmq import PgmqBus
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -172,7 +172,7 @@ async def main_async() -> None:
         watch=config["watch"],
     )
 
-    runner = PipelineRunner(bus=bus, handle_sigint=True)
+    runner = WorkerRunner(bus=bus, handle_sigint=True)
     logger.info(f"Starting {args.worker} worker, waiting for activation...")
     await runner.add_workers(worker)
     await runner.run()

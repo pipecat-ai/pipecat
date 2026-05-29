@@ -14,8 +14,8 @@ from pipecat.bus import BusMessage, BusWorkerRegistryMessage
 from pipecat.bus.messages import BusLocalMessage
 from pipecat.bus.serializers import JSONMessageSerializer
 from pipecat.bus.serializers.base import MessageSerializer
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.registry.types import WorkerReadyData, WorkerRegistryEntry
+from pipecat.workers.base_worker import BaseWorker
 
 try:
     from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
