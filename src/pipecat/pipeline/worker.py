@@ -570,6 +570,15 @@ class PipelineWorker(BaseWorker):
         return self._turn_trace_observer
 
     @property
+    def user_bot_latency_observer(self) -> UserBotLatencyObserver | None:
+        """Get the user-bot latency observer if tracing is enabled.
+
+        Returns:
+            The user-bot latency observer instance or None if not enabled.
+        """
+        return self._user_bot_latency_observer
+
+    @property
     def rtvi(self) -> RTVIProcessor:
         """Get the RTVI processor if RTVI is enabled.
 
