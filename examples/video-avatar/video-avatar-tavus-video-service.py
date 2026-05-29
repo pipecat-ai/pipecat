@@ -14,8 +14,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -29,6 +28,7 @@ from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.tavus.video import TavusVideoService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -100,7 +100,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ]
         )
 
-        task = PipelineTask(
+        worker = PipelineWorker(
             pipeline,
             params=PipelineParams(
                 audio_in_sample_rate=16000,
@@ -121,16 +121,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     "content": "Start by greeting the user and ask how you can help.",
                 }
             )
-            await task.queue_frames([LLMRunFrame()])
+            await worker.queue_frames([LLMRunFrame()])
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
             logger.info(f"Client disconnected")
-            await task.cancel()
+            await worker.cancel()
 
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-        await runner.run(task)
+        await runner.add_workers(worker)
+        await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

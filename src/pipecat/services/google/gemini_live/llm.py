@@ -105,7 +105,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 # Connection management constants
@@ -1089,18 +1089,22 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             if history_config:
                 config.history_config = history_config
 
-            # Add context window compression to configuration, if enabled
-            cwc = assert_given(self._settings.context_window_compression) or {}
-            if cwc.get("enabled", False):
+            # Add context window compression to configuration, if enabled.
+            # The setting may arrive as a ContextWindowCompressionParams (via the
+            # canonical `settings` API) or as a dict (via the legacy `params` path,
+            # which stores a model_dump()). Normalize to the params model.
+            cwc = assert_given(self._settings.context_window_compression)
+            if isinstance(cwc, dict):
+                cwc = ContextWindowCompressionParams(**cwc) if cwc else None
+            if cwc and cwc.enabled:
                 compression_config = ContextWindowCompressionConfig()
 
                 # Add sliding window (always true if compression is enabled)
                 compression_config.sliding_window = SlidingWindow()
 
                 # Add trigger_tokens if specified
-                trigger_tokens = cwc.get("trigger_tokens")
-                if trigger_tokens is not None:
-                    compression_config.trigger_tokens = trigger_tokens
+                if cwc.trigger_tokens is not None:
+                    compression_config.trigger_tokens = cwc.trigger_tokens
 
                 config.context_window_compression = compression_config
 

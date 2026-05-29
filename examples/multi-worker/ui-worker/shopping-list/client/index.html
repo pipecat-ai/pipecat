@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopping list — Pipecat UIWorker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>🛒 Shopping list</h1>
+      <button id="connect">Connect</button>
+    </header>
+
+    <main>
+      <p class="hint">
+        Talk to build your list — "add milk and eggs", "check off the
+        bread", "what's left?". You can also type an item below.
+      </p>
+
+      <form id="add-form" class="add-form">
+        <input
+          id="add-input"
+          type="text"
+          placeholder="Add an item…"
+          autocomplete="off"
+          aria-label="Add an item"
+        />
+        <button type="submit">Add</button>
+      </form>
+
+      <ul id="list" class="list" aria-label="Shopping list"></ul>
+      <p id="list-empty" class="list-empty">
+        Your list is empty. Say "add milk and eggs".
+      </p>
+    </main>
+
+    <div id="status" data-show="0"></div>
+    <audio id="bot-audio" autoplay></audio>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

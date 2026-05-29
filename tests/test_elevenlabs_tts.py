@@ -16,8 +16,10 @@ from pipecat.services.elevenlabs.tts import (
     ElevenLabsTTSService,
     _select_alignment,
     _strip_utterance_leading_spaces,
+    _word_timestamps_include_inter_frame_spaces,
     calculate_word_times,
 )
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 
 _WS_ALIGNMENT_KEYS = ("chars", "charStartTimesMs", "charDurationsMs")
 
@@ -64,6 +66,19 @@ def _words_from_chunks(chunks: list[dict[str, list[Any]]]) -> list[str]:
     return [word for word, _ in word_times]
 
 
+def _concatenate_words_for_language(words: list[str], language: str) -> str:
+    includes_inter_frame_spaces = _word_timestamps_include_inter_frame_spaces(language)
+    return concatenate_aggregated_text(
+        [
+            TextPartForConcatenation(
+                word,
+                includes_inter_part_spaces=includes_inter_frame_spaces,
+            )
+            for word in words
+        ]
+    )
+
+
 def test_elevenlabs_flash_alignment_preserves_inter_word_chunk_space():
     chunks = [
         _chunk(" Why did the math book"),
@@ -88,6 +103,45 @@ def test_elevenlabs_flash_alignment_preserves_inter_word_chunk_space():
         "many",
         "problems.",
     ]
+
+
+def test_elevenlabs_japanese_timestamp_chunks_reassemble_without_spaces():
+    words = _words_from_chunks(
+        [
+            _chunk("どんなことでも気 "),
+            _chunk("軽に相談してくださいね。 "),
+        ]
+    )
+
+    assert words == ["どんなことでも気", "軽に相談してくださいね。"]
+    assert (
+        _concatenate_words_for_language(words, language="ja")
+        == "どんなことでも気軽に相談してくださいね。"
+    )
+
+
+def test_elevenlabs_chinese_timestamp_chunks_reassemble_without_spaces():
+    words = _words_from_chunks(
+        [
+            _chunk("你好，我是 "),
+            _chunk("你的智能助手。 "),
+        ]
+    )
+
+    assert words == ["你好，我是", "你的智能助手。"]
+    assert _concatenate_words_for_language(words, language="zh-CN") == "你好，我是你的智能助手。"
+
+
+def test_elevenlabs_english_timestamp_chunks_reassemble_with_spaces():
+    words = ["Hello", "world."]
+
+    assert _concatenate_words_for_language(words, language="en") == "Hello world."
+
+
+def test_elevenlabs_timestamp_spacing_languages():
+    assert _word_timestamps_include_inter_frame_spaces("ja") is True
+    assert _word_timestamps_include_inter_frame_spaces("zh-CN") is True
+    assert _word_timestamps_include_inter_frame_spaces("en") is False
 
 
 def test_elevenlabs_alignment_strips_only_utterance_leading_spaces():

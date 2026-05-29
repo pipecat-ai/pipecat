@@ -53,7 +53,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Gladia, you need to `pip install pipecat-ai[gladia]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_gladia_language(language: Language) -> str:
@@ -558,8 +558,9 @@ class GladiaSTTService(WebsocketSTTService):
 
             logger.debug(f"{self} Connected to Gladia WebSocket")
         except Exception as e:
+            self._websocket = None
+            self._connection_active = False
             await self.push_error(error_msg=f"Unable to connect to Gladia: {e}", exception=e)
-            raise
 
     async def _disconnect_websocket(self):
         """Close the websocket connection to Gladia."""

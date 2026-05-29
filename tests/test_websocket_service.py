@@ -165,6 +165,19 @@ async def test_reconnect_exhausted_emits_non_fatal_error(service, report_error):
     assert "Connection refused" in final_error.error
 
 
+@pytest.mark.asyncio
+async def test_reconnect_exhausted_when_connect_does_not_raise(service, report_error):
+    """A non-raising failed connect is treated as a failed reconnect attempt."""
+    result = await service._try_reconnect(report_error=report_error)
+
+    assert result is False
+    assert report_error.call_count == 4
+    final_error = report_error.call_args_list[-1][0][0]
+    assert isinstance(final_error, ErrorFrame)
+    assert final_error.fatal is False
+    assert "websocket reconnection failed verification" in final_error.error
+
+
 # ---------------------------------------------------------------------------
 # Quick failure detection — accept then immediately close
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@
 """Deepgram speech-to-text service implementation."""
 
 import asyncio
+import inspect
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
 from typing import Any
@@ -48,7 +49,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Deepgram, you need to `pip install pipecat-ai[deepgram]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class LiveOptions:
@@ -428,11 +429,16 @@ class DeepgramSTTService(STTService):
                 from deepgram import DeepgramClientEnvironment
 
                 ws_url, http_url = _derive_deepgram_urls(base_url)
-                environment = DeepgramClientEnvironment(
-                    base=http_url,
-                    production=ws_url,
-                    agent=ws_url,
-                )
+                env_kwargs: dict[str, str] = {
+                    "base": http_url,
+                    "production": ws_url,
+                    "agent": ws_url,
+                }
+                # deepgram-sdk 7.2.0 added a required `agent_rest` kwarg; older
+                # 6.x releases do not accept it. Pass it only when present.
+                if "agent_rest" in inspect.signature(DeepgramClientEnvironment).parameters:
+                    env_kwargs["agent_rest"] = http_url
+                environment = DeepgramClientEnvironment(**env_kwargs)
                 self._client = AsyncDeepgramClient(api_key=api_key, environment=environment)
             except Exception:
                 logger.warning(

@@ -31,7 +31,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Deepgram Flux, you need to `pip install pipecat-ai[deepgram]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 # Re-export for backward compatibility
 __all__ = [
@@ -238,6 +238,11 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         self._url = url
         self._websocket_url = None
         self._receive_task = None
+
+    @property
+    def supports_ttfs(self) -> bool:
+        """TTFS doesn't apply: Flux defines turn boundaries directly."""
+        return False
 
     # ------------------------------------------------------------------
     # Transport interface implementation

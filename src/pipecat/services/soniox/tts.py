@@ -44,7 +44,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Soniox, you need to `pip install pipecat-ai[soniox]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 # Soniox idle timeout is 20-30s; keepalive cadence must stay well inside it.

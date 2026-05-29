@@ -563,7 +563,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         pipeline = Pipeline([user_aggregator])
 
-        # run_test internally sends StartFrame via PipelineRunner. With
+        # run_test internally sends StartFrame via WorkerRunner. With
         # ignore_start=False we can verify ordering: StartFrame must arrive
         # before UserMuteStartedFrame. Before the fix, UserMuteStartedFrame
         # was broadcast before StartFrame reached downstream processors.

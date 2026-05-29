@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Form fill — UIWorker a11y demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Application form</h1>
+      <button id="connect" type="button">Connect</button>
+    </header>
+
+    <main>
+      <form id="application-form" aria-label="Job application">
+        <h2>Apply for: Software Engineer</h2>
+        <p class="hint">
+          Click <strong>Connect</strong> and the assistant will walk you
+          through this form by voice — just answer its questions. You
+          don't need to look at the screen.
+        </p>
+
+        <fieldset>
+          <legend>Personal information</legend>
+
+          <div class="field">
+            <label for="first-name">First name</label>
+            <input id="first-name" name="first_name" type="text" autocomplete="given-name" />
+          </div>
+
+          <div class="field">
+            <label for="last-name">Last name</label>
+            <input id="last-name" name="last_name" type="text" autocomplete="family-name" />
+          </div>
+
+          <div class="field">
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" autocomplete="email" />
+          </div>
+
+          <div class="field">
+            <label for="phone">Phone number</label>
+            <input id="phone" name="phone" type="tel" autocomplete="tel" />
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Job qualifications</legend>
+
+          <div class="field">
+            <label for="experience">Years of relevant experience</label>
+            <input id="experience" name="experience" type="text" inputmode="numeric" />
+          </div>
+
+          <div class="field">
+            <label for="cover">Why are you interested in this role?</label>
+            <textarea id="cover" name="cover" rows="5"></textarea>
+          </div>
+        </fieldset>
+
+        <div class="actions">
+          <button id="submit" type="submit">Submit application</button>
+          <span id="form-status" aria-live="polite"></span>
+        </div>
+      </form>
+    </main>
+
+    <div id="status" aria-live="polite"></div>
+    <audio id="bot-audio" autoplay data-a11y-exclude></audio>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

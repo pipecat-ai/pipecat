@@ -1,0 +1,138 @@
+:root {
+  color-scheme: light;
+  font-family:
+    Charter,
+    Georgia,
+    "Iowan Old Style",
+    serif;
+  --border: #d4d4d8;
+  --muted: #71717a;
+  --selection: #fde68a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #fafafa;
+  color: #18181b;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+header h1 {
+  font-size: 1.125rem;
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+
+#connect {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+#connect:hover {
+  background: #f4f4f5;
+}
+
+#connect[data-state="connected"] {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+article h2 {
+  margin: 0 0 1rem;
+  font-size: 1.875rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+article p {
+  margin: 0 0 1.25rem;
+  font-size: 1.125rem;
+  line-height: 1.7;
+  color: #27272a;
+}
+
+article p.lede {
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--muted);
+  font-style: italic;
+  margin-bottom: 2rem;
+  border-left: 3px solid var(--border);
+  padding-left: 1rem;
+}
+
+/* Make the user's text selection (and the agent's programmatic
+   selection) visually distinct. The same color is used for both —
+   the agent and the user are pointing at the same thing. */
+::selection {
+  background: var(--selection);
+  color: #18181b;
+}
+
+/* Brief background flash when the agent calls ``highlight`` on a
+   paragraph. Distinct from ``select_text`` (which uses the OS-level
+   text selection) so the agent has two different visual idioms:
+   "I'm pointing at this content" (select) vs "look at this fact"
+   (flash). */
+@keyframes flash-fade {
+  0% {
+    background: var(--selection);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.flash {
+  animation: flash-fade 1.5s ease-out;
+  border-radius: 4px;
+  margin-left: -0.25rem;
+  padding-left: 0.25rem;
+}
+
+#status {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #18181b;
+  color: white;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+#status[data-show="1"] {
+  opacity: 1;
+}

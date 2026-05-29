@@ -44,7 +44,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Gradium, you need to `pip install "pipecat-ai[gradium]"`.')
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 # Seconds to wait after a "flushed" message for trailing text tokens to arrive
 # before finalizing the transcription.
@@ -150,7 +150,7 @@ class GradiumSTTService(WebsocketSTTService):
         self,
         *,
         api_key: str,
-        api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
+        api_endpoint_base_url: str = "wss://api.gradium.ai/api/speech/asr",
         encoding: str = "pcm",
         sample_rate: int | None = None,
         params: InputParams | None = None,
@@ -163,7 +163,7 @@ class GradiumSTTService(WebsocketSTTService):
 
         Args:
             api_key: Gradium API key for authentication.
-            api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
+            api_endpoint_base_url: WebSocket endpoint URL.
             encoding: Base audio encoding type. One of "pcm", "wav", or "opus".
                 For PCM, the sample rate is appended automatically from the
                 pipeline's audio_in_sample_rate (e.g., "pcm" becomes "pcm_16000").
@@ -423,8 +423,8 @@ class GradiumSTTService(WebsocketSTTService):
             logger.debug("Connected to Gradium STT")
 
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-            raise
+            self._websocket = None
+            await self.push_error(error_msg=f"Unable to connect to Gradium: {e}", exception=e)
 
     async def _disconnect(self):
         await super()._disconnect()

@@ -55,8 +55,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -71,6 +70,7 @@ from pipecat.services.ollama.llm import OLLamaLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -163,7 +163,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
@@ -185,13 +185,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "=== Phase 1: weather tool REMOVED. Keep asking about the weather "
                 "to exercise hallucination scenarios. ==="
             )
-            await task.queue_frame(LLMSetToolsFrame(tools=NOT_GIVEN))
+            await worker.queue_frame(LLMSetToolsFrame(tools=NOT_GIVEN))
         elif user_turn_count == READD_AT_TURN - 1:
             logger.info(
                 "=== Phase 2: weather tool RE-ADDED. Ask for the weather again — "
                 "does the LLM call it, or keep refusing? (THIS IS THE TEST.) ==="
             )
-            await task.queue_frame(LLMSetToolsFrame(tools=weather_tools))
+            await worker.queue_frame(LLMSetToolsFrame(tools=weather_tools))
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -209,15 +209,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 ),
             }
         )
-        await task.queue_frames([LLMRunFrame()])
+        await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-    await runner.run(task)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

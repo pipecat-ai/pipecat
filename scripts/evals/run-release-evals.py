@@ -97,6 +97,7 @@ EVAL_COMPLETE_TURN = EvalConfig(
 
 
 TESTS_VOICE = [
+    ("voice/voice-cartesia-turns.py", EVAL_SIMPLE_MATH),
     ("voice/voice-cartesia.py", EVAL_SIMPLE_MATH),
     ("voice/voice-cartesia-http.py", EVAL_SIMPLE_MATH),
     ("voice/voice-speechmatics.py", EVAL_SIMPLE_MATH),
@@ -198,6 +199,7 @@ TESTS_FUNCTION_CALLING = [
     ("function-calling/function-calling-sarvam.py", EVAL_WEATHER),
     ("function-calling/function-calling-novita.py", EVAL_WEATHER),
     ("function-calling/function-calling-deepseek.py", EVAL_WEATHER),
+    ("function-calling/function-calling-inception.py", EVAL_WEATHER),
     # Video
     ("function-calling/function-calling-anthropic-video.py", EVAL_VISION_CAMERA),
     ("function-calling/function-calling-aws-video.py", EVAL_VISION_CAMERA),
@@ -242,6 +244,7 @@ TESTS_VIDEO_AVATAR = [
 
 TESTS_TURN_MANAGEMENT = [
     ("turn-management/turn-management-filter-incomplete-turns.py", EVAL_COMPLETE_TURN),
+    ("turn-management/turn-management-filter-incomplete-turns-function-calling.py", EVAL_WEATHER),
 ]
 
 TESTS_THINKING = [

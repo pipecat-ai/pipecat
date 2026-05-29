@@ -47,7 +47,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Rime, you need to `pip install pipecat-ai[rime]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_rime_language(language: Language) -> str:
@@ -85,6 +85,8 @@ class RimeTTSSettings(TTSSettings):
         repetition_penalty: Token repetition penalty (arcana only, 1.0-2.0).
         temperature: Sampling temperature (arcana only, 0.0-1.0).
         top_p: Cumulative probability threshold (arcana only, 0.0-1.0).
+        timeScaleFactor: Audio playback speed factor (arcana, mistv3, and coda only).
+            Values above 1.0 slow down the audio; values below 1.0 speed it up.
     """
 
     segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -98,6 +100,7 @@ class RimeTTSSettings(TTSSettings):
     repetition_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    timeScaleFactor: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[dict[str, str]] = {"speaker": "voice"}
 
@@ -213,7 +216,7 @@ class RimeTTSService(WebsocketTTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="arcana",
+            model="coda",
             voice=None,
             language=None,
             segment=None,
@@ -229,6 +232,8 @@ class RimeTTSService(WebsocketTTSService):
             phonemizeBetweenBrackets=None,
             noTextNormalization=None,
             saveOovs=None,
+            # Shared with arcana, mistv3, and coda
+            timeScaleFactor=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -341,6 +346,11 @@ class RimeTTSService(WebsocketTTSService):
                 params["temperature"] = self._settings.temperature
             if self._settings.top_p is not None:
                 params["top_p"] = self._settings.top_p
+            if self._settings.timeScaleFactor is not None:
+                params["timeScaleFactor"] = self._settings.timeScaleFactor
+        elif self._settings.model == "coda":
+            if self._settings.timeScaleFactor is not None:
+                params["timeScaleFactor"] = self._settings.timeScaleFactor
         else:  # mistv2/mist
             if self._settings.reduceLatency is not None:
                 params["reduceLatency"] = self._settings.reduceLatency
@@ -710,7 +720,7 @@ class RimeHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="mistv2",
+            model="coda",
             voice=None,
             language="eng",
             segment=None,
@@ -724,6 +734,7 @@ class RimeHttpTTSService(TTSService):
             repetition_penalty=None,
             temperature=None,
             top_p=None,
+            timeScaleFactor=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -804,19 +815,38 @@ class RimeHttpTTSService(TTSService):
             "Content-Type": "application/json",
         }
 
-        payload = {
-            "lang": self._settings.language,
-            "speedAlpha": self._settings.speedAlpha,
-            "reduceLatency": self._settings.reduceLatency,
-            "pauseBetweenBrackets": self._settings.pauseBetweenBrackets,
-            "phonemizeBetweenBrackets": self._settings.phonemizeBetweenBrackets,
+        payload: dict[str, Any] = {
+            "text": text,
+            "speaker": self._settings.voice,
+            "modelId": self._settings.model,
+            "samplingRate": self.sample_rate,
         }
+        if self._settings.language is not None:
+            payload["lang"] = self._settings.language
+        if self._settings.speedAlpha is not None:
+            payload["speedAlpha"] = self._settings.speedAlpha
         if self._settings.inlineSpeedAlpha is not None:
             payload["inlineSpeedAlpha"] = self._settings.inlineSpeedAlpha
-        payload["text"] = text
-        payload["speaker"] = self._settings.voice
-        payload["modelId"] = self._settings.model
-        payload["samplingRate"] = self.sample_rate
+
+        if self._settings.model == "arcana":
+            if self._settings.repetition_penalty is not None:
+                payload["repetition_penalty"] = self._settings.repetition_penalty
+            if self._settings.temperature is not None:
+                payload["temperature"] = self._settings.temperature
+            if self._settings.top_p is not None:
+                payload["top_p"] = self._settings.top_p
+            if self._settings.timeScaleFactor is not None:
+                payload["timeScaleFactor"] = self._settings.timeScaleFactor
+        elif self._settings.model == "coda":
+            if self._settings.timeScaleFactor is not None:
+                payload["timeScaleFactor"] = self._settings.timeScaleFactor
+        else:  # mistv2/mist
+            if self._settings.reduceLatency is not None:
+                payload["reduceLatency"] = self._settings.reduceLatency
+            if self._settings.pauseBetweenBrackets is not None:
+                payload["pauseBetweenBrackets"] = self._settings.pauseBetweenBrackets
+            if self._settings.phonemizeBetweenBrackets is not None:
+                payload["phonemizeBetweenBrackets"] = self._settings.phonemizeBetweenBrackets
 
         # Arcana does not support PCM audio
         if payload["modelId"] == "arcana":

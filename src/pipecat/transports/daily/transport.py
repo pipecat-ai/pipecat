@@ -75,7 +75,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use the Daily transport, you need to `pip install pipecat-ai[daily]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 VAD_RESET_PERIOD_MS = 2000
 

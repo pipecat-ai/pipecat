@@ -33,7 +33,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use GStreamer, you need to `pip install pipecat-ai[gstreamer]`. Also, you need to install GStreamer in your system."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class GStreamerPipelineSource(FrameProcessor):

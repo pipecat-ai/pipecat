@@ -151,7 +151,7 @@ class ParallelPipeline(BasePipeline):
         #   processors (e.g. output transport) begin shutting down while
         #   other branches still have frames to flush, causing lost output.
         #
-        # - CancelFrame: PipelineTask waits for CancelFrame to reach the
+        # - CancelFrame: PipelineWorker waits for CancelFrame to reach the
         #   pipeline sink. If it escapes from a fast branch while slower
         #   branches are still running, the task considers cancellation
         #   complete prematurely.

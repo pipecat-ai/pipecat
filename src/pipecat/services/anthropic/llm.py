@@ -48,7 +48,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class AnthropicThinkingConfig(BaseModel):

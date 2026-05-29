@@ -41,7 +41,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Smallest, you need to `pip install pipecat-ai[smallest]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class SmallestTTSModel(StrEnum):

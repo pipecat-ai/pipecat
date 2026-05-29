@@ -15,8 +15,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -30,6 +29,7 @@ from pipecat.transports.lemonslice.transport import (
     LemonSliceParams,
     LemonSliceTransport,
 )
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -87,7 +87,7 @@ async def main():
             ]
         )
 
-        task = PipelineTask(
+        worker = PipelineWorker(
             pipeline,
             params=PipelineParams(
                 audio_in_sample_rate=16000,
@@ -107,12 +107,12 @@ async def main():
                     "content": "Start by greeting the user and ask how you can help.",
                 }
             )
-            await task.queue_frames([LLMRunFrame()])
+            await worker.queue_frames([LLMRunFrame()])
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, participant):
             logger.info("Client disconnected")
-            await task.cancel()
+            await worker.cancel()
 
         @transport.event_handler("on_avatar_connected")
         async def on_avatar_connected(transport, participant):
@@ -122,9 +122,10 @@ async def main():
         async def on_avatar_disconnected(transport, participant, reason):
             logger.info(f"Avatar disconnected. Reason: {reason}")
 
-        runner = PipelineRunner()
+        runner = WorkerRunner()
 
-        await runner.run(task)
+        await runner.add_workers(worker)
+        await runner.run()
 
 
 if __name__ == "__main__":

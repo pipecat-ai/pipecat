@@ -100,15 +100,34 @@ class DailyRunnerArguments(RunnerArguments):
 
 
 @dataclass
+class VonageRunnerArguments(RunnerArguments):
+    """Vonage transport session arguments for the runner.
+
+    Parameters:
+        application_id: Vonage application ID
+        vonage_session_id: Vonage session ID
+        token: Vonage Session Token
+    """
+
+    application_id: str
+    vonage_session_id: str
+    token: str
+
+
+@dataclass
 class WebSocketRunnerArguments(RunnerArguments):
     """WebSocket transport session arguments for the runner.
 
     Parameters:
         websocket: WebSocket connection for audio streaming
+        transport_type: Transport type identifier. Set to ``"websocket"`` for plain
+            WebSocket connections; ``None`` triggers auto-detection from the first
+            telephony provider message.
         body: Additional request data
     """
 
     websocket: WebSocket
+    transport_type: str | None = None
 
 
 @dataclass
