@@ -34,6 +34,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -99,7 +100,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         realtime_service_mode=True,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
+            # stop_secs is intentionally longer than Pipecat's 0.2s default:
+            # Gemini Live's manual-VAD mode wants end-of-speech to be confirmed
+            # with more silence.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
         ),
     )
 
