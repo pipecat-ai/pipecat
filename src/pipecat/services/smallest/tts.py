@@ -97,12 +97,9 @@ class SmallestTTSSettings(TTSSettings):
 
     Parameters:
         speed: Speech speed multiplier (0.5–2.0).
-        output_format: Audio output format. One of ``pcm``, ``mp3``, ``wav``,
-            ``ulaw``, ``alaw``. Defaults to ``pcm``.
     """
 
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    output_format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -133,6 +130,7 @@ class SmallestTTSService(InterruptibleTTSService):
         api_key: str,
         base_url: str = "wss://api.smallest.ai",
         sample_rate: int | None = None,
+        output_format: str = "pcm",
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -142,6 +140,9 @@ class SmallestTTSService(InterruptibleTTSService):
             api_key: Smallest AI API key for authentication.
             base_url: Base WebSocket URL for the Smallest API.
             sample_rate: Audio sample rate in Hz. If None, uses default.
+            output_format: Audio format returned by the API. One of ``pcm``,
+                ``mp3``, ``wav``, ``ulaw``, ``alaw``. Defaults to ``pcm``,
+                which is what Pipecat expects internally. Fixed at init time.
             settings: Runtime-updatable settings for the TTS service.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
@@ -158,7 +159,6 @@ class SmallestTTSService(InterruptibleTTSService):
             voice=_MODEL_DEFAULT_VOICES[model],
             language=Language.EN,
             speed=None,
-            output_format=None,
         )
 
         if settings is not None:
@@ -175,6 +175,7 @@ class SmallestTTSService(InterruptibleTTSService):
 
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
+        self._output_format = output_format
         self._receive_task = None
         self._keepalive_task = None
 
@@ -221,8 +222,7 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.speed is not None:
             msg["speed"] = self._settings.speed
 
-        if self._settings.output_format is not None:
-            msg["output_format"] = self._settings.output_format
+        msg["output_format"] = self._output_format
 
         return msg
 
@@ -260,8 +260,8 @@ class SmallestTTSService(InterruptibleTTSService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        All fields (model, speed, output_format, voice, language) take effect
-        on the next ``_build_msg`` call without reconnecting.
+        All fields (model, speed, voice, language) take effect on the next
+        ``_build_msg`` call without reconnecting.
         """
         return await super()._update_settings(delta)
 
