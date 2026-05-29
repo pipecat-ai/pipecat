@@ -128,18 +128,16 @@ class LLMUserAggregatorParams:
             has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
-        filter_incomplete_user_turns: [DEPRECATED] Use
-            ``user_turn_strategies=FilterIncompleteUserTurnStrategies()``
-            instead. When enabled, the LLM outputs a turn-completion
-            marker at the start of each response: ✓ (complete), ○
-            (incomplete short), or ◐ (incomplete long). Incomplete
+        filter_incomplete_user_turns: When enabled, the LLM outputs a
+            turn-completion marker at the start of each response: ✓ (complete),
+            ○ (incomplete short), or ◐ (incomplete long). Incomplete
             responses are suppressed and timeouts trigger re-prompting.
 
             .. deprecated:: 1.2.0
                 Use ``user_turn_strategies=FilterIncompleteUserTurnStrategies()``
                 instead. Will be removed in version 2.0.0.
 
-        user_turn_completion_config: [DEPRECATED] Configuration for turn
+        user_turn_completion_config: Configuration for turn
             completion behavior including custom instructions, timeouts, and
             prompts. Only used when filter_incomplete_user_turns is True
             (deprecated path) — for the new strategy-based API, pass the config
