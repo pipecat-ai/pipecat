@@ -869,8 +869,8 @@ class BaseOutputTransport(FrameProcessor):
 
                     # Sleep before retrying
                     await asyncio.sleep(sleep_between_consecutive_failures)
-                else:
-                    # Reset counter on successful write
+                elif isinstance(frame, OutputAudioRawFrame):
+                    # Reset counter only after a successful audio write.
                     consecutive_failures = 0
 
                 # If we were able to send to the transport, push the frame
