@@ -1460,3 +1460,175 @@ class GeminiTTSService(GoogleBaseTTSService):
         except Exception as e:
             error_message = f"Gemini TTS generation error: {str(e)}"
             yield ErrorFrame(error=error_message)
+
+
+# ---------------------------------------------------------------------------
+# GeminiGenAITTSService — google-genai generate_content path
+# ---------------------------------------------------------------------------
+
+try:
+    import google.genai as _genai
+    from google.genai.types import (
+        GenerateContentConfig as _GenerateContentConfig,
+    )
+    from google.genai.types import (
+        PrebuiltVoiceConfig as _PrebuiltVoiceConfig,
+    )
+    from google.genai.types import (
+        SpeechConfig as _SpeechConfig,
+    )
+    from google.genai.types import (
+        VoiceConfig as _VoiceConfig,
+    )
+
+    _GENAI_AVAILABLE = True
+except ModuleNotFoundError:
+    _GENAI_AVAILABLE = False
+
+
+@dataclass
+class GeminiGenAITTSSettings(TTSSettings):
+    """Settings for GeminiGenAITTSService.
+
+    Parameters:
+        model: Gemini speech generation model identifier, e.g.
+            ``"gemini-3.1-flash-tts-preview"``.
+        voice: Prebuilt voice name (e.g. ``"Kore"``, ``"Charon"``).
+        language: Language tag. Gemini TTS infers language from the text and
+            voice, so this setting is informational only.
+    """
+
+    pass
+
+
+class GeminiGenAITTSService(TTSService):
+    """Non-streaming Gemini TTS via the google-genai ``generate_content`` API.
+
+    Uses ``response_modalities=["AUDIO"]`` to synthesize speech through models
+    such as ``gemini-3.1-flash-tts-preview``.  This is distinct from
+    :class:`GeminiTTSService`, which uses the Google Cloud
+    Text-to-Speech streaming API and supports only ``gemini-2.5-*`` models.
+
+    Note:
+        Audio is returned as a single chunk after full synthesis — this
+        service is **not** intended as a low-latency realtime TTS path.
+        Use :class:`GeminiTTSService` or :class:`GoogleTTSService` when
+        low latency matters.
+
+    Example::
+
+        tts = GeminiGenAITTSService(
+            api_key=os.environ["GEMINI_API_KEY"],
+            settings=GeminiGenAITTSService.Settings(
+                model="gemini-3.1-flash-tts-preview",
+                voice="Kore",
+            ),
+        )
+    """
+
+    Settings = GeminiGenAITTSSettings
+    _settings: Settings
+
+    GOOGLE_SAMPLE_RATE = 24000
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        sample_rate: int | None = None,
+        settings: Settings | None = None,
+        **kwargs,
+    ):
+        """Initialize the Gemini GenAI TTS service.
+
+        Args:
+            api_key: Google AI API key.
+            sample_rate: Audio sample rate in Hz.  If ``None``, defaults to
+                24 kHz, which is the native output rate of Gemini TTS.
+            settings: Runtime-updatable settings object.
+            **kwargs: Additional keyword arguments forwarded to TTSService.
+        """
+        if not _GENAI_AVAILABLE:
+            raise ImportError(
+                "google-genai is required for GeminiGenAITTSService. "
+                "Install it with: pip install pipecat-ai[google]"
+            )
+
+        default_settings = self.Settings(
+            model="gemini-3.1-flash-tts-preview",
+            voice="Kore",
+            language=None,
+        )
+
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            push_text_frames=False,
+            push_stop_frames=True,
+            push_start_frame=True,
+            sample_rate=sample_rate or self.GOOGLE_SAMPLE_RATE,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._client = _genai.Client(api_key=api_key)
+
+    @traced_tts
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        """Synthesize speech via ``generate_content`` with ``AUDIO`` modality.
+
+        A single POST is made to the Gemini API; audio is returned as one
+        contiguous ``inline_data`` blob and emitted as one or more
+        :class:`TTSAudioRawFrame` objects.
+
+        Args:
+            text: Text to synthesize.
+            context_id: Identifier for the current TTS context.
+
+        Yields:
+            Frame: :class:`TTSAudioRawFrame` for each audio part in the
+            response, or an :class:`ErrorFrame` on failure.
+        """
+        logger.debug(f"{self}: Generating TTS [{text}]")
+
+        try:
+            speech_config = _SpeechConfig(
+                voice_config=_VoiceConfig(
+                    prebuilt_voice_config=_PrebuiltVoiceConfig(voice_name=self._settings.voice)
+                )
+            )
+            config = _GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=speech_config,
+            )
+
+            response = await self._client.aio.models.generate_content(
+                model=self._settings.model,
+                contents=text,
+                config=config,
+            )
+
+            await self.start_tts_usage_metrics(text)
+
+            emitted = False
+            if response.candidates:
+                for part in response.candidates[0].content.parts:
+                    if part.inline_data and part.inline_data.data:
+                        await self.stop_ttfb_metrics()
+                        yield TTSAudioRawFrame(
+                            audio=part.inline_data.data,
+                            sample_rate=self.sample_rate,
+                            num_channels=1,
+                            context_id=context_id,
+                        )
+                        emitted = True
+
+            if not emitted:
+                logger.warning(f"{self}: No audio data in Gemini GenAI TTS response")
+
+        except Exception as exc:
+            logger.error(f"{self}: Gemini GenAI TTS error: {exc}")
+            yield ErrorFrame(error=f"Gemini GenAI TTS error: {exc}")
+        finally:
+            await self.stop_ttfb_metrics()
