@@ -12,9 +12,7 @@
 
 name: stt_in_the_loop
 
-stt: true
-
-user_voice:
+user_audio:
   service: cartesia
   voice: 71a7ad14-091c-4e8e-a314-022ece01c121     # British Reading Lady
   model: sonic-2

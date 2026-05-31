@@ -13,17 +13,17 @@ user_stopped_speaking, llm_started, llm_response, interruption, tool_call,
 error). Designed for fast, deterministic behavioral evaluations of a pipeline
 without invoking real STT or full audio I/O.
 
-Two modes, controlled by the per-eval ``tts:`` field (default True):
+Two modes, controlled by the per-eval ``bot_audio:`` field (default True):
 
-- TTS on (default): the bot pipeline runs end-to-end including TTS. The
-  eval transport drops the audio bytes but paces ``write_audio_frame``
+- bot_audio on (default): the bot pipeline runs end-to-end including TTS.
+  The eval transport drops the audio bytes but paces ``write_audio_frame``
   at real-time (``audio_chunk_size / sample_rate`` per chunk) so the bot
   behaves as if a real audio sink were consuming output — gives
   interruption tests a realistic window in which to barge in.
-- TTS off (``{"type": "settings", "tts": false}``): pushes
-  ``LLMConfigureOutputFrame(skip_tts=True)`` downstream so the LLM bypasses
-  TTS entirely. No audio is generated, no API calls, no pacing — the
-  harness runs as fast as the bot can produce tokens.
+- bot_audio off (``{"type": "settings", "bot_audio": false}``): pushes
+  ``LLMConfigureOutputFrame(skip_tts=True)`` downstream so the LLM
+  bypasses TTS entirely. No audio is generated, no API calls, no
+  pacing — the harness runs as fast as the bot can produce tokens.
 
 Selected via ``-t eval`` in the development runner.
 """
@@ -91,24 +91,25 @@ class EvalTransportParams(TransportParams):
             initial context, etc.) and that needs to happen per-eval. Set
             False to also fire ``on_client_disconnected`` (typical bot
             behavior is to tear down on disconnect).
-        tts: When True (default), the bot's TTS runs normally and the
-            transport paces ``write_audio_frame`` at real-time to simulate
-            an audio sink. When False (or toggled via a
-            ``{"type": "settings", "tts": false}`` message), the transport
-            pushes ``LLMConfigureOutputFrame(skip_tts=True)`` so the LLM
-            bypasses TTS entirely — no audio, no TTS API calls, no pacing.
+        bot_audio: When True (default), the bot's TTS runs normally and
+            the transport paces ``write_audio_frame`` at real-time to
+            simulate an audio sink. When False (or toggled via a
+            ``{"type": "settings", "bot_audio": false}`` message), the
+            transport pushes ``LLMConfigureOutputFrame(skip_tts=True)`` so
+            the LLM bypasses TTS entirely — no audio, no TTS API calls,
+            no pacing.
     """
 
     # Both default to True since the eval transport's job is to drive the
-    # full pipeline. audio_in_enabled in particular matters when stt is on
-    # — STT services need the input audio path active to process the
-    # InputAudioRawFrames we inject from user_audio messages.
+    # full pipeline. audio_in_enabled in particular matters for user_audio
+    # input — STT services need the input audio path active to process the
+    # InputAudioRawFrames we inject.
     audio_in_enabled: bool = True
     audio_out_enabled: bool = True
 
     verbose: bool = False
     keep_alive: bool = True
-    tts: bool = True
+    bot_audio: bool = True
 
 
 class EvalTransportCallbacks(BaseModel):
@@ -271,12 +272,12 @@ class EvalInputTransport(BaseInputTransport):
     async def _apply_settings(self, msg: dict) -> None:
         """Apply per-eval runtime settings from a ``settings`` message.
 
-        ``tts`` (bool, default True): pushes
-        ``LLMConfigureOutputFrame(skip_tts=not tts)`` downstream. When
-        tts=False, the LLM bypasses TTS entirely.
+        ``bot_audio`` (bool, default True): pushes
+        ``LLMConfigureOutputFrame(skip_tts=not bot_audio)`` downstream.
+        When bot_audio=False, the LLM bypasses TTS entirely.
         """
-        if "tts" in msg:
-            await self.push_frame(LLMConfigureOutputFrame(skip_tts=not bool(msg["tts"])))
+        if "bot_audio" in msg:
+            await self.push_frame(LLMConfigureOutputFrame(skip_tts=not bool(msg["bot_audio"])))
 
     async def _reset_context(self, messages: list):
         """Push LLMMessagesUpdateFrame downstream to reset the bot's LLM context.
@@ -411,7 +412,7 @@ class EvalOutputTransport(BaseOutputTransport):
         # Toggled by LLMConfigureOutputFrame flowing through process_frame.
         # When True, write_audio_frame returns immediately (no real audio
         # will flow anyway since the LLM is bypassing TTS).
-        self._skip_tts = not params.tts
+        self._skip_tts = not params.bot_audio
 
         # Real-time audio pacing — computed at start() once sample_rate is
         # known. Each chunk's write blocks for audio_chunk_size/sample_rate

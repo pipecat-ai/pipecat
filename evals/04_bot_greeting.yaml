@@ -1,6 +1,6 @@
 name: bot_greets_then_describes_capabilities
 
-tts: false
+bot_audio: false
 
 judge:
   service: ollama

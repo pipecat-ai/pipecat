@@ -6,9 +6,9 @@
 
 """TTS service registry + audio cache for the eval harness.
 
-When a scenario opts into ``stt: true``, the harness generates raw audio
-for each user turn (via the configured ``user_voice`` block) and sends
-it to the bot as ``user_audio``. The bot's STT then processes it for
+When a scenario defines a ``user_audio:`` block, the harness generates
+raw audio for each user turn using that TTS config and sends it to the
+bot as a ``user_audio`` message. The bot's STT then processes it for
 real, exercising the full input audio path.
 
 Audio is cached at ``.cache/evals/tts/<sha256>.wav`` keyed by
@@ -19,7 +19,7 @@ experiment with sample rates without bloating the cache.
 
 Service support is via a small lazy-loaded registry. To add a new
 service, append a factory to ``TTS_FACTORIES``. Optional escape hatch
-via ``user_voice.factory: "my_pkg.my_func"`` (importable, called with
+via ``user_audio.factory: "my_pkg.my_func"`` (importable, called with
 the voice config dict).
 """
 
@@ -102,7 +102,7 @@ async def generate_or_load(text: str, voice_cfg: dict) -> tuple[bytes, int]:
     sample_rate = int(voice_cfg.get("sample_rate", DEFAULT_SAMPLE_RATE))
 
     if not service or not voice:
-        raise ValueError("user_voice config requires at least 'service' and 'voice'")
+        raise ValueError("user_audio config requires at least 'service' and 'voice'")
 
     cache_file = _cache_dir() / f"{_cache_key(text, service, voice, model)}.wav"
 
@@ -129,7 +129,7 @@ def _resolve_factory(voice_cfg: dict):
     if custom:
         module_name, _, attr = custom.rpartition(".")
         if not module_name:
-            raise ValueError(f"user_voice.factory must be a dotted path: {custom!r}")
+            raise ValueError(f"user_audio.factory must be a dotted path: {custom!r}")
         return getattr(importlib.import_module(module_name), attr)
 
     service = str(voice_cfg.get("service", "")).lower()
@@ -137,7 +137,7 @@ def _resolve_factory(voice_cfg: dict):
         known = ", ".join(sorted(TTS_FACTORIES))
         raise ValueError(
             f"Unknown TTS service: {service!r}. Known: {known}. "
-            "Or specify user_voice.factory: 'module.func' for a custom one."
+            "Or specify user_audio.factory: 'module.func' for a custom one."
         )
     return TTS_FACTORIES[service]
 

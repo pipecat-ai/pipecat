@@ -1,6 +1,6 @@
 name: bot_response_is_helpful
 
-tts: false
+bot_audio: false
 
 judge:
   service: ollama

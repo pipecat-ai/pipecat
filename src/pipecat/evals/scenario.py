@@ -47,20 +47,18 @@ Top-level optional fields:
                     model: qwen2.5:3b
                     endpoint: http://localhost:11434/v1   # optional
 
-    tts:      when False (default True), the harness pushes
-              ``LLMConfigureOutputFrame(skip_tts=True)`` to the bot so the
-              LLM bypasses TTS entirely — no audio, no TTS API calls, no
-              pacing. Use for evals that just check what the bot says, not
-              how fast it says it. Sent to the bot as
-              ``{"type": "settings", "tts": false}``.
-    stt:      when True (default False), the harness generates audio for
-              each user turn via the ``user_voice`` TTS service and sends
-              it to the bot as ``user_audio``. The bot's STT then
-              processes it for real. Requires a ``user_voice`` block.
-    user_voice: TTS service config the harness uses to synthesize user
-              audio. Required when ``stt`` is True. Mapping with at
-              minimum ``service`` and ``voice``; optional ``model``,
-              ``sample_rate`` (default 16000), and ``api_key_env``.
+    bot_audio:  when False (default True), the harness pushes
+                ``LLMConfigureOutputFrame(skip_tts=True)`` to the bot so the
+                LLM bypasses TTS entirely. Use for content evals that don't
+                care how the bot sounds. Sent to the bot as
+                ``{"type": "settings", "bot_audio": false}``.
+    user_audio: when present, the harness generates audio for each user
+                turn via this TTS config and sends it to the bot as
+                ``user_audio``, exercising its STT for real. Omit (default)
+                for text-only evals where the harness injects
+                ``TranscriptionFrame`` directly. Mapping with at minimum
+                ``service`` and ``voice``; optional ``model``,
+                ``sample_rate`` (default 16000), and ``api_key_env``.
     fixtures: free-form mapping (e.g. ``bot_url:``).
 """
 
@@ -168,17 +166,17 @@ class Scenario:
         judge: Judge LLM configuration dict with keys ``service``, ``model``,
             and optional ``endpoint``. Defaults to
             ``{"service": "ollama", "model": "qwen2.5:3b"}``.
-        tts: When False (default True), the harness asks the bot to bypass
-            TTS entirely (skip_tts=True). When True, TTS runs and the
-            transport paces audio at real-time. Use False for text-only
-            evals.
-        stt: When True (default False), the harness generates user audio
-            via the ``user_voice`` TTS and sends it to the bot to be
-            transcribed for real. When False, the harness injects
-            TranscriptionFrames directly, bypassing the bot's STT.
-        user_voice: TTS config the harness uses to generate user audio
-            when ``stt`` is True. Mapping with ``service``, ``voice``, and
-            optional ``model`` / ``sample_rate`` / ``api_key_env``.
+        bot_audio: When False (default True), the harness asks the bot to
+            bypass TTS entirely (skip_tts=True). When True, the bot runs
+            its TTS normally and the transport paces audio at real-time.
+            Set False for content-only evals that don't care about how
+            fast or how the bot sounds.
+        user_audio: TTS config the harness uses to generate user audio.
+            When present, the harness sends ``user_audio`` (not
+            ``user_input``) messages to the bot, exercising its STT for
+            real. Mapping with ``service``, ``voice``, and optional
+            ``model`` / ``sample_rate`` / ``api_key_env``. Omit for
+            text-only evals (default).
         fixtures: Optional fixtures dict (e.g. ``bot_url:``).
         source_path: Path the scenario was loaded from, for error messages.
     """
@@ -187,9 +185,8 @@ class Scenario:
     turns: list[Turn]
     reset: list[dict] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "qwen2.5:3b"})
-    tts: bool = True
-    stt: bool = False
-    user_voice: dict | None = None
+    bot_audio: bool = True
+    user_audio: dict | None = None
     fixtures: dict = field(default_factory=dict)
     source_path: Path | None = None
 
@@ -236,20 +233,15 @@ def load_scenario(path: str | Path) -> Scenario:
     if not isinstance(judge, dict):
         raise ValueError(f"{path}: 'judge:' must be a mapping")
 
-    tts = data.get("tts", True)
-    if not isinstance(tts, bool):
-        raise ValueError(f"{path}: 'tts:' must be a boolean")
+    bot_audio = data.get("bot_audio", True)
+    if not isinstance(bot_audio, bool):
+        raise ValueError(f"{path}: 'bot_audio:' must be a boolean")
 
-    stt = data.get("stt", False)
-    if not isinstance(stt, bool):
-        raise ValueError(f"{path}: 'stt:' must be a boolean")
-
-    user_voice = data.get("user_voice")
-    if user_voice is not None and not isinstance(user_voice, dict):
-        raise ValueError(f"{path}: 'user_voice:' must be a mapping")
-    if stt and not user_voice:
+    user_audio = data.get("user_audio")
+    if user_audio is not None and not isinstance(user_audio, dict):
         raise ValueError(
-            f"{path}: 'stt: true' requires a 'user_voice:' block (service + voice at minimum)"
+            f"{path}: 'user_audio:' must be a mapping (service + voice at minimum). "
+            "Omit it entirely for text-only evals."
         )
 
     return Scenario(
@@ -257,9 +249,8 @@ def load_scenario(path: str | Path) -> Scenario:
         turns=turns,
         reset=reset,
         judge=judge,
-        tts=tts,
-        stt=stt,
-        user_voice=user_voice,
+        bot_audio=bot_audio,
+        user_audio=user_audio,
         fixtures=data.get("fixtures") or {},
         source_path=path,
     )
