@@ -9,8 +9,9 @@
 
 name: barge_in_during_long_response
 
-judge_service: ollama
-judge_model: llama3:latest
+judge:
+  service: ollama
+  model: llama3:latest
 
 turns:
   - user: "tell me a long story about Paris"
@@ -29,4 +30,4 @@ turns:
         within_ms: 1000
       - event: llm_response
         within_ms: 5000
-        judge: "states a time of day rather than continuing the previous topic"
+        eval: "states a time of day rather than continuing the previous topic"

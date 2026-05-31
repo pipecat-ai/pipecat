@@ -128,15 +128,11 @@ async def run_scenario(
             duration_ms=int((time.monotonic() - started) * 1000),
         )
 
-    # Lazily construct the judge — only if the scenario uses judge: assertions.
+    # Lazily construct the judge — only if the scenario uses eval: assertions.
     judge: Judge | None = None
-    needs_judge = any(exp.judge is not None for turn in scenario.turns for exp in turn.expect)
+    needs_judge = any(exp.eval is not None for turn in scenario.turns for exp in turn.expect)
     if needs_judge:
-        judge = build_default_judge(
-            service=scenario.judge_service,
-            model=scenario.judge_model,
-            endpoint=scenario.judge_endpoint,
-        )
+        judge = build_default_judge(scenario.judge)
 
     ctx = _RunContext(
         ws=ws,
@@ -352,8 +348,8 @@ async def _check_judge(
     exp_idx: int,
     judge: Judge | None,
 ) -> AssertionFailure | None:
-    """Run the judge assertion if set."""
-    if expectation.judge is None:
+    """Run the judge assertion if ``eval:`` was set on this expectation."""
+    if expectation.eval is None:
         return None
 
     if judge is None:
@@ -361,7 +357,7 @@ async def _check_judge(
             turn_index=turn_idx,
             expectation_index=exp_idx,
             event_name=expectation.event,
-            reason="scenario uses 'judge:' but no judge could be built",
+            reason="scenario uses 'eval:' but no judge could be built",
         )
 
     content = event.get("text") or event.get("transcript")
@@ -373,13 +369,13 @@ async def _check_judge(
             reason=f"event has no text/transcript to judge: {event!r}",
         )
 
-    verdict = await judge.evaluate(expectation.judge, content)
+    verdict = await judge.evaluate(expectation.eval, content)
     if not verdict.passed:
         return AssertionFailure(
             turn_index=turn_idx,
             expectation_index=exp_idx,
             event_name=expectation.event,
-            reason=f"judge {expectation.judge!r}: said no — {verdict.reason}",
+            reason=f"eval {expectation.eval!r}: judge said no — {verdict.reason}",
         )
 
     return None

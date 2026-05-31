@@ -173,24 +173,22 @@ def _parse_verdict(response: str) -> JudgeVerdict:
         )
 
 
-def build_default_judge(
-    service: str = "ollama",
-    model: str = "qwen2.5:3b",
-    endpoint: str | None = None,
-) -> Judge | None:
-    """Build a :class:`Judge` from the scenario's flat judge fields.
+def build_default_judge(judge_config: dict | None) -> Judge | None:
+    """Build a :class:`Judge` from a scenario's ``judge:`` config block.
 
     Args:
-        service: One of ``"ollama"`` (default) or ``"openai"``.
-        model: Model identifier passed to the service.
-        endpoint: Optional override URL. For Ollama, defaults to
-            ``http://localhost:11434/v1``.
+        judge_config: Mapping with keys ``service`` (default ``"ollama"``),
+            ``model`` (default ``"qwen2.5:3b"``), and optional ``endpoint``
+            (service-specific default if omitted). ``None`` uses all defaults.
 
     Returns:
         A configured Judge, or ``None`` if construction fails (caller decides
-        whether to skip ``judge:`` assertions or fail the scenario).
+        whether to skip ``eval:`` assertions or fail the scenario).
     """
-    service_name = service.lower()
+    config = judge_config or {}
+    service_name = str(config.get("service", "ollama")).lower()
+    model = config.get("model", "qwen2.5:3b")
+    endpoint = config.get("endpoint")
 
     try:
         if service_name == "ollama":

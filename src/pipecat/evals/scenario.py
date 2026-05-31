@@ -28,7 +28,7 @@ Supported expectation fields (per event):
     text_contains: <str>       substring check on llm_response.text or bot_stopped_speaking.text
     name: <str>                tool_call.name equality
     args: <object>             tool_call.args equality
-    judge: <str>               natural-language criterion the event's text content
+    eval: <str>                natural-language criterion the event's text content
                                must satisfy, evaluated by a judge LLM (see
                                :mod:`pipecat.evals.judge`). Only meaningful on
                                events with bot-generated text content —
@@ -38,11 +38,15 @@ A turn may also include ``send_after:`` to schedule its ``user_input`` send
 relative to a prior event (used for interruption / barge-in tests).
 
 Top-level optional fields:
-    reset: list of LLM messages the harness sends as a reset before driving
-           turns (default empty list, which clears the bot's context).
-    judge_service: judge LLM service name (default "ollama").
-    judge_model: judge model name (default "qwen2.5:3b").
-    judge_endpoint: optional override for the judge service URL.
+    reset:    list of LLM messages the harness sends as a reset before driving
+              turns (default empty list, which clears the bot's context).
+    judge:    judge LLM configuration block, e.g.::
+
+                  judge:
+                    service: ollama
+                    model: qwen2.5:3b
+                    endpoint: http://localhost:11434/v1   # optional
+
     fixtures: free-form mapping (e.g. ``bot_url:``).
 """
 
@@ -80,7 +84,7 @@ class Expectation:
             ``bot_stopped_speaking.text``.
         name: Optional equality check for ``tool_call.name``.
         args: Optional equality check for ``tool_call.args``.
-        judge: Optional natural-language criterion the event's text content
+        eval: Optional natural-language criterion the event's text content
             must satisfy. Evaluated by a judge LLM. Only meaningful on
             ``llm_response`` and ``bot_stopped_speaking``.
         raw: The original parsed dict, for forward compatibility.
@@ -92,7 +96,7 @@ class Expectation:
     text_contains: str | None = None
     name: str | None = None
     args: dict | None = None
-    judge: str | None = None
+    eval: str | None = None
     raw: dict = field(default_factory=dict)
 
 
@@ -148,9 +152,9 @@ class Scenario:
             ...}`` message right after the initial ``ready`` handshake. Empty
             list (the default) clears the context entirely; bots without an
             LLM context aggregator ignore the resulting frame.
-        judge_service: Judge LLM service name (default ``"ollama"``).
-        judge_model: Judge model identifier (default ``"qwen2.5:3b"``).
-        judge_endpoint: Optional override URL for the judge service.
+        judge: Judge LLM configuration dict with keys ``service``, ``model``,
+            and optional ``endpoint``. Defaults to
+            ``{"service": "ollama", "model": "qwen2.5:3b"}``.
         fixtures: Optional fixtures dict (e.g. ``bot_url:``).
         source_path: Path the scenario was loaded from, for error messages.
     """
@@ -158,9 +162,7 @@ class Scenario:
     name: str
     turns: list[Turn]
     reset: list[dict] = field(default_factory=list)
-    judge_service: str = "ollama"
-    judge_model: str = "qwen2.5:3b"
-    judge_endpoint: str | None = None
+    judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "qwen2.5:3b"})
     fixtures: dict = field(default_factory=dict)
     source_path: Path | None = None
 
@@ -203,13 +205,15 @@ def load_scenario(path: str | Path) -> Scenario:
     else:
         raise ValueError(f"{path}: 'reset:' must be a list of message dicts")
 
+    judge = data.get("judge") or {"service": "ollama", "model": "qwen2.5:3b"}
+    if not isinstance(judge, dict):
+        raise ValueError(f"{path}: 'judge:' must be a mapping")
+
     return Scenario(
         name=name,
         turns=turns,
         reset=reset,
-        judge_service=data.get("judge_service", "ollama"),
-        judge_model=data.get("judge_model", "qwen2.5:3b"),
-        judge_endpoint=data.get("judge_endpoint"),
+        judge=judge,
         fixtures=data.get("fixtures") or {},
         source_path=path,
     )
@@ -269,10 +273,10 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> Expec
             f"{path}: turn #{turn_idx} expectation #{exp_idx} missing or invalid 'event:'"
         )
 
-    judge = e.get("judge")
-    if judge is not None and event not in JUDGEABLE_EVENTS:
+    criterion = e.get("eval")
+    if criterion is not None and event not in JUDGEABLE_EVENTS:
         logger.warning(
-            f"{path}: turn #{turn_idx} expectation #{exp_idx}: 'judge:' on "
+            f"{path}: turn #{turn_idx} expectation #{exp_idx}: 'eval:' on "
             f"event {event!r} — judge only makes sense on bot-generated text "
             f"events ({', '.join(sorted(JUDGEABLE_EVENTS))}). Will run but is "
             "unlikely to be meaningful."
@@ -285,6 +289,6 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> Expec
         text_contains=e.get("text_contains"),
         name=e.get("name"),
         args=e.get("args"),
-        judge=judge,
+        eval=criterion,
         raw=e,
     )

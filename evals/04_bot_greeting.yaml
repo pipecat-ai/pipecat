@@ -7,8 +7,9 @@
 
 name: bot_greets_then_describes_capabilities
 
-judge_service: ollama
-judge_model: llama3:latest
+judge:
+  service: ollama
+  model: llama3:latest
 
 turns:
   - expect:                              # no user input — wait for the bot's opener
@@ -16,12 +17,12 @@ turns:
         within_ms: 3000
       - event: bot_stopped_speaking
         within_ms: 8000
-        judge: "greets the user and offers to help"
+        eval: "greets the user and offers to help"
 
   - user: "what can you do?"
     expect:
       - event: llm_response
         within_ms: 5000
-        judge: "describes the agent's capabilities clearly and concisely"
+        eval: "describes the agent's capabilities clearly and concisely"
       - event: bot_stopped_speaking
         within_ms: 8000

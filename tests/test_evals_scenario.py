@@ -57,7 +57,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
                         text_contains: "bar"
                         name: my_tool
                         args: {a: 1}
-                        judge: "is friendly"
+                        eval: "is friendly"
                 """
             )
         )
@@ -67,7 +67,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(exp.text_contains, "bar")
         self.assertEqual(exp.name, "my_tool")
         self.assertEqual(exp.args, {"a": 1})
-        self.assertEqual(exp.judge, "is friendly")
+        self.assertEqual(exp.eval, "is friendly")
 
     def test_send_after_parsed(self):
         s = load_scenario(
@@ -104,14 +104,15 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(s.turns[0].user)
         self.assertEqual(s.turns[0].expect[0].event, "bot_stopped_speaking")
 
-    def test_judge_fields_and_fixtures_preserved(self):
+    def test_judge_block_and_fixtures_preserved(self):
         s = load_scenario(
             _write(
                 """
                 name: with_judge
-                judge_service: openai
-                judge_model: gpt-4o-mini
-                judge_endpoint: http://custom-endpoint
+                judge:
+                  service: openai
+                  model: gpt-4o-mini
+                  endpoint: http://custom-endpoint
                 fixtures:
                   bot_url: ws://localhost:9000
                 turns:
@@ -120,18 +121,26 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 """
             )
         )
-        self.assertEqual(s.judge_service, "openai")
-        self.assertEqual(s.judge_model, "gpt-4o-mini")
-        self.assertEqual(s.judge_endpoint, "http://custom-endpoint")
+        self.assertEqual(
+            s.judge,
+            {"service": "openai", "model": "gpt-4o-mini", "endpoint": "http://custom-endpoint"},
+        )
         self.assertEqual(s.fixtures, {"bot_url": "ws://localhost:9000"})
 
-    def test_judge_fields_default_to_ollama(self):
+    def test_judge_block_defaults_to_ollama(self):
         s = load_scenario(
             _write("name: e\nturns: [{user: hi, expect: [{event: user_stopped_speaking}]}]\n")
         )
-        self.assertEqual(s.judge_service, "ollama")
-        self.assertEqual(s.judge_model, "qwen2.5:3b")
-        self.assertIsNone(s.judge_endpoint)
+        self.assertEqual(s.judge, {"service": "ollama", "model": "qwen2.5:3b"})
+
+    def test_judge_block_non_mapping_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            load_scenario(
+                _write(
+                    "name: bad\njudge: not_a_mapping\nturns: [{user: hi, expect: [{event: x}]}]\n"
+                )
+            )
+        self.assertIn("'judge:'", str(cm.exception))
 
     def test_missing_name_field(self):
         with self.assertRaises(ValueError) as cm:
@@ -183,26 +192,26 @@ class TestEvalsScenarioParser(unittest.TestCase):
         e = Expectation(event="foo")
         self.assertIsNone(e.within_ms)
         self.assertIsNone(e.transcript_contains)
-        self.assertIsNone(e.judge)
+        self.assertIsNone(e.eval)
 
-    def test_judge_on_non_bot_event_warns(self):
-        """judge: on user-side events should produce a parser warning
+    def test_eval_on_non_bot_event_warns(self):
+        """eval: on user-side events should produce a parser warning
         (the user transcript is deterministic, so judging it adds cost without
         signal). We can't easily assert on loguru output, but the parse
         should succeed and the field should be preserved."""
         s = load_scenario(
             _write(
                 """
-                name: misused_judge
+                name: misused_eval
                 turns:
                   - user: "hi"
                     expect:
                       - event: user_stopped_speaking
-                        judge: "is a greeting"
+                        eval: "is a greeting"
                 """
             )
         )
-        self.assertEqual(s.turns[0].expect[0].judge, "is a greeting")
+        self.assertEqual(s.turns[0].expect[0].eval, "is a greeting")
 
     def test_turn_dataclass_construction(self):
         """Direct construction (used by tests / programmatic eval generation)."""

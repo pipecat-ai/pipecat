@@ -60,17 +60,18 @@ file has a commented-out example showing the shape).
 
 ## Judge configuration
 
-Evals with `judge:` assertions use a judge LLM. Configure with three optional
-top-level fields:
+Evals with `eval:` assertions use a judge LLM. Configure with a top-level
+`judge:` block:
 
 ```yaml
-judge_service: ollama         # default
-judge_model: qwen2.5:3b       # default
-judge_endpoint: http://...    # optional, service-specific default if omitted
+judge:
+  service: ollama             # default
+  model: qwen2.5:3b           # default
+  endpoint: http://...        # optional, service-specific default if omitted
 ```
 
 The judge runs as a one-shot call through any pipecat LLM service that exposes
-`run_inference()` (currently Ollama and OpenAI). The `judge:` assertion only
+`run_inference()` (currently Ollama and OpenAI). The `eval:` assertion only
 makes sense on events with bot-generated text — `llm_response` and
 `bot_stopped_speaking`. Asserting on user transcripts is silly since the test
 controls what the user said; the parser warns when you do it.
