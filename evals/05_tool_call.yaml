@@ -5,8 +5,8 @@
 #   - Asserting on tool_call.name and tool_call.args across multiple turns
 #   - A context-aware follow-up: the bot should understand "what about Tokyo?"
 #     means weather in Tokyo without the user repeating the topic
-#   - Using `eval:` to verify the bot's spoken response actually uses the tool
-#     result to answer the question — not just that it mentioned the city name
+#   - Using `eval:` on `llm_response` to verify the bot's response actually
+#     uses the tool result to answer the question
 
 name: weather_tool_call_with_follow_up
 
@@ -22,7 +22,7 @@ turns:
         name: get_weather
         args:
           city: "Paris"
-      - event: bot_stopped_speaking
+      - event: llm_response
         within_ms: 8000
         eval: "the response describes the current weather conditions in Paris (e.g. temperature, sky conditions, precipitation)"
 
@@ -33,6 +33,6 @@ turns:
         name: get_weather
         args:
           city: "Tokyo"
-      - event: bot_stopped_speaking
+      - event: llm_response
         within_ms: 8000
         eval: "the response describes the current weather conditions in Tokyo without losing the weather context from the prior turn"

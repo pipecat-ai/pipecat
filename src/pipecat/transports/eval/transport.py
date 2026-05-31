@@ -9,9 +9,19 @@
 This transport runs a local WebSocket server that simulates a connected client.
 It accepts scripted user input as JSON messages and emits high-level semantic
 events back to the connected harness (user_started_speaking,
-user_stopped_speaking, bot_started_speaking, bot_stopped_speaking,
-interruption, tool_call, error). Designed for fast, deterministic behavioral
-evaluations of a pipeline without invoking real STT or full audio I/O.
+user_stopped_speaking, llm_started, llm_response, interruption, tool_call,
+error). Designed for fast, deterministic behavioral evaluations of a pipeline
+without invoking real STT or full audio I/O.
+
+Two pacing modes:
+
+- Real-time (default): pacing happens in ``process_frame`` on each
+  ``TextFrame`` chunk, sleeping for ``len(text) / chars_per_second``
+  seconds. Gives interruption tests a realistic window in which to barge in.
+- Fast: triggered by ``{"type": "settings", "fast": true}`` from the
+  harness. The transport pushes ``LLMConfigureOutputFrame(skip_tts=True)``
+  downstream so the LLM produces text without invoking TTS at all — no
+  audio, no API calls, no pacing.
 
 Selected via ``-t eval`` in the development runner.
 """
@@ -27,8 +37,6 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -37,11 +45,14 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InterruptionFrame,
+    LLMConfigureOutputFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
     StartFrame,
+    TextFrame,
     TranscriptionFrame,
-    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -49,6 +60,12 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+
+# Rough speaking rate used when pacing TextFrame chunks in real-time mode —
+# 12.5 chars/sec ≈ 150 WPM at ~5 chars/word average. Sleep duration for a
+# chunk of N characters is N / CHARS_PER_SECOND. Override per-deployment by
+# setting EvalTransportParams.chars_per_second.
+DEFAULT_CHARS_PER_SECOND = 12.5
 
 try:
     from websockets.asyncio.server import serve as websocket_serve
@@ -73,22 +90,24 @@ class EvalTransportParams(TransportParams):
             connections — required for running several evals against a single
             bot process. Set False to get per-connection events (e.g. if your
             bot tears itself down on disconnect).
-        fast: When True, the output side skips real-time audio pacing —
-            ``write_audio_frame`` returns immediately rather than sleeping
-            for each chunk. Use for text-only evals where interruption timing
-            doesn't matter and you want results as fast as the bot can
-            produce them. Can also be toggled per-eval via a
-            ``{"type": "settings", "fast": true}`` message from the harness.
+        fast: When True at startup (or toggled via a ``settings`` message),
+            the transport pushes ``LLMConfigureOutputFrame(skip_tts=True)``
+            so the LLM produces text without invoking TTS — no audio, no API
+            calls, no pacing. Text-based pacing is also skipped. Use for
+            text-only evals where interruption timing doesn't matter and you
+            want results as fast as the bot can produce them.
+        chars_per_second: Speaking rate used when pacing ``TextFrame`` chunks
+            in real-time mode (default ≈ 150 WPM). Adjust per-deployment if
+            your TTS voice is noticeably faster or slower than typical
+            English speech.
     """
 
-    # Default audio_out_enabled to True so write_audio_frame() runs and paces
-    # bot speech in real time — without that, BotStoppedSpeakingFrame fires
-    # immediately and interruption tests have no window in which to barge in.
     audio_out_enabled: bool = True
 
     verbose: bool = False
     keep_alive: bool = True
     fast: bool = False
+    chars_per_second: float = DEFAULT_CHARS_PER_SECOND
 
 
 class EvalTransportCallbacks(BaseModel):
@@ -243,11 +262,16 @@ class EvalInputTransport(BaseInputTransport):
     async def _apply_settings(self, msg: dict) -> None:
         """Apply per-eval runtime settings from a ``settings`` message.
 
-        Currently supports ``fast`` (skip audio pacing); extensible for
-        future runtime knobs.
+        ``fast`` (bool): when True, pushes ``LLMConfigureOutputFrame(skip_tts=True)``
+        downstream so the LLM produces text without invoking TTS, and tells
+        the output side to skip text pacing. When False, pushes
+        ``skip_tts=False`` to re-enable TTS for the next response.
         """
-        if "fast" in msg and self._transport._output is not None:
-            self._transport._output.set_fast(bool(msg["fast"]))
+        if "fast" in msg:
+            fast = bool(msg["fast"])
+            await self.push_frame(LLMConfigureOutputFrame(skip_tts=fast))
+            if self._transport._output is not None:
+                self._transport._output.set_fast(fast)
 
     async def _reset_context(self, messages: list):
         """Push LLMMessagesUpdateFrame downstream to reset the bot's LLM context.
@@ -291,11 +315,18 @@ class EvalInputTransport(BaseInputTransport):
 class EvalOutputTransport(BaseOutputTransport):
     """Output side of the eval transport.
 
-    Inspects every frame arriving from upstream, translates relevant ones into
-    semantic JSON events, and writes them to the connected harness. Drops audio
-    bytes (we don't need them) but sleeps in ``write_audio_frame()`` so the
-    bot's speaking duration is realistic — this is what gives interruption tests
-    a real window in which to barge in.
+    Inspects every frame arriving from upstream and translates relevant ones
+    into semantic JSON events on the harness WebSocket. ``LLMFullResponseStart``
+    / ``LLMFullResponseEnd`` mark the boundaries of a bot response;
+    ``TextFrame`` subclasses (``LLMTextFrame`` in fast mode where TTS is
+    skipped, ``TTSTextFrame`` in normal mode) flow between them and are
+    aggregated into the ``llm_response.text`` payload.
+
+    In real-time mode, each ``TextFrame`` chunk is paced with a sleep
+    proportional to its character count — simulating natural speaking speed
+    so interruption tests have a window in which to barge in. The sleep is
+    interruptible: an ``InterruptionFrame`` signals an event that breaks any
+    in-flight pacing immediately.
     """
 
     def __init__(
@@ -304,7 +335,7 @@ class EvalOutputTransport(BaseOutputTransport):
         params: EvalTransportParams,
         **kwargs,
     ):
-        """Initialize the test output transport.
+        """Initialize the eval output transport.
 
         Args:
             transport: The parent transport instance.
@@ -318,19 +349,18 @@ class EvalOutputTransport(BaseOutputTransport):
 
         self._websocket: Any = None
 
-        # Audio pacing — mirrors the WebSocket server transport pattern. By
-        # sleeping in write_audio_frame() we emulate real-time playback so
-        # BotStoppedSpeakingFrame fires at a realistic time and interruption
-        # tests have a window in which to fire. Toggled off when ``fast``
-        # mode is set via a settings message from the harness.
-        self._send_interval = 0.0
-        self._next_send_time = 0.0
         self._fast = params.fast
+        self._chars_per_second = params.chars_per_second
 
-        # Aggregation state for semantic events.
-        self._bot_speech_text: list[str] = []
+        # Response aggregation state.
+        self._response_text: list[str] = []
+        self._in_response = False
+        self._llm_started_t: float | None = None
         self._tool_calls: dict[str, dict] = {}
-        self._bot_started_t: float | None = None
+
+        # Interruption signal: an asyncio.Event the InterruptionFrame handler
+        # sets to short-circuit any in-flight text pacing sleep.
+        self._interrupt_event = asyncio.Event()
 
         self._initialized = False
         self._t0 = time.monotonic()
@@ -351,7 +381,6 @@ class EvalOutputTransport(BaseOutputTransport):
             return
         self._initialized = True
 
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -380,14 +409,35 @@ class EvalOutputTransport(BaseOutputTransport):
 
         if isinstance(frame, InterruptionFrame):
             offset = (
-                int((time.monotonic() - self._bot_started_t) * 1000)
-                if self._bot_started_t is not None
+                int((time.monotonic() - self._llm_started_t) * 1000)
+                if self._llm_started_t is not None
                 else None
             )
+            self._interrupt_event.set()
             await self._emit(
-                {"type": "interruption", "t": self._t(), "into_bot_utterance_ms": offset}
+                {"type": "interruption", "t": self._t(), "into_bot_response_ms": offset}
             )
-            self._next_send_time = 0  # reset audio pacing — same as WebSocket server transport
+        elif isinstance(frame, LLMFullResponseStartFrame):
+            self._response_text = []
+            self._in_response = True
+            self._llm_started_t = time.monotonic()
+            self._interrupt_event.clear()
+            await self._emit({"type": "llm_started", "t": self._t()})
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            if self._in_response:
+                text = "".join(self._response_text)
+                self._response_text = []
+                self._in_response = False
+                self._llm_started_t = None
+                await self._emit({"type": "llm_response", "t": self._t(), "text": text})
+        elif isinstance(frame, TextFrame) and self._in_response:
+            # Catches LLMTextFrame in fast mode (TTS skipped) and TTSTextFrame
+            # in normal mode (TTSTextFrame extends AggregatedTextFrame extends
+            # TextFrame). TranscriptionFrame also extends TextFrame, but it
+            # fires before LLMFullResponseStartFrame, so _in_response gates
+            # it out.
+            self._response_text.append(frame.text)
+            await self._pace_text(frame.text)
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._tool_calls[frame.tool_call_id] = {
                 "name": frame.function_name,
@@ -424,12 +474,6 @@ class EvalOutputTransport(BaseOutputTransport):
                     "duration_ms": self._t() - started_t,
                 }
             )
-        elif isinstance(frame, TTSTextFrame):
-            self._bot_speech_text.append(frame.text)
-        # Note: BotStartedSpeakingFrame / BotStoppedSpeakingFrame are emitted
-        # by BaseOutputTransport itself (this class's parent), not by upstream
-        # processors, so they don't arrive here via process_frame. They get
-        # caught in push_frame() instead.
         elif isinstance(frame, ErrorFrame):
             await self._emit(
                 {
@@ -440,57 +484,33 @@ class EvalOutputTransport(BaseOutputTransport):
                 }
             )
 
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Intercept frames that the parent BaseOutputTransport emits itself.
+    async def _pace_text(self, text: str) -> None:
+        """Sleep proportional to text length to simulate natural speaking speed.
 
-        ``BotStartedSpeakingFrame`` and ``BotStoppedSpeakingFrame`` are pushed
-        from inside :class:`BaseOutputTransport` (via this class) once audio
-        playback boundaries are detected — so they never come through our
-        ``process_frame`` method. Hook them here so we can emit the matching
-        semantic events to the harness.
+        Returns immediately in fast mode or if the interruption event fires.
+        Computed as ``len(text) / chars_per_second`` (≈ 150 WPM at the
+        default rate). Interruptible via :meth:`set_fast` toggle or any
+        ``InterruptionFrame`` arrival (which sets ``self._interrupt_event``).
         """
-        if direction == FrameDirection.DOWNSTREAM:
-            if isinstance(frame, BotStartedSpeakingFrame):
-                self._bot_started_t = time.monotonic()
-                self._bot_speech_text = []
-                await self._emit({"type": "bot_started_speaking", "t": self._t()})
-            elif isinstance(frame, BotStoppedSpeakingFrame):
-                text = "".join(self._bot_speech_text)
-                self._bot_speech_text = []
-                self._bot_started_t = None
-                await self._emit({"type": "bot_stopped_speaking", "t": self._t(), "text": text})
-        await super().push_frame(frame, direction)
+        if self._fast or not text:
+            return
+        target_s = len(text) / self._chars_per_second
+        try:
+            await asyncio.wait_for(self._interrupt_event.wait(), timeout=target_s)
+        except TimeoutError:
+            pass
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Drop the audio bytes but sleep to emulate real-time playback.
-
-        Without the sleep, BotStoppedSpeakingFrame would fire effectively
-        instantly and interruption tests would have no window to barge in.
-        Skip the sleep entirely when ``fast`` mode is on — text-only evals
-        run as fast as the bot can produce them.
-        """
-        del frame  # bytes intentionally discarded; only the timing matters
-        if not self._fast:
-            await self._write_audio_sleep()
+        """Drop audio bytes; pacing happens on TextFrame in process_frame."""
+        del frame
         return True
 
     def set_fast(self, fast: bool) -> None:
-        """Toggle audio pacing.
+        """Toggle fast mode (skip text pacing).
 
-        Called by the parent transport when a ``settings`` message arrives
-        from the harness.
+        Called by the parent transport when a ``settings`` message arrives.
         """
         self._fast = fast
-
-    async def _write_audio_sleep(self):
-        """Pace audio frames against a monotonic clock."""
-        current_time = time.monotonic()
-        sleep_duration = max(0, self._next_send_time - current_time)
-        await asyncio.sleep(sleep_duration)
-        if sleep_duration == 0:
-            self._next_send_time = time.monotonic() + self._send_interval
-        else:
-            self._next_send_time += self._send_interval
 
     async def _emit(self, event: dict):
         """Send a semantic event to the connected harness, if any."""
@@ -505,11 +525,12 @@ class EvalOutputTransport(BaseOutputTransport):
 class EvalTransport(BaseTransport):
     """Eval transport for pipeline behavioral evaluations.
 
-    Selected via ``-t test`` in examples. Hosts a local WebSocket server, accepts
-    a single harness connection, accepts scripted ``user_input`` messages, and
-    emits high-level semantic events (``user_started_speaking``, ``llm_response``,
-    ``interruption``, ``bot_stopped_speaking``, ``tool_call``, etc.) that a
-    scenario runner can assert against.
+    Selected via ``-t eval`` in examples. Hosts a local WebSocket server,
+    accepts a single harness connection and scripted ``user_input`` messages,
+    and emits high-level semantic events (``user_started_speaking``,
+    ``user_stopped_speaking``, ``llm_started``, ``llm_response``,
+    ``interruption``, ``tool_call``, ``error``) that a scenario runner can
+    assert against.
 
     Designed for fast, deterministic tests of pipeline behavior — does not
     require STT/TTS/audio I/O and has no heavy network dependencies. For

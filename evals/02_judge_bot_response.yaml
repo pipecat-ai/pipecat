@@ -1,14 +1,13 @@
-# Template — requires a bot with a real LLM that produces bot speech.
-# Won't pass against the passthrough sample_bot.py.
+# Template — requires a bot with a real LLM. Won't pass against the
+# passthrough sample_bot.py.
 #
 # Demonstrates the judge LLM evaluating natural-language criteria on bot
-# output (where the actual text is non-deterministic and worth checking).
-# Assertions target bot_stopped_speaking.text — the words the bot actually
-# spoke — since that's what users care about and what the eval transport
-# can reliably extract from TTSTextFrame.
+# output. Assertions target `llm_response.text` — the text the bot produced
+# for this turn. Populated whether or not TTS ran (in fast mode, TTS is
+# skipped and the LLM's tokens reach us directly).
 #
-# fast: true skips real-time audio pacing — for text-only evals where
-# interruption timing doesn't matter, this dramatically speeds up the run.
+# fast: true bypasses TTS entirely via LLMConfigureOutputFrame(skip_tts=True)
+# — text-only evals run as fast as the bot can produce tokens.
 
 name: bot_response_is_helpful
 
@@ -21,12 +20,12 @@ judge:
 turns:
   - user: "what is the capital of France?"
     expect:
-      - event: bot_stopped_speaking
+      - event: llm_response
         within_ms: 10000
         eval: "the response correctly identifies Paris as the capital of France"
 
   - user: "and how many people live there?"
     expect:
-      - event: bot_stopped_speaking
+      - event: llm_response
         within_ms: 10000
         eval: "the response provides a population figure or acknowledges uncertainty"

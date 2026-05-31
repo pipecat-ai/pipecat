@@ -13,14 +13,14 @@ judge:
 
 turns:
   - expect:                              # no user input — wait for the bot's opener
-      - event: bot_started_speaking
+      - event: llm_started
         within_ms: 3000
-      - event: bot_stopped_speaking
+      - event: llm_response
         within_ms: 8000
         eval: "greets the user and offers to help"
 
   - user: "what can you do?"
     expect:
-      - event: bot_stopped_speaking
+      - event: llm_response
         within_ms: 8000
         eval: "describes the agent's capabilities clearly and concisely"

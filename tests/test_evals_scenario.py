@@ -51,7 +51,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 turns:
                   - user: "x"
                     expect:
-                      - event: bot_stopped_speaking
+                      - event: llm_response
                         within_ms: 500
                         transcript_contains: "foo"
                         text_contains: "bar"
@@ -97,12 +97,12 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 name: bot_first
                 turns:
                   - expect:
-                      - event: bot_stopped_speaking
+                      - event: llm_response
                 """
             )
         )
         self.assertIsNone(s.turns[0].user)
-        self.assertEqual(s.turns[0].expect[0].event, "bot_stopped_speaking")
+        self.assertEqual(s.turns[0].expect[0].event, "llm_response")
 
     def test_judge_block_and_fixtures_preserved(self):
         s = load_scenario(
