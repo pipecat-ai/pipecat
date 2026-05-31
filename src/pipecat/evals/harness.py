@@ -149,6 +149,8 @@ async def run_scenario(
         # context per eval. Bots without a context aggregator silently ignore
         # the resulting LLMMessagesUpdateFrame.
         await ws.send(json.dumps({"type": "reset", "messages": scenario.reset}))
+        # Push per-eval runtime settings (e.g. ``fast`` to skip audio pacing).
+        await ws.send(json.dumps({"type": "settings", "fast": scenario.fast}))
 
         for turn_idx, turn in enumerate(scenario.turns):
             turn_failures = await _run_turn(ctx, turn, turn_idx, judge)

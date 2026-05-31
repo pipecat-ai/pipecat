@@ -1,10 +1,18 @@
-# Template — requires a bot with a real LLM that produces llm_response events.
+# Template — requires a bot with a real LLM that produces bot speech.
 # Won't pass against the passthrough sample_bot.py.
 #
 # Demonstrates the judge LLM evaluating natural-language criteria on bot
 # output (where the actual text is non-deterministic and worth checking).
+# Assertions target bot_stopped_speaking.text — the words the bot actually
+# spoke — since that's what users care about and what the eval transport
+# can reliably extract from TTSTextFrame.
+#
+# fast: true skips real-time audio pacing — for text-only evals where
+# interruption timing doesn't matter, this dramatically speeds up the run.
 
 name: bot_response_is_helpful
+
+fast: true
 
 judge:
   service: ollama
@@ -13,12 +21,12 @@ judge:
 turns:
   - user: "what is the capital of France?"
     expect:
-      - event: llm_response
-        within_ms: 5000
+      - event: bot_stopped_speaking
+        within_ms: 10000
         eval: "the response correctly identifies Paris as the capital of France"
 
   - user: "and how many people live there?"
     expect:
-      - event: llm_response
-        within_ms: 5000
+      - event: bot_stopped_speaking
+        within_ms: 10000
         eval: "the response provides a population figure or acknowledges uncertainty"

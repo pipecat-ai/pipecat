@@ -75,6 +75,12 @@ class EvalTransportParams(TransportParams):
             connections — required for running several evals against a single
             bot process. Set False to get per-connection events (e.g. if your
             bot tears itself down on disconnect).
+        fast: When True, the output side skips real-time audio pacing —
+            ``write_audio_frame`` returns immediately rather than sleeping
+            for each chunk. Use for text-only evals where interruption timing
+            doesn't matter and you want results as fast as the bot can
+            produce them. Can also be toggled per-eval via a
+            ``{"type": "settings", "fast": true}`` message from the harness.
     """
 
     # Default audio_out_enabled to True so write_audio_frame() runs and paces
@@ -84,6 +90,7 @@ class EvalTransportParams(TransportParams):
 
     verbose: bool = False
     keep_alive: bool = True
+    fast: bool = False
 
 
 class EvalTransportCallbacks(BaseModel):
@@ -228,10 +235,21 @@ class EvalInputTransport(BaseInputTransport):
             await self._inject_user_turn(msg.get("text", ""))
         elif msg_type == "reset":
             await self._reset_context(msg.get("messages") or [])
+        elif msg_type == "settings":
+            await self._apply_settings(msg)
         elif msg_type == "ready":
             await self._callbacks.on_ready()
         else:
             logger.warning(f"Eval transport: unknown message type: {msg_type!r}")
+
+    async def _apply_settings(self, msg: dict) -> None:
+        """Apply per-eval runtime settings from a ``settings`` message.
+
+        Currently supports ``fast`` (skip audio pacing); extensible for
+        future runtime knobs.
+        """
+        if "fast" in msg and self._transport._output is not None:
+            self._transport._output.set_fast(bool(msg["fast"]))
 
     async def _reset_context(self, messages: list):
         """Push LLMMessagesUpdateFrame downstream to reset the bot's LLM context.
@@ -305,9 +323,11 @@ class EvalOutputTransport(BaseOutputTransport):
         # Audio pacing — mirrors the WebSocket server transport pattern. By
         # sleeping in write_audio_frame() we emulate real-time playback so
         # BotStoppedSpeakingFrame fires at a realistic time and interruption
-        # tests have a window in which to fire.
+        # tests have a window in which to fire. Toggled off when ``fast``
+        # mode is set via a settings message from the harness.
         self._send_interval = 0.0
         self._next_send_time = 0.0
+        self._fast = params.fast
 
         # Aggregation state for semantic events.
         self._llm_response_text: list[str] = []
@@ -416,17 +436,12 @@ class EvalOutputTransport(BaseOutputTransport):
                     "duration_ms": self._t() - started_t,
                 }
             )
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_started_t = time.monotonic()
-            self._bot_speech_text = []
-            await self._emit({"type": "bot_started_speaking", "t": self._t()})
         elif isinstance(frame, TTSTextFrame):
             self._bot_speech_text.append(frame.text)
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            text = "".join(self._bot_speech_text)
-            self._bot_speech_text = []
-            self._bot_started_t = None
-            await self._emit({"type": "bot_stopped_speaking", "t": self._t(), "text": text})
+        # Note: BotStartedSpeakingFrame / BotStoppedSpeakingFrame are emitted
+        # by BaseOutputTransport itself (this class's parent), not by upstream
+        # processors, so they don't arrive here via process_frame. They get
+        # caught in push_frame() instead.
         elif isinstance(frame, ErrorFrame):
             await self._emit(
                 {
@@ -437,16 +452,47 @@ class EvalOutputTransport(BaseOutputTransport):
                 }
             )
 
-    # Stored on the instance so it can be read across process_frame() calls.
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Intercept frames that the parent BaseOutputTransport emits itself.
+
+        ``BotStartedSpeakingFrame`` and ``BotStoppedSpeakingFrame`` are pushed
+        from inside :class:`BaseOutputTransport` (via this class) once audio
+        playback boundaries are detected — so they never come through our
+        ``process_frame`` method. Hook them here so we can emit the matching
+        semantic events to the harness.
+        """
+        if direction == FrameDirection.DOWNSTREAM:
+            if isinstance(frame, BotStartedSpeakingFrame):
+                self._bot_started_t = time.monotonic()
+                self._bot_speech_text = []
+                await self._emit({"type": "bot_started_speaking", "t": self._t()})
+            elif isinstance(frame, BotStoppedSpeakingFrame):
+                text = "".join(self._bot_speech_text)
+                self._bot_speech_text = []
+                self._bot_started_t = None
+                await self._emit({"type": "bot_stopped_speaking", "t": self._t(), "text": text})
+        await super().push_frame(frame, direction)
+
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Drop the audio bytes but sleep to emulate real-time playback.
 
         Without the sleep, BotStoppedSpeakingFrame would fire effectively
         instantly and interruption tests would have no window to barge in.
+        Skip the sleep entirely when ``fast`` mode is on — text-only evals
+        run as fast as the bot can produce them.
         """
         del frame  # bytes intentionally discarded; only the timing matters
-        await self._write_audio_sleep()
+        if not self._fast:
+            await self._write_audio_sleep()
         return True
+
+    def set_fast(self, fast: bool) -> None:
+        """Toggle audio pacing.
+
+        Called by the parent transport when a ``settings`` message arrives
+        from the harness.
+        """
+        self._fast = fast
 
     async def _write_audio_sleep(self):
         """Pace audio frames against a monotonic clock."""

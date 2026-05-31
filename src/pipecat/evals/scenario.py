@@ -47,6 +47,10 @@ Top-level optional fields:
                     model: qwen2.5:3b
                     endpoint: http://localhost:11434/v1   # optional
 
+    fast:     when true, the harness asks the eval transport to skip real-time
+              audio pacing. Use for text-only evals that don't care about
+              interruption timing — runs as fast as the bot can produce
+              tokens. Sent to the bot as ``{"type": "settings", "fast": true}``.
     fixtures: free-form mapping (e.g. ``bot_url:``).
 """
 
@@ -155,6 +159,8 @@ class Scenario:
         judge: Judge LLM configuration dict with keys ``service``, ``model``,
             and optional ``endpoint``. Defaults to
             ``{"service": "ollama", "model": "qwen2.5:3b"}``.
+        fast: When True, the harness asks the eval transport to skip real-time
+            audio pacing. Useful for text-only evals.
         fixtures: Optional fixtures dict (e.g. ``bot_url:``).
         source_path: Path the scenario was loaded from, for error messages.
     """
@@ -163,6 +169,7 @@ class Scenario:
     turns: list[Turn]
     reset: list[dict] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "qwen2.5:3b"})
+    fast: bool = False
     fixtures: dict = field(default_factory=dict)
     source_path: Path | None = None
 
@@ -209,11 +216,16 @@ def load_scenario(path: str | Path) -> Scenario:
     if not isinstance(judge, dict):
         raise ValueError(f"{path}: 'judge:' must be a mapping")
 
+    fast = data.get("fast", False)
+    if not isinstance(fast, bool):
+        raise ValueError(f"{path}: 'fast:' must be a boolean")
+
     return Scenario(
         name=name,
         turns=turns,
         reset=reset,
         judge=judge,
+        fast=fast,
         fixtures=data.get("fixtures") or {},
         source_path=path,
     )
