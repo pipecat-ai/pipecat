@@ -151,11 +151,15 @@ async def run_scenario(
         # right after it set it up.
         if scenario.reset:
             await ws.send(json.dumps({"type": "reset", "messages": scenario.reset}))
-        # Push per-eval runtime settings (e.g. ``tts`` to bypass TTS).
-        await ws.send(json.dumps({"type": "settings", "tts": scenario.tts}))
+        # Push per-eval runtime settings: tts controls bot-side TTS bypass;
+        # stt tells the eval transport to emit user-side events from its
+        # output side (using the bot's natural VAD/STT frames).
+        await ws.send(json.dumps({"type": "settings", "tts": scenario.tts, "stt": scenario.stt}))
+
+        user_voice = scenario.user_voice if scenario.stt else None
 
         for turn_idx, turn in enumerate(scenario.turns):
-            turn_failures = await _run_turn(ctx, turn, turn_idx, judge)
+            turn_failures = await _run_turn(ctx, turn, turn_idx, judge, user_voice)
             failures.extend(turn_failures)
     finally:
         reader_task.cancel()
@@ -198,8 +202,15 @@ async def _run_turn(
     turn: Turn,
     turn_idx: int,
     judge: Judge | None,
+    user_voice: dict | None,
 ) -> list[AssertionFailure]:
-    """Drive one turn: optionally honor send_after, send user_input, match expectations."""
+    """Drive one turn: optionally honor send_after, send user_input, match expectations.
+
+    When ``user_voice`` is set (scenario.stt=True), the turn's ``user``
+    text is rendered to audio (cached on disk) and sent as a
+    ``user_audio`` WS message instead of ``user_input``. The bot's STT
+    then transcribes it for real.
+    """
     failures: list[AssertionFailure] = []
 
     if turn.send_after is not None:
@@ -218,7 +229,21 @@ async def _run_turn(
 
     anchor = time.monotonic()
     if turn.user is not None:
-        await ctx.ws.send(json.dumps({"type": "user_input", "text": turn.user}))
+        if user_voice is not None:
+            from pipecat.evals.voice import generate_or_load, pcm_to_base64
+
+            pcm, sample_rate = await generate_or_load(turn.user, user_voice)
+            await ctx.ws.send(
+                json.dumps(
+                    {
+                        "type": "user_audio",
+                        "audio": pcm_to_base64(pcm),
+                        "sample_rate": sample_rate,
+                    }
+                )
+            )
+        else:
+            await ctx.ws.send(json.dumps({"type": "user_input", "text": turn.user}))
         anchor = time.monotonic()
 
     for exp_idx, expectation in enumerate(turn.expect):

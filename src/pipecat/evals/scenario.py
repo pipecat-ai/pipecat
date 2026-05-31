@@ -53,6 +53,14 @@ Top-level optional fields:
               pacing. Use for evals that just check what the bot says, not
               how fast it says it. Sent to the bot as
               ``{"type": "settings", "tts": false}``.
+    stt:      when True (default False), the harness generates audio for
+              each user turn via the ``user_voice`` TTS service and sends
+              it to the bot as ``user_audio``. The bot's STT then
+              processes it for real. Requires a ``user_voice`` block.
+    user_voice: TTS service config the harness uses to synthesize user
+              audio. Required when ``stt`` is True. Mapping with at
+              minimum ``service`` and ``voice``; optional ``model``,
+              ``sample_rate`` (default 16000), and ``api_key_env``.
     fixtures: free-form mapping (e.g. ``bot_url:``).
 """
 
@@ -164,6 +172,13 @@ class Scenario:
             TTS entirely (skip_tts=True). When True, TTS runs and the
             transport paces audio at real-time. Use False for text-only
             evals.
+        stt: When True (default False), the harness generates user audio
+            via the ``user_voice`` TTS and sends it to the bot to be
+            transcribed for real. When False, the harness injects
+            TranscriptionFrames directly, bypassing the bot's STT.
+        user_voice: TTS config the harness uses to generate user audio
+            when ``stt`` is True. Mapping with ``service``, ``voice``, and
+            optional ``model`` / ``sample_rate`` / ``api_key_env``.
         fixtures: Optional fixtures dict (e.g. ``bot_url:``).
         source_path: Path the scenario was loaded from, for error messages.
     """
@@ -173,6 +188,8 @@ class Scenario:
     reset: list[dict] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "qwen2.5:3b"})
     tts: bool = True
+    stt: bool = False
+    user_voice: dict | None = None
     fixtures: dict = field(default_factory=dict)
     source_path: Path | None = None
 
@@ -223,12 +240,26 @@ def load_scenario(path: str | Path) -> Scenario:
     if not isinstance(tts, bool):
         raise ValueError(f"{path}: 'tts:' must be a boolean")
 
+    stt = data.get("stt", False)
+    if not isinstance(stt, bool):
+        raise ValueError(f"{path}: 'stt:' must be a boolean")
+
+    user_voice = data.get("user_voice")
+    if user_voice is not None and not isinstance(user_voice, dict):
+        raise ValueError(f"{path}: 'user_voice:' must be a mapping")
+    if stt and not user_voice:
+        raise ValueError(
+            f"{path}: 'stt: true' requires a 'user_voice:' block (service + voice at minimum)"
+        )
+
     return Scenario(
         name=name,
         turns=turns,
         reset=reset,
         judge=judge,
         tts=tts,
+        stt=stt,
+        user_voice=user_voice,
         fixtures=data.get("fixtures") or {},
         source_path=path,
     )

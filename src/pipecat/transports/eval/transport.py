@@ -29,6 +29,7 @@ Selected via ``-t eval`` in the development runner.
 """
 
 import asyncio
+import base64
 import datetime
 import json
 import time
@@ -46,6 +47,7 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    InputAudioRawFrame,
     InterruptionFrame,
     LLMConfigureOutputFrame,
     LLMFullResponseEndFrame,
@@ -97,6 +99,11 @@ class EvalTransportParams(TransportParams):
             bypasses TTS entirely — no audio, no TTS API calls, no pacing.
     """
 
+    # Both default to True since the eval transport's job is to drive the
+    # full pipeline. audio_in_enabled in particular matters when stt is on
+    # — STT services need the input audio path active to process the
+    # InputAudioRawFrames we inject from user_audio messages.
+    audio_in_enabled: bool = True
     audio_out_enabled: bool = True
 
     verbose: bool = False
@@ -244,6 +251,8 @@ class EvalInputTransport(BaseInputTransport):
         msg_type = msg.get("type")
         if msg_type == "user_input":
             await self._inject_user_turn(msg.get("text", ""))
+        elif msg_type == "user_audio":
+            await self._inject_user_audio(msg)
         elif msg_type == "reset":
             await self._reset_context(msg.get("messages") or [])
         elif msg_type == "settings":
@@ -256,13 +265,19 @@ class EvalInputTransport(BaseInputTransport):
     async def _apply_settings(self, msg: dict) -> None:
         """Apply per-eval runtime settings from a ``settings`` message.
 
-        ``tts`` (bool, default True): pushes
-        ``LLMConfigureOutputFrame(skip_tts=not tts)`` downstream. When
-        tts=False, the LLM bypasses TTS entirely and the eval output
-        transport's audio pacing also stops (since no audio will flow).
+        - ``tts`` (bool, default True): pushes
+          ``LLMConfigureOutputFrame(skip_tts=not tts)`` downstream. When
+          tts=False, the LLM bypasses TTS entirely.
+        - ``stt`` (bool, default False): toggles user-event emission on
+          the output side. In STT mode, user_started/stopped_speaking
+          events are emitted from the output transport based on the
+          bot's VAD/STT frames; in text mode they're emitted from the
+          input side at injection time.
         """
         if "tts" in msg:
             await self.push_frame(LLMConfigureOutputFrame(skip_tts=not bool(msg["tts"])))
+        if "stt" in msg and self._transport._output is not None:
+            self._transport._output.set_stt_mode(bool(msg["stt"]))
 
     async def _reset_context(self, messages: list):
         """Push LLMMessagesUpdateFrame downstream to reset the bot's LLM context.
@@ -292,6 +307,58 @@ class EvalInputTransport(BaseInputTransport):
         )
         await self.push_frame(UserStoppedSpeakingFrame())
         await self._emit({"type": "user_stopped_speaking", "t": self._t(), "transcript": text})
+
+    async def _inject_user_audio(self, msg: dict):
+        """Push base64-encoded PCM audio into the pipeline so the bot's STT processes it.
+
+        Expects ``msg`` to contain:
+            ``audio``         base64-encoded raw PCM (16-bit, little-endian, mono)
+            ``sample_rate``   integer (Hz)
+            ``chunk_ms``      optional, defaults to 20 — audio is split into
+                              chunks of this duration before being pushed.
+                              Matches typical microphone capture cadence so
+                              VAD/STT services behave naturally.
+            ``trailing_silence_ms`` optional, defaults to 500 — silence
+                              appended after the audio so the bot's VAD
+                              detects end-of-speech.
+
+        Pushes via ``push_audio_frame`` so the base input transport's
+        queue/VAD/filter path runs as it would for real microphone input.
+        Does NOT emit user_started_speaking or user_stopped_speaking
+        events — those will be produced naturally by the bot's pipeline
+        once VAD and STT have done their work.
+        """
+        raw = msg.get("audio")
+        sample_rate = msg.get("sample_rate")
+        if not raw or not sample_rate:
+            logger.error("Eval transport: user_audio message missing audio or sample_rate")
+            return
+        try:
+            audio_bytes = base64.b64decode(raw)
+        except Exception as e:
+            logger.error(f"Eval transport: failed to decode user_audio base64: {e}")
+            return
+
+        sample_rate = int(sample_rate)
+        chunk_ms = int(msg.get("chunk_ms", 20))
+        trailing_ms = int(msg.get("trailing_silence_ms", 500))
+
+        # 2 bytes per sample (16-bit), mono.
+        bytes_per_chunk = (sample_rate * chunk_ms // 1000) * 2
+
+        for offset in range(0, len(audio_bytes), bytes_per_chunk):
+            chunk = audio_bytes[offset : offset + bytes_per_chunk]
+            await self.push_audio_frame(
+                InputAudioRawFrame(audio=chunk, sample_rate=sample_rate, num_channels=1)
+            )
+
+        if trailing_ms > 0:
+            silence = b"\x00\x00" * (sample_rate * chunk_ms // 1000)
+            chunks_of_silence = trailing_ms // chunk_ms
+            for _ in range(chunks_of_silence):
+                await self.push_audio_frame(
+                    InputAudioRawFrame(audio=silence, sample_rate=sample_rate, num_channels=1)
+                )
 
     async def _emit(self, event: dict):
         """Send a semantic event to the connected harness, if any."""
@@ -359,6 +426,14 @@ class EvalOutputTransport(BaseOutputTransport):
         self._llm_started_t: float | None = None
         self._tool_calls: dict[str, dict] = {}
 
+        # STT mode (toggled by settings message). When True, user-side events
+        # are emitted from here based on the bot's natural VAD/STT frames.
+        # In text mode (False, default), the input transport emits them
+        # directly at injection time and we leave UserStarted/Stopped frames
+        # alone.
+        self._stt_mode = False
+        self._user_transcript: list[str] = []
+
         self._initialized = False
         self._t0 = time.monotonic()
 
@@ -410,6 +485,17 @@ class EvalOutputTransport(BaseOutputTransport):
 
         if isinstance(frame, LLMConfigureOutputFrame):
             self._skip_tts = frame.skip_tts
+        elif self._stt_mode and isinstance(frame, UserStartedSpeakingFrame):
+            self._user_transcript = []
+            await self._emit({"type": "user_started_speaking", "t": self._t()})
+        elif self._stt_mode and isinstance(frame, TranscriptionFrame):
+            self._user_transcript.append(frame.text)
+        elif self._stt_mode and isinstance(frame, UserStoppedSpeakingFrame):
+            transcript = " ".join(self._user_transcript).strip()
+            self._user_transcript = []
+            await self._emit(
+                {"type": "user_stopped_speaking", "t": self._t(), "transcript": transcript}
+            )
         elif isinstance(frame, InterruptionFrame):
             offset = (
                 int((time.monotonic() - self._llm_started_t) * 1000)
@@ -497,6 +583,14 @@ class EvalOutputTransport(BaseOutputTransport):
                     "fatal": frame.fatal,
                 }
             )
+
+    def set_stt_mode(self, stt_mode: bool) -> None:
+        """Toggle emission of user-side events from the output transport.
+
+        Called by the parent transport when a ``settings`` message arrives
+        with ``stt``. See the field comment in __init__ for semantics.
+        """
+        self._stt_mode = stt_mode
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Drop the audio bytes but pace at real-time playback rate.

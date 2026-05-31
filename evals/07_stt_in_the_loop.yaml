@@ -1,0 +1,37 @@
+# Template — requires a bot with a real STT + LLM. Tested against
+# examples/voice/voice-cartesia.py.
+#
+# Demonstrates STT-in-the-loop: the harness generates user audio via the
+# configured TTS service, sends it as base64 PCM to the bot, the bot's
+# STT transcribes for real, the bot responds. Audio is cached at
+# .cache/evals/tts/<sha256>.wav so re-runs are fast.
+#
+# Note: user_stopped_speaking.transcript is currently best-effort and
+# often empty in STT mode — LLMUserAggregator consumes the
+# TranscriptionFrame upstream of the eval transport. Assert on
+# llm_response instead; if the bot understood the question, its
+# response will reflect that.
+
+name: stt_in_the_loop
+
+stt: true
+
+user_voice:
+  service: cartesia
+  voice: 71a7ad14-091c-4e8e-a314-022ece01c121     # British Reading Lady
+  model: sonic-2
+  api_key_env: CARTESIA_API_KEY
+  sample_rate: 16000
+
+judge:
+  service: ollama
+  model: llama3:latest
+
+turns:
+  - user: "what is the capital of France?"
+    expect:
+      - event: user_stopped_speaking
+        within_ms: 8000
+      - event: llm_response
+        within_ms: 20000
+        eval: "the response correctly identifies Paris as the capital of France"
