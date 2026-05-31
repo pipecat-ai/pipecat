@@ -3,11 +3,12 @@
 #
 # Demonstrates the judge LLM evaluating natural-language criteria on bot
 # output. Assertions target `llm_response.text` — the text the bot produced
-# for this turn.
+# for this turn (populated even when TTS is skipped, since LLMTextFrame
+# reaches the eval transport directly).
 #
-# fast: true skips real-time text pacing on the eval transport — the
-# harness runs as fast as the bot can produce tokens. (TTS still runs if
-# in the pipeline; its audio is dropped by the eval transport regardless.)
+# fast: true pushes LLMConfigureOutputFrame(skip_tts=True) so the LLM
+# bypasses TTS entirely (no audio, no TTS API calls) and skips real-time
+# text pacing.
 
 name: bot_response_is_helpful
 

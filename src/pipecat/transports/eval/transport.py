@@ -19,8 +19,10 @@ Two pacing modes:
   ``TextFrame`` chunk, sleeping for ``len(text) / chars_per_second``
   seconds. Gives interruption tests a realistic window in which to barge in.
 - Fast: triggered by ``{"type": "settings", "fast": true}`` from the
-  harness. Text pacing is bypassed — the harness runs as fast as the bot
-  can produce tokens. The rest of the bot pipeline is unchanged.
+  harness. Text pacing is skipped AND ``LLMConfigureOutputFrame(skip_tts=True)``
+  is pushed downstream so the LLM bypasses TTS entirely — no audio, no TTS
+  API calls. The output transport also reacts to ``LLMConfigureOutputFrame``
+  by disabling silence injection (no point with no audio to fill around).
 
 Selected via ``-t eval`` in the development runner.
 """
@@ -44,6 +46,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InterruptionFrame,
+    LLMConfigureOutputFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
@@ -89,26 +92,18 @@ class EvalTransportParams(TransportParams):
             bot process. Set False to get per-connection events (e.g. if your
             bot tears itself down on disconnect).
         fast: When True at startup (or toggled via a ``settings`` message),
-            the output side skips real-time text pacing — ``TextFrame``
-            chunks flow through without the per-chunk sleep. Use for text
+            the transport pushes ``LLMConfigureOutputFrame(skip_tts=True)``
+            so the LLM bypasses TTS entirely (no audio, no TTS API calls)
+            AND the output side skips real-time text pacing. Use for text
             evals where interruption timing doesn't matter and you want
-            results as fast as the bot can produce tokens. The rest of the
-            bot pipeline (including TTS) is unchanged; any audio produced
-            is dropped by the eval transport regardless of mode.
+            results as fast as possible.
         chars_per_second: Speaking rate used when pacing ``TextFrame`` chunks
             in real-time mode (default ≈ 150 WPM). Adjust per-deployment if
             your TTS voice is noticeably faster or slower than typical
             English speech.
     """
 
-    # Eval mode doesn't actually play audio anywhere, so we override the
-    # silence-related defaults from TransportParams: no continuous silence
-    # injection while the audio queue is empty (saves needless write_audio_frame
-    # calls in fast mode where TTS is skipped entirely), and no end-of-frame
-    # silence either. write_audio_frame is a no-op regardless of mode.
     audio_out_enabled: bool = True
-    audio_out_auto_silence: bool = False
-    audio_out_end_silence_secs: int = 0
 
     verbose: bool = False
     keep_alive: bool = True
@@ -268,14 +263,18 @@ class EvalInputTransport(BaseInputTransport):
     async def _apply_settings(self, msg: dict) -> None:
         """Apply per-eval runtime settings from a ``settings`` message.
 
-        ``fast`` (bool): toggle text pacing on the output side. When True,
-        ``TextFrame`` chunks are not paced — the harness runs as fast as the
-        bot can produce tokens. The bot pipeline is otherwise unchanged
-        (TTS still runs if it's in the pipeline; its audio is dropped by
-        the eval transport regardless).
+        ``fast`` (bool): tells the output side to skip text pacing AND
+        pushes ``LLMConfigureOutputFrame(skip_tts=fast)`` downstream so the
+        LLM bypasses TTS entirely — no audio, no TTS API calls. The output
+        transport also reacts to the LLMConfigureOutputFrame by toggling
+        silence injection (when skip_tts=True there's nothing to fill the
+        audio queue, so silence would just be busywork).
         """
-        if "fast" in msg and self._transport._output is not None:
-            self._transport._output.set_fast(bool(msg["fast"]))
+        if "fast" in msg:
+            fast = bool(msg["fast"])
+            await self.push_frame(LLMConfigureOutputFrame(skip_tts=fast))
+            if self._transport._output is not None:
+                self._transport._output.set_fast(fast)
 
     async def _reset_context(self, messages: list):
         """Push LLMMessagesUpdateFrame downstream to reset the bot's LLM context.
@@ -356,6 +355,11 @@ class EvalOutputTransport(BaseOutputTransport):
         self._fast = params.fast
         self._chars_per_second = params.chars_per_second
 
+        # Capture the original silence settings so we can restore them if a
+        # later LLMConfigureOutputFrame toggles skip_tts back to False.
+        self._original_audio_out_auto_silence = params.audio_out_auto_silence
+        self._original_audio_out_end_silence_secs = params.audio_out_end_silence_secs
+
         # Response aggregation state.
         self._response_text: list[str] = []
         self._in_response = False
@@ -411,7 +415,18 @@ class EvalOutputTransport(BaseOutputTransport):
         # emitted from the input side directly — SystemFrames bypass the data
         # queue and would otherwise race ahead of the TranscriptionFrame here.
 
-        if isinstance(frame, InterruptionFrame):
+        if isinstance(frame, LLMConfigureOutputFrame):
+            # When the LLM is told to skip TTS, no real audio will ever flow,
+            # so the base output transport's continuous silence injection and
+            # end-of-stream silence are just busywork. Disable both for the
+            # duration; restore the originals when TTS comes back on.
+            if frame.skip_tts:
+                self._params.audio_out_auto_silence = False
+                self._params.audio_out_end_silence_secs = 0
+            else:
+                self._params.audio_out_auto_silence = self._original_audio_out_auto_silence
+                self._params.audio_out_end_silence_secs = self._original_audio_out_end_silence_secs
+        elif isinstance(frame, InterruptionFrame):
             offset = (
                 int((time.monotonic() - self._llm_started_t) * 1000)
                 if self._llm_started_t is not None
