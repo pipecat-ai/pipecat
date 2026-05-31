@@ -154,3 +154,20 @@ class LiveKitRunnerArguments(RunnerArguments):
     room_name: str
     url: str
     token: str
+
+
+@dataclass
+class EvalRunnerArguments(RunnerArguments):
+    """Eval transport session arguments for the runner.
+
+    Used to launch a bot with the local WebSocket-based eval transport, which
+    accepts scripted user input from a harness and emits high-level semantic
+    events. Intended for fast pipeline behavioral evaluations; not a real transport.
+
+    Parameters:
+        host: Host address to bind the eval transport's WebSocket server to.
+        port: Port number to bind the eval transport's WebSocket server to.
+    """
+
+    host: str = "localhost"
+    port: int = 7860

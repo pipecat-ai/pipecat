@@ -40,6 +40,7 @@ from loguru import logger
 
 from pipecat.runner.types import (
     DailyRunnerArguments,
+    EvalRunnerArguments,
     LiveKitRunnerArguments,
     SmallWebRTCRunnerArguments,
     VonageRunnerArguments,
@@ -617,6 +618,16 @@ async def create_transport(
             runner_args.token,
             runner_args.room_name,
             params=params,
+        )
+    elif isinstance(runner_args, EvalRunnerArguments):
+        params = _get_transport_params("eval", transport_params)
+
+        from pipecat.transports.eval.transport import EvalTransport
+
+        return EvalTransport(
+            params=params,
+            host=runner_args.host,
+            port=runner_args.port,
         )
     elif isinstance(runner_args, VonageRunnerArguments):
         from pipecat.transports.vonage.video_connector import (
