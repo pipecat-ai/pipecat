@@ -1,0 +1,34 @@
+# Template — requires a bot with real LLM + TTS so the bot's speech actually
+# takes time. Won't pass against the passthrough sample_bot.py.
+#
+# Demonstrates:
+#   - send_after scheduled relative to a bot event (barge-in)
+#   - Asserting that an interruption event fires within a tight budget
+#   - Tight bot_stopped_speaking budget after interruption (the bot must shut up promptly)
+#   - Judge confirming the bot then answered the new question
+
+eval: barge_in_during_long_response
+
+judge:
+  service: ollama
+  model: llama3:latest
+
+turns:
+  - user: "tell me a long story about Paris"
+    expect:
+      - event: bot_started_speaking
+        within_ms: 3000
+
+  - send_after:
+      event: bot_started_speaking
+      delay_ms: 500
+    user: "stop, what time is it?"
+    expect:
+      - event: interruption
+        within_ms: 1000
+      - event: bot_stopped_speaking
+        within_ms: 1000
+      - event: llm_response
+        within_ms: 5000
+        says: "states a time of day"
+        says_not: "continues talking about Paris"

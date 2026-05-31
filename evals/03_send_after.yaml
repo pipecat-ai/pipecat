@@ -1,0 +1,22 @@
+# Demonstrates event-driven scheduling.
+# The second turn waits for user_stopped_speaking from the first turn, then
+# delays 200ms before sending its own user message. Works against the
+# passthrough bot.
+
+eval: chained_turns_with_send_after
+
+turns:
+  - user: "first message"
+    expect:
+      - event: user_stopped_speaking
+        within_ms: 500
+        transcript_contains: "first"
+
+  - send_after:
+      event: user_stopped_speaking
+      delay_ms: 200
+    user: "second message"
+    expect:
+      - event: user_stopped_speaking
+        within_ms: 500
+        transcript_contains: "second"

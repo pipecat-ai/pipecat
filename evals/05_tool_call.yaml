@@ -1,0 +1,38 @@
+# Template — requires a bot configured with a `get_weather` tool.
+# Won't pass against the passthrough sample_bot.py.
+#
+# Demonstrates:
+#   - Asserting on tool_call.name and tool_call.args across multiple turns
+#   - A context-aware follow-up: the bot should understand "what about Tokyo?"
+#     means weather in Tokyo without the user repeating the topic
+#   - Combining tool_call assertions with downstream llm_response /
+#     bot_stopped_speaking on each turn
+
+eval: weather_tool_call_with_follow_up
+
+turns:
+  - user: "what's the weather in Paris?"
+    expect:
+      - event: tool_call
+        within_ms: 3000
+        name: get_weather
+        args:
+          city: "Paris"
+      - event: llm_response
+        within_ms: 5000
+        text_contains: "Paris"
+      - event: bot_stopped_speaking
+        within_ms: 8000
+
+  - user: "what about Tokyo?"
+    expect:
+      - event: tool_call
+        within_ms: 3000
+        name: get_weather
+        args:
+          city: "Tokyo"
+      - event: llm_response
+        within_ms: 5000
+        text_contains: "Tokyo"
+      - event: bot_stopped_speaking
+        within_ms: 8000

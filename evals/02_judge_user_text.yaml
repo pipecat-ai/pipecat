@@ -1,0 +1,32 @@
+# Demonstrates the judge LLM evaluating natural-language criteria across
+# multiple turns. Uses Ollama locally — change `judge:` to point at any
+# pipecat-supported LLM service (OpenAI, etc.). Works against the sample
+# passthrough bot since the judge inspects the transcript field of
+# user_stopped_speaking.
+
+eval: judge_user_text_classification
+
+judge:
+  service: ollama
+  model: llama3:latest
+
+turns:
+  - user: "what is the capital of France?"
+    expect:
+      - event: user_stopped_speaking
+        within_ms: 500
+        says: "the text is asking a question"
+        says_not: "the text mentions weather"
+
+  - user: "the weather forecast for tomorrow looks rainy"
+    expect:
+      - event: user_stopped_speaking
+        within_ms: 500
+        says: "the text mentions weather"
+        says_not: "the text is asking a question"
+
+  - user: "hello there, how's your day going?"
+    expect:
+      - event: user_stopped_speaking
+        within_ms: 500
+        says: "the text is a friendly greeting"
