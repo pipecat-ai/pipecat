@@ -263,18 +263,13 @@ class EvalInputTransport(BaseInputTransport):
     async def _apply_settings(self, msg: dict) -> None:
         """Apply per-eval runtime settings from a ``settings`` message.
 
-        ``fast`` (bool): tells the output side to skip text pacing AND
-        pushes ``LLMConfigureOutputFrame(skip_tts=fast)`` downstream so the
-        LLM bypasses TTS entirely — no audio, no TTS API calls. The output
-        transport also reacts to the LLMConfigureOutputFrame by toggling
-        silence injection (when skip_tts=True there's nothing to fill the
-        audio queue, so silence would just be busywork).
+        ``fast`` (bool): pushes ``LLMConfigureOutputFrame(skip_tts=fast)``
+        downstream. The LLM service uses it to bypass TTS, and the eval
+        output transport uses the same frame to toggle its own pacing skip
+        — one signal, two consumers.
         """
         if "fast" in msg:
-            fast = bool(msg["fast"])
-            await self.push_frame(LLMConfigureOutputFrame(skip_tts=fast))
-            if self._transport._output is not None:
-                self._transport._output.set_fast(fast)
+            await self.push_frame(LLMConfigureOutputFrame(skip_tts=bool(msg["fast"])))
 
     async def _reset_context(self, messages: list):
         """Push LLMMessagesUpdateFrame downstream to reset the bot's LLM context.
@@ -352,13 +347,12 @@ class EvalOutputTransport(BaseOutputTransport):
 
         self._websocket: Any = None
 
-        self._fast = params.fast
         self._chars_per_second = params.chars_per_second
 
-        # Capture the original silence settings so we can restore them if a
-        # later LLMConfigureOutputFrame toggles skip_tts back to False.
-        self._original_audio_out_auto_silence = params.audio_out_auto_silence
-        self._original_audio_out_end_silence_secs = params.audio_out_end_silence_secs
+        # Toggled by LLMConfigureOutputFrame flowing through process_frame.
+        # When True, text pacing is skipped — the same signal the LLM uses
+        # to bypass TTS also tells us not to simulate spoken-word timing.
+        self._skip_tts = params.fast
 
         # Response aggregation state.
         self._response_text: list[str] = []
@@ -416,16 +410,7 @@ class EvalOutputTransport(BaseOutputTransport):
         # queue and would otherwise race ahead of the TranscriptionFrame here.
 
         if isinstance(frame, LLMConfigureOutputFrame):
-            # When the LLM is told to skip TTS, no real audio will ever flow,
-            # so the base output transport's continuous silence injection and
-            # end-of-stream silence are just busywork. Disable both for the
-            # duration; restore the originals when TTS comes back on.
-            if frame.skip_tts:
-                self._params.audio_out_auto_silence = False
-                self._params.audio_out_end_silence_secs = 0
-            else:
-                self._params.audio_out_auto_silence = self._original_audio_out_auto_silence
-                self._params.audio_out_end_silence_secs = self._original_audio_out_end_silence_secs
+            self._skip_tts = frame.skip_tts
         elif isinstance(frame, InterruptionFrame):
             offset = (
                 int((time.monotonic() - self._llm_started_t) * 1000)
@@ -506,12 +491,11 @@ class EvalOutputTransport(BaseOutputTransport):
     async def _pace_text(self, text: str) -> None:
         """Sleep proportional to text length to simulate natural speaking speed.
 
-        Returns immediately in fast mode or if the interruption event fires.
-        Computed as ``len(text) / chars_per_second`` (≈ 150 WPM at the
-        default rate). Interruptible via :meth:`set_fast` toggle or any
-        ``InterruptionFrame`` arrival (which sets ``self._interrupt_event``).
+        Returns immediately when TTS is being skipped (no real bot speech to
+        pace) or if the interruption event fires. Computed as
+        ``len(text) / chars_per_second`` (≈ 150 WPM at the default rate).
         """
-        if self._fast or not text:
+        if self._skip_tts or not text:
             return
         target_s = len(text) / self._chars_per_second
         try:
@@ -523,13 +507,6 @@ class EvalOutputTransport(BaseOutputTransport):
         """Drop audio bytes; pacing happens on TextFrame in process_frame."""
         del frame
         return True
-
-    def set_fast(self, fast: bool) -> None:
-        """Toggle fast mode (skip text pacing).
-
-        Called by the parent transport when a ``settings`` message arrives.
-        """
-        self._fast = fast
 
     async def _emit(self, event: dict):
         """Send a semantic event to the connected harness, if any."""
