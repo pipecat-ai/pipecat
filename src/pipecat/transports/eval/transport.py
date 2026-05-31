@@ -19,9 +19,8 @@ Two pacing modes:
   ``TextFrame`` chunk, sleeping for ``len(text) / chars_per_second``
   seconds. Gives interruption tests a realistic window in which to barge in.
 - Fast: triggered by ``{"type": "settings", "fast": true}`` from the
-  harness. The transport pushes ``LLMConfigureOutputFrame(skip_tts=True)``
-  downstream so the LLM produces text without invoking TTS at all — no
-  audio, no API calls, no pacing.
+  harness. Text pacing is bypassed — the harness runs as fast as the bot
+  can produce tokens. The rest of the bot pipeline is unchanged.
 
 Selected via ``-t eval`` in the development runner.
 """
@@ -45,7 +44,6 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InterruptionFrame,
-    LLMConfigureOutputFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
@@ -91,11 +89,12 @@ class EvalTransportParams(TransportParams):
             bot process. Set False to get per-connection events (e.g. if your
             bot tears itself down on disconnect).
         fast: When True at startup (or toggled via a ``settings`` message),
-            the transport pushes ``LLMConfigureOutputFrame(skip_tts=True)``
-            so the LLM produces text without invoking TTS — no audio, no API
-            calls, no pacing. Text-based pacing is also skipped. Use for
-            text-only evals where interruption timing doesn't matter and you
-            want results as fast as the bot can produce them.
+            the output side skips real-time text pacing — ``TextFrame``
+            chunks flow through without the per-chunk sleep. Use for text
+            evals where interruption timing doesn't matter and you want
+            results as fast as the bot can produce tokens. The rest of the
+            bot pipeline (including TTS) is unchanged; any audio produced
+            is dropped by the eval transport regardless of mode.
         chars_per_second: Speaking rate used when pacing ``TextFrame`` chunks
             in real-time mode (default ≈ 150 WPM). Adjust per-deployment if
             your TTS voice is noticeably faster or slower than typical
@@ -269,16 +268,14 @@ class EvalInputTransport(BaseInputTransport):
     async def _apply_settings(self, msg: dict) -> None:
         """Apply per-eval runtime settings from a ``settings`` message.
 
-        ``fast`` (bool): when True, pushes ``LLMConfigureOutputFrame(skip_tts=True)``
-        downstream so the LLM produces text without invoking TTS, and tells
-        the output side to skip text pacing. When False, pushes
-        ``skip_tts=False`` to re-enable TTS for the next response.
+        ``fast`` (bool): toggle text pacing on the output side. When True,
+        ``TextFrame`` chunks are not paced — the harness runs as fast as the
+        bot can produce tokens. The bot pipeline is otherwise unchanged
+        (TTS still runs if it's in the pipeline; its audio is dropped by
+        the eval transport regardless).
         """
-        if "fast" in msg:
-            fast = bool(msg["fast"])
-            await self.push_frame(LLMConfigureOutputFrame(skip_tts=fast))
-            if self._transport._output is not None:
-                self._transport._output.set_fast(fast)
+        if "fast" in msg and self._transport._output is not None:
+            self._transport._output.set_fast(bool(msg["fast"]))
 
     async def _reset_context(self, messages: list):
         """Push LLMMessagesUpdateFrame downstream to reset the bot's LLM context.

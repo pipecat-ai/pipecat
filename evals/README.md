@@ -84,8 +84,6 @@ YAML (default `false`):
   sleeping for `len(text) / chars_per_second` seconds (≈ 150 WPM by
   default). Gives interruption tests a realistic window in which to barge
   in. Use for `06_interruption.yaml` and similar timing-sensitive evals.
-- **Fast** (`fast: true`): the transport pushes
-  `LLMConfigureOutputFrame(skip_tts=True)` so the LLM produces text without
-  invoking TTS at all — no audio, no TTS API calls, no pacing. Use for
-  text-only evals where interruption timing doesn't matter and you want
-  results as fast as possible.
+- **Fast** (`fast: true`): text pacing is skipped — the harness runs as
+  fast as the bot can produce tokens. The bot pipeline itself is unchanged;
+  any audio TTS produces is dropped by the eval transport regardless.
