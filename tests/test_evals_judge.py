@@ -1,0 +1,165 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import unittest
+
+from pipecat.evals.judge import Judge, JudgeVerdict, _parse_verdict
+
+
+class TestParseVerdict(unittest.TestCase):
+    def test_clean_json_yes(self):
+        v = _parse_verdict('{"verdict": "yes", "reason": "It mentions weather."}')
+        self.assertTrue(v.passed)
+        self.assertEqual(v.reason, "It mentions weather.")
+
+    def test_clean_json_no(self):
+        v = _parse_verdict('{"verdict": "no", "reason": "Does not mention it."}')
+        self.assertFalse(v.passed)
+        self.assertEqual(v.reason, "Does not mention it.")
+
+    def test_fenced_json(self):
+        v = _parse_verdict('```json\n{"verdict": "yes", "reason": "ok"}\n```')
+        self.assertTrue(v.passed)
+        self.assertEqual(v.reason, "ok")
+
+    def test_fenced_json_without_lang(self):
+        v = _parse_verdict('```\n{"verdict": "yes", "reason": "ok"}\n```')
+        self.assertTrue(v.passed)
+
+    def test_unstructured_yes_fallback(self):
+        v = _parse_verdict("yes, this satisfies the criterion")
+        self.assertTrue(v.passed)
+
+    def test_unstructured_no_fallback(self):
+        v = _parse_verdict("no, it does not")
+        self.assertFalse(v.passed)
+
+    def test_ambiguous_response_fails_closed(self):
+        v = _parse_verdict("the answer is yes or possibly no")
+        self.assertFalse(v.passed)
+        self.assertIn("could not parse", v.reason)
+
+    def test_garbage_response(self):
+        v = _parse_verdict("???")
+        self.assertFalse(v.passed)
+
+    def test_extra_whitespace(self):
+        v = _parse_verdict('  \n {"verdict": "yes", "reason": "x"}  \n ')
+        self.assertTrue(v.passed)
+
+    def test_missing_reason(self):
+        v = _parse_verdict('{"verdict": "yes"}')
+        self.assertTrue(v.passed)
+        self.assertEqual(v.reason, "(no reason given)")
+
+
+class _FakeLLMService:
+    """In-memory stand-in for a pipecat LLM service.
+
+    Records every call and returns a queued response.
+    """
+
+    def __init__(self, responses: list[str]):
+        self._responses = list(responses)
+        self.calls: list[dict] = []
+
+    async def run_inference(
+        self,
+        context,
+        max_tokens=None,
+        system_instruction=None,
+    ) -> str:
+        self.calls.append(
+            {
+                "messages": list(context._messages),
+                "max_tokens": max_tokens,
+                "system_instruction": system_instruction,
+            }
+        )
+        if not self._responses:
+            raise RuntimeError("FakeLLMService: no more queued responses")
+        return self._responses.pop(0)
+
+
+class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
+    async def test_evaluate_says_pass(self):
+        svc = _FakeLLMService(['{"verdict": "yes", "reason": "yes it does"}'])
+        judge = Judge(svc)
+        v = await judge.evaluate("mentions weather", "It's raining in Paris.")
+        self.assertTrue(v.passed)
+        self.assertEqual(len(svc.calls), 1)
+
+    async def test_evaluate_says_fail(self):
+        svc = _FakeLLMService(['{"verdict": "no", "reason": "no it does not"}'])
+        judge = Judge(svc)
+        v = await judge.evaluate("mentions weather", "Hello there.")
+        self.assertFalse(v.passed)
+
+    async def test_polarity_inverts_pass(self):
+        """says_not passes when the judge says no."""
+        svc = _FakeLLMService(['{"verdict": "no", "reason": "no mention"}'])
+        judge = Judge(svc)
+        v = await judge.evaluate("mentions weather", "Hello.", polarity="says_not")
+        self.assertTrue(v.passed)
+        self.assertIn("inverted", v.reason)
+
+    async def test_polarity_inverts_fail(self):
+        """says_not fails when the judge says yes."""
+        svc = _FakeLLMService(['{"verdict": "yes", "reason": "it does"}'])
+        judge = Judge(svc)
+        v = await judge.evaluate("mentions weather", "It's raining.", polarity="says_not")
+        self.assertFalse(v.passed)
+
+    async def test_caching_avoids_second_call(self):
+        """Same (criterion, text) within one Judge hits the cache."""
+        svc = _FakeLLMService(['{"verdict": "yes", "reason": "ok"}'])
+        judge = Judge(svc)
+        v1 = await judge.evaluate("mentions weather", "It rains.")
+        v2 = await judge.evaluate("mentions weather", "It rains.")
+        self.assertTrue(v1.passed)
+        self.assertTrue(v2.passed)
+        self.assertEqual(len(svc.calls), 1, "second call should be cached")
+
+    async def test_cache_distinguishes_polarity_at_call_site(self):
+        """Cache is keyed by (criterion, text). Polarity is applied after lookup,
+        so the same content asked two ways still hits the LLM only once."""
+        svc = _FakeLLMService(['{"verdict": "yes", "reason": "it does"}'])
+        judge = Judge(svc)
+        v_says = await judge.evaluate("mentions weather", "Rain.", polarity="says")
+        v_says_not = await judge.evaluate("mentions weather", "Rain.", polarity="says_not")
+        self.assertTrue(v_says.passed)
+        self.assertFalse(v_says_not.passed)
+        self.assertEqual(len(svc.calls), 1)
+
+    async def test_service_failure_reported_not_raised(self):
+        """If the LLM call raises, the judge returns a failed verdict, not an exception."""
+
+        class _BoomService:
+            async def run_inference(self, **kwargs):
+                raise RuntimeError("network down")
+
+        judge = Judge(_BoomService())
+        v = await judge.evaluate("anything", "anything")
+        self.assertFalse(v.passed)
+        self.assertIn("RuntimeError", v.reason)
+
+    async def test_empty_response_fails(self):
+        svc = _FakeLLMService([""])
+        judge = Judge(svc)
+        v = await judge.evaluate("anything", "anything")
+        self.assertFalse(v.passed)
+
+
+class TestJudgeVerdictDataclass(unittest.TestCase):
+    def test_construction(self):
+        v = JudgeVerdict(passed=True, reason="ok", raw_response="raw")
+        self.assertTrue(v.passed)
+        self.assertEqual(v.reason, "ok")
+        self.assertEqual(v.raw_response, "raw")
+
+
+if __name__ == "__main__":
+    unittest.main()
