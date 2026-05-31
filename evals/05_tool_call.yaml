@@ -5,10 +5,14 @@
 #   - Asserting on tool_call.name and tool_call.args across multiple turns
 #   - A context-aware follow-up: the bot should understand "what about Tokyo?"
 #     means weather in Tokyo without the user repeating the topic
-#   - Combining tool_call assertions with downstream llm_response /
-#     bot_stopped_speaking on each turn
+#   - Using `eval:` to verify the bot's response actually uses the tool result
+#     to answer the question — not just that it mentioned the city name
 
 name: weather_tool_call_with_follow_up
+
+judge:
+  service: ollama
+  model: llama3:latest
 
 turns:
   - user: "what's the weather in Paris?"
@@ -20,7 +24,7 @@ turns:
           city: "Paris"
       - event: llm_response
         within_ms: 5000
-        text_contains: "Paris"
+        eval: "the response describes the current weather conditions in Paris (e.g. temperature, sky conditions, precipitation)"
       - event: bot_stopped_speaking
         within_ms: 8000
 
@@ -33,6 +37,6 @@ turns:
           city: "Tokyo"
       - event: llm_response
         within_ms: 5000
-        text_contains: "Tokyo"
+        eval: "the response describes the current weather conditions in Tokyo without losing the weather context from the prior turn"
       - event: bot_stopped_speaking
         within_ms: 8000
