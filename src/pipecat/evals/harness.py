@@ -145,12 +145,14 @@ async def run_scenario(
 
     try:
         await ws.send(json.dumps({"type": "ready"}))
-        # Always send a reset before driving turns — guarantees a clean LLM
-        # context per eval. Bots without a context aggregator silently ignore
-        # the resulting LLMMessagesUpdateFrame.
-        await ws.send(json.dumps({"type": "reset", "messages": scenario.reset}))
-        # Push per-eval runtime settings (e.g. ``fast`` to skip audio pacing).
-        await ws.send(json.dumps({"type": "settings", "fast": scenario.fast}))
+        # Only send a reset when the scenario actually asked for one. An
+        # implicit empty reset would race with bot startup flows (e.g. a
+        # greeting added in on_client_connected), wiping the bot's context
+        # right after it set it up.
+        if scenario.reset:
+            await ws.send(json.dumps({"type": "reset", "messages": scenario.reset}))
+        # Push per-eval runtime settings (e.g. ``tts`` to bypass TTS).
+        await ws.send(json.dumps({"type": "settings", "tts": scenario.tts}))
 
         for turn_idx, turn in enumerate(scenario.turns):
             turn_failures = await _run_turn(ctx, turn, turn_idx, judge)

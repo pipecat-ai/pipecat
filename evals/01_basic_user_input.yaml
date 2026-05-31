@@ -1,6 +1,3 @@
-# Sanity check — user input flows through and produces the expected events.
-# Works against any bot using EvalTransport, including the passthrough sample.
-
 name: basic_user_input
 
 turns:

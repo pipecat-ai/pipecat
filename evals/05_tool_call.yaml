@@ -1,13 +1,3 @@
-# Template — requires a bot configured with a `get_weather` tool.
-# Won't pass against the passthrough sample_bot.py.
-#
-# Demonstrates:
-#   - Asserting on tool_call.name and tool_call.args across multiple turns
-#   - A context-aware follow-up: the bot should understand "what about Tokyo?"
-#     means weather in Tokyo without the user repeating the topic
-#   - Using `eval:` on `llm_response` to verify the bot's response actually
-#     uses the tool result to answer the question
-
 name: weather_tool_call_with_follow_up
 
 judge:

@@ -13,16 +13,17 @@ user_stopped_speaking, llm_started, llm_response, interruption, tool_call,
 error). Designed for fast, deterministic behavioral evaluations of a pipeline
 without invoking real STT or full audio I/O.
 
-Two pacing modes:
+Two modes, controlled by the per-eval ``tts:`` field (default True):
 
-- Real-time (default): pacing happens in ``process_frame`` on each
-  ``TextFrame`` chunk, sleeping for ``len(text) / chars_per_second``
-  seconds. Gives interruption tests a realistic window in which to barge in.
-- Fast: triggered by ``{"type": "settings", "fast": true}`` from the
-  harness. Text pacing is skipped AND ``LLMConfigureOutputFrame(skip_tts=True)``
-  is pushed downstream so the LLM bypasses TTS entirely — no audio, no TTS
-  API calls. The output transport also reacts to ``LLMConfigureOutputFrame``
-  by disabling silence injection (no point with no audio to fill around).
+- TTS on (default): the bot pipeline runs end-to-end including TTS. The
+  eval transport drops the audio bytes but paces ``write_audio_frame``
+  at real-time (``audio_chunk_size / sample_rate`` per chunk) so the bot
+  behaves as if a real audio sink were consuming output — gives
+  interruption tests a realistic window in which to barge in.
+- TTS off (``{"type": "settings", "tts": false}``): pushes
+  ``LLMConfigureOutputFrame(skip_tts=True)`` downstream so the LLM bypasses
+  TTS entirely. No audio is generated, no API calls, no pacing — the
+  harness runs as fast as the bot can produce tokens.
 
 Selected via ``-t eval`` in the development runner.
 """
@@ -62,12 +63,6 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
-# Rough speaking rate used when pacing TextFrame chunks in real-time mode —
-# 12.5 chars/sec ≈ 150 WPM at ~5 chars/word average. Sleep duration for a
-# chunk of N characters is N / CHARS_PER_SECOND. Override per-deployment by
-# setting EvalTransportParams.chars_per_second.
-DEFAULT_CHARS_PER_SECOND = 12.5
-
 try:
     from websockets.asyncio.server import serve as websocket_serve
 except ModuleNotFoundError as e:
@@ -85,30 +80,28 @@ class EvalTransportParams(TransportParams):
         verbose: When True, also emits a ``frame`` event for every frame the
             transport observes (in addition to the curated semantic events).
             Useful for debugging failing scenarios; off by default.
-        keep_alive: When True (default), the transport does **not** invoke
-            ``on_client_connected`` / ``on_client_disconnected`` event
-            handlers on the bot side. The bot stays up across multiple harness
-            connections — required for running several evals against a single
-            bot process. Set False to get per-connection events (e.g. if your
-            bot tears itself down on disconnect).
-        fast: When True at startup (or toggled via a ``settings`` message),
-            the transport pushes ``LLMConfigureOutputFrame(skip_tts=True)``
-            so the LLM bypasses TTS entirely (no audio, no TTS API calls)
-            AND the output side skips real-time text pacing. Use for text
-            evals where interruption timing doesn't matter and you want
-            results as fast as possible.
-        chars_per_second: Speaking rate used when pacing ``TextFrame`` chunks
-            in real-time mode (default ≈ 150 WPM). Adjust per-deployment if
-            your TTS voice is noticeably faster or slower than typical
-            English speech.
+        keep_alive: When True (default), the transport suppresses the
+            ``on_client_disconnected`` event handler on the bot side so the
+            bot stays up across multiple harness connections (required for
+            running several evals against a single bot process). The
+            ``on_client_connected`` handler always fires regardless — bots
+            typically use it to kick off the conversation (greeting,
+            initial context, etc.) and that needs to happen per-eval. Set
+            False to also fire ``on_client_disconnected`` (typical bot
+            behavior is to tear down on disconnect).
+        tts: When True (default), the bot's TTS runs normally and the
+            transport paces ``write_audio_frame`` at real-time to simulate
+            an audio sink. When False (or toggled via a
+            ``{"type": "settings", "tts": false}`` message), the transport
+            pushes ``LLMConfigureOutputFrame(skip_tts=True)`` so the LLM
+            bypasses TTS entirely — no audio, no TTS API calls, no pacing.
     """
 
     audio_out_enabled: bool = True
 
     verbose: bool = False
     keep_alive: bool = True
-    fast: bool = False
-    chars_per_second: float = DEFAULT_CHARS_PER_SECOND
+    tts: bool = True
 
 
 class EvalTransportCallbacks(BaseModel):
@@ -263,13 +256,13 @@ class EvalInputTransport(BaseInputTransport):
     async def _apply_settings(self, msg: dict) -> None:
         """Apply per-eval runtime settings from a ``settings`` message.
 
-        ``fast`` (bool): pushes ``LLMConfigureOutputFrame(skip_tts=fast)``
-        downstream. The LLM service uses it to bypass TTS, and the eval
-        output transport uses the same frame to toggle its own pacing skip
-        — one signal, two consumers.
+        ``tts`` (bool, default True): pushes
+        ``LLMConfigureOutputFrame(skip_tts=not tts)`` downstream. When
+        tts=False, the LLM bypasses TTS entirely and the eval output
+        transport's audio pacing also stops (since no audio will flow).
         """
-        if "fast" in msg:
-            await self.push_frame(LLMConfigureOutputFrame(skip_tts=bool(msg["fast"])))
+        if "tts" in msg:
+            await self.push_frame(LLMConfigureOutputFrame(skip_tts=not bool(msg["tts"])))
 
     async def _reset_context(self, messages: list):
         """Push LLMMessagesUpdateFrame downstream to reset the bot's LLM context.
@@ -316,15 +309,17 @@ class EvalOutputTransport(BaseOutputTransport):
     Inspects every frame arriving from upstream and translates relevant ones
     into semantic JSON events on the harness WebSocket. ``LLMFullResponseStart``
     / ``LLMFullResponseEnd`` mark the boundaries of a bot response;
-    ``TextFrame`` subclasses (``LLMTextFrame`` in fast mode where TTS is
-    skipped, ``TTSTextFrame`` in normal mode) flow between them and are
-    aggregated into the ``llm_response.text`` payload.
+    ``TextFrame`` subclasses (``LLMTextFrame`` when TTS is skipped,
+    ``TTSTextFrame`` when TTS runs) flow between them and are aggregated
+    into the ``llm_response.text`` payload.
 
-    In real-time mode, each ``TextFrame`` chunk is paced with a sleep
-    proportional to its character count — simulating natural speaking speed
-    so interruption tests have a window in which to barge in. The sleep is
-    interruptible: an ``InterruptionFrame`` signals an event that breaks any
-    in-flight pacing immediately.
+    Audio pacing: when TTS is active (the bot pipeline produces audio
+    frames), ``write_audio_frame`` paces each chunk at real-time
+    (``audio_chunk_size / sample_rate`` seconds per chunk) so the bot
+    behaves as if a real audio sink were consuming output — gives
+    interruption tests a realistic window in which to barge in. When TTS
+    is skipped (``LLMConfigureOutputFrame(skip_tts=True)`` observed),
+    no audio frames flow and no pacing happens.
     """
 
     def __init__(
@@ -347,22 +342,22 @@ class EvalOutputTransport(BaseOutputTransport):
 
         self._websocket: Any = None
 
-        self._chars_per_second = params.chars_per_second
-
         # Toggled by LLMConfigureOutputFrame flowing through process_frame.
-        # When True, text pacing is skipped — the same signal the LLM uses
-        # to bypass TTS also tells us not to simulate spoken-word timing.
-        self._skip_tts = params.fast
+        # When True, write_audio_frame returns immediately (no real audio
+        # will flow anyway since the LLM is bypassing TTS).
+        self._skip_tts = not params.tts
+
+        # Real-time audio pacing — computed at start() once sample_rate is
+        # known. Each chunk's write blocks for audio_chunk_size/sample_rate
+        # seconds (its natural playback duration).
+        self._send_interval = 0.0
+        self._next_send_time = 0.0
 
         # Response aggregation state.
         self._response_text: list[str] = []
         self._in_response = False
         self._llm_started_t: float | None = None
         self._tool_calls: dict[str, dict] = {}
-
-        # Interruption signal: an asyncio.Event the InterruptionFrame handler
-        # sets to short-circuit any in-flight text pacing sleep.
-        self._interrupt_event = asyncio.Event()
 
         self._initialized = False
         self._t0 = time.monotonic()
@@ -383,6 +378,10 @@ class EvalOutputTransport(BaseOutputTransport):
             return
         self._initialized = True
 
+        # Real-time pacing: chunk duration in seconds. The base class
+        # populates audio_chunk_size and sample_rate by the time start()
+        # runs.
+        self._send_interval = self.audio_chunk_size / self.sample_rate
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -417,7 +416,14 @@ class EvalOutputTransport(BaseOutputTransport):
                 if self._llm_started_t is not None
                 else None
             )
-            self._interrupt_event.set()
+            self._next_send_time = 0  # reset audio pacing
+            # Cancel the in-flight response. If the LLM's End frame for the
+            # cancelled response arrives later (timing-dependent), the
+            # _in_response gate will prevent emitting a spurious empty
+            # llm_response. A new LLMFullResponseStart will re-arm the flag.
+            self._in_response = False
+            self._response_text = []
+            self._llm_started_t = None
             await self._emit(
                 {"type": "interruption", "t": self._t(), "into_bot_response_ms": offset}
             )
@@ -425,7 +431,6 @@ class EvalOutputTransport(BaseOutputTransport):
             self._response_text = []
             self._in_response = True
             self._llm_started_t = time.monotonic()
-            self._interrupt_event.clear()
             await self._emit({"type": "llm_started", "t": self._t()})
         elif isinstance(frame, LLMFullResponseEndFrame):
             if self._in_response:
@@ -433,15 +438,20 @@ class EvalOutputTransport(BaseOutputTransport):
                 self._response_text = []
                 self._in_response = False
                 self._llm_started_t = None
-                await self._emit({"type": "llm_response", "t": self._t(), "text": text})
+                # Skip the emission if no text was produced — happens when
+                # the LLM response cycle fires Start/End around a no-op
+                # (cancelled or zero-token response). The harness can't do
+                # anything useful with an empty llm_response and it would
+                # spuriously match expectations meant for the next response.
+                if text:
+                    await self._emit({"type": "llm_response", "t": self._t(), "text": text})
         elif isinstance(frame, TextFrame) and self._in_response:
-            # Catches LLMTextFrame in fast mode (TTS skipped) and TTSTextFrame
-            # in normal mode (TTSTextFrame extends AggregatedTextFrame extends
+            # Catches LLMTextFrame when TTS is skipped and TTSTextFrame when
+            # TTS runs (TTSTextFrame extends AggregatedTextFrame extends
             # TextFrame). TranscriptionFrame also extends TextFrame, but it
             # fires before LLMFullResponseStartFrame, so _in_response gates
             # it out.
             self._response_text.append(frame.text)
-            await self._pace_text(frame.text)
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._tool_calls[frame.tool_call_id] = {
                 "name": frame.function_name,
@@ -488,25 +498,33 @@ class EvalOutputTransport(BaseOutputTransport):
                 }
             )
 
-    async def _pace_text(self, text: str) -> None:
-        """Sleep proportional to text length to simulate natural speaking speed.
-
-        Returns immediately when TTS is being skipped (no real bot speech to
-        pace) or if the interruption event fires. Computed as
-        ``len(text) / chars_per_second`` (≈ 150 WPM at the default rate).
-        """
-        if self._skip_tts or not text:
-            return
-        target_s = len(text) / self._chars_per_second
-        try:
-            await asyncio.wait_for(self._interrupt_event.wait(), timeout=target_s)
-        except TimeoutError:
-            pass
-
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Drop audio bytes; pacing happens on TextFrame in process_frame."""
+        """Drop the audio bytes but pace at real-time playback rate.
+
+        When TTS is skipped, no audio flows through this method so the
+        ``_skip_tts`` short-circuit isn't strictly necessary, but it's a
+        cheap safety net and makes the intent explicit.
+        """
         del frame
+        if self._skip_tts:
+            return True
+        await self._pace_audio()
         return True
+
+    async def _pace_audio(self) -> None:
+        """Sleep so audio chunks are consumed at real-time playback rate.
+
+        Carries a ``_next_send_time`` cursor so timing doesn't drift across
+        many chunks. Reset to 0 on InterruptionFrame so the next chunk
+        sends immediately.
+        """
+        now = time.monotonic()
+        sleep_duration = max(0.0, self._next_send_time - now)
+        await asyncio.sleep(sleep_duration)
+        if sleep_duration == 0:
+            self._next_send_time = time.monotonic() + self._send_interval
+        else:
+            self._next_send_time += self._send_interval
 
     async def _emit(self, event: dict):
         """Send a semantic event to the connected harness, if any."""
@@ -595,16 +613,24 @@ class EvalTransport(BaseTransport):
         return self._output
 
     async def _on_client_connected(self, websocket):
-        """Share the WebSocket with the output side and (optionally) notify handlers."""
+        """Share the WebSocket with the output side and notify handlers.
+
+        ``on_client_connected`` always fires regardless of ``keep_alive`` —
+        bots typically use it to kick off conversations (greeting on
+        connect, pushing initial context messages, etc.) and that's exactly
+        what evals need on each fresh connection.
+        """
         if self._output:
             await self._output.set_client_connection(websocket)
-        # When keep_alive is True, suppress the connection event so bots that
-        # tear themselves down in on_client_disconnected stay up across evals.
-        if not self._params.keep_alive:
-            await self._call_event_handler("on_client_connected", websocket)
+        await self._call_event_handler("on_client_connected", websocket)
 
     async def _on_client_disconnected(self, websocket):
-        """Clear the WebSocket on the output side and (optionally) notify handlers."""
+        """Clear the WebSocket on the output side and (optionally) notify handlers.
+
+        Suppressed when ``keep_alive`` is True so bots that tear themselves
+        down in ``on_client_disconnected`` (typical: ``worker.cancel()``)
+        stay up across multiple harness connections.
+        """
         if self._output:
             await self._output.set_client_connection(None)
         if not self._params.keep_alive:

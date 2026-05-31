@@ -142,7 +142,10 @@ class TestEvalTransportKeepAlive(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.05)
         return transport, worker, task, port
 
-    async def test_keep_alive_true_suppresses_handlers(self):
+    async def test_keep_alive_true_fires_connect_suppresses_disconnect(self):
+        """keep_alive=True still fires on_client_connected (bots use it to
+        kick off conversations per-eval) but suppresses on_client_disconnected
+        so bots that tear down on disconnect stay alive across evals."""
         transport, worker, bot_task, port = await self._build_bot(keep_alive=True)
         try:
             connected = asyncio.Event()
@@ -157,10 +160,10 @@ class TestEvalTransportKeepAlive(unittest.IsolatedAsyncioTestCase):
                 disconnected.set()
 
             async with websockets.connect(f"ws://localhost:{port}"):
-                await asyncio.sleep(0.2)
+                await asyncio.wait_for(connected.wait(), timeout=1.0)
 
             await asyncio.sleep(0.3)
-            self.assertFalse(connected.is_set(), "on_client_connected should be suppressed")
+            self.assertTrue(connected.is_set(), "on_client_connected should fire")
             self.assertFalse(disconnected.is_set(), "on_client_disconnected should be suppressed")
         finally:
             await worker.cancel()

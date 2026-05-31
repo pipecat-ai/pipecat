@@ -1,26 +1,22 @@
-# Template — requires a bot that emits an LLM-generated greeting on connect.
-# Won't pass against the passthrough sample_bot.py.
-#
-# Demonstrates:
-#   - An "expect-only" first turn (no user input — wait for the bot to speak)
-#   - A judge-evaluated semantic check on the bot's reply
-
 name: bot_greets_then_describes_capabilities
+
+tts: false
 
 judge:
   service: ollama
   model: llama3:latest
 
 turns:
-  - expect:                              # no user input — wait for the bot's opener
+  # Wait for the bot's opener
+  - expect:
       - event: llm_started
-        within_ms: 3000
+        within_ms: 5000
       - event: llm_response
-        within_ms: 8000
+        within_ms: 15000
         eval: "greets the user and offers to help"
 
   - user: "what can you do?"
     expect:
       - event: llm_response
-        within_ms: 8000
+        within_ms: 15000
         eval: "describes the agent's capabilities clearly and concisely"

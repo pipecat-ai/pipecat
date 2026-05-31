@@ -1,14 +1,3 @@
-# Template — requires a bot with real LLM + TTS so the bot's response takes
-# time to produce. Won't pass against the passthrough sample_bot.py.
-#
-# Demonstrates:
-#   - send_after scheduled relative to a bot event (barge-in)
-#   - Asserting that an interruption event fires within a tight budget
-#   - Judge confirming the bot then answered the new question
-#
-# Note: this eval uses fast: false (default) — real-time text pacing is what
-# gives the harness a window in which to barge in during the bot's response.
-
 name: barge_in_during_long_response
 
 judge:
@@ -21,13 +10,13 @@ turns:
       - event: llm_started
         within_ms: 3000
 
-  - send_after:
+  - user: "stop, what time is it?"
+    send_after:
       event: llm_started
       delay_ms: 500
-    user: "stop, what time is it?"
     expect:
       - event: interruption
         within_ms: 1000
-      - event: llm_response                # the bot's reply to the new question
+      - event: llm_response
         within_ms: 10000
         eval: "states a time of day rather than continuing the previous topic"
