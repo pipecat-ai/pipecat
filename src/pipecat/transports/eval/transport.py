@@ -8,11 +8,12 @@
 
 This transport runs a local WebSocket server that simulates a connected client.
 It accepts scripted user input as JSON messages and emits high-level semantic
-events back to the connected harness (user_started_speaking, llm_response,
-interruption, bot_stopped_speaking, etc.). Designed for fast, deterministic
-behavioral evaluations of a pipeline without invoking real STT or full audio I/O.
+events back to the connected harness (user_started_speaking,
+user_stopped_speaking, bot_started_speaking, bot_stopped_speaking,
+interruption, tool_call, error). Designed for fast, deterministic behavioral
+evaluations of a pipeline without invoking real STT or full audio I/O.
 
-Selected via ``-t test`` in the development runner.
+Selected via ``-t eval`` in the development runner.
 """
 
 import asyncio
@@ -36,10 +37,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InterruptionFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
-    LLMTextFrame,
     OutputAudioRawFrame,
     StartFrame,
     TranscriptionFrame,
@@ -330,7 +328,6 @@ class EvalOutputTransport(BaseOutputTransport):
         self._fast = params.fast
 
         # Aggregation state for semantic events.
-        self._llm_response_text: list[str] = []
         self._bot_speech_text: list[str] = []
         self._tool_calls: dict[str, dict] = {}
         self._bot_started_t: float | None = None
@@ -391,15 +388,6 @@ class EvalOutputTransport(BaseOutputTransport):
                 {"type": "interruption", "t": self._t(), "into_bot_utterance_ms": offset}
             )
             self._next_send_time = 0  # reset audio pacing — same as WebSocket server transport
-        elif isinstance(frame, LLMFullResponseStartFrame):
-            self._llm_response_text = []
-            await self._emit({"type": "llm_started", "t": self._t()})
-        elif isinstance(frame, LLMTextFrame):
-            self._llm_response_text.append(frame.text)
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            text = "".join(self._llm_response_text)
-            self._llm_response_text = []
-            await self._emit({"type": "llm_response", "t": self._t(), "text": text})
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._tool_calls[frame.tool_call_id] = {
                 "name": frame.function_name,

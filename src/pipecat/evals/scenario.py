@@ -25,14 +25,14 @@ Supported expectation fields (per event):
     event: <name>              required — event type name
     within_ms: <int>           latency budget from the most recent anchor
     transcript_contains: <str> substring check on user_stopped_speaking.transcript
-    text_contains: <str>       substring check on llm_response.text or bot_stopped_speaking.text
+    text_contains: <str>       substring check on bot_stopped_speaking.text
     name: <str>                tool_call.name equality
     args: <object>             tool_call.args equality
     eval: <str>                natural-language criterion the event's text content
                                must satisfy, evaluated by a judge LLM (see
                                :mod:`pipecat.evals.judge`). Only meaningful on
-                               events with bot-generated text content —
-                               ``llm_response`` and ``bot_stopped_speaking``.
+                               ``bot_stopped_speaking`` (the text the bot
+                               actually spoke).
 
 A turn may also include ``send_after:`` to schedule its ``user_input`` send
 relative to a prior event (used for interruption / barge-in tests).
@@ -67,10 +67,10 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 # Events whose payloads carry bot-generated text the judge can sensibly
-# evaluate. Asserting ``judge:`` on anything else (user transcripts, tool
+# evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
 # calls, interruption signals) produces a parser warning — the test controls
 # user input deterministically, so judging it adds cost without signal.
-JUDGEABLE_EVENTS = frozenset({"llm_response", "bot_stopped_speaking"})
+JUDGEABLE_EVENTS = frozenset({"bot_stopped_speaking"})
 
 
 @dataclass
@@ -84,13 +84,12 @@ class Expectation:
             a turn, or the previous matched event otherwise).
         transcript_contains: Optional substring check on
             ``user_stopped_speaking.transcript``.
-        text_contains: Optional substring check on ``llm_response.text`` or
-            ``bot_stopped_speaking.text``.
+        text_contains: Optional substring check on ``bot_stopped_speaking.text``.
         name: Optional equality check for ``tool_call.name``.
         args: Optional equality check for ``tool_call.args``.
         eval: Optional natural-language criterion the event's text content
             must satisfy. Evaluated by a judge LLM. Only meaningful on
-            ``llm_response`` and ``bot_stopped_speaking``.
+            ``bot_stopped_speaking`` (the text the bot actually spoke).
         raw: The original parsed dict, for forward compatibility.
     """
 

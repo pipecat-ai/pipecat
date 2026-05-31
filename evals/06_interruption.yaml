@@ -26,8 +26,8 @@ turns:
     expect:
       - event: interruption
         within_ms: 1000
-      - event: bot_stopped_speaking
+      - event: bot_stopped_speaking      # the interrupted utterance ending
         within_ms: 1000
-      - event: llm_response
-        within_ms: 5000
+      - event: bot_stopped_speaking      # the bot's reply to the new question
+        within_ms: 8000
         eval: "states a time of day rather than continuing the previous topic"

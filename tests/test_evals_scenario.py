@@ -51,7 +51,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 turns:
                   - user: "x"
                     expect:
-                      - event: llm_response
+                      - event: bot_stopped_speaking
                         within_ms: 500
                         transcript_contains: "foo"
                         text_contains: "bar"

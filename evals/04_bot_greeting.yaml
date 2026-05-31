@@ -21,8 +21,6 @@ turns:
 
   - user: "what can you do?"
     expect:
-      - event: llm_response
-        within_ms: 5000
-        eval: "describes the agent's capabilities clearly and concisely"
       - event: bot_stopped_speaking
         within_ms: 8000
+        eval: "describes the agent's capabilities clearly and concisely"

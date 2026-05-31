@@ -42,15 +42,15 @@ as-is:
 
 ## Templates for real bots
 
-These evals assert on bot-side events (`llm_response`, `tool_call`,
-`bot_stopped_speaking`, `interruption`) and require a bot with real LLM and
-TTS services configured. Won't pass against the passthrough sample. Evals
-using the `judge:` assertion also need a judge LLM available (Ollama by
-default).
+These evals assert on bot-side events (`bot_started_speaking`,
+`bot_stopped_speaking`, `tool_call`, `interruption`) and require a bot with
+real LLM and TTS services configured. Won't pass against the passthrough
+sample. Evals using the `eval:` assertion also need a judge LLM available
+(Ollama by default).
 
 | File | What it shows |
 |---|---|
-| `02_judge_bot_response.yaml` | Judge LLM evaluating natural-language criteria on `llm_response.text` |
+| `02_judge_bot_response.yaml` | Judge LLM evaluating natural-language criteria on `bot_stopped_speaking.text` |
 | `04_bot_greeting.yaml` | Bot speaks first; expect-only opening turn; judge on bot reply |
 | `05_tool_call.yaml` | `tool_call` name/args assertions |
 | `06_interruption.yaml` | Barge-in via `send_after` on `bot_started_speaking` |
@@ -72,6 +72,6 @@ judge:
 
 The judge runs as a one-shot call through any pipecat LLM service that exposes
 `run_inference()` (currently Ollama and OpenAI). The `eval:` assertion only
-makes sense on events with bot-generated text — `llm_response` and
-`bot_stopped_speaking`. Asserting on user transcripts is silly since the test
-controls what the user said; the parser warns when you do it.
+makes sense on `bot_stopped_speaking` — the text the bot actually spoke.
+Asserting on user transcripts is silly since the test controls what the user
+said; the parser warns when you do it.

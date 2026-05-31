@@ -147,7 +147,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                     expect=[
                         Expectation(event="bot_started_speaking", within_ms=100),
                         Expectation(event="bot_stopped_speaking", within_ms=100),
-                        Expectation(event="llm_response", within_ms=100),
+                        Expectation(event="tool_call", within_ms=100),
                     ],
                 )
             ],
