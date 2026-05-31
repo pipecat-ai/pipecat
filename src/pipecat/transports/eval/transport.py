@@ -102,7 +102,14 @@ class EvalTransportParams(TransportParams):
             English speech.
     """
 
+    # Eval mode doesn't actually play audio anywhere, so we override the
+    # silence-related defaults from TransportParams: no continuous silence
+    # injection while the audio queue is empty (saves needless write_audio_frame
+    # calls in fast mode where TTS is skipped entirely), and no end-of-frame
+    # silence either. write_audio_frame is a no-op regardless of mode.
     audio_out_enabled: bool = True
+    audio_out_auto_silence: bool = False
+    audio_out_end_silence_secs: int = 0
 
     verbose: bool = False
     keep_alive: bool = True
