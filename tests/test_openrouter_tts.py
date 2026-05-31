@@ -6,18 +6,14 @@
 
 """Tests for OpenRouterTTSService."""
 
-import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from pipecat.frames.frames import (
     ErrorFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.services.openrouter.tts import (
     OPENROUTER_DEFAULT_TTS_MODEL,
@@ -26,7 +22,7 @@ from pipecat.services.openrouter.tts import (
     OpenRouterTTSService,
     OpenRouterTTSSettings,
 )
-from pipecat.services.settings import NOT_GIVEN, is_given
+from pipecat.services.settings import is_given
 
 
 # ---------------------------------------------------------------------------

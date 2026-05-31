@@ -23,8 +23,8 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
 )
-from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
 from pipecat.services.openai.tts import OpenAITTSService, OpenAITTSSettings
+from pipecat.services.tts_service import TTSService
 from pipecat.services.settings import assert_given
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -75,57 +75,20 @@ class OpenRouterTTSService(OpenAITTSService):
         *,
         api_key: str | None = None,
         base_url: str = OPENROUTER_TTS_BASE_URL,
-        voice: str | None = None,
-        model: str | None = None,
-        sample_rate: int | None = None,
-        instructions: str | None = None,
-        speed: float | None = None,
-        params: OpenAITTSService.InputParams | None = None,
         settings: Settings | None = None,
         **kwargs,
     ):
         """Initialize OpenRouter TTS service.
 
         Args:
-            api_key: OpenRouter API key. If None, reads from environment variable.
+            api_key: OpenRouter API key. If None, reads from the ``OPENROUTER_API_KEY``
+                environment variable.
             base_url: OpenRouter API base URL. Defaults to ``https://openrouter.ai/api/v1``.
-            voice: Voice ID to use. Varies by model/provider. Defaults to ``"alloy"``.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=OpenRouterTTSService.Settings(voice=...)`` instead.
-
-            model: TTS model to use. Defaults to ``"openai/gpt-4o-mini-tts-2025-12-15"``.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=OpenRouterTTSService.Settings(model=...)`` instead.
-
-            sample_rate: Output audio sample rate in Hz. Defaults to 24000Hz.
-            instructions: Optional instructions to guide voice synthesis behavior.
-                Only honored by supporting models (e.g. OpenAI).
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=OpenRouterTTSService.Settings(instructions=...)`` instead.
-
-            speed: Voice speed multiplier. Only honored by supporting models.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=OpenRouterTTSService.Settings(speed=...)`` instead.
-
-            params: Optional synthesis controls.
-
-                .. deprecated:: 0.0.105
-                    Use ``settings=OpenRouterTTSService.Settings(...)`` instead.
-
-            settings: Runtime-updatable settings. Takes precedence over deprecated parameters.
-            **kwargs: Additional keyword arguments passed to TTSService.
+            settings: Model, voice, and synthesis options. When omitted, defaults to
+                model ``openai/gpt-4o-mini-tts-2025-12-15`` and voice ``alloy``.
+            **kwargs: Additional keyword arguments passed to TTSService (e.g.
+                ``sample_rate``, ``push_start_frame``).
         """
-        if sample_rate and sample_rate != OPENAI_SAMPLE_RATE:
-            logger.warning(
-                f"OpenRouter TTS returns PCM at {OPENAI_SAMPLE_RATE}Hz. "
-                f"Current rate of {sample_rate}Hz may cause issues."
-            )
-
-        # 1. Initialize default_settings with OpenRouter defaults
         default_settings = self.Settings(
             model=OPENROUTER_DEFAULT_TTS_MODEL,
             voice=OPENROUTER_DEFAULT_TTS_VOICE,
@@ -134,41 +97,11 @@ class OpenRouterTTSService(OpenAITTSService):
             speed=None,
         )
 
-        # 2. Apply direct init arg overrides (deprecated)
-        if voice is not None:
-            self._warn_init_param_moved_to_settings("voice", "voice")
-            default_settings.voice = voice
-        if model is not None:
-            self._warn_init_param_moved_to_settings("model", "model")
-            default_settings.model = model
-        if instructions is not None:
-            self._warn_init_param_moved_to_settings("instructions", "instructions")
-            default_settings.instructions = instructions
-        if speed is not None:
-            self._warn_init_param_moved_to_settings("speed", "speed")
-            default_settings.speed = speed
-
-        # 3. Apply params overrides — only if settings not provided
-        if params is not None:
-            self._warn_init_param_moved_to_settings("params")
-            if not settings:
-                if params.instructions is not None:
-                    default_settings.instructions = params.instructions
-                if params.speed is not None:
-                    default_settings.speed = params.speed
-
-        # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
 
-        # Skip OpenAITTSService.__init__ and go directly to TTSService to avoid
-        # re-running the OpenAI-specific default_settings setup and sample rate
-        # warnings. We wire up the client ourselves below.
-        from pipecat.services.tts_service import TTSService
-
         TTSService.__init__(
             self,
-            sample_rate=sample_rate,
             push_start_frame=True,
             push_stop_frames=True,
             settings=default_settings,
