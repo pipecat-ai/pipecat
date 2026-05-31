@@ -29,7 +29,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
         s = load_scenario(
             _write(
                 """
-                eval: minimal
+                name: minimal
                 turns:
                   - user: "hello"
                     expect:
@@ -47,18 +47,17 @@ class TestEvalsScenarioParser(unittest.TestCase):
         s = load_scenario(
             _write(
                 """
-                eval: all_fields
+                name: all_fields
                 turns:
                   - user: "x"
                     expect:
-                      - event: user_stopped_speaking
+                      - event: llm_response
                         within_ms: 500
                         transcript_contains: "foo"
                         text_contains: "bar"
                         name: my_tool
                         args: {a: 1}
-                        says: "is friendly"
-                        says_not: "is rude"
+                        judge: "is friendly"
                 """
             )
         )
@@ -68,14 +67,13 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(exp.text_contains, "bar")
         self.assertEqual(exp.name, "my_tool")
         self.assertEqual(exp.args, {"a": 1})
-        self.assertEqual(exp.says, "is friendly")
-        self.assertEqual(exp.says_not, "is rude")
+        self.assertEqual(exp.judge, "is friendly")
 
     def test_send_after_parsed(self):
         s = load_scenario(
             _write(
                 """
-                eval: with_send_after
+                name: with_send_after
                 turns:
                   - user: "first"
                     expect: [{event: user_stopped_speaking}]
@@ -96,7 +94,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
         s = load_scenario(
             _write(
                 """
-                eval: bot_first
+                name: bot_first
                 turns:
                   - expect:
                       - event: bot_stopped_speaking
@@ -106,14 +104,14 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(s.turns[0].user)
         self.assertEqual(s.turns[0].expect[0].event, "bot_stopped_speaking")
 
-    def test_judge_and_fixtures_preserved(self):
+    def test_judge_fields_and_fixtures_preserved(self):
         s = load_scenario(
             _write(
                 """
-                eval: with_judge
-                judge:
-                  service: ollama
-                  model: qwen2.5:3b
+                name: with_judge
+                judge_service: openai
+                judge_model: gpt-4o-mini
+                judge_endpoint: http://custom-endpoint
                 fixtures:
                   bot_url: ws://localhost:9000
                 turns:
@@ -122,20 +120,30 @@ class TestEvalsScenarioParser(unittest.TestCase):
                 """
             )
         )
-        self.assertEqual(s.judge, {"service": "ollama", "model": "qwen2.5:3b"})
+        self.assertEqual(s.judge_service, "openai")
+        self.assertEqual(s.judge_model, "gpt-4o-mini")
+        self.assertEqual(s.judge_endpoint, "http://custom-endpoint")
         self.assertEqual(s.fixtures, {"bot_url": "ws://localhost:9000"})
 
-    def test_missing_eval_field(self):
+    def test_judge_fields_default_to_ollama(self):
+        s = load_scenario(
+            _write("name: e\nturns: [{user: hi, expect: [{event: user_stopped_speaking}]}]\n")
+        )
+        self.assertEqual(s.judge_service, "ollama")
+        self.assertEqual(s.judge_model, "qwen2.5:3b")
+        self.assertIsNone(s.judge_endpoint)
+
+    def test_missing_name_field(self):
         with self.assertRaises(ValueError) as cm:
             load_scenario(_write("turns: []\n"))
-        self.assertIn("'eval:'", str(cm.exception))
+        self.assertIn("'name:'", str(cm.exception))
 
     def test_send_after_without_user_rejected(self):
         with self.assertRaises(ValueError) as cm:
             load_scenario(
                 _write(
                     """
-                    eval: bad
+                    name: bad
                     turns:
                       - send_after: {event: x, delay_ms: 100}
                         expect: [{event: y}]
@@ -150,7 +158,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
             load_scenario(
                 _write(
                     """
-                    eval: bad
+                    name: bad
                     turns:
                       - send_after: {event: x, delay_ms: -1}
                         user: "y"
@@ -162,12 +170,12 @@ class TestEvalsScenarioParser(unittest.TestCase):
 
     def test_missing_expect_rejected(self):
         with self.assertRaises(ValueError) as cm:
-            load_scenario(_write("eval: bad\nturns: [{user: hi}]\n"))
+            load_scenario(_write("name: bad\nturns: [{user: hi}]\n"))
         self.assertIn("expect", str(cm.exception))
 
     def test_expectation_missing_event_rejected(self):
         with self.assertRaises(ValueError) as cm:
-            load_scenario(_write("eval: bad\nturns: [{user: hi, expect: [{within_ms: 100}]}]\n"))
+            load_scenario(_write("name: bad\nturns: [{user: hi, expect: [{within_ms: 100}]}]\n"))
         self.assertIn("event", str(cm.exception))
 
     def test_expectation_dataclass_defaults(self):
@@ -175,8 +183,26 @@ class TestEvalsScenarioParser(unittest.TestCase):
         e = Expectation(event="foo")
         self.assertIsNone(e.within_ms)
         self.assertIsNone(e.transcript_contains)
-        self.assertIsNone(e.says)
-        self.assertIsNone(e.says_not)
+        self.assertIsNone(e.judge)
+
+    def test_judge_on_non_bot_event_warns(self):
+        """judge: on user-side events should produce a parser warning
+        (the user transcript is deterministic, so judging it adds cost without
+        signal). We can't easily assert on loguru output, but the parse
+        should succeed and the field should be preserved."""
+        s = load_scenario(
+            _write(
+                """
+                name: misused_judge
+                turns:
+                  - user: "hi"
+                    expect:
+                      - event: user_stopped_speaking
+                        judge: "is a greeting"
+                """
+            )
+        )
+        self.assertEqual(s.turns[0].expect[0].judge, "is a greeting")
 
     def test_turn_dataclass_construction(self):
         """Direct construction (used by tests / programmatic eval generation)."""
@@ -186,7 +212,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
 
     def test_reset_defaults_to_empty(self):
         s = load_scenario(
-            _write("eval: e\nturns: [{user: hi, expect: [{event: user_stopped_speaking}]}]\n")
+            _write("name: e\nturns: [{user: hi, expect: [{event: user_stopped_speaking}]}]\n")
         )
         self.assertEqual(s.reset, [])
 
@@ -194,7 +220,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
         s = load_scenario(
             _write(
                 """
-                eval: with_reset
+                name: with_reset
                 reset:
                   - role: system
                     content: "You are a helpful assistant."
@@ -211,7 +237,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
     def test_reset_non_list_rejected(self):
         with self.assertRaises(ValueError) as cm:
             load_scenario(
-                _write("eval: bad\nreset: not_a_list\nturns: [{user: hi, expect: [{event: x}]}]\n")
+                _write("name: bad\nreset: not_a_list\nturns: [{user: hi, expect: [{event: x}]}]\n")
             )
         self.assertIn("'reset:'", str(cm.exception))
 

@@ -1,7 +1,7 @@
 # Sanity check — user input flows through and produces the expected events.
 # Works against any bot using EvalTransport, including the passthrough sample.
 
-eval: basic_user_input
+name: basic_user_input
 
 turns:
   - user: "hello world"

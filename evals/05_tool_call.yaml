@@ -8,7 +8,7 @@
 #   - Combining tool_call assertions with downstream llm_response /
 #     bot_stopped_speaking on each turn
 
-eval: weather_tool_call_with_follow_up
+name: weather_tool_call_with_follow_up
 
 turns:
   - user: "what's the weather in Paris?"

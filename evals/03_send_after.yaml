@@ -3,7 +3,7 @@
 # delays 200ms before sending its own user message. Works against the
 # passthrough bot.
 
-eval: chained_turns_with_send_after
+name: chained_turns_with_send_after
 
 turns:
   - user: "first message"

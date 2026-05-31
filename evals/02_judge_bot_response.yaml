@@ -1,0 +1,25 @@
+# Template — requires a bot with a real LLM that produces llm_response events.
+# Won't pass against the passthrough sample_bot.py.
+#
+# Demonstrates the judge LLM evaluating natural-language criteria on bot
+# output (where the actual text is non-deterministic and worth checking).
+# Configure the judge with the flat top-level judge_service / judge_model /
+# judge_endpoint fields.
+
+name: bot_response_is_helpful
+
+judge_service: ollama
+judge_model: llama3:latest
+
+turns:
+  - user: "what is the capital of France?"
+    expect:
+      - event: llm_response
+        within_ms: 5000
+        judge: "the response correctly identifies Paris as the capital of France"
+
+  - user: "and how many people live there?"
+    expect:
+      - event: llm_response
+        within_ms: 5000
+        judge: "the response provides a population figure or acknowledges uncertainty"

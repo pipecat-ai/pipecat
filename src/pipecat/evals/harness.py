@@ -128,15 +128,15 @@ async def run_scenario(
             duration_ms=int((time.monotonic() - started) * 1000),
         )
 
-    # Lazily construct the judge — only if the scenario uses says:/says_not:.
+    # Lazily construct the judge — only if the scenario uses judge: assertions.
     judge: Judge | None = None
-    needs_judge = any(
-        exp.says is not None or exp.says_not is not None
-        for turn in scenario.turns
-        for exp in turn.expect
-    )
+    needs_judge = any(exp.judge is not None for turn in scenario.turns for exp in turn.expect)
     if needs_judge:
-        judge = build_default_judge(scenario.judge)
+        judge = build_default_judge(
+            service=scenario.judge_service,
+            model=scenario.judge_model,
+            endpoint=scenario.judge_endpoint,
+        )
 
     ctx = _RunContext(
         ws=ws,
@@ -352,8 +352,8 @@ async def _check_judge(
     exp_idx: int,
     judge: Judge | None,
 ) -> AssertionFailure | None:
-    """Run judge-based ``says:`` / ``says_not:`` assertions if any are set."""
-    if expectation.says is None and expectation.says_not is None:
+    """Run the judge assertion if set."""
+    if expectation.judge is None:
         return None
 
     if judge is None:
@@ -361,7 +361,7 @@ async def _check_judge(
             turn_index=turn_idx,
             expectation_index=exp_idx,
             event_name=expectation.event,
-            reason="scenario uses says:/says_not: but no judge could be built",
+            reason="scenario uses 'judge:' but no judge could be built",
         )
 
     content = event.get("text") or event.get("transcript")
@@ -373,24 +373,13 @@ async def _check_judge(
             reason=f"event has no text/transcript to judge: {event!r}",
         )
 
-    if expectation.says is not None:
-        verdict = await judge.evaluate(expectation.says, content, polarity="says")
-        if not verdict.passed:
-            return AssertionFailure(
-                turn_index=turn_idx,
-                expectation_index=exp_idx,
-                event_name=expectation.event,
-                reason=f"says {expectation.says!r}: judge said no — {verdict.reason}",
-            )
-
-    if expectation.says_not is not None:
-        verdict = await judge.evaluate(expectation.says_not, content, polarity="says_not")
-        if not verdict.passed:
-            return AssertionFailure(
-                turn_index=turn_idx,
-                expectation_index=exp_idx,
-                event_name=expectation.event,
-                reason=f"says_not {expectation.says_not!r}: judge said yes — {verdict.reason}",
-            )
+    verdict = await judge.evaluate(expectation.judge, content)
+    if not verdict.passed:
+        return AssertionFailure(
+            turn_index=turn_idx,
+            expectation_index=exp_idx,
+            event_name=expectation.event,
+            reason=f"judge {expectation.judge!r}: said no — {verdict.reason}",
+        )
 
     return None

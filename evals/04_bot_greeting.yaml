@@ -4,13 +4,11 @@
 # Demonstrates:
 #   - An "expect-only" first turn (no user input — wait for the bot to speak)
 #   - A judge-evaluated semantic check on the bot's reply
-#   - says + says_not on the same event
 
-eval: bot_greets_then_describes_capabilities
+name: bot_greets_then_describes_capabilities
 
-judge:
-  service: ollama
-  model: llama3:latest
+judge_service: ollama
+judge_model: llama3:latest
 
 turns:
   - expect:                              # no user input — wait for the bot's opener
@@ -18,13 +16,12 @@ turns:
         within_ms: 3000
       - event: bot_stopped_speaking
         within_ms: 8000
-        says: "greets the user and offers to help"
+        judge: "greets the user and offers to help"
 
   - user: "what can you do?"
     expect:
       - event: llm_response
         within_ms: 5000
-        says: "describes the agent's capabilities"
-        says_not: "asks the user to repeat themselves"
+        judge: "describes the agent's capabilities clearly and concisely"
       - event: bot_stopped_speaking
         within_ms: 8000

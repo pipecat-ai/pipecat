@@ -9,7 +9,7 @@
 A scenario is a YAML file describing a scripted conversation and the semantic
 events expected to flow back from the bot. Simple example::
 
-    eval: simple_user_input
+    name: simple_user_input
     turns:
       - user: "hello world"
         expect:
@@ -28,11 +28,22 @@ Supported expectation fields (per event):
     text_contains: <str>       substring check on llm_response.text or bot_stopped_speaking.text
     name: <str>                tool_call.name equality
     args: <object>             tool_call.args equality
+    judge: <str>               natural-language criterion the event's text content
+                               must satisfy, evaluated by a judge LLM (see
+                               :mod:`pipecat.evals.judge`). Only meaningful on
+                               events with bot-generated text content —
+                               ``llm_response`` and ``bot_stopped_speaking``.
 
-Fields ``says:`` / ``says_not:`` use a judge LLM for natural-language
-content assertions (see :mod:`pipecat.evals.judge`). A turn may also include
-``send_after:`` to schedule its ``user_input`` send relative to a prior event
-(used for interruption / barge-in tests).
+A turn may also include ``send_after:`` to schedule its ``user_input`` send
+relative to a prior event (used for interruption / barge-in tests).
+
+Top-level optional fields:
+    reset: list of LLM messages the harness sends as a reset before driving
+           turns (default empty list, which clears the bot's context).
+    judge_service: judge LLM service name (default "ollama").
+    judge_model: judge model name (default "qwen2.5:3b").
+    judge_endpoint: optional override for the judge service URL.
+    fixtures: free-form mapping (e.g. ``bot_url:``).
 """
 
 from dataclasses import dataclass, field
@@ -46,6 +57,12 @@ try:
 except ModuleNotFoundError as e:
     logger.error("PyYAML is required for the scenario runner. Install with: pip install pyyaml")
     raise ImportError(f"Missing module: {e}") from e
+
+# Events whose payloads carry bot-generated text the judge can sensibly
+# evaluate. Asserting ``judge:`` on anything else (user transcripts, tool
+# calls, interruption signals) produces a parser warning — the test controls
+# user input deterministically, so judging it adds cost without signal.
+JUDGEABLE_EVENTS = frozenset({"llm_response", "bot_stopped_speaking"})
 
 
 @dataclass
@@ -63,11 +80,9 @@ class Expectation:
             ``bot_stopped_speaking.text``.
         name: Optional equality check for ``tool_call.name``.
         args: Optional equality check for ``tool_call.args``.
-        says: Optional natural-language criterion the event's text content must
-            satisfy. Evaluated by a judge LLM (see
-            :mod:`pipecat.evals.judge`).
-        says_not: Optional natural-language criterion the event's text content
-            must NOT satisfy. Evaluated by the same judge.
+        judge: Optional natural-language criterion the event's text content
+            must satisfy. Evaluated by a judge LLM. Only meaningful on
+            ``llm_response`` and ``bot_stopped_speaking``.
         raw: The original parsed dict, for forward compatibility.
     """
 
@@ -77,8 +92,7 @@ class Expectation:
     text_contains: str | None = None
     name: str | None = None
     args: dict | None = None
-    says: str | None = None
-    says_not: str | None = None
+    judge: str | None = None
     raw: dict = field(default_factory=dict)
 
 
@@ -127,15 +141,16 @@ class Scenario:
     """A parsed scenario file.
 
     Parameters:
-        name: The eval name (from ``eval:``).
+        name: The eval name (from ``name:``).
         turns: Ordered list of turns.
         reset: Messages to seed the bot's LLM context with before this eval
             runs. Sent by the harness as a ``{"type": "reset", "messages":
             ...}`` message right after the initial ``ready`` handshake. Empty
             list (the default) clears the context entirely; bots without an
             LLM context aggregator ignore the resulting frame.
-        judge: Optional judge configuration (model, endpoint). Reserved for
-            future ``says:``/``says_not:`` assertions.
+        judge_service: Judge LLM service name (default ``"ollama"``).
+        judge_model: Judge model identifier (default ``"qwen2.5:3b"``).
+        judge_endpoint: Optional override URL for the judge service.
         fixtures: Optional fixtures dict (e.g. ``bot_url:``).
         source_path: Path the scenario was loaded from, for error messages.
     """
@@ -143,7 +158,9 @@ class Scenario:
     name: str
     turns: list[Turn]
     reset: list[dict] = field(default_factory=list)
-    judge: dict | None = None
+    judge_service: str = "ollama"
+    judge_model: str = "qwen2.5:3b"
+    judge_endpoint: str | None = None
     fixtures: dict = field(default_factory=dict)
     source_path: Path | None = None
 
@@ -168,9 +185,9 @@ def load_scenario(path: str | Path) -> Scenario:
     if not isinstance(data, dict):
         raise ValueError(f"{path}: top level must be a mapping")
 
-    name = data.get("eval")
+    name = data.get("name")
     if not name or not isinstance(name, str):
-        raise ValueError(f"{path}: missing or invalid 'eval:' field")
+        raise ValueError(f"{path}: missing or invalid 'name:' field")
 
     raw_turns = data.get("turns")
     if not isinstance(raw_turns, list):
@@ -190,7 +207,9 @@ def load_scenario(path: str | Path) -> Scenario:
         name=name,
         turns=turns,
         reset=reset,
-        judge=data.get("judge"),
+        judge_service=data.get("judge_service", "ollama"),
+        judge_model=data.get("judge_model", "qwen2.5:3b"),
+        judge_endpoint=data.get("judge_endpoint"),
         fixtures=data.get("fixtures") or {},
         source_path=path,
     )
@@ -250,6 +269,15 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> Expec
             f"{path}: turn #{turn_idx} expectation #{exp_idx} missing or invalid 'event:'"
         )
 
+    judge = e.get("judge")
+    if judge is not None and event not in JUDGEABLE_EVENTS:
+        logger.warning(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx}: 'judge:' on "
+            f"event {event!r} — judge only makes sense on bot-generated text "
+            f"events ({', '.join(sorted(JUDGEABLE_EVENTS))}). Will run but is "
+            "unlikely to be meaningful."
+        )
+
     return Expectation(
         event=event,
         within_ms=e.get("within_ms"),
@@ -257,7 +285,6 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> Expec
         text_contains=e.get("text_contains"),
         name=e.get("name"),
         args=e.get("args"),
-        says=e.get("says"),
-        says_not=e.get("says_not"),
+        judge=judge,
         raw=e,
     )

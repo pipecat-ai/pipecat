@@ -85,32 +85,17 @@ class _FakeLLMService:
 
 
 class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
-    async def test_evaluate_says_pass(self):
+    async def test_evaluate_pass(self):
         svc = _FakeLLMService(['{"verdict": "yes", "reason": "yes it does"}'])
         judge = Judge(svc)
         v = await judge.evaluate("mentions weather", "It's raining in Paris.")
         self.assertTrue(v.passed)
         self.assertEqual(len(svc.calls), 1)
 
-    async def test_evaluate_says_fail(self):
+    async def test_evaluate_fail(self):
         svc = _FakeLLMService(['{"verdict": "no", "reason": "no it does not"}'])
         judge = Judge(svc)
         v = await judge.evaluate("mentions weather", "Hello there.")
-        self.assertFalse(v.passed)
-
-    async def test_polarity_inverts_pass(self):
-        """says_not passes when the judge says no."""
-        svc = _FakeLLMService(['{"verdict": "no", "reason": "no mention"}'])
-        judge = Judge(svc)
-        v = await judge.evaluate("mentions weather", "Hello.", polarity="says_not")
-        self.assertTrue(v.passed)
-        self.assertIn("inverted", v.reason)
-
-    async def test_polarity_inverts_fail(self):
-        """says_not fails when the judge says yes."""
-        svc = _FakeLLMService(['{"verdict": "yes", "reason": "it does"}'])
-        judge = Judge(svc)
-        v = await judge.evaluate("mentions weather", "It's raining.", polarity="says_not")
         self.assertFalse(v.passed)
 
     async def test_caching_avoids_second_call(self):
@@ -122,17 +107,6 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(v1.passed)
         self.assertTrue(v2.passed)
         self.assertEqual(len(svc.calls), 1, "second call should be cached")
-
-    async def test_cache_distinguishes_polarity_at_call_site(self):
-        """Cache is keyed by (criterion, text). Polarity is applied after lookup,
-        so the same content asked two ways still hits the LLM only once."""
-        svc = _FakeLLMService(['{"verdict": "yes", "reason": "it does"}'])
-        judge = Judge(svc)
-        v_says = await judge.evaluate("mentions weather", "Rain.", polarity="says")
-        v_says_not = await judge.evaluate("mentions weather", "Rain.", polarity="says_not")
-        self.assertTrue(v_says.passed)
-        self.assertFalse(v_says_not.passed)
-        self.assertEqual(len(svc.calls), 1)
 
     async def test_service_failure_reported_not_raised(self):
         """If the LLM call raises, the judge returns a failed verdict, not an exception."""

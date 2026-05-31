@@ -7,11 +7,10 @@
 #   - Tight bot_stopped_speaking budget after interruption (the bot must shut up promptly)
 #   - Judge confirming the bot then answered the new question
 
-eval: barge_in_during_long_response
+name: barge_in_during_long_response
 
-judge:
-  service: ollama
-  model: llama3:latest
+judge_service: ollama
+judge_model: llama3:latest
 
 turns:
   - user: "tell me a long story about Paris"
@@ -30,5 +29,4 @@ turns:
         within_ms: 1000
       - event: llm_response
         within_ms: 5000
-        says: "states a time of day"
-        says_not: "continues talking about Paris"
+        judge: "states a time of day rather than continuing the previous topic"

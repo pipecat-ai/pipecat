@@ -7,8 +7,8 @@
 """Judge LLM for content assertions in behavioral evaluations.
 
 Uses an LLM to decide whether a bot's response satisfies a natural-language
-criterion (``says: "describes the agent's capabilities"``). The judge runs as a
-one-shot, out-of-pipeline inference via
+criterion (``judge: "describes the agent's capabilities"``). The judge runs as
+a one-shot, out-of-pipeline inference via
 :meth:`pipecat.services.openai.base_llm.BaseOpenAILLMService.run_inference`,
 so it works with any pipecat LLM service backed by an OpenAI-compatible API
 (OpenAI, Ollama, Together, etc.).
@@ -26,7 +26,6 @@ Example::
     verdict = await judge.evaluate(
         criterion="describes the agent's capabilities",
         text="I can help with questions, set reminders, and look things up.",
-        polarity="says",
     )
     if not verdict.passed:
         print(f"judge said no: {verdict.reason}")
@@ -36,7 +35,6 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Literal
 
 from loguru import logger
 
@@ -89,20 +87,12 @@ class Judge:
         self._max_tokens = max_tokens
         self._cache: dict[str, JudgeVerdict] = {}
 
-    async def evaluate(
-        self,
-        criterion: str,
-        text: str,
-        polarity: Literal["says", "says_not"] = "says",
-    ) -> JudgeVerdict:
+    async def evaluate(self, criterion: str, text: str) -> JudgeVerdict:
         """Ask the judge whether ``text`` satisfies ``criterion``.
 
         Args:
-            criterion: Natural-language description of what the text should (or
-                should not) express.
+            criterion: Natural-language description of what the text should express.
             text: The actual text to evaluate.
-            polarity: ``"says"`` returns ``passed=True`` when the judge says yes;
-                ``"says_not"`` inverts the verdict (passes when the judge says no).
 
         Returns:
             A :class:`JudgeVerdict` with the pass/fail decision and a one-sentence
@@ -111,18 +101,11 @@ class Judge:
         """
         key = _cache_key(criterion, text)
         if key in self._cache:
-            cached = self._cache[key]
-        else:
-            cached = await self._call_judge(criterion, text)
-            self._cache[key] = cached
+            return self._cache[key]
 
-        if polarity == "says_not":
-            return JudgeVerdict(
-                passed=not cached.passed,
-                reason=f"(inverted) {cached.reason}",
-                raw_response=cached.raw_response,
-            )
-        return cached
+        verdict = await self._call_judge(criterion, text)
+        self._cache[key] = verdict
+        return verdict
 
     async def _call_judge(self, criterion: str, text: str) -> JudgeVerdict:
         """Single round-trip to the judge LLM."""
@@ -190,39 +173,38 @@ def _parse_verdict(response: str) -> JudgeVerdict:
         )
 
 
-def build_default_judge(judge_config: dict | None) -> Judge | None:
-    """Build a :class:`Judge` from a scenario's ``judge:`` config block.
-
-    Defaults to OllamaLLMService (qwen2.5:3b at localhost:11434) since that's
-    the documented local-judge default. Override via ``judge.service`` (one of
-    ``"ollama"``, ``"openai"``) and ``judge.model`` / ``judge.base_url`` /
-    ``judge.api_key_env``.
+def build_default_judge(
+    service: str = "ollama",
+    model: str = "qwen2.5:3b",
+    endpoint: str | None = None,
+) -> Judge | None:
+    """Build a :class:`Judge` from the scenario's flat judge fields.
 
     Args:
-        judge_config: The parsed ``judge:`` dict from a scenario, or ``None`` to
-            use defaults.
+        service: One of ``"ollama"`` (default) or ``"openai"``.
+        model: Model identifier passed to the service.
+        endpoint: Optional override URL. For Ollama, defaults to
+            ``http://localhost:11434/v1``.
 
     Returns:
         A configured Judge, or ``None`` if construction fails (caller decides
-        whether to skip ``says:`` assertions or fail the scenario).
+        whether to skip ``judge:`` assertions or fail the scenario).
     """
-    config = judge_config or {}
-    service_name = config.get("service", "ollama").lower()
-    model = config.get("model", "qwen2.5:3b")
+    service_name = service.lower()
 
     try:
         if service_name == "ollama":
             from pipecat.services.ollama.llm import OLLamaLLMService
 
-            base_url = config.get("base_url", "http://localhost:11434/v1")
-            service = OLLamaLLMService(
+            base_url = endpoint or "http://localhost:11434/v1"
+            llm_service = OLLamaLLMService(
                 base_url=base_url,
                 settings=OLLamaLLMService.Settings(model=model),
             )
         elif service_name == "openai":
             from pipecat.services.openai.llm import OpenAILLMService
 
-            service = OpenAILLMService(settings=OpenAILLMService.Settings(model=model))
+            llm_service = OpenAILLMService(settings=OpenAILLMService.Settings(model=model))
         else:
             logger.error(f"Unknown judge service: {service_name!r}")
             return None
@@ -230,4 +212,4 @@ def build_default_judge(judge_config: dict | None) -> Judge | None:
         logger.error(f"Failed to construct judge service {service_name!r}: {e}")
         return None
 
-    return Judge(service)
+    return Judge(llm_service)
