@@ -435,7 +435,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             parts.append(ASYNC_TOOL_CANCELLATION_INSTRUCTIONS)
         composed = "\n\n".join(p for p in parts if p)
         self._settings.system_instruction = composed or None
-        logger.debug(f"{self}: System instruction composed: {self._settings.system_instruction}")
+        preview = f"{composed[:100]}...{composed[-100:]}" if len(composed) > 200 else composed
+        logger.debug(f"{self}: System instruction composed: {preview}")
 
     async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
         """Apply a settings delta, handling turn-completion fields.
