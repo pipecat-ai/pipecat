@@ -151,10 +151,8 @@ async def run_scenario(
         # right after it set it up.
         if scenario.reset:
             await ws.send(json.dumps({"type": "reset", "messages": scenario.reset}))
-        # Push per-eval runtime settings: tts controls bot-side TTS bypass;
-        # stt tells the eval transport to emit user-side events from its
-        # output side (using the bot's natural VAD/STT frames).
-        await ws.send(json.dumps({"type": "settings", "tts": scenario.tts, "stt": scenario.stt}))
+        # Push per-eval runtime settings: tts controls bot-side TTS bypass.
+        await ws.send(json.dumps({"type": "settings", "tts": scenario.tts}))
 
         user_voice = scenario.user_voice if scenario.stt else None
 
