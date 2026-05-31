@@ -480,6 +480,22 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                     continue
 
                 for candidate in chunk.candidates:
+                    if candidate.finish_reason:
+                        finish_reason = (
+                            candidate.finish_reason.value
+                            if hasattr(candidate.finish_reason, "value")
+                            else candidate.finish_reason
+                        )
+                        finish_message = (
+                            f" finish_message={candidate.finish_message!r}"
+                            if candidate.finish_message
+                            else ""
+                        )
+                        logger.debug(
+                            f"{self}: Google generation stopped with "
+                            f"finish_reason={finish_reason}{finish_message}"
+                        )
+
                     if candidate.content and candidate.content.parts:
                         for part in candidate.content.parts:
                             function_call_id = None
