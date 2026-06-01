@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import WebSocket
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DialinSettings(BaseModel):
@@ -56,6 +56,63 @@ class DailyDialinRequest(BaseModel):
     daily_api_url: str
 
 
+class CallData(BaseModel):
+    """Parsed telephony handshake data from the provider's first WebSocket messages.
+
+    Populated by :func:`pipecat.runner.utils.parse_telephony_websocket` and exposed on
+    ``WebSocketRunnerArguments.call_data`` by ``create_transport``. Gives typed
+    attribute access — ``call_data.to_number``, ``call_data.call_id`` — while staying
+    dict-compatible (``call_data["call_id"]``, ``call_data.get("body", {})``) so bots
+    written against the old dict keep working.
+
+    Fields are populated per provider; absent ones stay ``None``. Provider-specific keys
+    not modeled here remain accessible (``extra="allow"``).
+
+    Parameters:
+        stream_id: Provider media-stream identifier.
+        call_id: Provider call identifier (Twilio/Plivo/Exotel; Telnyx uses
+            ``call_control_id``).
+        from_number: Caller's number. Wire key ``from``.
+        to_number: Dialed number. Wire key ``to``.
+        call_control_id: Telnyx call control id.
+        outbound_encoding: Telnyx outbound media encoding.
+        account_sid: Exotel account sid.
+        body: Custom parameters sent by the provider (e.g. Twilio TwiML stream
+            parameters).
+        custom_parameters: Exotel custom parameters.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    stream_id: str | None = None
+    call_id: str | None = None
+    from_number: str | None = Field(default=None, alias="from")
+    to_number: str | None = Field(default=None, alias="to")
+    call_control_id: str | None = None
+    outbound_encoding: str | None = None
+    account_sid: str | None = None
+    body: dict = Field(default_factory=dict)
+    custom_parameters: str | dict | None = None
+
+    def _wire_dict(self) -> dict:
+        """The original provider dict shape (wire/alias keys, including extras)."""
+        return self.model_dump(by_alias=True)
+
+    def __getitem__(self, key: str):
+        """Dict-style access, e.g. ``call_data["call_id"]``."""
+        return self._wire_dict()[key]
+
+    def __contains__(self, key: str) -> bool:
+        """``"call_id" in call_data`` — True only when the provider set the value."""
+        wire = self._wire_dict()
+        return key in wire and wire[key] is not None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dict-style ``.get`` returning ``default`` when the key is missing or unset."""
+        value = self._wire_dict().get(key, default)
+        return default if value is None else value
+
+
 @dataclass
 class RunnerArguments:
     """Base class for runner session arguments.
@@ -66,6 +123,12 @@ class RunnerArguments:
         pipeline_idle_timeout_secs: Seconds the pipeline may stay idle before
             shutting down.
         body: Optional request body data passed from the runner entry point.
+        call_data: Parsed telephony handshake as a :class:`CallData` model — typed
+            attribute access (``call_data.to_number``) that's also dict-compatible
+            (``call_data["call_id"]``). Populated by ``create_transport`` (or a direct
+            ``parse_telephony_websocket`` call) for telephony connections; ``None``
+            otherwise. Lives on the base so any bot can read ``runner_args.call_data``
+            uniformly (including under the eval transport), mirroring ``body``.
         session_id: Identifier for this bot session.
         cli_args: Parsed CLI arguments from the runner, when launched via the
             development runner.
@@ -76,6 +139,7 @@ class RunnerArguments:
     handle_sigterm: bool = field(init=False, kw_only=True)
     pipeline_idle_timeout_secs: int = field(init=False, kw_only=True)
     body: Any | None = field(default_factory=dict, kw_only=True)
+    call_data: CallData | None = field(default=None, kw_only=True)
     session_id: str | None = field(default=None, kw_only=True)
     cli_args: argparse.Namespace | None = field(default=None, init=False, kw_only=True)
 
@@ -118,11 +182,15 @@ class VonageRunnerArguments(RunnerArguments):
 class WebSocketRunnerArguments(RunnerArguments):
     """WebSocket transport session arguments for the runner.
 
+    The parsed telephony handshake is available on the inherited ``call_data`` field
+    (a :class:`CallData` model), populated by ``create_transport``.
+
     Parameters:
         websocket: WebSocket connection for audio streaming
         transport_type: Transport type identifier. Set to ``"websocket"`` for plain
             WebSocket connections; ``None`` triggers auto-detection from the first
-            telephony provider message.
+            telephony provider message. After auto-detection, ``create_transport``
+            overwrites this in place with the detected provider (e.g. ``"twilio"``).
         body: Additional request data
     """
 

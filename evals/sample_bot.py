@@ -36,6 +36,7 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    """Run the sample eval bot."""
     logger.info("Starting sample eval bot (passthrough pipeline)")
 
     # Passthrough pipeline — input frames flow straight to output.
