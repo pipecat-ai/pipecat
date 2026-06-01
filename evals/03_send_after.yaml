@@ -1,0 +1,26 @@
+name: chained_turns_with_send_after
+
+# Audio mode — send_after anchors on user_stopped_speaking, a real VAD event
+# that only fires when the bot's STT is in the loop.
+#
+# Tested against examples/voice/voice-cartesia.py.
+user_audio:
+  service: cartesia
+  voice: 71a7ad14-091c-4e8e-a314-022ece01c121     # British Reading Lady
+  model: sonic-2
+  api_key_env: CARTESIA_API_KEY
+  sample_rate: 16000
+
+turns:
+  - user: "first message"
+    expect:
+      - event: user_stopped_speaking
+        within_ms: 3000
+
+  - send_after:
+      event: user_stopped_speaking
+      delay_ms: 200
+    user: "second message"
+    expect:
+      - event: user_stopped_speaking
+        within_ms: 3000
