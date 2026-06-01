@@ -27,7 +27,10 @@ from pipecat.services.openai.realtime.events import (
     AudioInput,
     SessionProperties,
 )
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from pipecat.services.openai.realtime.llm import (
+    AUTOSIZED_USER_AUDIO_PREROLL_MARGIN_SECS,
+    OpenAIRealtimeLLMService,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -157,13 +160,17 @@ async def test_manual_mode_preroll_sized_from_vad_start_secs():
     """A SpeechControlParamsFrame sizes the pre-roll to start_secs + margin."""
     service, _ = _make_service(manual_turn_detection=True)
 
-    # start_secs=0.5 -> pre-roll = 0.5 + 0.1 margin = 0.6s -> 0.6 * 32000 = 19200 bytes.
+    start_secs = 0.5
     service._handle_speech_control_params(
-        SpeechControlParamsFrame(vad_params=VADParams(start_secs=0.5))
+        SpeechControlParamsFrame(vad_params=VADParams(start_secs=start_secs))
     )
-    await service._send_user_audio(_audio_frame(sample_rate=16000, data=bytes(32000)))
+    # Send 2s of audio — comfortably more than the window — so the buffer is
+    # capped to (start_secs + margin), not limited by how much we sent.
+    await service._send_user_audio(_audio_frame(sample_rate=16000, data=bytes(64000)))
 
-    assert len(service._user_audio_preroll_buffer) == 19200
+    # 16kHz mono / 16-bit = 2 bytes/sample.
+    expected = int(16000 * 1 * 2 * (start_secs + AUTOSIZED_USER_AUDIO_PREROLL_MARGIN_SECS))
+    assert len(service._user_audio_preroll_buffer) == expected
 
 
 @pytest.mark.asyncio
