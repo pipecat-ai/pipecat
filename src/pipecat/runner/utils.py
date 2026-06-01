@@ -601,12 +601,26 @@ async def create_transport(
         params.serve_tls_cert = runner_args.serve_tls_cert
         params.serve_tls_key = runner_args.serve_tls_key
 
-        return MOQTransport(
+        transport = MOQTransport(
             params=params,
             host=runner_args.host,
             port=runner_args.port,
             path=runner_args.path,
         )
+
+        # Auto-wire the runner back-channel: when the transport finishes
+        # MOQ bring-up, copy out the cert fingerprints (serve mode) and
+        # signal the runner's ready_event so /start can return. This used
+        # to require boilerplate in every bot example.
+        if runner_args.ready_event is not None:
+
+            @transport.event_handler("on_connected")
+            async def _moq_runner_on_connected(t):
+                runner_args.cert_fingerprints = list(t.cert_fingerprints)
+                if runner_args.ready_event is not None:
+                    runner_args.ready_event.set()
+
+        return transport
 
     else:
         raise ValueError(f"Unsupported runner arguments type: {type(runner_args)}")

@@ -142,6 +142,10 @@ class LiveKitRunnerArguments(RunnerArguments):
 class MOQRunnerArguments(RunnerArguments):
     """MOQ (Media over QUIC) transport session arguments for the runner.
 
+    The ``ready_event`` and ``cert_fingerprints`` fields are populated
+    automatically by :func:`pipecat.runner.utils.create_transport`; bots
+    don't need to thread them by hand.
+
     Parameters:
         host: MOQ relay/server hostname the browser uses to connect.
         port: MOQ relay/server port.
@@ -156,14 +160,12 @@ class MOQRunnerArguments(RunnerArguments):
             when no on-disk cert/key is provided.
         serve_tls_cert: Path to a PEM-encoded TLS cert chain.
         serve_tls_key: Path to the matching PEM-encoded private key.
-        ready_event: Optional event the bot sets once it has finished
-            the MOQ handshake. Lets the HTTP ``/start`` endpoint block
-            until the bot is reachable before telling the browser to
-            open its WebTransport.
-        cert_fingerprints: Filled in by the bot once serving begins —
-            SHA-256 fingerprints of the bot's TLS cert chain, hex-encoded.
-            The runner forwards these to the browser via ``/api/config``
-            so it can pin a self-signed cert without a PEM file.
+        ready_event: Event the bot fires once it has finished MOQ
+            bring-up. The HTTP ``/start`` endpoint waits on this before
+            telling the browser to open its WebTransport.
+        cert_fingerprints: SHA-256 fingerprints (hex) of the bot's TLS
+            cert chain — populated by the transport in serve mode so
+            ``/api/config`` can hand them to the browser for pinning.
     """
 
     host: str

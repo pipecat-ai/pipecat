@@ -12,28 +12,35 @@
  * Bot-audio playback is a thin custom loop on top of @moq/hang's
  * Container.Consumer + the browser's WebCodecs AudioDecoder.
  *
- * Catalog discovery (instead of hard-coded track names) lets the bot
- * pick its codec/sample rate; we just decode whatever it advertises.
+ * Connection management uses Moq.Connection.Reload so a dropped
+ * connection re-establishes automatically. Catalog discovery (instead
+ * of hard-coded track names) lets the bot pick its codec/sample rate;
+ * we just decode whatever it advertises.
+ *
+ * ESM imports are pinned to a single moq release train. These four
+ * packages have inter-dependent semver constraints — if you bump one,
+ * bump them together to a set published from the same monorepo commit.
+ * For production use a local Vite build instead of esm.sh; see
+ * moq_prebuilt/PLAN-moq-transport-package.md for the path.
  */
 
-import * as Moq from "https://esm.sh/@moq/net@0.1.0";
-import * as Publish from "https://esm.sh/@moq/publish@0.2.7";
-import * as Catalog from "https://esm.sh/@moq/hang@0.4.0/catalog";
-import * as Container from "https://esm.sh/@moq/hang@0.4.0/container";
-import { Signal } from "https://esm.sh/@moq/signals@0.1.0";
+import * as Moq from "https://esm.sh/@moq/net@0.1.2";
+import * as Publish from "https://esm.sh/@moq/publish@0.2.9";
+import * as Catalog from "https://esm.sh/@moq/hang@0.2.7/catalog";
+import * as Container from "https://esm.sh/@moq/hang@0.2.7/container";
+import { Effect, Signal } from "https://esm.sh/@moq/signals@0.1.7";
 
 // ---------------------------------------------------------------------------
-// State
+// State (cleared by doDisconnect)
 // ---------------------------------------------------------------------------
 
-let connection = null;
-let connectionSignal = null;
-let publishBroadcast = null;
-let microphone = null;
+let reload = null;            // Moq.Connection.Reload — auto-reconnects
+let publishBroadcast = null;  // Publish.Broadcast — mic → bot
+let microphone = null;        // Publish.Source.Microphone — getUserMedia source
+let consumeEffect = null;     // Effect — re-runs consume loops on each reconnect
+let statusEffect = null;      // Effect — mirrors reload.status to the DOM
 let playbackContext = null;
 let playbackTime = 0;
-let consumeAbort = null;
-let connected = false;
 let config = {};
 
 // ---------------------------------------------------------------------------
@@ -58,6 +65,11 @@ function log(msg, level = "info") {
   else if (level === "warn") line.style.color = "#f39c12";
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
+}
+
+function setButtonsConnected(isConnected) {
+  document.getElementById("connectBtn").disabled = isConnected;
+  document.getElementById("disconnectBtn").disabled = !isConnected;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,12 +195,15 @@ function handleRtviMessage(msg) {
 
 async function consumeBotAudio(botBroadcast, signal) {
   // Read the catalog once to find an Opus audio track. The bot's catalog
-  // is published by moq-rs's publish_media, which translates the OpusHead
+  // is published by moq-rs's publish_audio, which translates the OpusHead
   // we sent into a Catalog.AudioConfig.
   const catalogTrack = botBroadcast.subscribe(
     "catalog.json",
     Catalog.PRIORITY?.catalog ?? 0,
   );
+  signal.addEventListener("abort", () => {
+    try { catalogTrack.close(); } catch {}
+  });
   const catalogFrame = await catalogTrack.readFrame();
   catalogTrack.close();
   if (!catalogFrame || signal.aborted) return;
@@ -213,9 +228,11 @@ async function consumeBotAudio(botBroadcast, signal) {
     `rate=${audioConfig.sampleRate}Hz, channels=${audioConfig.numberOfChannels}`,
   );
 
-  // Subscribe to the audio track and decode frames with bounded latency.
+  // Subscribe and decode frames with bounded latency. The latency signal
+  // here is the browser-side jitter buffer (matches the bot's
+  // audio_in_max_latency_ms in spirit).
   const moqTrack = botBroadcast.subscribe(trackName, Catalog.PRIORITY?.audio ?? 1);
-  const latencySig = new Signal(80); // ms — matches the bot's max_latency_ms order of magnitude
+  const latencySig = new Signal(80);
   const consumer = new Container.Consumer(moqTrack, {
     format: new Container.Legacy.Format(),
     latency: latencySig,
@@ -238,11 +255,9 @@ async function consumeBotAudio(botBroadcast, signal) {
   });
 
   signal.addEventListener("abort", () => {
-    try {
-      consumer.close();
-      moqTrack.close();
-      if (decoder.state !== "closed") decoder.close();
-    } catch {}
+    try { consumer.close(); } catch {}
+    try { moqTrack.close(); } catch {}
+    try { if (decoder.state !== "closed") decoder.close(); } catch {}
   });
 
   let received = 0;
@@ -271,9 +286,9 @@ async function consumeBotAudio(botBroadcast, signal) {
 }
 
 function playAudioData(data) {
-  // Convert WebCodecs AudioData → AudioBuffer and schedule on the audio context.
-  // For low latency we just chain buffers back-to-back; the bot is responsible
-  // for keeping output paced.
+  // Convert WebCodecs AudioData → AudioBuffer and schedule on the audio
+  // context. The bot caps the consumer's latency (audio_in_max_latency_ms),
+  // so we just chain buffers as they arrive.
   if (!playbackContext) {
     data.close();
     return;
@@ -299,9 +314,7 @@ async function consumeBotTranscript(botBroadcast, signal) {
   const trackName = config.transcript_track || "transcript";
   const track = botBroadcast.subscribe(trackName, 0);
   signal.addEventListener("abort", () => {
-    try {
-      track.close();
-    } catch {}
+    try { track.close(); } catch {}
   });
 
   try {
@@ -356,7 +369,6 @@ async function doConnect() {
       `https://${config.relay_host}:${config.relay_port}${config.path || "/moq"}`,
     );
     log(`Connecting to ${url}`);
-    setStatus("Connecting...", "connecting");
 
     const webtransport = {};
     if (config.cert_hash) {
@@ -367,103 +379,103 @@ async function doConnect() {
       log(`Using certificate pinning: sha256=${config.cert_hash.slice(0, 16)}...`);
     }
 
-    connection = await Moq.Connection.connect(url, { webtransport });
-    log(`Connected (ALPN=${connection.version}, ${(performance.now() - t0).toFixed(0)}ms)`);
-    setStatus("Connected", "connected");
-    connected = true;
-    connectionSignal = new Signal(connection);
+    // Reload auto-reconnects on disconnect. Publish.Broadcast and the
+    // consume effect below both react to its `established` signal.
+    reload = new Moq.Connection.Reload({
+      enabled: new Signal(true),
+      url: new Signal(url),
+      webtransport,
+    });
+
+    // Mirror Reload's status onto the UI.
+    statusEffect = new Effect();
+    statusEffect.run((eff) => {
+      const status = eff.get(reload.status);
+      if (status === "connected") setStatus("Connected", "connected");
+      else if (status === "connecting") setStatus("Connecting...", "connecting");
+      else setStatus("Disconnected", "disconnected");
+    });
 
     const ourPath = Moq.Path.from(config.namespace, config.client_id);
     const botPath = Moq.Path.from(config.namespace, config.bot_id);
 
     // ----------------------------------------------------------------------
-    // Publish side — @moq/publish does mic capture + Opus encoding + catalog
+    // Publish — @moq/publish.Broadcast handles mic capture, Opus encoding,
+    // catalog publishing, and serving subscribe requests. It re-attaches
+    // automatically when reload.established flips after a reconnect.
     // ----------------------------------------------------------------------
 
     microphone = new Publish.Source.Microphone({ enabled: new Signal(true) });
     publishBroadcast = new Publish.Broadcast({
-      connection: connectionSignal,
+      connection: reload.established,
       enabled: new Signal(true),
       name: new Signal(ourPath),
       audio: {
         source: microphone.source,
         enabled: new Signal(true),
       },
-      // No video.
     });
     log(`Publishing broadcast: ${ourPath} (mic via @moq/publish)`);
 
     // ----------------------------------------------------------------------
-    // Consume side — read the catalog, decode Opus, play via Web Audio
+    // Consume — re-run the loops on each successful (re)connect.
     // ----------------------------------------------------------------------
 
-    const botBroadcast = connection.consume(botPath);
-    log(`Consuming broadcast: ${botPath}`);
+    consumeEffect = new Effect();
+    consumeEffect.run((eff) => {
+      const conn = eff.get(reload.established);
+      if (!conn) return;
 
-    consumeAbort = new AbortController();
-    consumeBotAudio(botBroadcast, consumeAbort.signal).catch((e) =>
-      log(`Bot audio loop error: ${e.message}`, "warn"),
-    );
-    consumeBotTranscript(botBroadcast, consumeAbort.signal).catch((e) =>
-      log(`Transcript loop error: ${e.message}`, "warn"),
-    );
+      const botBroadcast = conn.consume(botPath);
+      log(`Consuming broadcast: ${botPath}`);
 
-    // Watch for connection close.
-    connection.closed
-      .then(() => {
-        log("Transport closed");
-        setStatus("Disconnected", "disconnected");
-      })
-      .catch((err) => {
-        log(`Transport closed with error: ${err?.message || err}`, "error");
-        setStatus("Error: " + (err?.message || err), "error");
-      });
+      const ac = new AbortController();
+      consumeBotAudio(botBroadcast, ac.signal).catch((e) =>
+        log(`Bot audio loop: ${e.message}`, "warn"),
+      );
+      consumeBotTranscript(botBroadcast, ac.signal).catch((e) =>
+        log(`Transcript loop: ${e.message}`, "warn"),
+      );
+
+      eff.cleanup(() => ac.abort());
+    });
+
+    log(`Setup complete (${(performance.now() - t0).toFixed(0)}ms)`);
+    setButtonsConnected(true);
 
   } catch (e) {
     const elapsed = (performance.now() - t0).toFixed(0);
     log(`Connection failed after ${elapsed}ms: ${e.message}`, "error");
     if (e.stack) log(`  Stack: ${e.stack.split("\n").slice(1, 3).join(" | ")}`, "error");
     setStatus("Error: " + e.message, "error");
+    // Re-enable Connect so the user can retry without refreshing.
+    setButtonsConnected(false);
+    // Clean up any partial state.
+    await doDisconnect({silent: true});
   }
 }
 
-async function doDisconnect() {
-  log("Disconnecting...");
-  connected = false;
+async function doDisconnect({silent = false} = {}) {
+  if (!silent) log("Disconnecting...");
 
-  if (consumeAbort) {
-    consumeAbort.abort();
-    consumeAbort = null;
-  }
-  if (publishBroadcast) {
-    publishBroadcast.close();
-    publishBroadcast = null;
-  }
-  if (microphone) {
-    microphone.close();
-    microphone = null;
-  }
-  if (connection) {
-    try {
-      connection.close();
-    } catch (e) {
-      log(`Error closing connection: ${e.message}`, "warn");
-    }
-    connection = null;
-    connectionSignal = null;
+  if (consumeEffect) { consumeEffect.close(); consumeEffect = null; }
+  if (statusEffect) { statusEffect.close(); statusEffect = null; }
+  if (publishBroadcast) { publishBroadcast.close(); publishBroadcast = null; }
+  if (microphone) { microphone.close(); microphone = null; }
+  if (reload) {
+    try { reload.signals.close(); } catch {}
+    reload = null;
   }
   if (playbackContext) {
-    try {
-      await playbackContext.close();
-    } catch {}
+    try { await playbackContext.close(); } catch {}
     playbackContext = null;
   }
 
-  setStatus("Disconnected", "disconnected");
-  log("Disconnected");
-
-  document.getElementById("connectBtn").disabled = false;
-  document.getElementById("disconnectBtn").disabled = true;
+  if (!silent) {
+    setStatus("Disconnected", "disconnected");
+    log("Disconnected");
+  }
+  setButtonsConnected(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -471,8 +483,7 @@ async function doDisconnect() {
 // ---------------------------------------------------------------------------
 
 document.getElementById("connectBtn").addEventListener("click", async () => {
-  document.getElementById("connectBtn").disabled = true;
-  document.getElementById("disconnectBtn").disabled = false;
+  setButtonsConnected(true);
   await doConnect();
 });
 

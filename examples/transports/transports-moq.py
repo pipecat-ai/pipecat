@@ -58,7 +58,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.moq import MOQParams
-from pipecat.transports.moq.protocol import MOQRole
 
 load_dotenv(override=True)
 
@@ -75,7 +74,6 @@ transport_params = {
     "moq": lambda: MOQParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        role=MOQRole.PUBSUB,
     ),
 }
 
@@ -131,16 +129,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
-    # For MOQ, we need to handle connection and events differently
+    # For MOQ, we need to handle connection and events differently.
+    # create_transport() already wires the runner's ready_event +
+    # cert_fingerprints back-channel for us, so we don't need to do that here.
     if isinstance(runner_args, MOQRunnerArguments):
-        @transport.event_handler("on_connected")
-        async def on_connected(transport):
-            logger.info("MOQ transport ready (waiting for client to join)")
-            # Surface the self-signed cert fingerprints (serve mode only)
-            # so /api/config can hand them to the browser for pinning.
-            runner_args.cert_fingerprints = list(transport.cert_fingerprints)
-            if runner_args.ready_event is not None:
-                runner_args.ready_event.set()
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport):
