@@ -97,9 +97,18 @@ class SmallestTTSSettings(TTSSettings):
 
     Parameters:
         speed: Speech speed multiplier (0.5–2.0).
+        word_timestamps: Opt in to per-word timing events on WebSocket streaming.
+            When ``True``, the server interleaves ``word_timestamp`` frames with
+            audio chunks; each carries ``{id, word, start, end}`` where
+            ``start``/``end`` are floats in seconds relative to the audio stream
+            start.  Supported on base-queue English + Hindi voices (``meher``,
+            ``devansh``, ``kartik``, ``maithili``, ``liam``, ``avery``); other
+            voice families silently emit no word events.  Defaults to ``None``
+            (disabled).
     """
 
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    word_timestamps: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -159,6 +168,7 @@ class SmallestTTSService(InterruptibleTTSService):
             voice=_MODEL_DEFAULT_VOICES[model],
             language=Language.EN,
             speed=None,
+            word_timestamps=None,
         )
 
         if settings is not None:
@@ -221,6 +231,9 @@ class SmallestTTSService(InterruptibleTTSService):
 
         if self._settings.speed is not None:
             msg["speed"] = self._settings.speed
+
+        if self._settings.word_timestamps:
+            msg["word_timestamps"] = True
 
         msg["output_format"] = self._output_format
 
@@ -379,6 +392,12 @@ class SmallestTTSService(InterruptibleTTSService):
                     context_id=context_id,
                 )
                 await self.append_to_audio_context(context_id, frame)
+            elif status == "word_timestamp":
+                data = msg.get("data", {})
+                logger.debug(
+                    f"{self} word_timestamp: id={data.get('id')} word={data.get('word')!r} "
+                    f"start={data.get('start')} end={data.get('end')}"
+                )
             elif status == "error":
                 context_id = self.get_active_audio_context_id()
                 await self.push_frame(TTSStoppedFrame(context_id=context_id))
