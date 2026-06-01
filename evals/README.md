@@ -58,7 +58,7 @@ Each scenario picks a mode by whether it has a `user_audio:` block.
 - **Text mode** (no `user_audio:`): user turns are sent as RTVI `send-text`.
   No VAD/STT runs, so there are **no** `user_started_speaking` /
   `user_stopped_speaking` events — assert on what the bot *did*
-  (`llm_started`, `llm_response`, `tool_call`). The top-level `bot_audio:`
+  (`llm_started`, `llm_response`, `function_call`). The top-level `bot_audio:`
   flag (default `true`) maps to `send-text`'s `audio_response`; set it `false`
   to bypass TTS for content-only evals.
 
@@ -89,7 +89,7 @@ messages:
 | `user_transcription`      | `user-transcription` (final), audio mode        |
 | `llm_started`             | `bot-llm-started`                               |
 | `llm_response`            | `bot-llm-text` accumulated to `bot-llm-stopped` |
-| `tool_call`               | `llm-function-call-in-progress`                 |
+| `function_call`           | `llm-function-call-in-progress`                 |
 
 ## The evals
 
@@ -99,12 +99,12 @@ messages:
 | `02_judge_bot_response.yaml` | text  | Judge LLM evaluating natural-language criteria on `llm_response` |
 | `03_send_after.yaml`         | audio | `send_after` anchored on a real `user_stopped_speaking`         |
 | `04_bot_greeting.yaml`       | text  | Bot speaks first; expect-only opening turn; judge on reply      |
-| `05_tool_call.yaml`          | text  | `tool_call` name/args assertions                                |
+| `05_function_call.yaml`          | text  | `function_call` name/args assertions                                |
 | `06_interruption.yaml`       | text  | Barge-in: a `run_immediately` `send-text` interrupts the bot    |
 | `07_stt_in_the_loop.yaml`    | audio | STT-in-the-loop; assert only on `llm_response`                  |
 
 Evals using the `eval:` assertion also need a judge LLM available (Ollama by
-default). `05_tool_call.yaml` needs a bot with a `get_weather` tool whose
+default). `05_function_call.yaml` needs a bot with a `get_weather` tool whose
 `RTVIObserver` is configured with `function_call_report_level` `FULL` (the
 default `NONE` omits the function name and args).
 

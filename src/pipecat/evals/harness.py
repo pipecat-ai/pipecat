@@ -25,7 +25,7 @@ scenario ``event:``         RTVI server message(s)
 ``user_transcription``      ``user-transcription`` (final only)
 ``llm_started``             ``bot-llm-started``
 ``llm_response``            ``bot-llm-text`` accumulated until ``bot-llm-stopped``
-``tool_call``               ``llm-function-call-in-progress``
+``function_call``           ``llm-function-call-in-progress``
 ==========================  ==============================================
 
 Matching semantics: expected events must appear in the specified order, but
@@ -274,7 +274,7 @@ def _translate(message: dict, ctx: _RunContext) -> list[dict]:
         case "llm-function-call-in-progress":
             return [
                 {
-                    "type": "tool_call",
+                    "type": "function_call",
                     "name": data.get("function_name"),
                     "args": dict(data.get("arguments") or {}),
                 }
