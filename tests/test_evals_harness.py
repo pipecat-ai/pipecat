@@ -24,7 +24,7 @@ import unittest
 import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
-from pipecat.evals.harness import _RunContext, _translate, run_scenario
+from pipecat.evals.harness import EvalSession, run_scenario
 from pipecat.evals.scenario import Expectation, Scenario, SendAfter, Turn
 
 
@@ -32,55 +32,55 @@ def _rtvi(msg_type: str, data: dict | None = None) -> str:
     return json.dumps({"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data})
 
 
-def _ctx() -> _RunContext:
-    return _RunContext(ws=None, queue=asyncio.Queue(), latest_event_times={}, events_seen=[])
+def _session() -> EvalSession:
+    return EvalSession(Scenario(name="t", turns=[]), "ws://localhost:0")
 
 
 class TestTranslate(unittest.TestCase):
     def test_user_speaking_events(self):
-        ctx = _ctx()
+        s = _session()
         self.assertEqual(
-            _translate({"type": "user-started-speaking"}, ctx),
+            s._translate({"type": "user-started-speaking"}),
             [{"type": "user_started_speaking"}],
         )
         self.assertEqual(
-            _translate({"type": "user-stopped-speaking"}, ctx),
+            s._translate({"type": "user-stopped-speaking"}),
             [{"type": "user_stopped_speaking"}],
         )
 
     def test_user_transcription_final_only(self):
-        ctx = _ctx()
+        s = _session()
         interim = {"type": "user-transcription", "data": {"text": "he", "final": False}}
         final = {"type": "user-transcription", "data": {"text": "hello", "final": True}}
-        self.assertEqual(_translate(interim, ctx), [])
+        self.assertEqual(s._translate(interim), [])
         self.assertEqual(
-            _translate(final, ctx),
+            s._translate(final),
             [{"type": "user_transcription", "transcript": "hello"}],
         )
 
     def test_llm_response_accumulates_text(self):
-        ctx = _ctx()
-        self.assertEqual(_translate({"type": "bot-llm-started"}, ctx), [{"type": "llm_started"}])
-        self.assertEqual(_translate({"type": "bot-llm-text", "data": {"text": "Hello "}}, ctx), [])
-        self.assertEqual(_translate({"type": "bot-llm-text", "data": {"text": "world"}}, ctx), [])
+        s = _session()
+        self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
+        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "Hello "}}), [])
+        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "world"}}), [])
         self.assertEqual(
-            _translate({"type": "bot-llm-stopped"}, ctx),
+            s._translate({"type": "bot-llm-stopped"}),
             [{"type": "llm_response", "text": "Hello world"}],
         )
 
     def test_function_call(self):
-        ctx = _ctx()
+        s = _session()
         msg = {
             "type": "llm-function-call-in-progress",
             "data": {"function_name": "get_weather", "arguments": {"city": "Paris"}},
         }
         self.assertEqual(
-            _translate(msg, ctx),
+            s._translate(msg),
             [{"type": "function_call", "name": "get_weather", "args": {"city": "Paris"}}],
         )
 
     def test_unmapped_message_ignored(self):
-        self.assertEqual(_translate({"type": "metrics", "data": {}}, _ctx()), [])
+        self.assertEqual(_session()._translate({"type": "metrics", "data": {}}), [])
 
 
 def _free_port() -> int:

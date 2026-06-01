@@ -17,7 +17,7 @@ from pathlib import Path
 
 import typer
 
-from pipecat.evals.harness import ScenarioResult, run_scenario
+from pipecat.evals.harness import EvalResult, run_scenario
 from pipecat.evals.scenario import load_scenario
 
 eval_app = typer.Typer(
@@ -59,7 +59,7 @@ def _dim(s: str) -> str:
     return _color(s, "2")
 
 
-def _print_result(result: ScenarioResult) -> None:
+def _print_result(result: EvalResult) -> None:
     badge = _green("✓") if result.passed else _red("✗")
     print(f"  {badge} {result.scenario_name} {_dim(f'({result.duration_ms}ms)')}")
     if not result.passed:
