@@ -61,7 +61,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = SmallestTTSService(
         api_key=os.environ["SMALLEST_API_KEY"],
         settings=SmallestTTSService.Settings(
-            voice="sophia",
+            model="lightning_v3.1_pro",
+            voice="meher",
         ),
     )
 
