@@ -71,29 +71,47 @@ done
 echo
 
 # ---------------------------------------------------------------------------
-# 4. npm-link the unpublished moq-transport into the prebuilt client.
+# 4. Link the unpublished moq-transport + the local voice-ui-kit into the
+#    prebuilt client, and dedupe @pipecat-ai/client-js across all three.
 #
 # TEMPORARY: remove this block once `@pipecat-ai/moq-transport` is published
-# and the prebuilt client depends on it normally.
+# and voice-ui-kit's next release (with MoQ support) is on npm.
 #
-# Two link chains are set up:
+# This MUST run BEFORE building voice-ui-kit, so its tsc/dts step resolves a
+# single @pipecat-ai/client-js. Otherwise it picks up its own (1.8.x via the
+# pnpm lockfile) AND pipecat-client-web-transports' hoisted copy (currently
+# 1.10.x) and fails with:
+#   "Property '_options' is protected but type 'Transport' is not a class
+#    derived from 'Transport'"
+#
+# Link chains set up:
 #   a) @pipecat-ai/moq-transport (source: pipecat-client-web-transports/transports/moq-transport)
 #      -> consumed by pipecat-prebuilt/client
-#   b) @pipecat-ai/client-js (source: pipecat-prebuilt/client's installed copy at 1.8.x)
-#      -> linked into pipecat-client-web-transports so the linked moq-transport
-#         resolves the same Transport class as the consumer (without this,
-#         moq-transport picks up client-js@1.10.x from the monorepo and tsc
-#         rejects the assignment with "Property '_options' is protected").
+#   b) @pipecat-ai/voice-ui-kit  (source: voice-ui-kit/package)
+#      -> consumed by pipecat-prebuilt/client (replaces the npm-installed
+#         release with the local build that knows about transportType="moq").
+#         The link itself doesn't require voice-ui-kit's dist/ to exist yet;
+#         dist/ is only needed when the prebuilt client actually runs.
+#   c) @pipecat-ai/client-js     (canonical: pipecat-prebuilt/client's
+#      installed copy at 1.8.x) -> linked into pipecat-client-web-transports
+#      and voice-ui-kit/package so every layer in the build resolves the
+#      same Transport / PipecatClient class instance.
 #
-# Prerequisites: `npm install` has been run in both
-#   pipecat-client-web-transports/ and pipecat-prebuilt/client/ already.
+# voice-ui-kit/package is a pnpm workspace; `npm link` errors against its
+# managed node_modules. We replace the client-js symlink with a manual
+# `ln -s` instead, which produces an equivalent symlink on disk.
+#
+# Prerequisites: `npm install` in pipecat-client-web-transports/ and
+# pipecat-prebuilt/client/, and `pnpm install` in voice-ui-kit/.
 # ---------------------------------------------------------------------------
 TRANSPORTS_DIR="$PIPECAT_DIR/../pipecat-client-web-transports"
 MOQ_PKG_DIR="$TRANSPORTS_DIR/transports/moq-transport"
 PREBUILT_CLIENT_DIR="$PIPECAT_DIR/../pipecat-prebuilt/client"
 PREBUILT_CLIENT_JS_DIR="$PREBUILT_CLIENT_DIR/node_modules/@pipecat-ai/client-js"
+VUK_PKG_DIR="$PIPECAT_DIR/../voice-ui-kit/package"
+VUK_CLIENT_JS_LINK="$VUK_PKG_DIR/node_modules/@pipecat-ai/client-js"
 
-echo "==> Linking moq-transport into pipecat-prebuilt/client (temporary)..."
+echo "==> Linking moq-transport + voice-ui-kit + deduping client-js (temporary)..."
 
 if [[ ! -d "$MOQ_PKG_DIR" ]]; then
   echo "    skipped: $MOQ_PKG_DIR not found"
@@ -101,13 +119,33 @@ elif [[ ! -d "$PREBUILT_CLIENT_DIR/node_modules" ]]; then
   echo "    skipped: run 'npm install' in $PREBUILT_CLIENT_DIR first"
 elif [[ ! -d "$PREBUILT_CLIENT_JS_DIR" ]]; then
   echo "    skipped: $PREBUILT_CLIENT_JS_DIR not found (run 'npm install' in $PREBUILT_CLIENT_DIR)"
+elif [[ ! -d "$VUK_PKG_DIR/node_modules" ]]; then
+  echo "    skipped: $VUK_PKG_DIR/node_modules not found (run 'pnpm install' in $(dirname "$VUK_PKG_DIR"))"
 else
-  ( cd "$MOQ_PKG_DIR"          && npm link >/dev/null )
-  ( cd "$PREBUILT_CLIENT_DIR"  && npm link @pipecat-ai/moq-transport >/dev/null )
-  ( cd "$PREBUILT_CLIENT_JS_DIR" && npm link >/dev/null )
-  ( cd "$TRANSPORTS_DIR"       && npm link @pipecat-ai/client-js >/dev/null )
+  # Register the unpublished packages globally. --ignore-scripts so npm
+  # doesn't try to re-run each package's build/prepare here.
+  ( cd "$MOQ_PKG_DIR"            && npm link --ignore-scripts >/dev/null )
+  ( cd "$VUK_PKG_DIR"             && npm link --ignore-scripts >/dev/null )
+  ( cd "$PREBUILT_CLIENT_JS_DIR"  && npm link --ignore-scripts >/dev/null )
+
+  # Pull them into the prebuilt client.
+  ( cd "$PREBUILT_CLIENT_DIR"     && npm link --ignore-scripts @pipecat-ai/moq-transport @pipecat-ai/voice-ui-kit >/dev/null )
+
+  # Dedupe client-js into the transports repo (npm-managed, npm link works).
+  # --ignore-scripts is critical here: pipecat-client-web-transports is a
+  # workspace root, and a vanilla `npm link` would trigger every workspace's
+  # prepare lifecycle and try to rebuild all the other transports.
+  ( cd "$TRANSPORTS_DIR"          && npm link --ignore-scripts @pipecat-ai/client-js >/dev/null )
+
+  # Dedupe client-js into voice-ui-kit (pnpm-managed — replace its symlink
+  # manually since `npm link` doesn't cooperate with pnpm's node_modules).
+  mkdir -p "$(dirname "$VUK_CLIENT_JS_LINK")"
+  rm -rf "$VUK_CLIENT_JS_LINK"
+  ln -s "$PREBUILT_CLIENT_JS_DIR" "$VUK_CLIENT_JS_LINK"
+
   echo "    @pipecat-ai/moq-transport -> $MOQ_PKG_DIR"
-  echo "    @pipecat-ai/client-js     -> $PREBUILT_CLIENT_JS_DIR"
+  echo "    @pipecat-ai/voice-ui-kit  -> $VUK_PKG_DIR"
+  echo "    @pipecat-ai/client-js     -> $PREBUILT_CLIENT_JS_DIR (shared into transports + voice-ui-kit)"
 fi
 echo
 
@@ -115,7 +153,16 @@ echo
 # 5. Print run commands
 # ---------------------------------------------------------------------------
 echo "==========================================="
-echo " Run these in separate terminals:"
+echo " Next: build moq-transport + voice-ui-kit"
+echo "==========================================="
+echo
+echo "# Build the linked packages so their dist/ reflects local source."
+echo "# Both reads use the deduped client-js so types line up."
+echo "( cd $TRANSPORTS_DIR/transports/moq-transport && npm run build )"
+echo "( cd $(dirname "$VUK_PKG_DIR") && pnpm -F @pipecat-ai/voice-ui-kit build )"
+echo
+echo "==========================================="
+echo " Then run these in separate terminals:"
 echo "==========================================="
 echo
 echo "# 1. Start the relay (binds QUIC/WebTransport on UDP [::]:4080)"

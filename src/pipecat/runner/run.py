@@ -526,10 +526,8 @@ def _configure_server_app(args: argparse.Namespace):
     active_sessions: dict[str, dict[str, Any]] = {}
 
     # All transports — MoQ included — share the unified routes:
-    # `pipecat_ai_prebuilt` UI at /client (which knows about MoQ via the
-    # MoqDemo component), unified POST /start with per-transport
-    # branches. The hand-rolled `moq_prebuilt/` UI is still in the repo
-    # as a fallback but is no longer wired into the runner.
+    # `pipecat_ai_prebuilt` UI at /client and the unified POST /start
+    # with per-transport branches.
     _setup_frontend_routes(app)
     _setup_webrtc_routes(app, args, active_sessions)
     _setup_daily_routes(app, args)
@@ -1296,67 +1294,6 @@ def _build_moq_client_config(args: argparse.Namespace, namespace: str) -> dict[s
         "transcriptTrack": "transcript",
         "messageTrack": "user-message",
     }
-
-
-def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
-    """Set up MOQ (Media over QUIC) specific routes."""
-    if not _transport_routes_enabled("moq"):
-        return
-
-    MOQPrebuiltUI = None
-    try:
-        from moq_prebuilt.frontend import MOQPrebuiltUI
-    except ImportError:
-        # Fallback: look for moq_prebuilt relative to the pipecat repo root
-        try:
-            import pipecat
-
-            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(pipecat.__file__)))
-            client_dir = os.path.join(repo_root, "moq_prebuilt", "client")
-            if os.path.isdir(client_dir):
-                from starlette.staticfiles import StaticFiles
-
-                MOQPrebuiltUI = StaticFiles(directory=client_dir, html=True)
-        except Exception:
-            pass
-    if not MOQPrebuiltUI:
-        logger.warning("moq_prebuilt client not found, MOQ client UI will not be available")
-
-    # Mount the frontend
-    if MOQPrebuiltUI:
-        app.mount("/client", MOQPrebuiltUI)
-
-    @app.get("/", include_in_schema=False)
-    async def root_redirect():
-        """Redirect root requests to client interface."""
-        return RedirectResponse(url="/client/")
-
-    @app.get("/api/config")
-    async def moq_config():
-        """Return MOQ relay connection config for the browser client.
-
-        This is the legacy endpoint the hand-rolled ``moq_prebuilt/`` UI
-        polls before opening WebTransport. The newer ``pipecat-prebuilt``
-        client reads the same data out of the ``POST /start`` response
-        instead — see ``_build_moq_client_config``.
-        """
-        return {
-            "relay_host": args.moq_host,
-            "relay_port": args.moq_port,
-            "path": args.moq_path,
-            "namespace": args.moq_namespace,
-            "insecure": args.moq_insecure,
-            "cert_hash": _compute_moq_cert_hash(args),
-            "client_id": args.moq_client_id,
-            "bot_id": args.moq_bot_id,
-            "publish_track": "user-audio",
-            "subscribe_track": "bot-audio",
-            "transcript_track": "transcript",
-        }
-
-    # The MoQ bot is started via the unified POST /start (with
-    # ``{"transport": "moq", ...}``), registered by
-    # ``_setup_unified_start_route``. No MoQ-specific /start needed here.
 
 
 def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
