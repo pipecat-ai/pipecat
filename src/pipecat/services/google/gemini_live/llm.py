@@ -114,7 +114,8 @@ MAX_CONSECUTIVE_FAILURES = 3
 CONNECTION_ESTABLISHED_THRESHOLD = 10.0  # seconds
 
 # Pre-roll cushion added on top of the auto-sized duration (start_secs), to
-# absorb small timing slop between start_secs and the audio actually clipped.
+# absorb small timing slop between start_secs and the audio actually clipped,
+# and to give a bit of extra audio context for the model.
 # Not applied to an explicit user_audio_preroll_secs override.
 AUTOSIZED_USER_AUDIO_PREROLL_MARGIN_SECS = 0.1
 # Pre-roll used before start_secs is known (no SpeechControlParamsFrame yet, or
