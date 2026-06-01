@@ -1,0 +1,29 @@
+name: barge_in_during_long_response
+
+# Text mode. The second turn is sent with run_immediately, which interrupts the
+# bot's in-progress response (RTVI send-text triggers an interruption) and then
+# asks a new question. send_after times the barge-in 500ms into the bot's
+# response. There's no dedicated "interruption" RTVI event to assert on; the
+# proof is that the next llm_response answers the new question instead of
+# continuing the story.
+#
+# Requires a bot with a real LLM. Tested against examples/voice/voice-cartesia.py.
+
+judge:
+  service: ollama
+  model: llama3:latest
+
+turns:
+  - user: "tell me a long story about Paris"
+    expect:
+      - event: llm_started
+        within_ms: 3000
+
+  - user: "stop, what time is it?"
+    send_after:
+      event: llm_started
+      delay_ms: 500
+    expect:
+      - event: llm_response
+        within_ms: 10000
+        eval: "states a time of day rather than continuing the previous topic"

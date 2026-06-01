@@ -1,0 +1,22 @@
+name: bot_greets_then_describes_capabilities
+
+bot_audio: false
+
+judge:
+  service: ollama
+  model: llama3:latest
+
+turns:
+  # Wait for the bot's opener
+  - expect:
+      - event: llm_started
+        within_ms: 5000
+      - event: llm_response
+        within_ms: 15000
+        eval: "greets the user and offers to help"
+
+  - user: "what can you do?"
+    expect:
+      - event: llm_response
+        within_ms: 15000
+        eval: "describes the agent's capabilities clearly and concisely"
