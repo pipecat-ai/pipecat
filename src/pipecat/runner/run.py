@@ -107,6 +107,7 @@ from loguru import logger
 
 from pipecat.runner.types import (
     DailyRunnerArguments,
+    EvalRunnerArguments,
     RunnerArguments,
     SmallWebRTCRunnerArguments,
     VonageRunnerArguments,
@@ -1159,6 +1160,24 @@ async def _run_daily_direct(args: argparse.Namespace):
         await bot_module.bot(runner_args)
 
 
+async def _run_eval(args: argparse.Namespace):
+    """Run a bot with the eval transport (no FastAPI server).
+
+    The eval transport is a ``WebsocketServerTransport`` speaking RTVI that
+    hosts its own local WebSocket server for the harness to connect to. The
+    dev runner here just constructs ``EvalRunnerArguments`` and invokes the bot
+    function directly — no FastAPI routes are needed.
+    """
+    logger.info("Running with eval transport...")
+
+    runner_args = EvalRunnerArguments(host=args.host, port=args.port, session_id=str(uuid.uuid4()))
+    runner_args.handle_sigint = True
+    runner_args.cli_args = args
+
+    bot_module = _get_bot_module()
+    await bot_module.bot(runner_args)
+
+
 async def _run_vonage():
     """Run Vonage bot (no FastAPI server)."""
     logger.info("Running Vonage transport...")
@@ -1259,7 +1278,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "vonage", "webrtc", "websocket", *TELEPHONY_TRANSPORTS],
+        choices=["daily", "eval", "vonage", "webrtc", "websocket", *TELEPHONY_TRANSPORTS],
         default=None,
         help=(
             "Restrict the server to a single transport and set it as the default for /start. "
@@ -1334,6 +1353,15 @@ def main(parser: argparse.ArgumentParser | None = None):
 
         # Run direct Daily connection
         asyncio.run(_run_daily_direct(args))
+        return
+
+    # Handle eval transport (no FastAPI server — the WebSocket server transport
+    # runs its own WS server)
+    if args.transport == "eval":
+        print()
+        print(f"🚀 Bot ready! (eval transport on ws://{args.host}:{args.port})")
+        print()
+        asyncio.run(_run_eval(args))
         return
 
     # Print startup message

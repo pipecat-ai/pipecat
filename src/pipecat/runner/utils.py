@@ -41,6 +41,7 @@ from loguru import logger
 from pipecat.runner.types import (
     CallData,
     DailyRunnerArguments,
+    EvalRunnerArguments,
     ExotelCallData,
     LiveKitRunnerArguments,
     SmallWebRTCRunnerArguments,
@@ -709,6 +710,33 @@ async def create_transport(
             runner_args.token,
             runner_args.room_name,
             params=params,
+        )
+    elif isinstance(runner_args, EvalRunnerArguments):
+        # The eval transport is a plain WebSocket server speaking RTVI. The
+        # harness connects as an RTVI client; the bot pipeline must include an
+        # RTVIProcessor and pass an RTVIObserver to the task. Default the
+        # serializer to RTVIEvalSerializer so examples only need to opt into
+        # audio input.
+        from pipecat.evals.serializer import RTVIEvalSerializer
+        from pipecat.transports.websocket.server import (
+            WebsocketServerParams,
+            WebsocketServerTransport,
+        )
+
+        params = _get_transport_params("eval", transport_params)
+        if not isinstance(params, WebsocketServerParams):
+            raise ValueError(
+                "Eval transport params must be a WebsocketServerParams instance. "
+                "Set transport_params['eval'] to a lambda returning "
+                "WebsocketServerParams(audio_in_enabled=True)."
+            )
+        if params.serializer is None:
+            params.serializer = RTVIEvalSerializer()
+
+        return WebsocketServerTransport(
+            params=params,
+            host=runner_args.host,
+            port=runner_args.port,
         )
     elif isinstance(runner_args, VonageRunnerArguments):
         from pipecat.transports.vonage.video_connector import (
