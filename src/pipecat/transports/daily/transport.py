@@ -1814,7 +1814,7 @@ class DailyInputTransport(BaseInputTransport):
         # Audio task when using a virtual speaker (i.e. no user tracks).
         self._audio_in_task: asyncio.Task | None = None
 
-    async def start_audio_in_streaming(self):
+    async def _start_audio_in_streaming(self):
         """Start receiving audio from participants."""
         if not self._params.audio_in_enabled:
             return
@@ -1874,7 +1874,7 @@ class DailyInputTransport(BaseInputTransport):
         await self.set_transport_ready(frame)
 
         if self._params.audio_in_stream_on_start:
-            await self.start_audio_in_streaming()
+            await self._start_audio_in_streaming()
 
     async def stop(self, frame: EndFrame):
         """Stop the input transport and leave the Daily room.

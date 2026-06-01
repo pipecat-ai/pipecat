@@ -1671,6 +1671,19 @@ class OutputTransportReadyFrame(ControlFrame):
 
 
 @dataclass
+class InputTransportStartAudioStreamingFrame(ControlFrame):
+    """Frame asking the input transport to start audio input streaming.
+
+    Pushed downstream (e.g. by ``RTVIProcessor`` once the client is ready) so a
+    ``BaseInputTransport`` begins streaming audio from its source. Replaces
+    calling ``BaseInputTransport.start_audio_in_streaming()`` directly, keeping
+    cross-processor communication frame-based.
+    """
+
+    pass
+
+
+@dataclass
 class HeartbeatFrame(ControlFrame):
     """Frame used by pipeline task to monitor pipeline health.
 
