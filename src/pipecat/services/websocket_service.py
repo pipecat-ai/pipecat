@@ -134,10 +134,21 @@ class WebsocketService(ABC):
             success = await self._try_reconnect(report_error=report_error)
             if success and self._websocket is not None:
                 logger.info(f"{self} reconnected successfully, will retry send the message")
-                # trying to send the message one more time
-                await self._websocket.send(message)
+                # Trying to send the message one more time. This retry must stay
+                # inside its own try/except: if the send fails again (e.g. the
+                # server closes the freshly reconnected socket), the exception
+                # would otherwise escape send_with_retry unhandled and crash the
+                # calling service on the audio hot path.
+                try:
+                    await self._websocket.send(message)
+                except Exception as retry_error:
+                    logger.error(f"{self} send failed after reconnect: {retry_error}")
+                    await report_error(
+                        ErrorFrame(f"{self} send failed after reconnect: {retry_error}")
+                    )
             else:
                 logger.error(f"{self} send failed; unable to reconnect")
+                # _try_reconnect already reported the failure via report_error.
 
     async def _maybe_try_reconnect(
         self,

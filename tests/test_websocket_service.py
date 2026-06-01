@@ -256,7 +256,25 @@ async def test_stable_connection_resets_quick_failure_counter(service, report_er
 # ---------------------------------------------------------------------------
 # Lifecycle and guards
 # ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_send_with_retry_reports_retry_send_failure(service, report_error):
+    """A failed send after reconnect is reported instead of escaping."""
+    websocket = type("FakeWebsocket", (), {})()
+    websocket.send = AsyncMock(
+        side_effect=[ConnectionError("initial send failed"), RuntimeError("retry failed")]
+    )
+    service._websocket = websocket
+    service._try_reconnect = AsyncMock(return_value=True)
 
+    await service.send_with_retry("message", report_error)
+
+    assert websocket.send.call_count == 2
+    service._try_reconnect.assert_called_once()
+    report_error.assert_called_once()
+    error_frame = report_error.call_args[0][0]
+    assert isinstance(error_frame, ErrorFrame)
+    assert error_frame.fatal is False
+    assert "retry failed" in error_frame.error
 
 @pytest.mark.asyncio
 async def test_disconnect_prevents_reconnection(service, report_error):
