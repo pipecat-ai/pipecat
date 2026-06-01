@@ -24,7 +24,11 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, GeminiVADParams
+from pipecat.services.google.gemini_live.llm import (
+    AUTOSIZED_USER_AUDIO_PREROLL_MARGIN_SECS,
+    GeminiLiveLLMService,
+    GeminiVADParams,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -176,19 +180,21 @@ async def test_manual_vad_preroll_sized_from_vad_start_secs():
     service = _make_service(vad_disabled=True)
     session = service._session
 
-    # start_secs=0.5 -> pre-roll = 0.5 + 0.1 margin = 0.6s.
-    # At 16kHz mono / 16-bit that's int(16000 * 1 * 2 * 0.6) = 19200 bytes.
+    start_secs = 0.5
     service._handle_speech_control_params(
-        SpeechControlParamsFrame(vad_params=VADParams(start_secs=0.5))
+        SpeechControlParamsFrame(vad_params=VADParams(start_secs=start_secs))
     )
 
-    one_second = bytes(32000)
-    await service._send_user_audio(_audio_frame(sample_rate=16000, data=one_second))
+    # Send 2s of audio — comfortably more than the window — so the buffer is
+    # capped to (start_secs + margin), not limited by how much we sent.
+    await service._send_user_audio(_audio_frame(sample_rate=16000, data=bytes(64000)))
 
-    assert len(service._user_audio_preroll_buffer) == 19200
+    # 16kHz mono / 16-bit = 2 bytes/sample.
+    expected = int(16000 * 1 * 2 * (start_secs + AUTOSIZED_USER_AUDIO_PREROLL_MARGIN_SECS))
+    assert len(service._user_audio_preroll_buffer) == expected
 
     await service._handle_user_started_speaking(UserStartedSpeakingFrame())
-    assert sum(len(p) for p in session.audio_payloads()) == 19200
+    assert sum(len(p) for p in session.audio_payloads()) == expected
 
 
 @pytest.mark.asyncio
