@@ -8,7 +8,8 @@ eval transport and asserts on the semantic event stream it emits. See
 
 from pipecat.evals.harness import (
     AssertionFailure,
-    ScenarioResult,
+    EvalResult,
+    EvalSession,
     run_scenario,
 )
 from pipecat.evals.scenario import (
@@ -21,9 +22,10 @@ from pipecat.evals.scenario import (
 
 __all__ = [
     "AssertionFailure",
+    "EvalResult",
+    "EvalSession",
     "Expectation",
     "Scenario",
-    "ScenarioResult",
     "SendAfter",
     "Turn",
     "load_scenario",
