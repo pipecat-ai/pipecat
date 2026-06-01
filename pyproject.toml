@@ -34,6 +34,7 @@ dependencies = [
     "pyloudnorm~=0.2.0",
     "resampy~=0.4.3",
     "soxr~=1.0.0",
+    "typer>=0.12,<1",
     "openai>=1.74.0,<3",
     # Pinning numba to resolve package dependencies
     "numba>=0.61.2,<1",
@@ -43,6 +44,9 @@ dependencies = [
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
     "onnxruntime~=1.24.3",
 ]
+
+[project.entry-points."pipecat_cli.extensions"]
+eval = "pipecat.cli.entry_point:entrypoint_cli_typer"
 
 [project.urls]
 Homepage = "https://pipecat.ai"
