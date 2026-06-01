@@ -241,3 +241,21 @@ class LiveKitRunnerArguments(RunnerArguments):
     room_name: str
     url: str
     token: str
+
+
+@dataclass
+class EvalRunnerArguments(RunnerArguments):
+    """Eval transport session arguments for the runner.
+
+    Used to launch a bot with a local ``WebsocketServerTransport`` speaking RTVI
+    (via ``RTVIEvalSerializer``). The eval harness connects as an RTVI client,
+    sends scripted user input, and asserts on the RTVI events the bot emits.
+    Intended for fast pipeline behavioral evaluations.
+
+    Parameters:
+        host: Host address to bind the eval transport's WebSocket server to.
+        port: Port number to bind the eval transport's WebSocket server to.
+    """
+
+    host: str = "localhost"
+    port: int = 7860
