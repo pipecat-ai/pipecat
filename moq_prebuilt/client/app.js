@@ -12,29 +12,29 @@
  * Bot-audio playback is a thin custom loop on top of @moq/hang's
  * Container.Consumer + the browser's WebCodecs AudioDecoder.
  *
- * Connection management uses Moq.Connection.Reload so a dropped
+ * Connection management uses Net.Connection.Reload so a dropped
  * connection re-establishes automatically. Catalog discovery (instead
  * of hard-coded track names) lets the bot pick its codec/sample rate;
  * we just decode whatever it advertises.
  *
- * ESM imports are pinned to a single moq release train. These four
- * packages have inter-dependent semver constraints — if you bump one,
- * bump them together to a set published from the same monorepo commit.
- * For production use a local Vite build instead of esm.sh; see
+ * Only @moq/publish is imported at runtime. As of 0.2.10 it re-exports
+ * `Net`, `Hang`, and `Signals` so we get a single version pin across
+ * the whole moq stack — no per-package semver drift. For production
+ * use a local Vite build instead of esm.sh; see
  * moq_prebuilt/PLAN-moq-transport-package.md for the path.
  */
 
-import * as Moq from "https://esm.sh/@moq/net@0.1.2";
-import * as Publish from "https://esm.sh/@moq/publish@0.2.9";
-import * as Catalog from "https://esm.sh/@moq/hang@0.2.7/catalog";
-import * as Container from "https://esm.sh/@moq/hang@0.2.7/container";
-import { Effect, Signal } from "https://esm.sh/@moq/signals@0.1.7";
+import * as Publish from "https://esm.sh/@moq/publish@0.2.10";
+
+const { Net, Hang, Signals } = Publish;
+const { Catalog, Container } = Hang;
+const { Effect, Signal } = Signals;
 
 // ---------------------------------------------------------------------------
 // State (cleared by doDisconnect)
 // ---------------------------------------------------------------------------
 
-let reload = null;            // Moq.Connection.Reload — auto-reconnects
+let reload = null;            // Net.Connection.Reload — auto-reconnects
 let publishBroadcast = null;  // Publish.Broadcast — mic → bot
 let microphone = null;        // Publish.Source.Microphone — getUserMedia source
 let consumeEffect = null;     // Effect — re-runs consume loops on each reconnect
@@ -381,7 +381,7 @@ async function doConnect() {
 
     // Reload auto-reconnects on disconnect. Publish.Broadcast and the
     // consume effect below both react to its `established` signal.
-    reload = new Moq.Connection.Reload({
+    reload = new Net.Connection.Reload({
       enabled: new Signal(true),
       url: new Signal(url),
       webtransport,
@@ -396,8 +396,8 @@ async function doConnect() {
       else setStatus("Disconnected", "disconnected");
     });
 
-    const ourPath = Moq.Path.from(config.namespace, config.client_id);
-    const botPath = Moq.Path.from(config.namespace, config.bot_id);
+    const ourPath = Net.Path.from(config.namespace, config.client_id);
+    const botPath = Net.Path.from(config.namespace, config.bot_id);
 
     // ----------------------------------------------------------------------
     // Publish — @moq/publish.Broadcast handles mic capture, Opus encoding,
