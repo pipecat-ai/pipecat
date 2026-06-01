@@ -11,10 +11,14 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import Frame, TranscriptionFrame, UserStoppedSpeakingFrame
+from pipecat.frames.frames import (
+    Frame,
+    InterimTranscriptionFrame,
+    TranscriptionFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
@@ -23,6 +27,7 @@ from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -49,9 +54,10 @@ class TranscriptionLogger(FrameProcessor):
             logger.debug(
                 f"Transcription latency: {(STOP_SECS - (time.time() - self._last_transcription_time)):.2f}"
             )
-
-        if isinstance(frame, TranscriptionFrame):
+        elif isinstance(frame, TranscriptionFrame):
             self._last_transcription_time = time.time()
+        elif isinstance(frame, InterimTranscriptionFrame):
+            print(f"Interim transcription: {frame.text}")
 
         # Push all frames through
         await self.push_frame(frame, direction)
@@ -82,13 +88,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     tl = TranscriptionLogger()
+
     vad_processor = VADProcessor(
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=STOP_SECS))
     )
 
-    pipeline = Pipeline([transport.input(), vad_processor, stt, tl])
+    pipeline = Pipeline([transport.input(), vad_processor, stt, tl, transport.output()])
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -100,11 +107,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

@@ -13,16 +13,13 @@ from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import LLMContextMessage
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -30,6 +27,7 @@ from pipecat.services.ultravox.llm import OneShotInputParams, UltravoxRealtimeLL
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -72,9 +70,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
+    # Ultravox doesn't emit user-turn frames. To get them (for RTVI
+    # speech events, turn observers, etc.) uncomment the local-VAD
+    # imports + `user_params=` below. See realtime-ultravox.py for the
+    # full discussion.
+    #
+    # from pipecat.audio.vad.silero import SileroVADAnalyzer
+    # from pipecat.processors.aggregators.llm_response_universal import (
+    #     LLMUserAggregatorParams,
+    # )
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        realtime_service_mode=True,
+        # user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
@@ -87,7 +95,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -95,6 +103,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
+
+    # Ultravox doesn't emit user-turn frames, so on_user_turn_stopped
+    # won't fire. If you uncomment the local-VAD opt-in above, also
+    # uncomment the imports and handler below.
+    #
+    # from pipecat.processors.aggregators.llm_response_universal import UserTurnStoppedMessage
+    # from pipecat.turns.user_stop import BaseUserTurnStopStrategy
+    #
+    # @user_aggregator.event_handler("on_user_turn_stopped")
+    # async def on_user_turn_stopped(
+    #     aggregator,
+    #     strategy: BaseUserTurnStopStrategy,
+    #     message: UserTurnStoppedMessage,
+    # ):
+    #     logger.info(f"User turn stopped at {message.timestamp}")
 
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
@@ -105,28 +128,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        await task.queue_frames([LLMRunFrame()])
+        await worker.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
         logger.info("Updating Ultravox Realtime LLM settings: output_medium=text")
-        await task.queue_frame(
+        await worker.queue_frame(
             LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMService.Settings(output_medium="text"))
         )
 
         await asyncio.sleep(10)
         logger.info("Updating Ultravox Realtime LLM settings: output_medium=voice")
-        await task.queue_frame(
+        await worker.queue_frame(
             LLMUpdateSettingsFrame(delta=UltravoxRealtimeLLMService.Settings(output_medium="voice"))
         )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

@@ -51,7 +51,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 from pipecat.services.settings import (
     NOT_GIVEN,
@@ -71,7 +71,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
@@ -204,6 +204,21 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     Implements the OpenAI Realtime API with WebSocket communication for low-latency
     bidirectional audio and text interactions. Supports function calling, conversation
     management, and real-time transcription.
+
+    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
+    OpenAI's server-side VAD events, so pipeline processors that depend on
+    those frames (RTVI client speech events, ``TurnTrackingObserver``,
+    ``AudioBufferProcessor`` turn recording, ``UserIdleController``, user
+    mute strategies, voicemail detector) work out of the box. Pair with
+    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
+    so context writes are decoupled from those frames; see the
+    ``examples/realtime/realtime-openai.py`` example.
+
+    If you wire local VAD (``LLMUserAggregatorParams.vad_analyzer``) on
+    top of this service, disable OpenAI's server-side turn detection
+    first (``turn_detection=False``); otherwise both sources broadcast
+    duplicate user-turn frames. See
+    ``examples/realtime/realtime-openai-locally-driven-turns.py``.
     """
 
     Settings = OpenAIRealtimeLLMSettings
@@ -211,6 +226,10 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
     adapter_class = OpenAIRealtimeLLMAdapter
+
+    # Realtime (speech-to-speech) service. Emits UserStarted/Stopped
+    # speaking frames from server-side VAD events.
+    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=True)
 
     def __init__(
         self,
@@ -473,16 +492,28 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     # speech and interruption handling
     #
 
-    async def _handle_interruption(self):
-        # None and False are different. Check for False. None means we're using OpenAI's
-        # built-in turn detection defaults.
+    def _is_turn_detection_disabled(self) -> bool:
+        """Whether server-side turn detection is explicitly disabled.
+
+        ``None`` and ``False`` are different. ``None`` means we're
+        using OpenAI's built-in turn detection defaults (so server VAD
+        is active); ``False`` is the opt-out that puts the service in
+        manual mode.
+        """
         session_properties = assert_given(self._settings.session_properties)
-        turn_detection_disabled = (
+        return bool(
             session_properties.audio
             and session_properties.audio.input
             and session_properties.audio.input.turn_detection is False
         )
-        if turn_detection_disabled:
+
+    def _emits_user_turn_frames(self) -> bool:
+        # When turn_detection is disabled the server doesn't emit VAD
+        # events, so we don't broadcast UserStarted/StoppedSpeakingFrame.
+        return not self._is_turn_detection_disabled()
+
+    async def _handle_interruption(self):
+        if self._is_turn_detection_disabled():
             await self.send_client_event(events.InputAudioBufferClearEvent())
             await self.send_client_event(events.ResponseCancelEvent())
         await self._truncate_current_audio_response()
@@ -497,15 +528,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         pass
 
     async def _handle_user_stopped_speaking(self, frame):
-        # None and False are different. Check for False. None means we're using OpenAI's
-        # built-in turn detection defaults.
-        session_properties = assert_given(self._settings.session_properties)
-        turn_detection_disabled = (
-            session_properties.audio
-            and session_properties.audio.input
-            and session_properties.audio.input.turn_detection is False
-        )
-        if turn_detection_disabled:
+        if self._is_turn_detection_disabled():
             await self.send_client_event(events.InputAudioBufferCommitEvent())
             await self.send_client_event(events.ResponseCreateEvent())
 
@@ -1026,11 +1049,17 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             logger.error(f"Failed to process function call arguments: {e}")
 
     async def _handle_evt_speech_started(self, evt):
+        # Note: this event is not received when turn detection is disabled,
+        # which is good: in that case, local turn detection is responsible for
+        # this work.
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
+        # Note: this event is not received when turn detection is disabled,
+        # which is good: in that case, local turn detection is responsible for
+        # this work.
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self.broadcast_frame(UserStoppedSpeakingFrame)

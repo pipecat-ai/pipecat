@@ -11,9 +11,9 @@ from loguru import logger
 
 from pipecat.frames.frames import Frame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.workers.runner import WorkerRunner
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
@@ -32,11 +32,12 @@ async def main():
     """
     pipeline = Pipeline([NullProcessor()])
 
-    task = PipelineTask(pipeline, params=PipelineParams(enable_heartbeats=True))
+    worker = PipelineWorker(pipeline, params=PipelineParams(enable_heartbeats=True))
 
-    runner = PipelineRunner()
+    runner = WorkerRunner()
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 if __name__ == "__main__":

@@ -14,17 +14,15 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
+    UserTurnMessageAddedMessage,
     UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
@@ -42,6 +40,8 @@ from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -187,7 +187,13 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        # OpenAI Realtime drives the conversation server-side and emits its
+        # own UserStarted/StoppedSpeakingFrame from server VAD events, so
+        # local VAD on the aggregator is unnecessary. realtime_service_mode
+        # decouples context writes from turn frames and transcript-bound
+        # turn-end. See `realtime-openai-locally-driven-turns.py` for the
+        # variant that disables server VAD and drives turn detection locally.
+        realtime_service_mode=True,
     )
 
     pipeline = Pipeline(
@@ -200,7 +206,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         ]
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -214,27 +220,27 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames([LLMRunFrame()])
+        await worker.queue_frames([LLMRunFrame()])
 
         # Add a new tool at runtime after a delay.
         await asyncio.sleep(15)
         new_tools = ToolsSchema(
             standard_tools=[weather_function, restaurant_function, get_news_function]
         )
-        await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
+        await worker.queue_frames([LLMSetToolsFrame(tools=new_tools)])
         # Alternative pattern, useful if you're changing other session properties, too.
         # (Though note that tools in your LLMContext take precedence over those
         # in session properties, so if you have context-provided tools, prefer
         # LLMSetToolsFrame instead, as it updates your context. Ditto for
         # updating system instructions: send an LLMMessagesUpdateFrame with
         # context messages updated with your new desired system message.)
-        # await task.queue_frames(
+        # await worker.queue_frames(
         #     [LLMUpdateSettingsFrame(settings=SessionProperties(tools=new_tools).model_dump())]
         # )
 
         # Reasoning effort can be changed at runtime too. Only
         # reasoning-capable Realtime models (e.g. gpt-realtime-2) support this.
-        # await task.queue_frames(
+        # await worker.queue_frames(
         #     [
         #         LLMUpdateSettingsFrame(
         #             delta=OpenAIRealtimeLLMService.Settings(
@@ -249,11 +255,26 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
-    # Log transcript updates
+    # Subscribe to user turn lifecycle events. OpenAI Realtime emits its
+    # own user-turn frames from server VAD, so on_user_turn_stopped fires
+    # at the turn boundary. In realtime mode UserTurnStoppedMessage.content
+    # is None because the user transcript isn't finalized at turn-stop
+    # time — subscribe to on_user_turn_message_added for the finalized text
+    # (it's written when the assistant response begins). The assistant
+    # message is finalized at turn-stop time in both modes, so
+    # on_assistant_turn_stopped carries the content directly.
     @user_aggregator.event_handler("on_user_turn_stopped")
-    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+    async def on_user_turn_stopped(
+        aggregator,
+        strategy: BaseUserTurnStopStrategy,
+        message: UserTurnStoppedMessage,
+    ):
+        logger.info(f"User turn stopped at {message.timestamp}")
+
+    @user_aggregator.event_handler("on_user_turn_message_added")
+    async def on_user_turn_message_added(aggregator, message: UserTurnMessageAddedMessage):
         timestamp = f"[{message.timestamp}] " if message.timestamp else ""
         line = f"{timestamp}user: {message.content}"
         logger.info(f"Transcript: {line}")
@@ -264,9 +285,10 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         line = f"{timestamp}assistant: {message.content}"
         logger.info(f"Transcript: {line}")
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

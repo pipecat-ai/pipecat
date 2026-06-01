@@ -52,7 +52,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use ElevenLabs Realtime STT, you need to `pip install pipecat-ai[elevenlabs]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_elevenlabs_language(language: Language) -> str:
@@ -823,6 +823,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             logger.debug("Connected to ElevenLabs Realtime STT")
         except Exception as e:
+            self._websocket = None
             await self.push_error(
                 error_msg=f"Unable to connect to ElevenLabs Realtime STT: {e}", exception=e
             )

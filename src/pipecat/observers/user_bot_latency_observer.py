@@ -85,7 +85,7 @@ class LatencyBreakdown(BaseModel):
 
     Collected between ``VADUserStoppedSpeakingFrame`` and
     ``BotStartedSpeakingFrame`` when ``enable_metrics=True`` in
-    :class:`~pipecat.pipeline.task.PipelineParams`.
+    :class:`~pipecat.pipeline.worker.PipelineParams`.
 
     Parameters:
         ttfb: Time-to-first-byte metrics from each service in the pipeline.

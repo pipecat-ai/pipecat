@@ -51,7 +51,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, RealtimeServiceInfo
 from pipecat.services.settings import (
     NOT_GIVEN,
     LLMSettings,
@@ -68,7 +68,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Inworld Realtime, you need to `pip install pipecat-ai[inworld]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
@@ -201,6 +201,16 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     Supports function calling, conversation management, and real-time
     transcription.
 
+    Emits ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame`` from
+    Inworld's server-side VAD events. Pair with
+    ``LLMContextAggregatorPair(..., realtime_service_mode=True)``
+    so context writes are decoupled from those frames. If you wire local
+    VAD (``LLMUserAggregatorParams.vad_analyzer``) on top of this
+    service, disable Inworld's server-side turn detection first via
+    ``turn_detection=None`` (manual mode); otherwise both sources
+    broadcast duplicate user-turn frames. See
+    ``examples/realtime/realtime-inworld-locally-driven-turns.py``.
+
     Example::
 
         llm = InworldRealtimeLLMService(
@@ -245,6 +255,10 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
     adapter_class = InworldRealtimeLLMAdapter
 
+    # Realtime (speech-to-speech) service. Emits UserStarted/Stopped
+    # speaking frames from server-side VAD events.
+    _realtime_service_info = RealtimeServiceInfo(emits_user_turn_frames=True)
+
     # Target ~60ms audio chunks when sending to Inworld (16-bit mono).
     _AUDIO_CHUNK_TARGET_MS = 60
 
@@ -273,8 +287,9 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             tts_model: TTS model to use (e.g. "inworld-tts-2").
                 Shorthand for ``session_properties.audio.output.model``.
             stt_model: STT model for input transcription
-                (e.g. "assemblyai/universal-streaming-multilingual").
-                Shorthand for ``session_properties.audio.input.transcription.model``.
+                (e.g. "inworld/inworld-stt-1"). Defaults to ``"inworld/inworld-stt-1"``;
+                pass ``stt_model=`` to override. Shorthand for
+                ``session_properties.audio.input.transcription.model``.
             base_url: WebSocket base URL for the realtime API.
             auth_type: Authentication type. ``"basic"`` for server-side API key
                 auth, ``"bearer"`` for client-side JWT auth.
@@ -288,7 +303,7 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
         default_model = llm_model or "openai/gpt-4.1-mini"
         default_voice = voice or "Clive"
         default_tts_model = tts_model or "inworld-tts-2"
-        default_stt_model = stt_model or "assemblyai/u3-rt-pro"
+        default_stt_model = stt_model or "inworld/inworld-stt-1"
 
         default_settings = self.Settings(
             model=default_model,
@@ -417,12 +432,30 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             return rate
         return getattr(self, "_output_sample_rate", 24000)
 
+    def _is_manual_turn_detection(self) -> bool:
+        """Whether server-side turn detection is disabled (manual mode)."""
+        session_properties = assert_given(self._settings.session_properties)
+        return bool(
+            session_properties.audio
+            and session_properties.audio.input
+            and session_properties.audio.input.turn_detection is None
+        )
+
+    def _emits_user_turn_frames(self) -> bool:
+        # In manual mode the server doesn't emit VAD events, so we
+        # don't broadcast UserStarted/StoppedSpeakingFrame.
+        return not self._is_manual_turn_detection()
+
     async def _handle_interruption(self):
         """Handle user interruption of assistant speech.
 
-        Inworld's server-side VAD handles response cancellation and buffer
-        cleanup automatically, so we only need to clean up local state.
+        Server-side VAD handles response cancellation and buffer cleanup
+        automatically; in manual mode the client must send the cancel
+        and clear events explicitly.
         """
+        if self._is_manual_turn_detection():
+            await self.send_client_event(events.InputAudioBufferClearEvent())
+            await self.send_client_event(events.ResponseCancelEvent())
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
 
@@ -437,10 +470,16 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     async def _handle_user_stopped_speaking(self, frame):
         """Handle user stopped speaking event.
 
-        Inworld's server-side VAD handles commit and response creation,
-        so this is a no-op. Metrics are started in _handle_evt_speech_stopped.
+        Server-side VAD handles commit and response creation
+        automatically; in manual mode the client must send them
+        explicitly. Metrics are started in _handle_evt_speech_stopped
+        in the server-VAD path.
         """
-        pass
+        if self._is_manual_turn_detection():
+            await self.start_ttfb_metrics()
+            await self.start_processing_metrics()
+            await self.send_client_event(events.InputAudioBufferCommitEvent())
+            await self.send_client_event(events.ResponseCreateEvent())
 
     async def _handle_bot_stopped_speaking(self):
         """Handle bot stopped speaking event."""
@@ -705,14 +744,16 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 logger.warning(f"Failed to decode server message: {message[:200]}")
                 continue
 
-            # Skip events that don't have a matching Pydantic model
-            if event_type in ("conversation.item.done",):
-                continue
-
             try:
                 evt = events.parse_server_event(message)
             except Exception as e:
                 logger.warning(f"Failed to parse server event: {e}")
+                continue
+
+            # Unrecognized event type (e.g. newer realtime server events without a
+            # model, like response.output_text.done). Benign — log quietly and skip.
+            if evt is None:
+                logger.debug(f"{self} ignoring unhandled server event: {event_type}")
                 continue
 
             if evt.type == "ping":
@@ -757,6 +798,8 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                 else:
                     await self._handle_evt_error(evt)
                     return
+            else:
+                logger.debug(f"{self} received known but undispatched server event: {evt.type}")
 
     async def _handle_evt_session_created(self, evt):
         """Handle session.created event — first event after connecting."""
@@ -923,12 +966,20 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
 
     async def _handle_evt_speech_started(self, evt):
         """Handle speech started event from server-side VAD."""
+        if self._is_manual_turn_detection():
+            # In manual mode, the client is responsible for broadcasting user turn frames
+            return
+
         await self._truncate_current_audio_response()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.broadcast_interruption()
 
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from server-side VAD."""
+        if self._is_manual_turn_detection():
+            # In manual mode, the client is responsible for broadcasting user turn frames
+            return
+
         # Mark that the server is handling this turn (and will auto-create a
         # response when create_response=True).  This prevents _handle_context
         # from sending a duplicate ResponseCreateEvent when the user aggregator

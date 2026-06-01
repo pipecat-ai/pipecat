@@ -383,10 +383,14 @@ class AggregatedTextFrame(TextFrame):
     Parameters:
         aggregated_by: Method used to aggregate the text frames.
         context_id: Unique identifier for the TTS context that generated this text.
+        raw_text: The full matched text including start/end pattern delimiters, set when
+            this frame was produced from a PatternMatch (e.g. a ``<code>...</code>`` block).
+            None for ordinary sentence aggregations.
     """
 
     aggregated_by: AggregationType | str
     context_id: str | None = None
+    raw_text: str | None = None
 
 
 @dataclass
@@ -1433,6 +1437,30 @@ class STTMetadataFrame(ServiceMetadataFrame):
     """
 
     ttfs_p99_latency: float
+
+
+@dataclass
+class RealtimeServiceMetadataFrame(ServiceMetadataFrame):
+    """Metadata announcing a realtime (speech-to-speech) LLM service.
+
+    Broadcast by realtime LLM services at pipeline start so downstream
+    processors — notably ``LLMContextAggregatorPair`` — can detect that
+    a realtime service is in the pipeline. The aggregator uses this to
+    surface a one-time recommendation to opt in to
+    ``realtime_service_mode=True`` when it hasn't been configured.
+
+    Parameters:
+        emits_user_turn_frames: Whether this service is currently
+            configured to emit ``UserStartedSpeakingFrame`` /
+            ``UserStoppedSpeakingFrame`` from server-side turn signals.
+            False for services with no server-side turn signals at all
+            (e.g. Gemini Live, AWS Nova Sonic, Ultravox), and also
+            False for services whose server-side turn detection has
+            been disabled by configuration (e.g. OpenAI Realtime with
+            ``turn_detection=False``).
+    """
+
+    emits_user_turn_frames: bool = True
 
 
 @dataclass

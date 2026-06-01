@@ -108,6 +108,8 @@ class STTService(AIService):
                 This is broadcast via STTMetadataFrame at pipeline start for downstream
                 processors (e.g., turn strategies) to optimize timing. Subclasses provide
                 measured defaults; pass a value here to override for your deployment.
+                Turn-based services where the server defines turn boundaries should
+                override :attr:`supports_ttfs` to return False instead of supplying a value.
             keepalive_timeout: Seconds of no audio before sending silence to keep the
                 connection alive. None disables keepalive. Useful for services that
                 close idle connections (e.g. behind a ServiceSwitcher).
@@ -468,8 +470,24 @@ class STTService(AIService):
 
         await super().push_frame(frame, direction)
 
+    @property
+    def supports_ttfs(self) -> bool:
+        """Whether this STT service has a meaningful TTFS-to-final-transcript metric.
+
+        Returns False for turn-based STTs where the server defines the turn
+        boundary, so there is no separate "speech end → final transcript"
+        interval to measure. Downstream turn-stop strategies that consume
+        :class:`STTMetadataFrame` treat a 0 latency as "no extra wait."
+        """
+        return True
+
     async def _push_stt_metadata(self):
         """Push STT metadata frame for downstream processors (e.g., turn strategies)."""
+        if not self.supports_ttfs:
+            await self.broadcast_frame(
+                STTMetadataFrame, service_name=self.name, ttfs_p99_latency=0.0
+            )
+            return
         ttfs = self._ttfs_p99_latency
         if ttfs is None:
             ttfs = DEFAULT_TTFS_P99

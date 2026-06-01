@@ -57,7 +57,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_APPLICATION_CREDENTIALS` environment variable."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_google_stt_language(language: Language) -> str:

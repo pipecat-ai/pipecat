@@ -41,14 +41,20 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Smallest, you need to `pip install pipecat-ai[smallest]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 class SmallestTTSModel(StrEnum):
     """Available Smallest AI TTS models."""
 
-    LIGHTNING_V2 = "lightning-v2"
-    LIGHTNING_V3_1 = "lightning-v3.1"
+    LIGHTNING_V3_1 = "lightning_v3.1"
+    LIGHTNING_V3_1_PRO = "lightning_v3.1_pro"
+
+
+_MODEL_DEFAULT_VOICES: dict[SmallestTTSModel, str] = {
+    SmallestTTSModel.LIGHTNING_V3_1: "sophia",
+    SmallestTTSModel.LIGHTNING_V3_1_PRO: "meher",
+}
 
 
 def language_to_smallest_tts_language(language: Language) -> str:
@@ -90,16 +96,10 @@ class SmallestTTSSettings(TTSSettings):
     """Settings for SmallestTTSService.
 
     Parameters:
-        speed: Speech speed multiplier.
-        consistency: Consistency level for voice generation (0-1).
-        similarity: Similarity level for voice generation (0-1).
-        enhancement: Enhancement level for voice generation (0-2).
+        speed: Speech speed multiplier (0.5–2.0).
     """
 
     speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    consistency: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    similarity: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    enhancement: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -130,6 +130,7 @@ class SmallestTTSService(InterruptibleTTSService):
         api_key: str,
         base_url: str = "wss://api.smallest.ai",
         sample_rate: int | None = None,
+        output_format: str = "pcm",
         settings: Settings | None = None,
         **kwargs,
     ):
@@ -139,17 +140,25 @@ class SmallestTTSService(InterruptibleTTSService):
             api_key: Smallest AI API key for authentication.
             base_url: Base WebSocket URL for the Smallest API.
             sample_rate: Audio sample rate in Hz. If None, uses default.
+            output_format: Audio format returned by the API. One of ``pcm``,
+                ``mp3``, ``wav``, ``ulaw``, ``alaw``. Defaults to ``pcm``,
+                which is what Pipecat expects internally. Fixed at init time.
             settings: Runtime-updatable settings for the TTS service.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
+        # Resolve the model early so we can pick the right default voice.
+        model = SmallestTTSModel.LIGHTNING_V3_1_PRO
+        if settings is not None and settings.model not in (None, NOT_GIVEN):
+            try:
+                model = SmallestTTSModel(settings.model)
+            except ValueError:
+                pass
+
         default_settings = self.Settings(
-            model=SmallestTTSModel.LIGHTNING_V3_1.value,
-            voice="sophia",
+            model=model.value,
+            voice=_MODEL_DEFAULT_VOICES[model],
             language=Language.EN,
             speed=None,
-            consistency=None,
-            similarity=None,
-            enhancement=None,
         )
 
         if settings is not None:
@@ -166,6 +175,7 @@ class SmallestTTSService(InterruptibleTTSService):
 
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
+        self._output_format = output_format
         self._receive_task = None
         self._keepalive_task = None
 
@@ -204,6 +214,7 @@ class SmallestTTSService(InterruptibleTTSService):
         msg = {
             "text": text,
             "voice_id": self._settings.voice,
+            "model": self._settings.model,
             "language": self._settings.language,
             "sample_rate": self.sample_rate,
         }
@@ -211,20 +222,13 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.speed is not None:
             msg["speed"] = self._settings.speed
 
-        # consistency, similarity, enhancement are only supported by lightning-v2
-        if self._settings.model == SmallestTTSModel.LIGHTNING_V2.value:
-            if self._settings.consistency is not None:
-                msg["consistency"] = self._settings.consistency
-            if self._settings.similarity is not None:
-                msg["similarity"] = self._settings.similarity
-            if self._settings.enhancement is not None:
-                msg["enhancement"] = self._settings.enhancement
+        msg["output_format"] = self._output_format
 
         return msg
 
     def _build_websocket_url(self) -> str:
-        """Build the WebSocket URL from base URL and model."""
-        return f"{self._base_url}/waves/v1/{self._settings.model}/get_speech/stream"
+        """Build the WebSocket URL."""
+        return f"{self._base_url}/waves/v1/tts/live"
 
     async def start(self, frame: StartFrame):
         """Start the Smallest TTS service.
@@ -254,22 +258,12 @@ class SmallestTTSService(InterruptibleTTSService):
         await self._disconnect()
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
-        """Apply a settings delta, reconnecting if model changed.
+        """Apply a settings delta.
 
-        Per-message fields (speed, consistency, similarity, enhancement, voice,
-        language) apply automatically on the next ``_build_msg`` call. A model
-        change requires reconnecting because the model is part of the WebSocket URL.
+        All fields (model, speed, voice, language) take effect on the next
+        ``_build_msg`` call without reconnecting.
         """
-        changed = await super()._update_settings(delta)
-
-        if not changed:
-            return changed
-
-        if "model" in changed:
-            await self._disconnect()
-            await self._connect()
-
-        return changed
+        return await super()._update_settings(delta)
 
     async def _connect(self):
         """Connect to Smallest WebSocket and start receive task."""
@@ -362,6 +356,7 @@ class SmallestTTSService(InterruptibleTTSService):
             msg = {
                 "text": " ",
                 "voice_id": self._settings.voice,
+                "model": self._settings.model,
                 "language": self._settings.language,
             }
             await self._websocket.send(json.dumps(msg))

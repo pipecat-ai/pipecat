@@ -32,7 +32,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Kokoro, you need to `pip install pipecat-ai[kokoro]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 KOKORO_CACHE_DIR = Path(os.path.expanduser("~/.cache/kokoro-onnx"))
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"

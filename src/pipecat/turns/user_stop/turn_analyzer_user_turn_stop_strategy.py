@@ -44,15 +44,34 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     as a fallback.
     """
 
-    def __init__(self, *, turn_analyzer: BaseTurnAnalyzer, **kwargs):
+    def __init__(
+        self,
+        *,
+        turn_analyzer: BaseTurnAnalyzer,
+        wait_for_transcript: bool = True,
+        **kwargs,
+    ):
         """Initialize the user turn stop strategy.
 
         Args:
             turn_analyzer: The turn detection analyzer instance to detect end of user turn.
+            wait_for_transcript: Whether to require a transcript before
+                triggering end-of-turn. When True (default), turn-end fires
+                only after the turn analyzer reports COMPLETE *and* either a
+                finalized transcript arrives or the STT safety-net timeout
+                elapses with text in hand. When False, the strategy signals
+                turn-end as soon as the turn analyzer reports COMPLETE —
+                independent of transcripts. Set this to False when local
+                turn detection is the intended driver of the conversation
+                (e.g. with a realtime LLM service consuming audio directly),
+                so transcripts are off the latency critical path.
+                ``LLMContextAggregatorPair`` flips this for you when
+                ``realtime_service_mode=True``.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._turn_analyzer = turn_analyzer
+        self._wait_for_transcript = wait_for_transcript
         self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
         self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
 
@@ -65,6 +84,15 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._transcript_finalized = False
         self._timeout_task: asyncio.Task | None = None
         self._timeout_expired: bool = False
+
+    @property
+    def wait_for_transcript(self) -> bool:
+        """Whether transcripts gate end-of-turn signalling."""
+        return self._wait_for_transcript
+
+    @wait_for_transcript.setter
+    def wait_for_transcript(self, value: bool) -> None:
+        self._wait_for_transcript = value
 
     async def reset(self):
         """Reset the strategy to its initial state."""
@@ -256,11 +284,25 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Trigger user turn stopped if conditions are met.
 
         Conditions:
-        - We have transcription text
         - Turn analyzer indicates turn is complete
-        - Either the timeout has elapsed OR we have a finalized transcript
+        - When ``wait_for_transcript`` is True (default): we have
+          transcription text *and* either the safety-net timeout has
+          elapsed or a finalized transcript arrived.
+        - When ``wait_for_transcript`` is False: fire as soon as the turn
+          analyzer reports COMPLETE — independent of transcripts.
         """
-        if not self._text or not self._turn_complete:
+        if not self._turn_complete:
+            return
+
+        if not self._wait_for_transcript:
+            # Turn-end is driven by the analyzer; transcripts are bookkeeping.
+            if self._timeout_task:
+                await self.task_manager.cancel_task(self._timeout_task)
+                self._timeout_task = None
+            await self.trigger_user_turn_stopped()
+            return
+
+        if not self._text:
             return
 
         # For finalized transcripts, trigger immediately

@@ -11,16 +11,14 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import LLMContextMessage
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
+    UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -29,6 +27,8 @@ from pipecat.services.openai.realtime import events
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import BaseUserTurnStopStrategy
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
@@ -66,7 +66,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        realtime_service_mode=True,
     )
 
     pipeline = Pipeline(
@@ -79,7 +79,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -87,6 +87,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
+
+    # Azure Realtime emits user-turn frames from server VAD, so
+    # on_user_turn_stopped fires at the turn boundary. In realtime mode
+    # UserTurnStoppedMessage.content is None (the user transcript isn't
+    # finalized at turn-stop time); subscribe to on_user_turn_message_added
+    # if you need the finalized user text.
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(
+        aggregator,
+        strategy: BaseUserTurnStopStrategy,
+        message: UserTurnStoppedMessage,
+    ):
+        logger.info(f"User turn stopped at {message.timestamp}")
 
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
@@ -97,11 +110,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        await task.queue_frames([LLMRunFrame()])
+        await worker.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
         logger.info("Updating Azure Realtime LLM settings: output_modalities=['text']")
-        await task.queue_frame(
+        await worker.queue_frame(
             LLMUpdateSettingsFrame(
                 delta=AzureRealtimeLLMService.Settings(
                     session_properties=events.SessionProperties(output_modalities=["text"])
@@ -111,7 +124,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         await asyncio.sleep(10)
         logger.info("Updating Azure Realtime LLM settings: output_modalities=['audio']")
-        await task.queue_frame(
+        await worker.queue_frame(
             LLMUpdateSettingsFrame(
                 delta=AzureRealtimeLLMService.Settings(
                     session_properties=events.SessionProperties(output_modalities=["audio"])
@@ -122,11 +135,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

@@ -25,6 +25,13 @@ Run the TTFS benchmark for your service and configuration, then pass the
 measured value to your STT service constructor:
 
     stt = DeepgramSTTService(api_key="...", ttfs_p99_latency=0.45)
+
+Turn-based STT services (e.g. ``CartesiaTurnsSTTService``,
+``DeepgramFluxSTTService``) have no meaningful TTFS metric — the server
+defines the turn boundary directly, so there is no separate "speech end →
+final transcript" interval to measure. Those services override the
+``STTService.supports_ttfs`` property to return False rather than supplying
+a constant here.
 """
 
 # Conservative fallback for services without measured values
@@ -42,19 +49,17 @@ ELEVENLABS_REALTIME_TTFS_P99: float = 0.41
 FAL_TTFS_P99: float = 2.07
 GLADIA_TTFS_P99: float = 1.49
 GOOGLE_TTFS_P99: float = 1.57
-GRADIUM_TTFS_P99: float = 1.61
+GRADIUM_TTFS_P99: float = 0.60
 GROQ_TTFS_P99: float = 1.54
+MISTRAL_TTFS_P99: float = 1.89
 OPENAI_TTFS_P99: float = 2.01
 OPENAI_REALTIME_TTFS_P99: float = 1.66
 SARVAM_TTFS_P99: float = 1.17
+SMALLEST_TTFS_P99: float = 1.59
 SONIOX_TTFS_P99: float = 0.35
 SPEECHMATICS_TTFS_P99: float = 0.74
+XAI_TTFS_P99: float = 2.14
 
 # These services run locally and should be replaced with measured values
 NVIDIA_TTFS_P99: float = DEFAULT_TTFS_P99
 WHISPER_TTFS_P99: float = DEFAULT_TTFS_P99
-
-# No benchmark available yet; using conservative default
-MISTRAL_TTFS_P99: float = DEFAULT_TTFS_P99
-SMALLEST_TTFS_P99: float = DEFAULT_TTFS_P99
-XAI_TTFS_P99: float = DEFAULT_TTFS_P99

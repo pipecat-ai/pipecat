@@ -48,7 +48,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
@@ -339,10 +339,10 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             logger.info(f"{self} Successfully connected to AWS Transcribe")
         except Exception as e:
+            self._websocket = None
             await self.push_error(
                 error_msg=f"Unable to connect to AWS Transcribe: {e}", exception=e
             )
-            raise
 
     async def _disconnect_websocket(self):
         """Close the websocket connection to AWS Transcribe."""

@@ -224,7 +224,10 @@ class TestSystemInstructionComposition(unittest.IsolatedAsyncioTestCase):
         # Disable
         await service._update_settings(LLMSettings(filter_incomplete_user_turns=False))
         self.assertEqual(service._settings.system_instruction, "You are a helpful assistant.")
-        self.assertIsNone(service._base_system_instruction)
+        # The base prompt is retained — it's the single source of truth that
+        # composition rebuilds from; disabling just recomposes without the
+        # turn-completion addon.
+        self.assertEqual(service._base_system_instruction, "You are a helpful assistant.")
 
     async def test_disable_turn_completion_restores_none(self):
         """Disabling turn completion when original was None should restore None."""

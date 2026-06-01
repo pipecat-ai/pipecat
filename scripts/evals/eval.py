@@ -39,7 +39,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -332,7 +332,7 @@ async def run_eval_pipeline(
         ]
     )
 
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             audio_in_sample_rate=16000,
@@ -350,7 +350,7 @@ async def run_eval_pipeline(
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         if example_image:
-            await task.queue_frame(
+            await worker.queue_frame(
                 OutputImageRawFrame(
                     image=example_image.tobytes(),
                     size=example_image.size,
@@ -365,15 +365,15 @@ async def run_eval_pipeline(
             context.add_message(
                 {"role": "user", "content": f"Start by saying this exactly: '{eval_config.prompt}'"}
             )
-            await task.queue_frames([LLMRunFrame()])
+            await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
+        await runner.cancel()
 
-    @task.event_handler("on_pipeline_finished")
-    async def on_pipeline_finished(task, frame):
+    @worker.event_handler("on_pipeline_finished")
+    async def on_pipeline_finished(worker, frame):
         if isinstance(frame, EndFrame):
             await eval_runner.assert_eval(bool(frame.reason))
         elif isinstance(frame, CancelFrame):
@@ -383,4 +383,5 @@ async def run_eval_pipeline(
     # eval and the example.
     runner = PipelineRunner(handle_sigint=False)
 
-    await runner.run(task)
+    await runner.add_workers(worker)
+    await runner.run()

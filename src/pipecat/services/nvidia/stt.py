@@ -46,7 +46,7 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use NVIDIA Nemotron Speech STT, you need to `pip install pipecat-ai[nvidia]`."
     )
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 def language_to_nvidia_nemotron_speech_language(language: Language) -> str:
@@ -146,6 +146,79 @@ class NvidiaSegmentedSTTSettings(_NvidiaBaseSTTSettings):
     """Settings for NvidiaSegmentedSTTService."""
 
     pass
+
+
+class AudioChunkIterator:
+    """Per-stream iterator that feeds audio chunks to NVIDIA's gRPC stream.
+
+    The NVIDIA client consumes audio synchronously from a worker thread, while
+    Pipecat produces audio asynchronously on the event loop. This iterator
+    bridges those two worlds and owns the logic for unblocking and closing a
+    single stream cleanly.
+    """
+
+    _QUEUE_SENTINEL = object()
+
+    def __init__(self, event_loop: asyncio.AbstractEventLoop):
+        """Initialize the iterator for a single streaming session.
+
+        Args:
+            event_loop: Event loop used to await queue operations from the
+                worker thread.
+        """
+        self._event_loop = event_loop
+        self._queue: asyncio.Queue[bytes | object] = asyncio.Queue()
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        """Whether the iterator has been closed intentionally."""
+        return self._closed
+
+    async def put(self, audio: bytes) -> None:
+        """Enqueue audio for the active stream.
+
+        Args:
+            audio: Raw PCM audio bytes to send to the server.
+        """
+        if self._closed:
+            return
+        await self._queue.put(audio)
+
+    async def close(self) -> None:
+        """Close the iterator and unblock any pending read."""
+        if self._closed:
+            return
+        self._closed = True
+        await self._queue.put(self._QUEUE_SENTINEL)
+
+    def __iter__(self):
+        """Return the iterator instance."""
+        return self
+
+    def __next__(self) -> bytes:
+        """Get the next audio chunk for the active stream.
+
+        Returns:
+            Audio bytes from the queue.
+
+        Raises:
+            StopIteration: When the iterator has been closed.
+        """
+        if self._closed:
+            raise StopIteration
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(self._queue.get(), self._event_loop)
+            audio = future.result()
+        except FuturesCancelledError:
+            raise StopIteration
+
+        if audio is self._QUEUE_SENTINEL:
+            self._closed = True
+            raise StopIteration
+
+        return audio
 
 
 class NvidiaSTTService(STTService):
@@ -275,7 +348,7 @@ class NvidiaSTTService(STTService):
         self._function_id = model_function_map.get("function_id")
 
         self._asr_service = None
-        self._queue = None
+        self._audio_iterator: AudioChunkIterator | None = None
         self._config = None
         self._thread_task = None
 
@@ -400,8 +473,7 @@ class NvidiaSTTService(STTService):
         await super().start(frame)
         self._initialize_client()
         self._config = self._create_recognition_config()
-
-        self._queue = asyncio.Queue()
+        self._audio_iterator = AudioChunkIterator(self.get_event_loop())
 
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
@@ -426,15 +498,45 @@ class NvidiaSTTService(STTService):
         await super().cancel(frame)
         await self._stop_tasks()
 
-    async def _stop_tasks(self):
+    async def _stop_tasks(self, close_iterator: bool = True):
+        """Stop the active stream thread and optionally close the shared iterator.
+
+        ``close_iterator=False`` is used during reconnect so we can tear down the
+        current gRPC stream but keep buffering audio on the same iterator until
+        the replacement stream starts consuming it.
+        """
+        iterator = self._audio_iterator
+        if close_iterator:
+            self._audio_iterator = None
+        if close_iterator and iterator is not None:
+            await iterator.close()
+
         if self._thread_task:
             await self.cancel_task(self._thread_task)
             self._thread_task = None
 
-    def _response_handler(self):
+    async def _do_reconnect(self):
+        iterator = self._audio_iterator
+        if iterator is None or iterator.closed:
+            return
+
+        await self._stop_tasks(close_iterator=False)
+        self._initialize_client()
+        self._config = self._create_recognition_config()
+        self._thread_task = self.create_task(self._thread_task_handler())
+
+    async def _handle_stream_drop(self, iterator: AudioChunkIterator, reason: str):
+        if iterator.closed or iterator is not self._audio_iterator:
+            return
+
+        logger.warning(f"{self} stream dropped: {reason}")
+        await self._request_reconnect()
+
+    def _response_handler(self, iterator: AudioChunkIterator):
+        drop_reason = None
         try:
             responses = self._asr_service.streaming_response_generator(
-                audio_chunks=self,
+                audio_chunks=iterator,
                 streaming_config=self._config,
             )
             for response in responses:
@@ -443,21 +545,29 @@ class NvidiaSTTService(STTService):
                 asyncio.run_coroutine_threadsafe(
                     self._handle_response(response), self.get_event_loop()
                 )
+            drop_reason = "server closed the gRPC stream"
         except grpc.RpcError as e:
             status = e.code().name if hasattr(e, "code") else "UNKNOWN"
             details = e.details() if hasattr(e, "details") else str(e)
-            logger.error(f"{self} gRPC streaming error ({status}): {details}")
+            drop_reason = f"gRPC {status}: {details}"
+        except Exception as e:
+            drop_reason = str(e)
+            logger.error(f"{self} unexpected streaming error: {e}")
+
+        if drop_reason:
             asyncio.run_coroutine_threadsafe(
-                self.push_error(f"{self} STT streaming failed (gRPC {status}): {details}"),
+                self._handle_stream_drop(iterator, drop_reason),
                 self.get_event_loop(),
             )
 
     async def _thread_task_handler(self):
+        iterator = self._audio_iterator
+        if iterator is None:
+            return
+
         try:
-            self._thread_running = True
-            await asyncio.to_thread(self._response_handler)
+            await asyncio.to_thread(self._response_handler, iterator)
         except asyncio.CancelledError:
-            self._thread_running = False
             raise
 
     @traced_stt
@@ -515,35 +625,10 @@ class NvidiaSTTService(STTService):
             None - transcription results are pushed to the pipeline via frames.
         """
         await self.start_processing_metrics()
-        await self._queue.put(audio)
+        iterator = self._audio_iterator
+        if iterator is not None and not iterator.closed:
+            await iterator.put(audio)
         yield None
-
-    def __next__(self) -> bytes:
-        """Get the next audio chunk for NVIDIA Nemotron Speech processing.
-
-        Returns:
-            Audio bytes from the queue.
-
-        Raises:
-            StopIteration: When the thread is no longer running.
-        """
-        if not self._thread_running:
-            raise StopIteration
-
-        try:
-            future = asyncio.run_coroutine_threadsafe(self._queue.get(), self.get_event_loop())
-            audio = future.result()
-            return audio
-        except FuturesCancelledError:
-            raise StopIteration
-
-    def __iter__(self):
-        """Return iterator for audio chunk processing.
-
-        Returns:
-            Self as iterator.
-        """
-        return self
 
 
 class NvidiaSegmentedSTTService(SegmentedSTTService):

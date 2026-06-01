@@ -31,7 +31,7 @@ Example::
             print(f"Bot connected in {report.bot_connected_secs:.3f}s")
         print(f"Client connected in {report.client_connected_secs:.3f}s")
 
-    task = PipelineTask(pipeline, observers=[observer])
+    worker = PipelineWorker(pipeline, observers=[observer])
 """
 
 import time
@@ -155,7 +155,7 @@ class StartupTimingObserver(BaseObserver):
                 logger.info(f"Bot connected in {report.bot_connected_secs:.3f}s")
             logger.info(f"Client connected in {report.client_connected_secs:.3f}s")
 
-        task = PipelineTask(pipeline, observers=[observer])
+        worker = PipelineWorker(pipeline, observers=[observer])
 
     Args:
         processor_types: Optional tuple of processor types to measure. If None,
@@ -216,7 +216,7 @@ class StartupTimingObserver(BaseObserver):
     async def on_pipeline_started(self):
         """Emit the startup timing report when the pipeline has fully started.
 
-        Called by the ``PipelineTask`` after the ``StartFrame`` has been
+        Called by the ``PipelineWorker`` after the ``StartFrame`` has been
         processed by all processors, including nested ``ParallelPipeline``
         branches.
         """
