@@ -7,32 +7,18 @@
 """MOQ (Media over QUIC) transport example.
 
 This example demonstrates using the MOQ transport for real-time voice
-conversations over QUIC, connecting to a MOQ relay server. It uses the
-unified runner pattern that works with Daily, WebRTC, and MOQ transports.
-
-MOQ provides WebRTC-like latency without WebRTC constraints, using QUIC
-for prioritization and partial reliability.
+conversations over QUIC. MOQ provides WebRTC-like latency without WebRTC
+constraints, using QUIC for prioritization and partial reliability.
 
 Requirements:
     uv sync --extra moq --extra silero --extra deepgram --extra cartesia \
         --extra openai --extra runner
 
-    # You also need a MOQ relay running locally. Clone moq-relay from
-    # https://github.com/kixelated/moq and then run scripts/moq-dev-setup.sh
-    # from this repo, pointing at the relay checkout. The script generates
-    # a self-signed cert, symlinks it into both repos, and prints the
-    # exact relay + bot run commands to copy.
-    #
-    #   git clone https://github.com/kixelated/moq.git ../moq
-    #   ./scripts/moq-dev-setup.sh ../moq
-    #
-    # Then in two terminals run the commands the script printed (relay
-    # binds QUIC on UDP [::]:4080 with --auth-public '').
-
 Usage:
-    # Run with MOQ transport (connects to local relay set up by the script):
-    uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-cert moq-cert.pem --moq-insecure --moq-path /
+    # Local dev — bot is its own MOQ server, mints a self-signed cert,
+    # browser pins the fingerprint via /api/config. No separate relay
+    # needed:
+    uv run python examples/transports/transports-moq.py -t moq --moq-serve
 
     # Connect to a remote relay (CA-signed cert, no pinning needed):
     uv run python examples/transports/transports-moq.py \\
@@ -40,11 +26,11 @@ Usage:
 
     # With a custom namespace (different "room"):
     uv run python examples/transports/transports-moq.py \\
-        -t moq --moq-cert moq-cert.pem --moq-insecure --moq-namespace my-room
+        -t moq --moq-serve --moq-namespace my-room
 
-    # Then open the browser client at http://localhost:7860 and click Connect.
+    # Then open http://localhost:7860 and click Connect.
 
-    # Can also run with other transports (no relay needed):
+    # Can also run with other transports:
     uv run python examples/transports/transports-moq.py -t webrtc
     uv run python examples/transports/transports-moq.py -t daily
 """
@@ -72,7 +58,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.moq import MOQParams
-from pipecat.transports.moq.protocol import MOQRole
 
 load_dotenv(override=True)
 
@@ -89,7 +74,6 @@ transport_params = {
     "moq": lambda: MOQParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        role=MOQRole.PUBSUB,
     ),
 }
 
@@ -145,13 +129,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
-    # For MOQ, we need to handle connection and events differently
+    # For MOQ, we need to handle connection and events differently.
+    # create_transport() already wires the runner's ready_event +
+    # cert_fingerprints back-channel for us, so we don't need to do that here.
     if isinstance(runner_args, MOQRunnerArguments):
-        @transport.event_handler("on_connected")
-        async def on_connected(transport):
-            logger.info("Connected to MOQ relay (waiting for client to join)")
-            if runner_args.ready_event is not None:
-                runner_args.ready_event.set()
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport):
