@@ -68,7 +68,7 @@ class TestTranslate(unittest.TestCase):
             [{"type": "llm_response", "text": "Hello world"}],
         )
 
-    def test_tool_call(self):
+    def test_function_call(self):
         ctx = _ctx()
         msg = {
             "type": "llm-function-call-in-progress",
@@ -76,7 +76,7 @@ class TestTranslate(unittest.TestCase):
         }
         self.assertEqual(
             _translate(msg, ctx),
-            [{"type": "tool_call", "name": "get_weather", "args": {"city": "Paris"}}],
+            [{"type": "function_call", "name": "get_weather", "args": {"city": "Paris"}}],
         )
 
     def test_unmapped_message_ignored(self):
@@ -160,7 +160,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         result = await run_scenario(scenario, self.server.url)
         self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
 
-    async def test_tool_call_pass(self):
+    async def test_function_call_pass(self):
         self.server.on_text(
             "weather in Paris?",
             _rtvi(
@@ -179,7 +179,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                     user="weather in Paris?",
                     expect=[
                         Expectation(
-                            event="tool_call",
+                            event="function_call",
                             within_ms=2000,
                             name="get_weather",
                             args={"city": "Paris"},
@@ -234,7 +234,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                     expect=[
                         Expectation(event="llm_started", within_ms=100),
                         Expectation(event="llm_response", within_ms=100),
-                        Expectation(event="tool_call", within_ms=100),
+                        Expectation(event="function_call", within_ms=100),
                     ],
                 )
             ],

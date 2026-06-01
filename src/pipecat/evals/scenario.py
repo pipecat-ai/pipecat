@@ -23,15 +23,15 @@ the bot emits, and asserts on them in order.
 
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``user_transcription``,
-``llm_started``, ``llm_response``, ``tool_call``.
+``llm_started``, ``llm_response``, ``function_call``.
 
 Supported expectation fields (per event):
     event: <name>              required — event type name
     within_ms: <int>           latency budget from the most recent anchor
     transcript_contains: <str> substring check on user_transcription.transcript
     text_contains: <str>       substring check on llm_response.text
-    name: <str>                tool_call.name equality
-    args: <object>             tool_call.args equality
+    name: <str>                function_call.name equality
+    args: <object>             function_call.args equality
     eval: <str>                natural-language criterion the event's text content
                                must satisfy, evaluated by a judge LLM (see
                                :mod:`pipecat.evals.judge`). Only meaningful on
@@ -96,8 +96,8 @@ class Expectation:
         transcript_contains: Optional substring check on
             ``user_transcription.transcript``.
         text_contains: Optional substring check on ``llm_response.text``.
-        name: Optional equality check for ``tool_call.name``.
-        args: Optional equality check for ``tool_call.args``.
+        name: Optional equality check for ``function_call.name``.
+        args: Optional equality check for ``function_call.args``.
         eval: Optional natural-language criterion the event's text content
             must satisfy. Evaluated by a judge LLM. Only meaningful on
             ``llm_response`` (the text the bot produced for this turn).
