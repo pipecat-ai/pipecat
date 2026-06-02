@@ -57,9 +57,11 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **Transports** (`src/pipecat/transports/`): Transports are frame processors used for external I/O layer (Daily WebRTC, LiveKit WebRTC, WebSocket, Local). Abstract interface via `BaseTransport`, `BaseInputTransport` and `BaseOutputTransport`.
 
-- **Pipeline Task (`src/pipecat/pipeline/task.py`)**: Runs and manages a pipeline. Pipeline tasks send the first frame, `StartFrame`, to the pipeline in order for processors to know they can start processing and pushing frames. Pipeline tasks internally create a pipeline with two additional processors, a source processor before the user-defined pipeline and a sink processor at the end. Those are used for multiple things: error handling, pipeline task level events, heartbeat monitoring, etc.
+- **Workers (`src/pipecat/workers/`)**: A **worker** is the top-level runnable unit (it replaces the old "pipeline task"). `BaseWorker` (`src/pipecat/workers/base_worker.py`) is the abstract base: it owns activation, end/cancel, bus subscription, job RPC, and a default `run()` for bus-only workers. `WorkerParams` configures it. Specialized workers live under `src/pipecat/workers/llm/` (`LLMWorker` adds `@tool` collection; `LLMContextWorker` adds an `LLMContext` plus aggregator pair) and `src/pipecat/workers/ui/` (`UIWorker`).
 
-- **Pipeline Runner (`src/pipecat/pipeline/runner.py`)**: High-level entry point for executing pipeline tasks. Handles signal management (SIGINT/SIGTERM) for graceful shutdown and optional garbage collection. Run a single pipeline task with `await runner.run(task)` or multiple concurrently with `await asyncio.gather(runner.run(task1), runner.run(task2))`.
+- **Pipeline Worker (`src/pipecat/pipeline/worker.py`)**: `PipelineWorker` is the `BaseWorker` subclass that wraps a user-defined pipeline — the common single-bot case. It sends the first frame, `StartFrame`, so processors know they can start processing and pushing frames, and internally wraps the pipeline with a source processor (before the pipeline) and a sink processor (at the end) used for error handling, worker-level events, heartbeat monitoring, etc. Optional `bridged=` adds bus edge processors so the pipeline can exchange frames with other workers. `PipelineTask` is a deprecated (1.3.0) alias — construct `PipelineWorker` instead.
+
+- **Worker Runner (`src/pipecat/workers/runner.py`)**: `WorkerRunner` is the high-level entry point for executing workers. It owns the shared `WorkerBus` and `WorkerRegistry` and handles signal management (SIGINT/SIGTERM) for graceful shutdown. Register workers with `await runner.add_workers(*workers)`, then `await runner.run()`. By default (`auto_end=True`) the runner ends once every root worker finishes — so a single-pipeline bot ends when its pipeline does; pass `auto_end=False` for long-lived hosts (e.g. a FastAPI server) that add/remove workers across sessions. `PipelineRunner`, and passing a worker directly to `run(worker)`, are deprecated (1.3.0).
 
 - **Services** (`src/pipecat/services/`): 60+ AI provider integrations (STT, TTS, LLM, etc.). Extend base classes: `AIService`, `LLMService`, `STTService`, `TTSService`, `VisionService`.
 
@@ -67,7 +69,21 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **RTVI** (`src/pipecat/processors/frameworks/rtvi.py`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels.
 
-- **Observers** (`src/pipecat/observers/`): Monitor frame flow without modifying the pipeline. Passed to `PipelineTask` via the `observers` parameter. Implement `on_process_frame()` and `on_push_frame()` callbacks.
+- **Observers** (`src/pipecat/observers/`): Monitor frame flow without modifying the pipeline. Passed to `PipelineWorker` via the `observers` parameter. Implement `on_process_frame()` and `on_push_frame()` callbacks.
+
+### Workers, Bus, and Jobs
+
+Beyond the single-pipeline case, Pipecat supports multiple cooperating **workers** coordinated by a shared bus (folded in from the former `pipecat-subagents` package). Terminology note: a "worker" is a runnable unit, "task" now refers only to asyncio tasks, and cross-worker RPC uses "jobs" and "job groups".
+
+- **Bus** (`src/pipecat/bus/`): `WorkerBus` is the abstract pub/sub message bus; `AsyncQueueBus` (`bus/local/async_queue.py`) is the default in-process implementation, with `PgmqBus` / `RedisBus` (`bus/network/`) for distributed workers. Typed messages live in `bus/messages.py` (a `BusMessage` hierarchy split into normal-priority data messages and high-priority system messages, covering frame transport, worker lifecycle, and job RPC). `BusBridgeProcessor` (`bus/bridge_processor.py`) bridges a pipeline to the bus; `BusSubscriber` is the receive-side mixin.
+
+- **Registry** (`src/pipecat/registry/`): `WorkerRegistry` tracks local and remote workers. The runner manages registration; code uses `watch(name, handler)` (or the `@worker_ready(name=...)` decorator) to be notified when a named worker becomes ready.
+
+- **Jobs** (`src/pipecat/pipeline/job_context.py`, `job_decorator.py`, `worker_ready_decorator.py`): A worker exposes handlers with `@job(name=..., sequential=...)`. A caller opens `async with self.job(worker_name, ...)` (single worker) or `self.job_group(*worker_names, ...)` (fan-out) to send a request and await `JobStatus` results / streamed updates over the bus.
+
+- **LLM tools** (`src/pipecat/workers/llm/tool_decorator.py`): On an `LLMWorker`, methods marked `@tool` are auto-collected and registered with the LLM service (supports `cancel_on_interruption` and `timeout`).
+
+Runnable examples live in `examples/multi-worker/` (local handoff, distributed handoff via pgmq/redis, parallel debate, remote proxy, UI worker).
 
 ### Important Patterns
 
@@ -88,13 +104,18 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **Error Handling**: Use `await self.push_error(msg, exception, fatal)` to push errors upstream. Services should use `fatal=False` (the default) so application code can handle errors and take action (e.g. switch to another service).
 
+- **Accessing the worker**: Reach the running worker via the `pipeline_worker` property on `FrameProcessor` and the `pipeline_worker` field on `FunctionCallParams`. Both are required once the processor is set up (the property raises if accessed before setup). The old `pipeline_task` accessor is deprecated (1.3.0).
+
 ### Key Directories
 
 | Directory                  | Purpose                                            |
 | -------------------------- | -------------------------------------------------- |
 | `src/pipecat/frames/`      | Frame definitions (100+ types)                     |
 | `src/pipecat/processors/`  | FrameProcessor base + aggregators, filters, audio  |
-| `src/pipecat/pipeline/`    | Pipeline orchestration                             |
+| `src/pipecat/pipeline/`    | Pipeline orchestration; PipelineWorker + job RPC   |
+| `src/pipecat/workers/`     | Worker model: BaseWorker, runner, LLM/UI workers   |
+| `src/pipecat/bus/`         | Inter-worker message bus (local + pgmq/redis)      |
+| `src/pipecat/registry/`    | Worker registry (local + remote tracking)          |
 | `src/pipecat/services/`    | AI service integrations (60+ providers)            |
 | `src/pipecat/transports/`  | Transport layer (Daily, LiveKit, WebSocket, Local) |
 | `src/pipecat/serializers/` | Frame serialization for WebSocket protocols        |
