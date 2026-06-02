@@ -31,32 +31,41 @@ from pipecat.frames.frames import LLMConfigureOutputFrame
 from pipecat.transports.websocket.server import WebsocketServerTransport
 
 SKIP_TTS_QUERY_PARAM = "skip_tts"
+CAPTURE_AUDIO_QUERY_PARAM = "capture_audio"
 
 
-def _connection_wants_skip_tts(websocket) -> bool:
-    """Whether the client's connection URL requested ``skip_tts``."""
+def _query_flag(websocket, name: str) -> bool:
+    """Whether the client's connection URL set the boolean query param ``name``."""
     # websockets exposes the request target as ``.path`` (legacy) or
     # ``.request.path`` (newer); both include the query string.
     path = getattr(websocket, "path", None)
     if path is None:
         request = getattr(websocket, "request", None)
         path = getattr(request, "path", "") if request is not None else ""
-    values = parse_qs(urlsplit(path or "").query).get(SKIP_TTS_QUERY_PARAM, [])
+    values = parse_qs(urlsplit(path or "").query).get(name, [])
     return bool(values) and values[0].strip().lower() in ("1", "true", "yes")
 
 
 class EvalWebsocketServerTransport(WebsocketServerTransport):
     """WebSocket server transport used by the eval harness.
 
-    Identical to the base transport except that a ``?skip_tts=true`` connection
-    silences the bot's output for that session, including any on-connect greeting
-    (see the module docstring for why this must happen before
-    ``on_client_connected``).
+    Reads two per-connection query flags the harness sets:
+
+    - ``?skip_tts=true`` silences the bot's output for the session, including any
+      on-connect greeting (see the module docstring for why this must happen
+      before ``on_client_connected``).
+    - ``?capture_audio=true`` makes the serializer forward the bot's synthesized
+      audio to the harness (for ``tts_response`` transcription).
     """
 
     async def _on_client_connected(self, websocket):
-        """Push a skip-TTS config (if requested) before the greeting, then proceed."""
-        if self._input is not None and _connection_wants_skip_tts(websocket):
+        """Apply per-connection eval flags, then proceed (config before any greeting)."""
+        serializer = getattr(self._params, "serializer", None)
+        if serializer is not None and hasattr(serializer, "set_capture_audio"):
+            serializer.set_capture_audio(_query_flag(websocket, CAPTURE_AUDIO_QUERY_PARAM))
+
+        if self._input is not None and _query_flag(websocket, SKIP_TTS_QUERY_PARAM):
             logger.debug(f"{self}: eval client requested skip_tts; configuring LLM output")
             await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=True))
+
         await super()._on_client_connected(websocket)

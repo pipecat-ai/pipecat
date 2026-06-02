@@ -44,6 +44,36 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertIsNone(s.turns[0].send_after)
         # bot_audio defaults to False: evals are text/silent unless they opt in.
         self.assertFalse(s.bot_audio)
+        self.assertIsNone(s.transcriber)
+
+    def test_bot_audio_bool(self):
+        s = load_scenario(
+            _write(
+                "name: a\nbot_audio: true\nturns: [{user: hi, expect: [{event: llm_started}]}]\n"
+            )
+        )
+        self.assertTrue(s.bot_audio)
+        self.assertIsNone(s.transcriber)
+
+    def test_bot_audio_mapping_enables_transcriber(self):
+        s = load_scenario(
+            _write(
+                "name: a\n"
+                "bot_audio:\n"
+                "  model: base\n"
+                "turns: [{user: hi, expect: [{event: tts_response, eval: ok}]}]\n"
+            )
+        )
+        self.assertTrue(s.bot_audio)
+        self.assertEqual(s.transcriber, {"model": "base"})
+
+    def test_bot_audio_invalid_type_rejected(self):
+        with self.assertRaises(ValueError):
+            load_scenario(
+                _write(
+                    "name: a\nbot_audio: 3\nturns: [{user: hi, expect: [{event: llm_started}]}]\n"
+                )
+            )
 
     def test_all_expectation_fields(self):
         s = load_scenario(

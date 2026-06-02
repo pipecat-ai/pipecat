@@ -27,6 +27,8 @@ scenario ``event:``         RTVI server message(s)
 ``llm_started``             ``bot-llm-started``
 ``llm_response``            text mode: ``bot-llm-text`` joined at ``bot-llm-stopped``;
                             audio mode: one segment per ``bot-tts-text`` (spoken sentence)
+``tts_response``            local-Whisper transcription of the bot's audio, per
+                            spoken segment (audio mode only)
 ``function_call``           ``llm-function-call-in-progress``
 ==========================  ==============================================
 
@@ -69,7 +71,11 @@ from loguru import logger
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.judge import Judge, build_default_judge
 from pipecat.evals.scenario import Expectation, Scenario, SendAfter, Turn
-from pipecat.evals.serializer import EVAL_CONFIGURE_MESSAGE_TYPE, EVAL_RESET_MESSAGE_TYPE
+from pipecat.evals.serializer import (
+    EVAL_BOT_AUDIO_TYPE,
+    EVAL_CONFIGURE_MESSAGE_TYPE,
+    EVAL_RESET_MESSAGE_TYPE,
+)
 
 # ``websockets`` is imported lazily inside the methods that use it. That keeps
 # this module importable (and the CLI plugin loadable via pipecat-cli) even
@@ -115,6 +121,9 @@ class EvalResult:
     failures: list[AssertionFailure] = field(default_factory=list)
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
+    # When set, the scenario was not run (e.g. tts_response without audio mode);
+    # the string is the reason. Neither passed nor failed.
+    skipped: str | None = None
 
 
 @dataclass
@@ -194,11 +203,33 @@ class EvalSession:
         # no text (llm_started, function_call, speaking events).
         self._last_match_text: str = ""
 
+        # tts_response: when a scenario asserts on the bot's actual spoken audio,
+        # the harness captures that audio and transcribes it locally. Lazy — only
+        # set up when needed.
+        self._wants_tts_response: bool = any(
+            exp.event == "tts_response" for turn in scenario.turns for exp in turn.expect
+        )
+        self._transcriber: Any = None
+        self._tts_audio: bytearray = bytearray()  # current spoken segment's audio
+        self._tts_sample_rate: int = 0
+
     async def run(self) -> EvalResult:
         """Connect, drive the scenario, and return the result."""
         import websockets  # lazy: see note at the top of the module
 
         started = time.monotonic()
+
+        # tts_response needs the bot's actual audio; without audio mode there's
+        # nothing to transcribe, so skip rather than run a guaranteed failure.
+        if self._wants_tts_response and not self._scenario.bot_audio:
+            reason = "asserts tts_response but bot_audio is off (no audio to transcribe)"
+            logger.warning(f"Eval '{self._scenario.name}': {reason}; skipping")
+            return EvalResult(
+                scenario_name=self._scenario.name,
+                passed=False,
+                skipped=reason,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
 
         try:
             async with asyncio.timeout(self._connect_timeout_s):
@@ -229,6 +260,13 @@ class EvalSession:
             self._voice = EvalVoice(self._scenario.user_audio)
             await self._voice.start()
 
+        # One Whisper pipeline to transcribe the bot's audio for tts_response.
+        if self._wants_tts_response:
+            from pipecat.evals.transcribe import EvalTranscriber
+
+            self._transcriber = EvalTranscriber(self._scenario.transcriber)
+            await self._transcriber.start()
+
         failures: list[AssertionFailure] = []
         reader_task = asyncio.create_task(self._reader_loop())
 
@@ -244,6 +282,8 @@ class EvalSession:
                 pass
             if self._voice is not None:
                 await self._voice.aclose()
+            if self._transcriber is not None:
+                await self._transcriber.aclose()
             await self._ws.close()
 
         return EvalResult(
@@ -255,17 +295,23 @@ class EvalSession:
         )
 
     def _connect_url(self) -> str:
-        """Bot URL, with ``?skip_tts=true`` in text mode.
+        """Bot URL with the per-connection eval query flags.
 
-        The eval transport reads this on connect and silences the bot (including
-        an on-connect greeting) before any LLM runs — see
-        :mod:`pipecat.evals.transport`. Frames are ordered, so this can't be done
-        after connecting.
+        ``skip_tts`` (text mode) silences the bot before any LLM runs; the eval
+        transport must read it at connect time because frames are ordered and a
+        later message can't precede an on-connect greeting (see
+        :mod:`pipecat.evals.transport`). ``capture_audio`` makes the bot forward
+        its synthesized audio for ``tts_response`` transcription.
         """
-        if self._scenario.bot_audio:
+        flags = []
+        if not self._scenario.bot_audio:
+            flags.append("skip_tts=true")
+        if self._wants_tts_response:
+            flags.append("capture_audio=true")
+        if not flags:
             return self._bot_url
         sep = "&" if "?" in self._bot_url else "?"
-        return f"{self._bot_url}{sep}skip_tts=true"
+        return f"{self._bot_url}{sep}{'&'.join(flags)}"
 
     def _message_id(self) -> str:
         self._next_id += 1
@@ -345,12 +391,45 @@ class EvalSession:
                     continue
                 if message.get("label") != RTVI.MESSAGE_LABEL:
                     continue
+                if self._wants_tts_response:
+                    await self._handle_tts_audio(message)
                 for event in self._translate(message):
-                    self._events_seen.append(event)
-                    self._latest_event_times[event["type"]] = time.monotonic()
-                    await self._queue.put(event)
+                    await self._enqueue(event)
         except (websockets.ConnectionClosed, asyncio.CancelledError):
             pass
+
+    async def _enqueue(self, event: dict) -> None:
+        """Record and queue a friendly event for the matcher."""
+        self._events_seen.append(event)
+        self._latest_event_times[event["type"]] = time.monotonic()
+        await self._queue.put(event)
+
+    async def _handle_tts_audio(self, message: dict) -> None:
+        """Accumulate the bot's audio and emit a ``tts_response`` per spoken turn.
+
+        We bound on the speaking boundaries (``bot-started-speaking`` /
+        ``bot-stopped-speaking``), not the TTS ones: the output transport delays
+        audio by PTS to play it out, so ``bot-tts-stopped`` fires while the tail
+        is still streaming. ``bot-stopped-speaking`` fires once the audio has
+        actually finished — only then is the buffer complete. The transcription
+        is stamped with the response's start so the matcher anchors/aggregates it
+        like ``llm_response``.
+        """
+        msg_type = message.get("type")
+        if msg_type == EVAL_BOT_AUDIO_TYPE:
+            data = message.get("data") or {}
+            self._tts_audio.extend(base64.b64decode(data.get("audio", "")))
+            self._tts_sample_rate = int(data.get("sampleRate", 0)) or self._tts_sample_rate
+        elif msg_type == "bot-started-speaking":
+            self._tts_audio = bytearray()
+        elif msg_type == "bot-stopped-speaking":
+            if not self._tts_audio or self._transcriber is None:
+                return
+            pcm, sample_rate = bytes(self._tts_audio), self._tts_sample_rate
+            started_at = self._response_started_at
+            self._tts_audio = bytearray()
+            text = await self._transcriber.transcribe(pcm, sample_rate)
+            await self._enqueue({"type": "tts_response", "text": text, "started_at": started_at})
 
     def _translate(self, message: dict) -> list[dict]:
         """Translate one RTVI server message into zero or more friendly events."""
@@ -610,7 +689,7 @@ class EvalSession:
         deadline = anchor + (budget_ms / 1000.0)
         self._last_match_text = ""
 
-        aggregates = expectation.event == "llm_response" and (
+        aggregates = expectation.event in ("llm_response", "tts_response") and (
             expectation.text_contains is not None or expectation.eval is not None
         )
         if not aggregates:
