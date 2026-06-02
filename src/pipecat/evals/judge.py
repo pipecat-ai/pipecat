@@ -211,22 +211,12 @@ def build_default_judge(judge_config: dict | None) -> Judge | None:
     """
     config = judge_config or {}
     service_name = str(config.get("service", "ollama")).lower()
-    model = config.get("model", "qwen2.5:3b")
-    endpoint = config.get("endpoint")
 
     try:
         if service_name == "ollama":
-            from pipecat.services.ollama.llm import OLLamaLLMService
-
-            base_url = endpoint or "http://localhost:11434/v1"
-            llm_service = OLLamaLLMService(
-                base_url=base_url,
-                settings=OLLamaLLMService.Settings(model=model),
-            )
+            llm_service = _ollama_service(config)
         elif service_name == "openai":
-            from pipecat.services.openai.llm import OpenAILLMService
-
-            llm_service = OpenAILLMService(settings=OpenAILLMService.Settings(model=model))
+            llm_service = _openai_service(config)
         else:
             logger.error(f"Unknown judge service: {service_name!r}")
             return None
@@ -235,3 +225,21 @@ def build_default_judge(judge_config: dict | None) -> Judge | None:
         return None
 
     return Judge(llm_service)
+
+
+def _ollama_service(config: dict):
+    """Build a local Ollama LLM service from the ``judge:`` config."""
+    from pipecat.services.ollama.llm import OLLamaLLMService
+
+    base_url = config.get("endpoint") or "http://localhost:11434/v1"
+    return OLLamaLLMService(
+        base_url=base_url,
+        settings=OLLamaLLMService.Settings(model=config.get("model", "qwen2.5:3b")),
+    )
+
+
+def _openai_service(config: dict):
+    """Build an OpenAI LLM service from the ``judge:`` config."""
+    from pipecat.services.openai.llm import OpenAILLMService
+
+    return OpenAILLMService(settings=OpenAILLMService.Settings(model=config.get("model", "gpt-4o")))
