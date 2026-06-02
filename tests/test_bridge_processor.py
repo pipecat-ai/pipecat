@@ -8,7 +8,16 @@ import asyncio
 import unittest
 
 from pipecat.bus import AsyncQueueBus, BusBridgeProcessor, BusFrameMessage
-from pipecat.frames.frames import TextFrame
+from pipecat.bus.bridge_processor import _LOCAL_ONLY_FRAMES
+from pipecat.frames.frames import (
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
+    MetricsFrame,
+    TextFrame,
+    TTSSpeakFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.tests.utils import run_test
@@ -262,6 +271,74 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         )
         await processor.on_bus_message(msg)
         self.assertEqual(len(injected), 0)
+
+    async def test_local_only_frames_not_sent_to_bus(self):
+        """Emitter-local output frames (``TTSSpeakFrame``,
+        ``FunctionCall*Frame``, ``MetricsFrame``) pass through downstream
+        in the emitting worker's pipeline but are never relayed across
+        the bus, so sibling tasks never see duplicate copies."""
+        bus = AsyncQueueBus()
+        sent_to_bus = []
+        original_send = bus.send
+
+        async def capture_send(msg):
+            sent_to_bus.append(msg)
+            await original_send(msg)
+
+        bus.send = capture_send
+
+        processor = BusBridgeProcessor(bus=bus, worker_name="test_task")
+        pipeline = Pipeline([processor])
+
+        # One of each local-only frame type. ``MetricsFrame`` requires a
+        # data argument; an empty list is the canonical no-op shape.
+        # System vs Data frames get reordered downstream by pipecat, so we
+        # don't pin the downstream order here — only that nothing leaks to
+        # the bus, which is the invariant the fix protects.
+        frames_to_send = [
+            TTSSpeakFrame(text="hello"),
+            FunctionCallsStartedFrame(function_calls=[]),
+            FunctionCallInProgressFrame(function_name="x", tool_call_id="id1", arguments={}),
+            FunctionCallResultFrame(
+                function_name="x",
+                tool_call_id="id1",
+                arguments={},
+                result={"ok": True},
+            ),
+            FunctionCallCancelFrame(function_name="x", tool_call_id="id1"),
+            MetricsFrame(data=[]),
+        ]
+
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            ignore_start=True,
+        )
+
+        # None of them reached the bus.
+        bus_frame_msgs = [m for m in sent_to_bus if isinstance(m, BusFrameMessage)]
+        self.assertEqual(
+            len(bus_frame_msgs),
+            0,
+            f"expected 0 bus messages, got {[type(m.frame).__name__ for m in bus_frame_msgs]}",
+        )
+
+    def test_local_only_frames_tuple_pin(self):
+        """Pin the exact contents of ``_LOCAL_ONLY_FRAMES``. Adding a new
+        emitter-local frame type or removing one is a behaviour change
+        that downstream multi-worker deployments depend on — make it
+        intentional by updating this test in the same commit."""
+        self.assertEqual(
+            set(_LOCAL_ONLY_FRAMES),
+            {
+                TTSSpeakFrame,
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+                FunctionCallCancelFrame,
+                MetricsFrame,
+            },
+        )
 
 
 if __name__ == "__main__":

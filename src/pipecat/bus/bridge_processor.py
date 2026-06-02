@@ -25,9 +25,15 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
+    MetricsFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
     StopFrame,
+    TTSSpeakFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
@@ -36,6 +42,21 @@ if TYPE_CHECKING:
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
 _PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
+
+# Frames that are semantically local to the emitting worker's pipeline and
+# must never be relayed across the bus. Broadcasting them would cause the
+# same frame instance to be processed once per sibling task: duplicate
+# entries in each task's context aggregator for the function-call frames,
+# double TTS playback for ``TTSSpeakFrame``, inflated counters for
+# ``MetricsFrame``. None of these have legitimate cross-task semantics.
+_LOCAL_ONLY_FRAMES = (
+    TTSSpeakFrame,
+    FunctionCallsStartedFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallCancelFrame,
+    MetricsFrame,
+)
 
 
 class BusBridgeProcessor(FrameProcessor, BusSubscriber):
@@ -103,6 +124,13 @@ class BusBridgeProcessor(FrameProcessor, BusSubscriber):
         # Urgent transport frames pass through directly. They need to
         # reach the transport even when no child worker is active yet.
         if isinstance(frame, _PASSTHROUGH_FRAMES):
+            await self.push_frame(frame, direction)
+            return
+
+        # Emitter-local frames never cross the bus (see comment on
+        # ``_LOCAL_ONLY_FRAMES`` above). They continue downstream in this
+        # worker's pipeline only.
+        if isinstance(frame, _LOCAL_ONLY_FRAMES):
             await self.push_frame(frame, direction)
             return
 
@@ -208,6 +236,8 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         if direction != self._direction:
             return
         if isinstance(frame, _LIFECYCLE_FRAMES):
+            return
+        if isinstance(frame, _LOCAL_ONLY_FRAMES):
             return
         if self._exclude_frames and isinstance(frame, self._exclude_frames):
             return
