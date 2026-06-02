@@ -1,0 +1,1 @@
+Added the `pipecat init` project-scaffolding CLI to `pipecat-ai`, available via the optional `cli` extra. Install it with `uv tool install "pipecat-ai[cli]"` (add `--with pipecatcloud` to enable `pipecat cloud`), then run `pipecat init` to scaffold a new bot project. The CLI dependencies are optional, so they are not pulled into a plain `pip install pipecat-ai`.
