@@ -135,7 +135,12 @@ class WebsocketService(ABC):
             if success and self._websocket is not None:
                 logger.info(f"{self} reconnected successfully, will retry send the message")
                 # trying to send the message one more time
-                await self._websocket.send(message)
+                try:
+                    await self._websocket.send(message)
+                except Exception as retry_error:
+                    msg = f"{self} send failed after reconnect: {retry_error}"
+                    logger.error(msg)
+                    await report_error(ErrorFrame(msg))
             else:
                 logger.error(f"{self} send failed; unable to reconnect")
 
