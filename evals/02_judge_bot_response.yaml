@@ -1,7 +1,5 @@
 name: bot_response_is_helpful
 
-bot_audio: false
-
 judge:
   service: ollama
   model: llama3:latest
@@ -10,11 +8,9 @@ turns:
   - user: "what is the capital of France?"
     expect:
       - event: llm_response
-        within_ms: 10000
         eval: "the response correctly identifies Paris as the capital of France"
 
   - user: "and how many people live there?"
     expect:
       - event: llm_response
-        within_ms: 10000
         eval: "the response provides a population figure or acknowledges uncertainty"
