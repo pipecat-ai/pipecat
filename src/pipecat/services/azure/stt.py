@@ -12,7 +12,7 @@ Speech SDK for real-time audio transcription.
 
 import asyncio
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
 from loguru import logger
@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import STTSettings, assert_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, assert_given
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -53,11 +53,40 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
+AzureProfanity = Literal["raw", "masked", "removed"]
+"""How Azure handles profanity in transcripts.
+
+* ``"raw"`` — return the text as recognized, no masking.
+* ``"masked"`` — replace profane words with ``****`` (Azure default).
+* ``"removed"`` — drop profane words from the output.
+"""
+
+_PROFANITY_OPTIONS: dict[AzureProfanity, ProfanityOption] = {
+    "raw": ProfanityOption.Raw,
+    "masked": ProfanityOption.Masked,
+    "removed": ProfanityOption.Removed,
+}
+
+
 @dataclass
 class AzureSTTSettings(STTSettings):
-    """Settings for AzureSTTService."""
+    """Settings for AzureSTTService.
 
-    pass
+    ``model`` and ``language`` are inherited from ``STTSettings`` /
+    ``ServiceSettings``.
+
+    Parameters:
+        profanity: How Azure handles profanity in transcripts. One of
+            ``"raw"``, ``"masked"``, or ``"removed"`` (see ``AzureProfanity``).
+            Store-mode default is ``None`` (Azure SDK default = ``"masked"``).
+            Use ``"raw"`` for non-English deployments where Azure's profanity
+            list is over-eager and masks ordinary words (e.g. Italian names
+            containing common substrings), which breaks downstream fuzzy
+            matching and LLM reasoning. See `SpeechConfig.set_profanity
+            <https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.speechconfig#azure-cognitiveservices-speech-speechconfig-set-profanity>`_.
+    """
+
+    profanity: AzureProfanity | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureSTTService(STTService):
@@ -80,7 +109,6 @@ class AzureSTTService(STTService):
         sample_rate: int | None = None,
         private_endpoint: str | None = None,
         endpoint_id: str | None = None,
-        profanity: Literal["raw", "masked", "removed"] | None = None,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = AZURE_TTFS_P99,
         **kwargs,
@@ -100,19 +128,6 @@ class AzureSTTService(STTService):
             private_endpoint: Private endpoint for STT behind firewall.
                 See https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-private-link?tabs=portal
             endpoint_id: Custom model endpoint id.
-            profanity: How Azure handles profanity in transcripts.
-
-                * ``"raw"`` — return the text as recognized, no masking.
-                * ``"masked"`` — replace profane words with ``****`` (Azure default).
-                * ``"removed"`` — drop profane words from the output.
-
-                Defaults to ``None`` (Azure SDK default = ``"masked"``). Use
-                ``"raw"`` for non-English deployments where Azure's profanity
-                list is over-eager and masks ordinary words (e.g. Italian
-                names containing common substrings), which breaks
-                downstream fuzzy matching and LLM reasoning.
-                See `SpeechConfig.set_profanity
-                <https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.speechconfig#azure-cognitiveservices-speech-speechconfig-set-profanity>`_.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -123,6 +138,7 @@ class AzureSTTService(STTService):
         default_settings = self.Settings(
             model=None,
             language=Language.EN_US,
+            profanity=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -170,13 +186,7 @@ class AzureSTTService(STTService):
         if endpoint_id:
             self._speech_config.endpoint_id = endpoint_id
 
-        if profanity is not None:
-            profanity_option = {
-                "raw": ProfanityOption.Raw,
-                "masked": ProfanityOption.Masked,
-                "removed": ProfanityOption.Removed,
-            }[profanity]
-            self._speech_config.set_profanity(profanity_option)
+        self._apply_profanity()
 
         self._audio_stream = None
         self._speech_recognizer = None
@@ -200,17 +210,36 @@ class AzureSTTService(STTService):
         """
         return language_to_azure_language(language)
 
+    def _apply_profanity(self):
+        """Apply the current ``profanity`` setting to the speech config.
+
+        A no-op when profanity is ``None`` (keeps the Azure SDK default of
+        ``"masked"``).
+        """
+        # Annotate the local so pyright solves ``assert_given``'s TypeVar to the
+        # literal instead of widening it to ``str`` (which wouldn't be a valid
+        # ``_PROFANITY_OPTIONS`` key).
+        profanity: AzureProfanity | None = assert_given(self._settings.profanity)
+        if profanity is not None:
+            self._speech_config.set_profanity(_PROFANITY_OPTIONS[profanity])
+
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta and reconnect if language changed."""
+        """Apply a settings delta and reconnect if language or profanity changed."""
         changed = await super()._update_settings(delta)
 
         if "language" in changed:
             self._speech_config.speech_recognition_language = assert_given(
                 self._settings.language
             ) or language_to_azure_language(Language.EN_US)
-            if self._audio_stream:
-                await self._disconnect()
-                await self._connect()
+
+        if "profanity" in changed:
+            self._apply_profanity()
+
+        # Both settings are baked into the recognizer at connect time, so a
+        # live change only takes effect after a reconnect.
+        if ("language" in changed or "profanity" in changed) and self._audio_stream:
+            await self._disconnect()
+            await self._connect()
 
         return changed
 

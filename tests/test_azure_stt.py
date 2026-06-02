@@ -18,10 +18,17 @@ from pipecat.services.azure.stt import AzureSTTService
 from pipecat.transcriptions.language import Language
 
 
-class TestAzureSTTProfanityKwarg(unittest.TestCase):
-    """The ``profanity`` kwarg surfaces ``SpeechConfig.set_profanity``
-    as a public init parameter so callers don't have to reach into the
-    private ``_speech_config`` to disable Azure's profanity masking."""
+class TestAzureSTTProfanitySetting(unittest.TestCase):
+    """The ``profanity`` setting surfaces ``SpeechConfig.set_profanity`` as a
+    runtime-updatable ``AzureSTTSettings`` field so callers don't have to reach
+    into the private ``_speech_config`` to disable Azure's profanity masking."""
+
+    def _service(self, profanity):
+        return AzureSTTService(
+            api_key="fake",
+            region="eastus",
+            settings=AzureSTTService.Settings(profanity=profanity),
+        )
 
     def test_profanity_omitted_is_no_op(self):
         # Omitted = keep Azure SDK default (Masked). Constructor should
@@ -30,29 +37,26 @@ class TestAzureSTTProfanityKwarg(unittest.TestCase):
         self.assertIsNotNone(service._speech_config)
 
     def test_profanity_raw_accepted(self):
-        service = AzureSTTService(api_key="fake", region="eastus", profanity="raw")
-        self.assertIsNotNone(service._speech_config)
+        self.assertIsNotNone(self._service("raw")._speech_config)
 
     def test_profanity_masked_accepted(self):
-        service = AzureSTTService(api_key="fake", region="eastus", profanity="masked")
-        self.assertIsNotNone(service._speech_config)
+        self.assertIsNotNone(self._service("masked")._speech_config)
 
     def test_profanity_removed_accepted(self):
-        service = AzureSTTService(api_key="fake", region="eastus", profanity="removed")
-        self.assertIsNotNone(service._speech_config)
+        self.assertIsNotNone(self._service("removed")._speech_config)
 
     def test_profanity_invalid_value_rejected(self):
         # Out-of-range value fails fast at init instead of silently
         # falling back to the SDK default.
         with self.assertRaises(KeyError):
-            AzureSTTService(api_key="fake", region="eastus", profanity="nope")  # type: ignore[arg-type]
+            self._service("nope")  # type: ignore[arg-type]
 
     def test_profanity_calls_set_profanity_on_speech_config(self):
-        # Spy on SpeechConfig.set_profanity to confirm the kwarg is wired
+        # Spy on SpeechConfig.set_profanity to confirm the setting is wired
         # through. We can't easily read back the value (the SDK exposes
         # a setter but no public getter), so we patch and assert.
         with patch("pipecat.services.azure.stt.SpeechConfig.set_profanity") as mock_set:
-            AzureSTTService(api_key="fake", region="eastus", profanity="raw")
+            self._service("raw")
             mock_set.assert_called_once()
 
     def test_profanity_not_called_when_omitted(self):
