@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 import numpy as np
 from loguru import logger
@@ -108,8 +108,6 @@ class VonageVideoConnectorTransportParams(TransportParams):
     video_in_preferred_resolution: tuple[int, int] | None = None
     video_in_preferred_framerate: int | None = None
     clear_buffers_on_interruption: bool = True
-    captions_in_enabled: bool = False
-    captions_in_auto_subscribe: bool = False
 
 
 class SubscribeSettings(BaseModel):
@@ -359,25 +357,13 @@ class VonageClient:
             await self.disconnect()
 
         if self._event_task and self._task_manager:
-            try:
-                await self._task_manager.cancel_task(self._event_task)
-                await self._event_task
-            except asyncio.CancelledError:
-                pass
+            await self._task_manager.cancel_task(self._event_task)
             self._event_task = None
         if self._audio_task and self._task_manager:
-            try:
-                await self._task_manager.cancel_task(self._audio_task)
-                await self._audio_task
-            except asyncio.CancelledError:
-                pass
+            await self._task_manager.cancel_task(self._audio_task)
             self._audio_task = None
         if self._video_task and self._task_manager:
-            try:
-                await self._task_manager.cancel_task(self._video_task)
-                await self._video_task
-            except asyncio.CancelledError:
-                pass
+            await self._task_manager.cancel_task(self._video_task)
             self._video_task = None
 
     def add_listener(self, listener: VonageClientListener) -> int:
