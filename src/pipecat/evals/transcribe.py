@@ -13,10 +13,10 @@ service in one persistent pipeline (mirroring
 :class:`~pipecat.evals.voice.EvalVoice`) and transcribes buffered audio segments
 on demand.
 
-The service is configured by a scenario's ``bot_audio`` mapping —
-``service`` (default ``"whisper"``, a local model) and ``model`` — much like the
-``judge:`` block. Built-in service support lives in
-``EvalTranscriber._build_service``; the escape hatch is
+The transcriber takes an already-built ``STTService``; :func:`build_stt_service`
+constructs one from a scenario's ``bot_audio`` mapping — ``service`` (default
+``"whisper"``, a local model) and ``model`` — much like
+:func:`~pipecat.evals.judge.build_default_judge`. The escape hatch is
 ``bot_audio.factory: "my_pkg.my_func"`` — an importable callable taking
 ``(config, sample_rate)`` and returning an ``STTService``. Audio is resampled to
 16 kHz before transcription, a rate STT services expect.
@@ -28,6 +28,7 @@ import importlib
 from loguru import logger
 
 from pipecat.evals.voice import _IdentitySerializer
+from pipecat.services.stt_service import STTService
 
 # STT services expect 16 kHz mono audio.
 STT_SAMPLE_RATE = 16000
@@ -37,25 +38,68 @@ STT_SAMPLE_RATE = 16000
 TRANSCRIBE_TIMEOUT_S = 30.0
 
 
+def build_stt_service(config: dict | None):
+    """Build an ``STTService`` from a scenario's ``bot_audio`` mapping.
+
+    Honors a custom ``factory`` (dotted path to a callable taking
+    ``(config, sample_rate)`` and returning an ``STTService``); otherwise
+    dispatches on the ``service`` name (default ``"whisper"``). Add providers by
+    extending this.
+
+    Args:
+        config: ``bot_audio`` mapping, or ``None`` for the Whisper default.
+
+    Returns:
+        A constructed ``STTService``.
+    """
+    config = config or {}
+
+    custom = config.get("factory")
+    if custom:
+        module_name, _, attr = custom.rpartition(".")
+        if not module_name:
+            raise ValueError(f"bot_audio.factory must be a dotted path: {custom!r}")
+        factory = getattr(importlib.import_module(module_name), attr)
+        return factory(config, STT_SAMPLE_RATE)
+
+    service = str(config.get("service", "whisper")).lower()
+    if service == "whisper":
+        return _whisper_service(config)
+
+    raise ValueError(
+        f"Unknown STT service: {service!r}. Known: whisper. "
+        "Or set bot_audio.factory to a 'module.func' returning an STTService."
+    )
+
+
+def _whisper_service(config: dict):
+    """Build a local Whisper STT service from the ``bot_audio`` config."""
+    from pipecat.services.whisper.stt import WhisperSTTService
+
+    model = config.get("model")
+    if model:
+        return WhisperSTTService(settings=WhisperSTTService.Settings(model=str(model)))
+    return WhisperSTTService()
+
+
 class EvalTranscriber:
-    """Transcribes bot audio with a local STT model from one persistent pipeline.
+    """Transcribes bot audio with an STT service from one persistent pipeline.
 
-    Use as an async context manager::
+    Takes an already-built ``STTService`` (see :func:`build_stt_service`). Use as
+    an async context manager::
 
-        async with EvalTranscriber({"service": "whisper", "model": "base"}) as t:
+        async with EvalTranscriber(build_stt_service({"model": "base"})) as t:
             text = await t.transcribe(pcm, sample_rate=24000)
     """
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, service: STTService):
         """Initialize the transcriber.
 
         Args:
-            config: ``bot_audio`` mapping — ``service`` (default ``"whisper"``)
-                and ``model``, plus an optional ``factory`` (dotted path to a
-                callable returning an ``STTService``). Omit to use the default
-                Whisper model.
+            service: A constructed ``STTService`` (e.g. from
+                :func:`build_stt_service`).
         """
-        self._config = config or {}
+        self._service = service
         self._worker = None
         self._runner_task = None
         self._output_generator = None
@@ -69,10 +113,9 @@ class EvalTranscriber:
         from pipecat.processors.async_generator import AsyncGeneratorProcessor
         from pipecat.workers.runner import WorkerRunner
 
-        service = self._build_service()
         grab = AsyncGeneratorProcessor(serializer=_IdentitySerializer())
         self._worker = PipelineWorker(
-            Pipeline([service, grab]),
+            Pipeline([self._service, grab]),
             params=PipelineParams(audio_in_sample_rate=STT_SAMPLE_RATE),
             # Persistent: idles between segments and must not self-cancel.
             idle_timeout_secs=None,
@@ -135,43 +178,6 @@ class EvalTranscriber:
         except TimeoutError:
             return ""  # no speech detected in the segment
         return ""
-
-    #
-    # STT service construction
-    #
-
-    def _build_service(self):
-        """Build the configured STT service.
-
-        Honors a custom ``bot_audio.factory`` (dotted path to a callable taking
-        ``(config, sample_rate)`` and returning an ``STTService``); otherwise
-        dispatches on the ``service`` name. Add providers by extending this.
-        """
-        custom = self._config.get("factory")
-        if custom:
-            module_name, _, attr = custom.rpartition(".")
-            if not module_name:
-                raise ValueError(f"bot_audio.factory must be a dotted path: {custom!r}")
-            factory = getattr(importlib.import_module(module_name), attr)
-            return factory(self._config, STT_SAMPLE_RATE)
-
-        service = str(self._config.get("service", "whisper")).lower()
-        if service == "whisper":
-            return self._whisper()
-
-        raise ValueError(
-            f"Unknown STT service: {service!r}. Known: whisper. "
-            "Or set bot_audio.factory to a 'module.func' returning an STTService."
-        )
-
-    def _whisper(self):
-        """Build a local Whisper STT service from the ``bot_audio`` config."""
-        from pipecat.services.whisper.stt import WhisperSTTService
-
-        model = self._config.get("model")
-        if model:
-            return WhisperSTTService(settings=WhisperSTTService.Settings(model=str(model)))
-        return WhisperSTTService()
 
     async def aclose(self) -> None:
         """Stop the pipeline and release the model."""

@@ -255,16 +255,27 @@ class EvalSession:
 
         # One TTS pipeline for the whole scenario's audio turns.
         if self._scenario.user_audio is not None:
-            from pipecat.evals.voice import EvalVoice
+            from pipecat.evals.voice import (
+                EvalVoice,
+                build_tts_service,
+                tts_cache_key,
+                tts_sample_rate,
+            )
 
-            self._voice = EvalVoice(self._scenario.user_audio)
+            cfg = self._scenario.user_audio
+            sample_rate = tts_sample_rate(cfg)
+            self._voice = EvalVoice(
+                build_tts_service(cfg, sample_rate),
+                sample_rate=sample_rate,
+                cache_key=tts_cache_key(cfg),
+            )
             await self._voice.start()
 
-        # One Whisper pipeline to transcribe the bot's audio for tts_response.
+        # One STT pipeline to transcribe the bot's audio for tts_response.
         if self._wants_tts_response:
-            from pipecat.evals.transcribe import EvalTranscriber
+            from pipecat.evals.transcribe import EvalTranscriber, build_stt_service
 
-            self._transcriber = EvalTranscriber(self._scenario.transcriber)
+            self._transcriber = EvalTranscriber(build_stt_service(self._scenario.transcriber))
             await self._transcriber.start()
 
         failures: list[AssertionFailure] = []
