@@ -717,10 +717,8 @@ async def create_transport(
         # serializer to RTVIEvalSerializer so examples only need to opt into
         # audio input.
         from pipecat.evals.serializer import RTVIEvalSerializer
-        from pipecat.transports.websocket.server import (
-            WebsocketServerParams,
-            WebsocketServerTransport,
-        )
+        from pipecat.evals.transport import EvalWebsocketServerTransport
+        from pipecat.transports.websocket.server import WebsocketServerParams
 
         params = _get_transport_params("eval", transport_params)
         if not isinstance(params, WebsocketServerParams):
@@ -732,7 +730,9 @@ async def create_transport(
         if params.serializer is None:
             params.serializer = RTVIEvalSerializer()
 
-        return WebsocketServerTransport(
+        # EvalWebsocketServerTransport silences the bot (skip TTS) for a
+        # ?skip_tts=true connection before the on-connect greeting runs.
+        return EvalWebsocketServerTransport(
             params=params,
             host=runner_args.host,
             port=runner_args.port,
