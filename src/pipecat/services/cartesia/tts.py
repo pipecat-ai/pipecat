@@ -44,10 +44,10 @@ except ModuleNotFoundError as e:
 
 
 class GenerationConfig(BaseModel):
-    """Configuration for Cartesia Sonic-3 generation parameters.
+    """Configuration for Cartesia generation parameters.
 
-    Sonic-3 interprets these parameters as guidance to ensure natural speech.
-    Test against your content for best results.
+    Cartesia interprets these parameters as guidance to ensure natural speech.
+    Test against your content for best results. Applicable to sonic-3 and sonic-3.5 models.
 
     Parameters:
         volume: Volume multiplier for generated speech. Valid range: [0.5, 2.0]. Default is 1.0.
@@ -194,7 +194,7 @@ class CartesiaTTSSettings(TTSSettings):
     """Settings for CartesiaTTSService and CartesiaHttpTTSService.
 
     Parameters:
-        generation_config: Generation configuration for Sonic-3 models. Includes volume,
+        generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
@@ -222,7 +222,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            generation_config: Generation configuration for Sonic-3 models. Includes volume,
+            generation_config: Generation configuration for Cartesia models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
             pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
@@ -260,7 +260,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
             cartesia_version: API version string for Cartesia service.
             url: WebSocket URL for Cartesia TTS API.
-            model: TTS model to use (e.g., "sonic-3").
+            model: TTS model to use.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaTTSService.Settings(model=...)`` instead.
@@ -770,7 +770,7 @@ class CartesiaHttpTTSService(TTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            generation_config: Generation configuration for Sonic-3 models. Includes volume,
+            generation_config: Generation configuration for Cartesia models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
             pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
@@ -804,7 +804,7 @@ class CartesiaHttpTTSService(TTSService):
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaHttpTTSService.Settings(voice=...)`` instead.
 
-            model: TTS model to use (e.g., "sonic-3").
+            model: TTS model to use.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=CartesiaHttpTTSService.Settings(model=...)`` instead.
