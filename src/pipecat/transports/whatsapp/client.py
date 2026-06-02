@@ -22,6 +22,7 @@ from loguru import logger
 from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
 from pipecat.transports.whatsapp.api import (
     WhatsAppApi,
+    WhatsAppCallStatusValue,
     WhatsAppConnectCall,
     WhatsAppConnectCallValue,
     WhatsAppTerminateCall,
@@ -50,6 +51,7 @@ class WhatsAppClient:
         session: aiohttp.ClientSession,
         ice_servers: list[IceServer] | None = None,
         whatsapp_secret: str | None = None,
+        call_status_callback: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> None:
         """Initialize the WhatsApp client.
 
@@ -60,12 +62,17 @@ class WhatsAppClient:
             ice_servers: List of ICE servers for WebRTC connections. If None,
                         defaults to Google's public STUN server
             whatsapp_secret: WhatsApp APP secret for validating that the webhook request came from WhatsApp.
+            call_status_callback: Optional async callback invoked on call status updates
+                (RINGING, ACCEPTED, REJECTED). Receives call_id and status as arguments.
         """
         self._whatsapp_api = WhatsAppApi(
             whatsapp_token=whatsapp_token, phone_number_id=phone_number_id, session=session
         )
         self._whatsapp_secret = whatsapp_secret
+        self._call_status_callback = call_status_callback
         self._ongoing_calls_map: dict[str, SmallWebRTCConnection] = {}
+        self._pending_outbound_calls: dict[str, SmallWebRTCConnection] = {}
+        self._pending_outbound_callbacks: dict[str, Callable[[SmallWebRTCConnection], Awaitable[None]]] = {}
 
         # Set default ICE servers if none provided
         if ice_servers is None:
@@ -101,26 +108,34 @@ class WhatsAppClient:
         """
         logger.debug("Will terminate all ongoing WhatsApp calls")
 
-        if not self._ongoing_calls_map:
-            logger.debug("No ongoing calls to terminate")
-            return
-
-        logger.debug(f"Terminating {len(self._ongoing_calls_map)} ongoing calls")
-
-        # Terminate each call via WhatsApp API
         termination_tasks = []
-        for call_id, pipecat_connection in self._ongoing_calls_map.items():
-            logger.debug(f"Terminating call {call_id}")
-            # Call WhatsApp API to terminate the call
-            if self._whatsapp_api:
-                termination_tasks.append(self._whatsapp_api.terminate_call_to_whatsapp(call_id))
-            # Disconnect the pipecat connection
-            termination_tasks.append(pipecat_connection.disconnect())
+
+        # Cancel pending outbound calls that never connected
+        if self._pending_outbound_calls:
+            logger.debug(f"Cancelling {len(self._pending_outbound_calls)} pending outbound calls")
+            for call_id, pipecat_connection in self._pending_outbound_calls.items():
+                logger.debug(f"Cancelling pending outbound call {call_id}")
+                termination_tasks.append(pipecat_connection.disconnect())
+            self._pending_outbound_calls.clear()
+            self._pending_outbound_callbacks.clear()
+
+        if not self._ongoing_calls_map:
+            if not termination_tasks:
+                logger.debug("No ongoing calls to terminate")
+                return
+        else:
+            logger.debug(f"Terminating {len(self._ongoing_calls_map)} ongoing calls")
+
+            # Terminate each call via WhatsApp API
+            for call_id, pipecat_connection in self._ongoing_calls_map.items():
+                logger.debug(f"Terminating call {call_id}")
+                if self._whatsapp_api:
+                    termination_tasks.append(self._whatsapp_api.terminate_call_to_whatsapp(call_id))
+                termination_tasks.append(pipecat_connection.disconnect())
 
         # Execute all terminations concurrently
         await asyncio.gather(*termination_tasks, return_exceptions=True)
 
-        # Clear the ongoing calls map
         self._ongoing_calls_map.clear()
         logger.debug("All calls terminated successfully")
 
@@ -223,10 +238,18 @@ class WhatsAppClient:
                                 try:
                                     connection = await self._handle_connect_event(call)
 
-                                    # Invoke callback if provided
-                                    if connection_callback and connection:
+                                    # Outbound calls use the callback stored at initiate_call time;
+                                    # inbound calls use the callback passed to this method.
+                                    if call.direction == "outbound":
+                                        callback = self._pending_outbound_callbacks.pop(
+                                            call.id, None
+                                        )
+                                    else:
+                                        callback = connection_callback
+
+                                    if callback and connection:
                                         try:
-                                            await connection_callback(connection)
+                                            await callback(connection)
                                             logger.debug(
                                                 f"Connection callback executed successfully for call {call.id}"
                                             )
@@ -242,6 +265,22 @@ class WhatsAppClient:
                                         f"Failed to handle connect event for call {call.id}: {connect_error}"
                                     )
                                     raise
+
+                    # Handle call status events (RINGING, ACCEPTED, REJECTED)
+                    elif isinstance(change.value, WhatsAppCallStatusValue):
+                        for call in change.value.calls:
+                            if call.event == "status":
+                                logger.debug(
+                                    f"Call {call.id} status update: {call.status}"
+                                )
+                                if self._call_status_callback:
+                                    try:
+                                        await self._call_status_callback(call.id, call.status)
+                                    except Exception as status_error:
+                                        logger.error(
+                                            f"Call status callback failed for call {call.id}: {status_error}"
+                                        )
+                                return True
 
                     # Handle terminate events
                     elif isinstance(change.value, WhatsAppTerminateCallValue):
@@ -266,6 +305,60 @@ class WhatsAppClient:
             logger.debug(f"Webhook request details: {request}")
             raise
 
+    async def initiate_call(
+        self,
+        to: str,
+        connection_callback: Callable[[SmallWebRTCConnection], Awaitable[None]] | None = None,
+    ) -> str:
+        """Initiate an outbound WhatsApp call.
+
+        Creates a WebRTC offer and sends it to the specified phone number via the
+        WhatsApp Cloud API. When the callee accepts, WhatsApp delivers a connect
+        webhook with direction="outbound" containing their SDP answer. The
+        connection callback is invoked at that point, mirroring inbound behaviour.
+
+        The business must have permission to call the destination number (e.g.
+        obtained within 7 days of a prior inbound call from that number).
+
+        Args:
+            to: Destination phone number in WhatsApp ID format (e.g. "15551234567").
+            connection_callback: Optional callback invoked with the established
+                SmallWebRTCConnection once the outbound connect webhook is received.
+
+        Returns:
+            The call_id assigned by WhatsApp, which can be used to track or
+            terminate the call.
+
+        Raises:
+            Exception: If the WhatsApp API rejects the call creation request.
+        """
+        logger.debug(f"Initiating outbound call to {to}")
+
+        pipecat_connection = SmallWebRTCConnection(self._ice_servers)
+        try:
+            sdp_offer = await pipecat_connection.create_offer()
+            sdp_offer = self._filter_sdp_for_whatsapp(sdp_offer)
+
+            response = await self._whatsapp_api.create_call_to_whatsapp(to, sdp_offer)
+            if not response.get("success", False):
+                raise Exception(f"WhatsApp API rejected outbound call: {response}")
+
+            call_id = response.get("call_id")
+            if not call_id:
+                raise Exception(f"No call_id in WhatsApp API response: {response}")
+
+            self._pending_outbound_calls[call_id] = pipecat_connection
+            if connection_callback:
+                self._pending_outbound_callbacks[call_id] = connection_callback
+
+            logger.debug(f"Outbound call created with call_id {call_id}")
+            return call_id
+
+        except Exception as e:
+            await pipecat_connection.disconnect()
+            logger.error(f"Failed to initiate outbound call to {to}: {e}")
+            raise
+
     def _filter_sdp_for_whatsapp(self, sdp: str) -> str:
         """Filter SDP to be compatible with WhatsApp requirements.
 
@@ -286,16 +379,68 @@ class WhatsAppClient:
             filtered.append(line)
         return "\r\n".join(filtered) + "\r\n"
 
+    async def _handle_outbound_connect_event(
+        self, call: WhatsAppConnectCall
+    ) -> SmallWebRTCConnection:
+        """Handle a CONNECT webhook for an outbound call by setting the remote SDP answer.
+
+        Retrieves the pending WebRTC connection created in :meth:`initiate_call`,
+        applies the callee's SDP answer, and moves it to the ongoing calls map.
+
+        Args:
+            call: WhatsApp connect call event with direction="outbound".
+
+        Returns:
+            The established SmallWebRTCConnection instance.
+
+        Raises:
+            Exception: If no pending outbound call matches call.id, or if setting
+                the remote description fails.
+        """
+        logger.debug(f"Outbound call connect event for call {call.id}")
+
+        pipecat_connection = self._pending_outbound_calls.pop(call.id, None)
+        if pipecat_connection is None:
+            raise Exception(f"No pending outbound call found for call_id: {call.id}")
+
+        try:
+            await pipecat_connection.set_remote_answer(
+                sdp=call.session.sdp,
+                type=call.session.sdp_type,
+            )
+
+            self._ongoing_calls_map[call.id] = pipecat_connection
+
+            @pipecat_connection.event_handler("closed")
+            async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
+                logger.debug(
+                    f"Peer connection closed: {webrtc_connection.pc_id} for call {call.id}"
+                )
+                self._ongoing_calls_map.pop(call.id, None)
+
+            logger.debug(f"Outbound WebRTC connection established for call {call.id}")
+            return pipecat_connection
+
+        except Exception as e:
+            await pipecat_connection.disconnect()
+            logger.error(f"Failed to handle outbound connect event for call {call.id}: {e}")
+            raise
+
     async def _handle_connect_event(self, call: WhatsAppConnectCall) -> SmallWebRTCConnection:
         """Handle a CONNECT event by establishing WebRTC connection and accepting the call.
 
-        This method:
+        Routes to outbound or inbound handling based on call direction.
+
+        For inbound calls:
         1. Creates a new WebRTC connection using configured ICE servers
         2. Initializes the connection with the provided SDP
         3. Generates an SDP answer and filters it for WhatsApp compatibility
         4. Pre-accepts the call with WhatsApp API
         5. Accepts the call with WhatsApp API
         6. Stores the connection for later management
+
+        For outbound calls (direction="outbound"):
+        Delegates to :meth:`_handle_outbound_connect_event`.
 
         Args:
             call: WhatsApp connect call event
@@ -306,6 +451,9 @@ class WhatsAppClient:
         Raises:
             Exception: If pre-accept or accept API calls fail
         """
+        if call.direction == "outbound":
+            return await self._handle_outbound_connect_event(call)
+
         logger.debug(f"Incoming call from {call.from_}, call_id: {call.id}")
 
         pipecat_connection = None
