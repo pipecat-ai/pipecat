@@ -394,10 +394,11 @@ class SmallestTTSService(InterruptibleTTSService):
                 await self.append_to_audio_context(context_id, frame)
             elif status == "word_timestamp":
                 data = msg.get("data", {})
-                logger.debug(
-                    f"{self} word_timestamp: id={data.get('id')} word={data.get('word')!r} "
-                    f"start={data.get('start')} end={data.get('end')}"
-                )
+                word = data.get("word")
+                start = data.get("start")
+                if word is not None and start is not None:
+                    context_id = self.get_active_audio_context_id()
+                    await self.add_word_timestamps([(word, start)], context_id)
             elif status == "error":
                 context_id = self.get_active_audio_context_id()
                 await self.push_frame(TTSStoppedFrame(context_id=context_id))
