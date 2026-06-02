@@ -730,13 +730,11 @@ async def create_transport(
             )
         if params.serializer is None:
             params.serializer = RTVIEvalSerializer()
-        # Keep the bot alive across evals: bots cancel their pipeline in
-        # on_client_disconnected, so suppress that event and one bot serves a
-        # whole suite (the server keeps running regardless).
-        params.notify_client_disconnected = False
 
-        # EvalWebsocketServerTransport silences the bot (skip TTS) for a
-        # ?skip_tts=true connection before the on-connect greeting runs.
+        # EvalWebsocketServerTransport handles the eval-only behavior: skip-TTS
+        # before an on-connect greeting, audio capture/recording, and keeping one
+        # bot alive across the suite (it detaches on disconnect without firing the
+        # bot's on_client_disconnected handler, which would cancel the pipeline).
         return EvalWebsocketServerTransport(
             params=params,
             host=runner_args.host,
