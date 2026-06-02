@@ -84,6 +84,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.llm import tool
 from pipecat.workers.runner import WorkerRunner
 from pipecat.workers.ui import UIWorker
@@ -94,6 +95,10 @@ MAIN_NAME = "main"
 UI_NAME = "ui"
 
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(audio_in_enabled=True, audio_out_enabled=True),
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
 }
