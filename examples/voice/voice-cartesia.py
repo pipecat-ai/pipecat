@@ -34,10 +34,6 @@ load_dotenv(override=True)
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
-    # The eval transport is a WebSocket server speaking RTVI. The runner
-    # defaults the serializer to RTVIEvalSerializer; PipelineWorker auto-wires
-    # the RTVIProcessor/RTVIObserver. audio_in_enabled lets audio-mode evals
-    # exercise STT.
     "eval": lambda: WebsocketServerParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
