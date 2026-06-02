@@ -18,7 +18,22 @@ class TestParseVerdict(unittest.TestCase):
     def test_clean_json_no(self):
         v = _parse_verdict('{"verdict": "no", "reason": "Does not mention it."}')
         self.assertFalse(v.passed)
+        self.assertEqual(v.verdict, "no")
         self.assertEqual(v.reason, "Does not mention it.")
+
+    def test_clean_json_continue(self):
+        v = _parse_verdict('{"verdict": "continue", "reason": "Just a filler so far."}')
+        self.assertEqual(v.verdict, "continue")
+        self.assertFalse(v.passed)
+        self.assertEqual(v.reason, "Just a filler so far.")
+
+    def test_unknown_verdict_fails_closed(self):
+        v = _parse_verdict('{"verdict": "maybe", "reason": "x"}')
+        self.assertEqual(v.verdict, "no")
+
+    def test_unstructured_continue_fallback(self):
+        v = _parse_verdict("continue, more text is needed")
+        self.assertEqual(v.verdict, "continue")
 
     def test_fenced_json(self):
         v = _parse_verdict('```json\n{"verdict": "yes", "reason": "ok"}\n```')
@@ -129,10 +144,15 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
 
 class TestJudgeVerdictDataclass(unittest.TestCase):
     def test_construction(self):
-        v = JudgeVerdict(passed=True, reason="ok", raw_response="raw")
+        v = JudgeVerdict(verdict="yes", reason="ok", raw_response="raw")
         self.assertTrue(v.passed)
         self.assertEqual(v.reason, "ok")
         self.assertEqual(v.raw_response, "raw")
+
+    def test_passed_only_for_yes(self):
+        self.assertTrue(JudgeVerdict(verdict="yes", reason="", raw_response="").passed)
+        self.assertFalse(JudgeVerdict(verdict="no", reason="", raw_response="").passed)
+        self.assertFalse(JudgeVerdict(verdict="continue", reason="", raw_response="").passed)
 
 
 if __name__ == "__main__":
