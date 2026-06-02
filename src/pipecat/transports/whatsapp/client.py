@@ -206,7 +206,7 @@ class WhatsAppClient:
                                with caller metadata; or the legacy
                                ``(connection,)`` signature.
 
-                               .. deprecated:: 1.3.0
+                               .. deprecated:: 1.4.0
                                    The single-argument ``(connection,)`` signature is
                                    deprecated. Use ``(connection, call: WhatsAppConnectCall)``
                                    instead.
