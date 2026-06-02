@@ -13,7 +13,7 @@ Speech SDK for real-time audio transcription.
 import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from loguru import logger
 
@@ -37,6 +37,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 try:
     from azure.cognitiveservices.speech import (
         CancellationReason,
+        ProfanityOption,
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
@@ -79,6 +80,7 @@ class AzureSTTService(STTService):
         sample_rate: int | None = None,
         private_endpoint: str | None = None,
         endpoint_id: str | None = None,
+        profanity: Literal["raw", "masked", "removed"] | None = None,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = AZURE_TTFS_P99,
         **kwargs,
@@ -98,6 +100,19 @@ class AzureSTTService(STTService):
             private_endpoint: Private endpoint for STT behind firewall.
                 See https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-private-link?tabs=portal
             endpoint_id: Custom model endpoint id.
+            profanity: How Azure handles profanity in transcripts.
+
+                * ``"raw"`` — return the text as recognized, no masking.
+                * ``"masked"`` — replace profane words with ``****`` (Azure default).
+                * ``"removed"`` — drop profane words from the output.
+
+                Defaults to ``None`` (Azure SDK default = ``"masked"``). Use
+                ``"raw"`` for non-English deployments where Azure's profanity
+                list is over-eager and masks ordinary words (e.g. Italian
+                names containing common substrings), which breaks
+                downstream fuzzy matching and LLM reasoning.
+                See `SpeechConfig.set_profanity
+                <https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.speechconfig#azure-cognitiveservices-speech-speechconfig-set-profanity>`_.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -154,6 +169,14 @@ class AzureSTTService(STTService):
 
         if endpoint_id:
             self._speech_config.endpoint_id = endpoint_id
+
+        if profanity is not None:
+            profanity_option = {
+                "raw": ProfanityOption.Raw,
+                "masked": ProfanityOption.Masked,
+                "removed": ProfanityOption.Removed,
+            }[profanity]
+            self._speech_config.set_profanity(profanity_option)
 
         self._audio_stream = None
         self._speech_recognizer = None
@@ -286,12 +309,18 @@ class AzureSTTService(STTService):
                 "Language | None",
                 getattr(event.result, "language", None) or assert_given(self._settings.language),
             )
+            # Azure's ``RecognizedSpeech`` event is by definition the final
+            # recognition for an utterance — mark the frame as such so that
+            # downstream turn-stop strategies (``SpeechTimeoutUserTurnStop``
+            # and friends) can take their finalized fast-path instead of
+            # waiting for VAD events that may never arrive on short replies.
             frame = TranscriptionFrame(
                 event.result.text,
                 self._user_id,
                 time_now_iso8601(),
                 language,
                 result=event,
+                finalized=True,
             )
             asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(event.result.text, True, language), self.get_event_loop()
