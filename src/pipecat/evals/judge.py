@@ -41,10 +41,15 @@ from loguru import logger
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 JUDGE_SYSTEM_INSTRUCTION = (
-    "You are a strict but fair judge evaluating whether a piece of text satisfies a "
-    "given criterion. Respond ONLY with a JSON object on a single line containing two "
-    'fields: {"verdict": "yes" | "no", "reason": "<one short sentence>"}. '
-    "Do not include any other text, explanation, or markdown."
+    "You are a strict but fair judge deciding whether a bot's response satisfies a "
+    "given criterion. The text may be a partial response that is still streaming in. "
+    "Respond ONLY with a JSON object on a single line containing two fields: "
+    '{"verdict": "yes" | "no" | "continue", "reason": "<one short sentence>"}. '
+    'Use "yes" if the text satisfies the criterion. Use "no" if the text gives a '
+    'substantive answer that fails it. Use "continue" if the text so far is only an '
+    'interim or filler utterance (e.g. "Let me check on that.", a greeting, or an '
+    "obviously incomplete fragment) that does not yet contain enough to decide — more "
+    "text is expected. Do not include any other text, explanation, or markdown."
 )
 
 JUDGE_PROMPT_TEMPLATE = """Criterion: {criterion}
@@ -54,16 +59,29 @@ Text to evaluate:
 {text}
 \"\"\"
 
-Does the text satisfy the criterion?"""
+Does the text satisfy the criterion? Answer yes, no, or continue."""
 
 
 @dataclass
 class JudgeVerdict:
-    """Outcome of a single judge call."""
+    """Outcome of a single judge call.
 
-    passed: bool
+    Parameters:
+        verdict: ``"yes"`` (satisfies), ``"no"`` (substantive answer that fails),
+            or ``"continue"`` (interim/filler/incomplete — re-judge once more text
+            arrives).
+        reason: One-sentence justification.
+        raw_response: The judge LLM's raw text, for diagnostics.
+    """
+
+    verdict: str
     reason: str
     raw_response: str
+
+    @property
+    def passed(self) -> bool:
+        """True only when the verdict is a definite ``"yes"``."""
+        return self.verdict == "yes"
 
 
 class Judge:
@@ -121,14 +139,14 @@ class Judge:
         except Exception as e:
             logger.error(f"Judge call failed: {e.__class__.__name__} ({e})")
             return JudgeVerdict(
-                passed=False,
+                verdict="no",
                 reason=f"judge call failed: {e.__class__.__name__}",
                 raw_response="",
             )
 
         if not response:
             return JudgeVerdict(
-                passed=False, reason="judge returned empty response", raw_response=""
+                verdict="no", reason="judge returned empty response", raw_response=""
             )
 
         return _parse_verdict(response)
@@ -153,21 +171,27 @@ def _parse_verdict(response: str) -> JudgeVerdict:
     try:
         obj = json.loads(cleaned)
         verdict = str(obj.get("verdict", "")).strip().lower()
+        if verdict not in ("yes", "no", "continue"):
+            verdict = "no"
         reason = str(obj.get("reason", "")).strip()
         return JudgeVerdict(
-            passed=verdict == "yes",
+            verdict=verdict,
             reason=reason or "(no reason given)",
             raw_response=response,
         )
     except (json.JSONDecodeError, AttributeError):
-        # Fallback: scan for yes/no in the raw text
+        # Fallback: scan for a verdict keyword in the raw text.
         lowered = cleaned.lower()
+        if "continue" in lowered:
+            return JudgeVerdict(
+                verdict="continue", reason="(unstructured continue)", raw_response=response
+            )
         if "yes" in lowered and "no" not in lowered:
-            return JudgeVerdict(passed=True, reason="(unstructured yes)", raw_response=response)
+            return JudgeVerdict(verdict="yes", reason="(unstructured yes)", raw_response=response)
         if "no" in lowered and "yes" not in lowered:
-            return JudgeVerdict(passed=False, reason="(unstructured no)", raw_response=response)
+            return JudgeVerdict(verdict="no", reason="(unstructured no)", raw_response=response)
         return JudgeVerdict(
-            passed=False,
+            verdict="no",
             reason=f"could not parse judge response: {response!r}",
             raw_response=response,
         )
