@@ -42,7 +42,7 @@ done
 - `cargo` / Rust toolchain for the relay
 - `openssl` (macOS ships with LibreSSL — that works)
 
-## 2. Install all four JS workspaces
+## 2. Install everything
 
 Paths assume you start from this `pipecat/` directory and the repos are
 siblings:
@@ -55,10 +55,27 @@ Order doesn't matter; no builds yet. The link chain that ties them
 together happens after.
 
 ```bash
-uv sync --extra moq
+uv sync --extra moq --extra daily --extra silero --extra deepgram \
+        --extra cartesia --extra openai --extra runner
 ( cd ../pipecat-client-web-transports && npm install --ignore-scripts )
 ( cd ../pipecat-prebuilt/client       && npm install )
 ( cd ../voice-ui-kit                  && pnpm install )
+```
+
+The Python extras come from `transports-moq.py`'s pipeline: `silero` for
+VAD, `deepgram` for STT, `cartesia` for TTS, `openai` for the LLM, and
+`runner` for the FastAPI server that hosts `/start` + the prebuilt UI.
+`moq` is the transport itself. `daily` is along for the ride — the
+example unconditionally imports `DailyParams` at the top of the file
+so it can also run under `-t daily`, even though we're using `-t moq`.
+
+You'll also need API keys for those three services. Drop them in a
+`.env` at the repo root (loaded automatically by the example):
+
+```dotenv
+DEEPGRAM_API_KEY=...
+CARTESIA_API_KEY=...
+OPENAI_API_KEY=...
 ```
 
 `--ignore-scripts` on the transports repo is intentional: that workspace
@@ -66,7 +83,7 @@ runs each transport's `prepare`/build during install, and on this branch
 `small-webrtc-transport`'s parcel build fails for an unrelated reason
 (imports `@pipecat-ai/client-js` from `lib/` but the workspace root
 doesn't declare it as a regular dep). We only need `moq-transport`'s
-build, which §4 below does explicitly.
+build, which §3's script handles directly.
 
 A couple of things to know:
 
@@ -80,10 +97,11 @@ A couple of things to know:
 From this `pipecat/` repo root:
 
 ```bash
-./scripts/moq-dev-setup.sh <path/to/moq-dev/moq>
+export PATH_TO_MOQ=<path/to/moq-relay-clone>
+./scripts/moq-dev-setup.sh $PATH_TO_MOQ
 ```
 
-The script does four things:
+The script does five things, in order:
 
 1. Generates a self-signed cert (`localhost`, 14 days — the WebTransport
    limit) into `pipecat/.moq-certs/`.
@@ -101,28 +119,18 @@ The script does four things:
    pipecat-client-web-transports's hoisted client-js@1.10.x, which
    collides with voice-ui-kit's pnpm-locked 1.8.x), and at runtime the
    React `PipecatClientProvider` context breaks across the duplicates.
+5. Builds `moq-transport` + `voice-ui-kit` so their `dist/` reflects
+   local source — now that the link chain is in place, tsc resolves a
+   single `Transport` type and the dts build passes.
 
-The link chain is temporary — delete that block from the script once
-both packages ship to npm.
+The final output prints the three terminal commands from §4 — that's
+what to do next. (`pipecat-prebuilt/client` doesn't need an explicit
+build; Vite compiles on demand.)
 
-## 4. Build moq-transport + voice-ui-kit
+The link chain + auto-build is temporary — delete those blocks from the
+script once both packages ship to npm.
 
-This has to run **after** the link chain is in place — the build needs
-the deduped client-js to resolve a single `Transport` type. The setup
-script prints these exact commands; for reference:
-
-```bash
-( cd ../pipecat-client-web-transports/transports/moq-transport \
-    && npm run build )
-( cd ../voice-ui-kit \
-    && pnpm -F @pipecat-ai/voice-ui-kit build )
-```
-
-`pipecat-prebuilt/client` doesn't need an explicit build — Vite's dev
-server compiles on demand. If you want a production bundle anyway:
-`( cd ../pipecat-prebuilt/client && npm run build )`.
-
-## 5. Run the stack
+## 4. Run the stack
 
 The setup script prints these at the end; they're listed here for
 reference. Three terminals.
@@ -160,11 +168,23 @@ cd ../pipecat-prebuilt/client
 npm run dev
 ```
 
-Open <http://localhost:7860>, pick **MoQ** in the transport dropdown.
-The `ConsoleTemplate` should drive the full UI — connect/disconnect,
+Open the **Vite dev server URL** (printed in this terminal — usually
+<http://localhost:5173>), not the bot's `/client/` route. Vite proxies
+`/start` + `/api` back to the bot at :7860, so the UI talks to the
+right backend. Pick **MoQ** in the transport dropdown.
+
+> **Important:** `http://localhost:7860/client/` serves the *published*
+> `pipecat-ai-prebuilt` PyPI wheel that was bundled into the pipecat
+> install — it doesn't know about MoQ. Our local edits live in the
+> Vite dev server only. (Same gotcha if you build the local prebuilt
+> for production and want pipecat to serve it: the runner mounts
+> `pipecat_ai_prebuilt.frontend.PipecatPrebuiltUI` from
+> `site-packages`, not your local checkout.)
+
+The `ConsoleTemplate` should then drive the full UI — connect/disconnect,
 transcript, mic device picker, SessionInfo showing "MoQ".
 
-## 6. Iterating
+## 5. Iterating
 
 - **Edited `moq-transport/src/*`?** Rebuild it: `cd
   pipecat-client-web-transports/transports/moq-transport && npm run build`.
@@ -182,19 +202,22 @@ transcript, mic device picker, SessionInfo showing "MoQ".
   symlink for `@pipecat-ai/client-js`, undoing the dedupe. Re-run the
   setup script before the next `voice-ui-kit` build.
 
-## 7. Troubleshooting
+## 6. Troubleshooting
 
 | Symptom | Likely cause |
 | --- | --- |
 | Browser console: `Failed to load transport "moq"` | moq-transport isn't linked into prebuilt. Re-run the setup script and check the "Linking …" output. |
+| No **MoQ** entry in the transport dropdown | You're at `http://localhost:7860/client/`, which is the published `pipecat-ai-prebuilt` wheel served by the pipecat runner — it predates our MoQ work. Open the Vite dev server URL instead (usually `http://localhost:5173`); that's what `npm run dev` serves with your local edits. |
+| Vite URL is a blank page, console says `Invalid hook call` / `Cannot read properties of null (reading 'useEffect')` | Two React instances. The linked voice-ui-kit ships its own pnpm-locked React (19.2.1) and prebuilt has its own (19.2.6 from npm); hooks break across the boundary. Fix is in `pipecat-prebuilt/client/vite.config.js` — `resolve.dedupe: ["react", "react-dom", "react/jsx-runtime", "@pipecat-ai/client-js", "@pipecat-ai/client-react"]`. Pull the latest of that file; it's already set. |
 | `Property '_options' is protected` during voice-ui-kit build | Two copies of `@pipecat-ai/client-js` (1.8.x in voice-ui-kit, 1.10.x hoisted in pipecat-client-web-transports). Re-run the setup script before re-trying the build. If you re-ran `pnpm install` in voice-ui-kit after the script, run the script again — pnpm undoes the dedupe symlink. |
-| `npm install` in pipecat-client-web-transports fails with `@parcel/core: Failed to resolve '@pipecat-ai/client-js' from './lib/media-mgmt/mediaManager.ts'` | The workspace's `prepare` scripts try to build every transport, and `small-webrtc-transport` is broken on this branch independently. Add `--ignore-scripts` to the install command (per §2). We only need `moq-transport`'s build, and §4 does that explicitly. |
+| `npm install` in pipecat-client-web-transports fails with `@parcel/core: Failed to resolve '@pipecat-ai/client-js' from './lib/media-mgmt/mediaManager.ts'` | The workspace's `prepare` scripts try to build every transport, and `small-webrtc-transport` is broken on this branch independently. Add `--ignore-scripts` to the install command (per §2). We only need `moq-transport`'s build, and §3's script does that explicitly. |
 | Browser: "MoqTransport requires `relayUrl`" | `/start` didn't return the `moq` block. Bot probably isn't running with `-t moq`. |
 | WebTransport handshake fails with `net::ERR_QUIC_PROTOCOL_ERROR` | Cert expired (14-day limit) or the fingerprint pinned in the browser doesn't match the cert the relay loaded. Re-run the setup script. |
 | `pnpm install` errors with corepack signing-key complaint | Install pnpm globally: `npm install -g --force pnpm@10.14.0`. |
+| Bot crashes with `ModuleNotFoundError: No module named 'websockets'` (or similar) at import time | The Python extras in §2 were incomplete. `uv sync --extra moq` alone isn't enough — the example uses Silero VAD, Deepgram STT, Cartesia TTS, and OpenAI LLM; each of those has its own extra. Re-run the full `uv sync` command from §2. |
 | Stale voice-ui-kit code after editing | `pnpm -F @pipecat-ai/voice-ui-kit build` was skipped or failed. |
 
-## 8. What the link chain actually does
+## 7. What the link chain actually does
 
 For when something breaks and the script's output isn't enough.
 

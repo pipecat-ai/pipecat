@@ -150,19 +150,32 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-# 5. Print run commands
+# 5. Build the linked packages so their dist/ reflects local source.
+#
+# Running the builds inside the script keeps the user-facing flow simple:
+# they install (§2) → run this script (§3) → start the three terminals
+# (§4). The link chain is in place by this point, so tsc resolves a single
+# Transport type and the dts build passes.
+# ---------------------------------------------------------------------------
+if [[ -d "$MOQ_PKG_DIR" ]]; then
+  echo "==> Building @pipecat-ai/moq-transport..."
+  ( cd "$MOQ_PKG_DIR" && npm run build >/dev/null )
+  echo "    OK ($MOQ_PKG_DIR/dist)"
+  echo
+fi
+
+if [[ -d "$VUK_PKG_DIR" ]]; then
+  echo "==> Building @pipecat-ai/voice-ui-kit..."
+  ( cd "$(dirname "$VUK_PKG_DIR")" && pnpm -F @pipecat-ai/voice-ui-kit build >/dev/null )
+  echo "    OK ($VUK_PKG_DIR/dist)"
+  echo
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Print run commands
 # ---------------------------------------------------------------------------
 echo "==========================================="
-echo " Next: build moq-transport + voice-ui-kit"
-echo "==========================================="
-echo
-echo "# Build the linked packages so their dist/ reflects local source."
-echo "# Both reads use the deduped client-js so types line up."
-echo "( cd $TRANSPORTS_DIR/transports/moq-transport && npm run build )"
-echo "( cd $(dirname "$VUK_PKG_DIR") && pnpm -F @pipecat-ai/voice-ui-kit build )"
-echo
-echo "==========================================="
-echo " Then run these in separate terminals:"
+echo " Next: run these in separate terminals"
 echo "==========================================="
 echo
 echo "# 1. Start the relay (binds QUIC/WebTransport on UDP [::]:4080)"
@@ -181,10 +194,12 @@ echo "  --moq-cert moq-cert.pem \\"
 echo "  --moq-insecure \\"
 echo "  --moq-path /"
 echo
-echo "# 3. Start the prebuilt client dev server"
+echo "# 3. Start the prebuilt client dev server (Vite — usually port 5173)"
 echo "cd $PIPECAT_DIR/../pipecat-prebuilt/client"
 echo "npm run dev"
 echo
-echo "# 4. Open browser"
-echo "open http://localhost:7860"
+echo "# 4. Open the Vite dev URL printed in terminal 3 (NOT the bot's"
+echo "#    http://localhost:7860/client/, which serves the published"
+echo "#    pipecat-ai-prebuilt wheel without MoQ)."
+echo "open http://localhost:5173"
 echo
