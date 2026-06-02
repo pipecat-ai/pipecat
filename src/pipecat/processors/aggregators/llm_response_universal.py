@@ -1841,6 +1841,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if self._realtime_service_mode:
             await self._realtime_handle_llm_start()
             return
+        if self._assistant_turn_start_timestamp and self._aggregation:
+            await self._trigger_assistant_turn_stopped(interrupted=True)
         await self._trigger_assistant_turn_started()
 
     async def _realtime_handle_llm_start(self):
