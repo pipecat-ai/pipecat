@@ -14,8 +14,8 @@ events expected to flow back from the bot. Simple example::
       - user: "hello world"
         expect:
           - event: user_started_speaking
-          - event: user_stopped_speaking
-            transcript_contains: "hello world"
+          - event: user_transcription
+            text_contains: "hello world"
 
 The runner (see :mod:`pipecat.evals.harness`) loads the scenario, connects to
 the bot's eval transport over RTVI, drives each turn, collects the RTVI events
@@ -28,8 +28,10 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 Supported expectation fields (per event):
     event: <name>              required — event type name
     within_ms: <int>           latency budget from the most recent anchor
-    transcript_contains: <str> substring check on user_transcription.transcript
-    text_contains: <str>       substring check on llm_response.text
+                               (optional; defaults to 60s when omitted)
+    text_contains: <str>       substring check on the event's text content
+                               (``llm_response.text`` or
+                               ``user_transcription.transcript``)
     name: <str>                function_call.name equality
     args: <object>             function_call.args equality
     eval: <str>                natural-language criterion the event's text content
@@ -51,17 +53,17 @@ Top-level optional fields:
                     model: qwen2.5:3b
                     endpoint: http://localhost:11434/v1   # optional
 
-    bot_audio:  when False (default True), text-mode turns are sent with the
-                RTVI ``send-text`` ``audio_response=false`` option, so the LLM
-                bypasses TTS for that turn. Use for content evals that don't
-                care how the bot sounds. Only affects text mode.
+    bot_audio:  whether the bot produces speech (TTS). Default False: the bot
+                skips TTS and ``llm_response`` is read from the LLM text, which is
+                faster and silent (even an on-connect greeting). Set True for
+                evals that need the bot to actually speak.
     user_audio: when present, the harness generates audio for each user turn
                 via this TTS config and streams it to the bot as RTVI
                 ``raw-audio`` chunks, exercising its STT for real. Omit
                 (default) for text-only evals, where the harness sends RTVI
                 ``send-text``. Mapping with at minimum ``service`` and
                 ``voice``; optional ``model``, ``sample_rate`` (default 16000),
-                and ``api_key_env``.
+                and ``api_key`` (defaults to $CARTESIA_API_KEY).
     fixtures: free-form mapping (e.g. ``bot_url:``).
 """
 
@@ -92,10 +94,10 @@ class Expectation:
         event: Required — the semantic event name (e.g. ``user_stopped_speaking``).
         within_ms: Optional latency budget, measured from the most recent anchor
             (typically the preceding ``user_input`` send for the first event of
-            a turn, or the previous matched event otherwise).
-        transcript_contains: Optional substring check on
-            ``user_transcription.transcript``.
-        text_contains: Optional substring check on ``llm_response.text``.
+            a turn, or the previous matched event otherwise). Defaults to 60s
+            when omitted, so timing isn't asserted unless set explicitly.
+        text_contains: Optional substring check on the event's text content
+            (``llm_response.text`` or ``user_transcription.transcript``).
         name: Optional equality check for ``function_call.name``.
         args: Optional equality check for ``function_call.args``.
         eval: Optional natural-language criterion the event's text content
@@ -106,7 +108,6 @@ class Expectation:
 
     event: str
     within_ms: int | None = None
-    transcript_contains: str | None = None
     text_contains: str | None = None
     name: str | None = None
     args: dict | None = None
@@ -169,15 +170,17 @@ class Scenario:
         judge: Judge LLM configuration dict with keys ``service``, ``model``,
             and optional ``endpoint``. Defaults to
             ``{"service": "ollama", "model": "qwen2.5:3b"}``.
-        bot_audio: When False (default True), text-mode turns bypass TTS via
-            the RTVI ``send-text`` ``audio_response=false`` option. When True,
-            the bot runs its TTS normally. Only affects text mode; set False
-            for content-only evals that don't care how the bot sounds.
+        bot_audio: Whether the bot produces speech. Default False: the bot skips
+            TTS (``llm_response`` is read from the LLM text), which is faster and
+            avoids audio cost. The harness also configures skip-TTS at connect
+            time so even an on-connect greeting is silent. Set True for evals
+            that need the bot to actually speak (``llm_response`` is then read
+            from the spoken TTS text).
         user_audio: TTS config the harness uses to generate user audio. When
             present, the harness streams RTVI ``raw-audio`` (not ``send-text``)
             to the bot, exercising its STT for real. Mapping with ``service``,
             ``voice``, and optional ``model`` / ``sample_rate`` /
-            ``api_key_env``. Omit for text-only evals (default).
+            ``api_key``. Omit for text-only evals (default).
         fixtures: Optional fixtures dict (e.g. ``bot_url:``).
         source_path: Path the scenario was loaded from, for error messages.
     """
@@ -186,7 +189,7 @@ class Scenario:
     turns: list[Turn]
     reset: list[dict] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "qwen2.5:3b"})
-    bot_audio: bool = True
+    bot_audio: bool = False
     user_audio: dict | None = None
     fixtures: dict = field(default_factory=dict)
     source_path: Path | None = None
@@ -234,7 +237,7 @@ def load_scenario(path: str | Path) -> Scenario:
     if not isinstance(judge, dict):
         raise ValueError(f"{path}: 'judge:' must be a mapping")
 
-    bot_audio = data.get("bot_audio", True)
+    bot_audio = data.get("bot_audio", False)
     if not isinstance(bot_audio, bool):
         raise ValueError(f"{path}: 'bot_audio:' must be a boolean")
 
@@ -323,7 +326,6 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> Expec
     return Expectation(
         event=event,
         within_ms=e.get("within_ms"),
-        transcript_contains=e.get("transcript_contains"),
         text_contains=e.get("text_contains"),
         name=e.get("name"),
         args=e.get("args"),

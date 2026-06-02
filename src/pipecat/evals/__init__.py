@@ -10,6 +10,7 @@ from pipecat.evals.harness import (
     AssertionFailure,
     EvalResult,
     EvalSession,
+    TurnProgress,
     run_scenario,
 )
 from pipecat.evals.scenario import (
@@ -19,11 +20,14 @@ from pipecat.evals.scenario import (
     Turn,
     load_scenario,
 )
+from pipecat.evals.voice import EvalVoice
 
 __all__ = [
     "AssertionFailure",
     "EvalResult",
     "EvalSession",
+    "EvalVoice",
+    "TurnProgress",
     "Expectation",
     "Scenario",
     "SendAfter",

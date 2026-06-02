@@ -25,14 +25,25 @@ scenario ``event:``         RTVI server message(s)
 ``user_stopped_speaking``   ``user-stopped-speaking``
 ``user_transcription``      ``user-transcription`` (final only)
 ``llm_started``             ``bot-llm-started``
-``llm_response``            ``bot-llm-text`` accumulated until ``bot-llm-stopped``
+``llm_response``            text mode: ``bot-llm-text`` joined at ``bot-llm-stopped``;
+                            audio mode: one segment per ``bot-tts-text`` (spoken sentence)
 ``function_call``           ``llm-function-call-in-progress``
 ==========================  ==============================================
 
 Matching semantics: expected events must appear in the specified order, but
 unmatched events may appear between them (so a scenario doesn't have to
 enumerate every event the bot emits). The ``within_ms`` budget for each
-expectation is measured from the most recent ``send-text`` / ``raw-audio`` send.
+expectation is measured from the most recent ``send-text`` / ``raw-audio`` send
+(default 60s when omitted).
+
+An ``llm_response`` with a content check (``text_contains`` / ``eval:``)
+aggregates: the harness accumulates the text of successive response segments
+within the turn and re-checks on each one, so an interim filler ("Let me check
+on that.") or the on-connect greeting is rolled past rather than mistaken for
+the turn's answer. Responses that began before the turn's input are skipped, so
+an interrupted prior turn doesn't bleed in. The judge returns yes / no /
+continue; ``text_contains`` treats a missing substring as continue. The
+``within_ms`` budget bounds the wait.
 
 Example::
 
@@ -49,6 +60,7 @@ import asyncio
 import base64
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -57,14 +69,17 @@ from loguru import logger
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.evals.judge import Judge, build_default_judge
 from pipecat.evals.scenario import Expectation, Scenario, SendAfter, Turn
-from pipecat.evals.serializer import EVAL_RESET_MESSAGE_TYPE
+from pipecat.evals.serializer import EVAL_CONFIGURE_MESSAGE_TYPE, EVAL_RESET_MESSAGE_TYPE
 
 # ``websockets`` is imported lazily inside the methods that use it. That keeps
 # this module importable (and the CLI plugin loadable via pipecat-cli) even
 # when the optional ``websockets-base`` extra isn't installed — users who
 # actually run an eval get a clear ImportError at that point.
 
-DEFAULT_EVENT_TIMEOUT_MS = 5000
+# Generous default so an expectation without an explicit ``within_ms`` waits
+# long enough for slow LLM/TTS responses (and function-call round-trips) rather
+# than failing on latency. Set ``within_ms`` explicitly to assert on timing.
+DEFAULT_EVENT_TIMEOUT_MS = 60000
 SEND_AFTER_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
 BOT_READY_TIMEOUT_S = 10.0
@@ -102,6 +117,26 @@ class EvalResult:
     events_seen: list[dict] = field(default_factory=list)
 
 
+@dataclass
+class TurnProgress:
+    """A real-time progress record emitted while a turn runs (for verbose output).
+
+    Parameters:
+        turn_index: The turn being run.
+        expectation_index: Index of the expectation, or -1 for turn-level records
+            (the turn header, or a ``send_after`` that never fired).
+        event_name: The expectation's event (or the user text for a turn header).
+        status: ``turn`` (header), ``matched``, ``failed``, or ``timeout``.
+        detail: Optional extra text (failure reason, user utterance, ...).
+    """
+
+    turn_index: int
+    expectation_index: int
+    event_name: str
+    status: str
+    detail: str = ""
+
+
 class EvalSession:
     """Runs one :class:`Scenario` against a bot over a single WebSocket session.
 
@@ -110,7 +145,13 @@ class EvalSession:
     Use :meth:`run`, or the :func:`run_scenario` convenience wrapper.
     """
 
-    def __init__(self, scenario: Scenario, bot_url: str, connect_timeout_s: float = 5.0):
+    def __init__(
+        self,
+        scenario: Scenario,
+        bot_url: str,
+        connect_timeout_s: float = 5.0,
+        on_progress: Callable[[TurnProgress], None] | None = None,
+    ):
         """Initialize the eval session.
 
         Args:
@@ -118,10 +159,13 @@ class EvalSession:
             bot_url: WebSocket URL of the bot's eval transport.
             connect_timeout_s: How long to wait for the bot to accept the WS
                 connection before giving up.
+            on_progress: Optional callback invoked with a :class:`TurnProgress`
+                as each turn and expectation resolves (used for verbose output).
         """
         self._scenario = scenario
         self._bot_url = bot_url
         self._connect_timeout_s = connect_timeout_s
+        self._on_progress = on_progress
 
         self._ws: Any = None
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -129,9 +173,26 @@ class EvalSession:
         self._events_seen: list[dict] = []
         self._next_id = 0
         self._judge: Judge | None = None
-        # Accumulates bot-llm-text deltas between bot-llm-started and
-        # bot-llm-stopped to synthesize the llm_response event's text.
-        self._llm_buffer: list[str] = []
+
+        # One persistent TTS pipeline reused across the scenario's audio turns
+        # (created in run() only when the scenario uses user_audio).
+        self._voice: Any = None
+
+        # Accumulates the bot's output text for the current response, to
+        # synthesize llm_response. Source depends on the mode: bot-llm-text in
+        # text mode (skip-TTS), bot-tts-text in audio mode (what was spoken).
+        self._text_buffer: list[str] = []
+
+        # When the current response began (bot-llm-started). Stamped onto each
+        # llm_response so the matcher can ignore responses that started before a
+        # turn's input (the on-connect greeting, or a turn the current one
+        # interrupted). See _match_and_verify.
+        self._response_started_at: float = 0.0
+
+        # Text content of the most recently matched event (the bot's response, or
+        # a user transcript), surfaced to verbose progress. Empty for events with
+        # no text (llm_started, function_call, speaking events).
+        self._last_match_text: str = ""
 
     async def run(self) -> EvalResult:
         """Connect, drive the scenario, and return the result."""
@@ -141,7 +202,7 @@ class EvalSession:
 
         try:
             async with asyncio.timeout(self._connect_timeout_s):
-                self._ws = await websockets.connect(self._bot_url)
+                self._ws = await websockets.connect(self._connect_url())
         except (TimeoutError, OSError) as e:
             return EvalResult(
                 scenario_name=self._scenario.name,
@@ -161,6 +222,13 @@ class EvalSession:
         if any(exp.eval is not None for turn in self._scenario.turns for exp in turn.expect):
             self._judge = build_default_judge(self._scenario.judge)
 
+        # One TTS pipeline for the whole scenario's audio turns.
+        if self._scenario.user_audio is not None:
+            from pipecat.evals.voice import EvalVoice
+
+            self._voice = EvalVoice(self._scenario.user_audio)
+            await self._voice.start()
+
         failures: list[AssertionFailure] = []
         reader_task = asyncio.create_task(self._reader_loop())
 
@@ -174,6 +242,8 @@ class EvalSession:
                 await reader_task
             except (asyncio.CancelledError, Exception):
                 pass
+            if self._voice is not None:
+                await self._voice.aclose()
             await self._ws.close()
 
         return EvalResult(
@@ -184,9 +254,40 @@ class EvalSession:
             events_seen=self._events_seen,
         )
 
+    def _connect_url(self) -> str:
+        """Bot URL, with ``?skip_tts=true`` in text mode.
+
+        The eval transport reads this on connect and silences the bot (including
+        an on-connect greeting) before any LLM runs — see
+        :mod:`pipecat.evals.transport`. Frames are ordered, so this can't be done
+        after connecting.
+        """
+        if self._scenario.bot_audio:
+            return self._bot_url
+        sep = "&" if "?" in self._bot_url else "?"
+        return f"{self._bot_url}{sep}skip_tts=true"
+
     def _message_id(self) -> str:
         self._next_id += 1
         return str(self._next_id)
+
+    def _required_report_level(self) -> str | None:
+        """Minimal function-call report level the scenario's assertions need.
+
+        Returns ``"full"`` if any ``function_call`` expectation checks ``args``,
+        ``"name"`` if one checks ``name`` only, else ``None`` (no elevation —
+        the bot's default applies and a function_call event still arrives).
+        """
+        needs_name = False
+        for turn in self._scenario.turns:
+            for exp in turn.expect:
+                if exp.event != "function_call":
+                    continue
+                if exp.args is not None:
+                    return "full"
+                if exp.name is not None:
+                    needs_name = True
+        return "name" if needs_name else None
 
     async def _handshake(self) -> None:
         """Send client-ready, wait for bot-ready, then optionally seed context."""
@@ -204,6 +305,21 @@ class EvalSession:
             await self._wait_for_event("bot_ready", BOT_READY_TIMEOUT_S)
         except TimeoutError:
             logger.warning("Eval session: bot-ready not received; proceeding anyway")
+
+        # If the scenario asserts on function-call name/args, ask the bot's
+        # RTVIObserver to report them for the duration of this eval. Agents keep
+        # the secure NONE default; only the eval transport understands this.
+        level = self._required_report_level()
+        if level is not None:
+            configure = RTVI.Message(
+                type="client-message",
+                id=self._message_id(),
+                data={
+                    "t": EVAL_CONFIGURE_MESSAGE_TYPE,
+                    "d": {"function_call_report_level": {"*": level}},
+                },
+            )
+            await self._ws.send(configure.model_dump_json())
 
         # Only send a reset when the scenario actually asked for one. An implicit
         # empty reset would race with bot startup flows (e.g. a greeting added in
@@ -253,13 +369,31 @@ class EvalSession:
                     return [{"type": "user_transcription", "transcript": data.get("text", "")}]
                 return []
             case "bot-llm-started":
-                self._llm_buffer = []
+                self._text_buffer = []
+                self._response_started_at = time.monotonic()
                 return [{"type": "llm_started"}]
             case "bot-llm-text":
-                self._llm_buffer.append(data.get("text", ""))
+                # Text mode (skip-TTS): the LLM text is the bot's output. Buffer
+                # it and emit one segment at bot-llm-stopped (a clean boundary —
+                # bot-llm-text reliably precedes bot-llm-stopped).
+                if not self._scenario.bot_audio:
+                    self._text_buffer.append(data.get("text", ""))
                 return []
             case "bot-llm-stopped":
-                return [{"type": "llm_response", "text": "".join(self._llm_buffer)}]
+                if not self._scenario.bot_audio:
+                    return [self._response_event("".join(self._text_buffer))]
+                return []
+            case "bot-tts-text":
+                # Audio mode: each spoken sentence is a response segment, emitted
+                # as it arrives. We can't bound on bot-tts-stopped because some
+                # TTS services emit the text *after* the audio finishes (e.g.
+                # OpenAI), which would yield empty responses. The matcher
+                # aggregates the segments of the turn.
+                if self._scenario.bot_audio:
+                    return [self._response_event(data.get("text", ""))]
+                return []
+            case "bot-tts-stopped":
+                return []
             case "llm-function-call-in-progress":
                 return [
                     {
@@ -270,6 +404,39 @@ class EvalSession:
                 ]
             case _:
                 return []
+
+    def _response_event(self, text: str) -> dict:
+        """Build one ``llm_response`` segment, stamped with the response's start.
+
+        A segment is the full LLM text in text mode, or one spoken sentence in
+        audio mode. The text may be empty (e.g. an interrupted response).
+        ``started_at`` lets the matcher aggregate the segments of *this* turn and
+        skip earlier ones (the greeting, or a prior turn the current one
+        interrupted).
+        """
+        return {
+            "type": "llm_response",
+            "text": text,
+            "started_at": self._response_started_at,
+        }
+
+    @staticmethod
+    def _match_summary(event: dict) -> str:
+        """A short human label for a matched event, for verbose progress.
+
+        For ``function_call`` it's the call signature (``name(arg=value, ...)``);
+        for everything else it's the event's text content (or empty).
+        """
+        if event.get("type") == "function_call":
+            args = event.get("args") or {}
+            sig = ", ".join(f"{k}={v}" for k, v in args.items())
+            return f"{event.get('name') or '?'}({sig})"
+        return event.get("text") or event.get("transcript") or ""
+
+    def _progress(self, record: TurnProgress) -> None:
+        """Emit a progress record to the on_progress callback, if one was given."""
+        if self._on_progress is not None:
+            self._on_progress(record)
 
     async def _run_turn(self, turn: Turn, turn_idx: int) -> list[AssertionFailure]:
         """Drive one turn: optionally honor send_after, send user input, match expectations.
@@ -292,41 +459,62 @@ class EvalSession:
                         reason=f"send_after never fired: {e}",
                     )
                 )
+                self._progress(
+                    TurnProgress(
+                        turn_idx, -1, turn.send_after.event, "timeout", failures[-1].reason
+                    )
+                )
                 return failures
 
         anchor = time.monotonic()
         if turn.user is not None:
-            if self._scenario.user_audio is not None:
-                await self._send_user_audio(turn.user, self._scenario.user_audio)
+            if self._voice is not None:
+                await self._send_user_audio(turn.user)
             else:
                 await self._send_user_text(turn.user, self._scenario.bot_audio)
             anchor = time.monotonic()
+
+        # A turn that sends input only accepts a response that began after the
+        # send (skipping the greeting / an interrupted prior turn). An
+        # observe-only turn has no input to anchor on — it observes whatever the
+        # bot produced autonomously (e.g. the on-connect greeting), so don't skip.
+        match_floor = anchor if turn.user is not None else 0.0
+
+        self._progress(TurnProgress(turn_idx, -1, turn.user or "", "turn"))
 
         for exp_idx, expectation in enumerate(turn.expect):
             budget_ms = expectation.within_ms or DEFAULT_EVENT_TIMEOUT_MS
 
             try:
-                matched = await self._await_event(expectation, anchor, budget_ms)
+                failure = await self._match_and_verify(
+                    expectation, anchor, budget_ms, turn_idx, exp_idx, match_floor
+                )
             except TimeoutError:
+                reason = f"no matching {expectation.event!r} event arrived within {budget_ms}ms"
                 failures.append(
                     AssertionFailure(
                         turn_index=turn_idx,
                         expectation_index=exp_idx,
                         event_name=expectation.event,
-                        reason=(
-                            f"no matching {expectation.event!r} event arrived within {budget_ms}ms"
-                        ),
+                        reason=reason,
                     )
+                )
+                self._progress(
+                    TurnProgress(turn_idx, exp_idx, expectation.event, "timeout", reason)
                 )
                 break
 
-            failure = self._check_payload(matched, expectation, turn_idx, exp_idx)
             if failure:
                 failures.append(failure)
-
-            judge_failure = await self._check_judge(matched, expectation, turn_idx, exp_idx)
-            if judge_failure:
-                failures.append(judge_failure)
+                self._progress(
+                    TurnProgress(turn_idx, exp_idx, expectation.event, "failed", failure.reason)
+                )
+            else:
+                self._progress(
+                    TurnProgress(
+                        turn_idx, exp_idx, expectation.event, "matched", self._last_match_text
+                    )
+                )
 
         return failures
 
@@ -346,11 +534,9 @@ class EvalSession:
         )
         await self._ws.send(message.model_dump_json())
 
-    async def _send_user_audio(self, text: str, user_audio: dict) -> None:
+    async def _send_user_audio(self, text: str) -> None:
         """Render ``text`` to audio (cached) and stream it as ``raw-audio`` chunks."""
-        from pipecat.evals.voice import generate_or_load
-
-        pcm, sample_rate = await generate_or_load(text, user_audio)
+        pcm, sample_rate = await self._voice.generate(text)
         for chunk in _audio_chunks(pcm, sample_rate):
             message = RTVI.Message(
                 type="raw-audio",
@@ -396,16 +582,90 @@ class EvalSession:
 
             await asyncio.sleep(SEND_AFTER_POLL_S)
 
-    async def _await_event(self, expectation: Expectation, anchor: float, budget_ms: int) -> dict:
-        """Pop events from the queue until one matching ``expectation.event`` arrives.
+    async def _match_and_verify(
+        self,
+        expectation: Expectation,
+        anchor: float,
+        budget_ms: int,
+        turn_idx: int,
+        exp_idx: int,
+        match_floor: float,
+    ) -> AssertionFailure | None:
+        """Wait for the expected event and verify it. Returns a failure or None.
 
-        Events that don't match the expected name are dropped (so a scenario
-        doesn't have to enumerate every event the bot emits). They remain in
-        ``events_seen`` and ``latest_event_times`` for diagnostics and send_after
-        lookups.
+        Most events match a single event and are checked once. An ``llm_response``
+        carrying a content check (``text_contains`` / ``eval:``) instead
+        *aggregates*: it accumulates the text of successive response segments
+        within the turn and re-checks on each new segment until the check passes,
+        the judge affirmatively rejects, or the ``within_ms`` budget expires.
+        Segments whose response began before ``match_floor`` (the greeting, or a
+        turn the current one interrupted) are skipped; observe-only turns pass a
+        floor of 0 so they can match the autonomous greeting.
+
+        Raises:
+            TimeoutError: when no matching event arrives at all (so the caller can
+                report "no matching event arrived"). A response that arrives but
+                never satisfies the content check returns a failure instead.
         """
         deadline = anchor + (budget_ms / 1000.0)
+        self._last_match_text = ""
 
+        aggregates = expectation.event == "llm_response" and (
+            expectation.text_contains is not None or expectation.eval is not None
+        )
+        if not aggregates:
+            event = await self._next_matching_event(expectation.event, deadline)
+            payload_failure = self._check_payload(event, expectation, turn_idx, exp_idx)
+            if payload_failure:
+                return payload_failure
+            judge_failure = await self._check_judge(event, expectation, turn_idx, exp_idx)
+            if judge_failure is None:
+                self._last_match_text = self._match_summary(event)
+            return judge_failure
+
+        def fail(reason: str) -> AssertionFailure:
+            return AssertionFailure(turn_idx, exp_idx, expectation.event, reason)
+
+        if expectation.eval is not None and self._judge is None:
+            return fail("scenario uses 'eval:' but no judge could be built")
+
+        aggregate = ""
+        last_reason = ""
+        seen_any = False
+        while True:
+            try:
+                event = await self._next_matching_event(expectation.event, deadline)
+            except TimeoutError:
+                if not seen_any:
+                    raise  # no response at all → "no matching event arrived"
+                return fail(f"not satisfied within {budget_ms}ms: {last_reason}")
+
+            # Ignore responses that began before this turn's input (greeting /
+            # interrupted prior turn). Observe-only turns use a floor of 0.
+            if event.get("started_at", 0.0) < match_floor:
+                continue
+
+            seen_any = True
+            aggregate += event.get("text", "")
+            status, reason = await self._evaluate_aggregate(aggregate, expectation)
+            if status == "pass":
+                self._last_match_text = aggregate
+                return None
+            if status == "fail":
+                return fail(reason)
+            # "continue": wait for the next segment, separated by a space so
+            # sentences don't run together (e.g. "...that. The weather...").
+            aggregate += " "
+            last_reason = reason
+
+    async def _next_matching_event(self, event_type: str, deadline: float) -> dict:
+        """Pop events from the queue until one of ``event_type`` arrives.
+
+        Events that don't match are dropped (so a scenario doesn't have to
+        enumerate every event the bot emits). They remain in ``events_seen`` and
+        ``latest_event_times`` for diagnostics and send_after lookups. Raises
+        TimeoutError once ``deadline`` passes.
+        """
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -414,8 +674,36 @@ class EvalSession:
             async with asyncio.timeout(remaining):
                 event = await self._queue.get()
 
-            if event.get("type") == expectation.event:
+            if event.get("type") == event_type:
                 return event
+
+    async def _evaluate_aggregate(
+        self, aggregate: str, expectation: Expectation
+    ) -> tuple[str, str]:
+        """Evaluate the accumulated response text. Returns ``(status, reason)``.
+
+        ``status`` is ``"pass"``, ``"fail"``, or ``"continue"``. ``text_contains``
+        is monotonic, so a missing substring is ``"continue"`` (more text may
+        arrive); only the judge can affirmatively ``"fail"``.
+        """
+        if expectation.text_contains is not None and expectation.text_contains not in aggregate:
+            return (
+                "continue",
+                f"text {aggregate!r} does not contain {expectation.text_contains!r}",
+            )
+
+        if expectation.eval is not None:
+            if not aggregate.strip():
+                return ("continue", "no response text yet")
+            # _match_and_verify guarantees a judge exists before aggregating eval:.
+            assert self._judge is not None
+            verdict = await self._judge.evaluate(expectation.eval, aggregate)
+            if verdict.verdict == "no":
+                return ("fail", f"eval {expectation.eval!r}: judge said no — {verdict.reason}")
+            if verdict.verdict == "continue":
+                return ("continue", f"eval {expectation.eval!r}: incomplete — {verdict.reason}")
+
+        return ("pass", "")
 
     @staticmethod
     def _check_payload(
@@ -434,18 +722,12 @@ class EvalSession:
                 reason=reason,
             )
 
-        if expectation.transcript_contains is not None:
-            transcript = event.get("transcript", "")
-            if expectation.transcript_contains not in transcript:
-                return fail(
-                    f"transcript {transcript!r} does not contain "
-                    f"{expectation.transcript_contains!r}"
-                )
-
         if expectation.text_contains is not None:
-            text = event.get("text", "")
-            if expectation.text_contains not in text:
-                return fail(f"text {text!r} does not contain {expectation.text_contains!r}")
+            # Resolve the event's text content: llm_response carries "text",
+            # user_transcription carries "transcript".
+            content = event.get("text") or event.get("transcript") or ""
+            if expectation.text_contains not in content:
+                return fail(f"text {content!r} does not contain {expectation.text_contains!r}")
 
         if expectation.name is not None:
             actual_name = event.get("name")
@@ -453,9 +735,13 @@ class EvalSession:
                 return fail(f"name {actual_name!r} != expected {expectation.name!r}")
 
         if expectation.args is not None:
-            actual_args = event.get("args")
-            if actual_args != expectation.args:
-                return fail(f"args {actual_args!r} != expected {expectation.args!r}")
+            # Subset match: every expected key/value must be present in the call,
+            # so extra arguments the model includes (e.g. a `format`/unit field)
+            # don't fail the assertion.
+            actual_args = event.get("args") or {}
+            missing = {k: v for k, v in expectation.args.items() if actual_args.get(k) != v}
+            if missing:
+                return fail(f"args {actual_args!r} missing expected {missing!r}")
 
         return None
 
@@ -513,6 +799,7 @@ async def run_scenario(
     scenario: Scenario,
     bot_url: str,
     connect_timeout_s: float = 5.0,
+    on_progress: Callable[[TurnProgress], None] | None = None,
 ) -> EvalResult:
     """Run a scenario against a bot at the given WebSocket URL.
 
@@ -523,8 +810,9 @@ async def run_scenario(
         bot_url: WebSocket URL of the bot's eval transport.
         connect_timeout_s: How long to wait for the bot to accept the WS
             connection before giving up.
+        on_progress: Optional per-turn/expectation progress callback (verbose).
 
     Returns:
         The structured outcome.
     """
-    return await EvalSession(scenario, bot_url, connect_timeout_s).run()
+    return await EvalSession(scenario, bot_url, connect_timeout_s, on_progress).run()
