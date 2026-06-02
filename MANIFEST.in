@@ -2,3 +2,6 @@ prune docs
 prune examples
 prune scripts
 prune tests
+
+# Ship the CLI scaffolding templates in the sdist (jinja + client trees, incl. dotfiles).
+graft src/pipecat/cli/templates

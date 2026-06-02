@@ -127,17 +127,13 @@ def validate_and_build_config(
                 resolved_transports.append(t)
             else:
                 all_valid = sorted(set(valid_transport_values) | generic_transport_names)
-                errors.append(
-                    f"Unknown transport '{t}'. Valid transports: {', '.join(all_valid)}"
-                )
+                errors.append(f"Unknown transport '{t}'. Valid transports: {', '.join(all_valid)}")
 
     # Cross-check transport vs bot_type
     if bot_type and resolved_transports:
         for t in resolved_transports:
             if bot_type == "web" and t in telephony_values:
-                errors.append(
-                    f"Transport '{t}' is a telephony transport but bot-type is 'web'"
-                )
+                errors.append(f"Transport '{t}' is a telephony transport but bot-type is 'web'")
             elif bot_type == "telephony" and t in webrtc_values:
                 # WebRTC transports are allowed for telephony bots (local testing)
                 pass
@@ -213,9 +209,7 @@ def validate_and_build_config(
         if client_framework == "react":
             generate_client = True
             if client_server and client_server not in ("vite", "nextjs"):
-                errors.append(
-                    f"--client-server must be 'vite' or 'nextjs', got '{client_server}'"
-                )
+                errors.append(f"--client-server must be 'vite' or 'nextjs', got '{client_server}'")
         elif client_framework == "vanilla":
             generate_client = True
             resolved_client_server = "vite"
@@ -241,9 +235,7 @@ def validate_and_build_config(
     if twilio_daily_sip_mode and transport and "twilio_daily_sip" not in transport:
         has_sip = any(t.startswith("twilio_daily_sip") for t in transport)
         if not has_sip:
-            errors.append(
-                "--twilio-daily-sip-mode specified but no 'twilio_daily_sip' transport"
-            )
+            errors.append("--twilio-daily-sip-mode specified but no 'twilio_daily_sip' transport")
 
     # Bail out with all errors
     if errors:

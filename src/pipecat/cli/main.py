@@ -38,6 +38,7 @@ extensions.sort(key=lambda x: x[0].lower())
 for name, extension in extensions:
     app.add_typer(extension, name=name)
 
+
 def version_callback(value: bool):
     """Print version and exit."""
     if value:
@@ -63,6 +64,7 @@ def main(
 ):
     """Pipecat CLI - Build AI voice agents with ease."""
     pass
+
 
 if __name__ == "__main__":
     app()
