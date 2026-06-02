@@ -1,0 +1,25 @@
+{# Twilio + Daily SIP bot entry point (both dial-in and dial-out) #}
+    try:
+        request = AgentRequest.model_validate(runner_args.body)
+
+        transport = DailyTransport(
+            request.room_url,
+            request.token,
+            "Twilio + Daily SIP Bot",
+            params=DailyParams(
+                audio_in_enabled=True,
+                {% if enable_krisp %}
+                audio_in_filter=krisp_filter,
+                {% endif %}
+                audio_out_enabled=True,
+            ),
+        )
+
+        await run_bot(transport, runner_args)
+
+    except Exception as e:
+        logger.error(f"Error running bot: {e}")
+        raise e
+
+
+

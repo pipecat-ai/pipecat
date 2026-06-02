@@ -1,0 +1,121 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Webhook server to handle dial-out requests and start the voice bot.
+
+This server provides endpoints for initiating outbound calls:
+- /start: Main endpoint that receives dial-out requests with SIP URI
+- /health: Health check endpoint
+
+The server automatically detects the environment (local vs production) and routes
+bot starting requests accordingly:
+- Local: Uses internal bot starting logic
+- Production: Calls Pipecat Cloud API
+
+All call data (room_url, token, dialout_settings) flows through the body parameter
+to ensure consistency between local and cloud deployments.
+"""
+
+import os
+from contextlib import asynccontextmanager
+
+import aiohttp
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from loguru import logger
+
+from server_utils import (
+    AgentRequest,
+    create_daily_room,
+    dialout_request_from_request,
+    start_bot_local,
+    start_bot_production,
+)
+
+load_dotenv()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle and shared resources.
+
+    Creates a shared aiohttp session for making HTTP requests to bot endpoints.
+    The session is reused across requests for better performance through connection pooling.
+    """
+    # Create shared HTTP session for bot API calls
+    app.state.http_session = aiohttp.ClientSession()
+    logger.info("Created shared HTTP session")
+    yield
+    # Clean up: close the session on shutdown
+    await app.state.http_session.close()
+    logger.info("Closed shared HTTP session")
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.post("/dialout")
+async def handle_dialout_request(request: Request) -> JSONResponse:
+    """Handle dial-out request.
+
+    This endpoint:
+    1. Receives dial-out request with SIP URI
+    2. Creates a Daily room with SIP capabilities
+    3. Starts the bot (locally or via Pipecat Cloud based on ENVIRONMENT)
+    4. Returns room details for the client
+
+    Returns:
+        JSONResponse with room_url and token
+    """
+    logger.debug("Received dial-out request")
+
+    dialout_request = await dialout_request_from_request(request)
+
+    daily_room_config = await create_daily_room(dialout_request, request.app.state.http_session)
+
+    agent_request = AgentRequest(
+        room_url=daily_room_config.room_url,
+        token=daily_room_config.token,
+        dialout_settings=dialout_request.dialout_settings,
+    )
+
+    try:
+        if os.getenv("ENV") == "production":
+            await start_bot_production(agent_request, request.app.state.http_session)
+        else:
+            await start_bot_local(agent_request, request.app.state.http_session)
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start bot: {str(e)}")
+
+    return JSONResponse(
+        {
+            "status": "success",
+            "room_url": daily_room_config.room_url,
+            "token": daily_room_config.token,
+            "sip_uri": dialout_request.dialout_settings.sip_uri,
+        }
+    )
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint.
+
+    Returns:
+        dict: Status indicating server health
+    """
+    return {"status": "healthy"}
+
+
+if __name__ == "__main__":
+    # Run the server
+    port = int(os.getenv("PORT", "8080"))
+    logger.info(f"Starting server on port {port}")
+    uvicorn.run("server:app", host="0.0.0.0", port=port, reload=True)
+

@@ -1,0 +1,26 @@
+{# Daily PSTN dial-out bot entry point. server.py already created the room, so the
+   room URL/token and dial-out settings arrive in the request body (AgentRequest).
+   The transport is built by hand here; run_bot reads the dial-out settings from
+   runner_args.body. (Dial-in goes through the unified create_transport path.) #}
+    try:
+        request = AgentRequest.model_validate(runner_args.body)
+
+        transport = DailyTransport(
+            request.room_url,
+            request.token,
+            "Daily PSTN Bot",
+            params=DailyParams(
+                api_key=os.getenv("DAILY_API_KEY"),
+                audio_in_enabled=True,
+                {% if enable_krisp %}
+                audio_in_filter=krisp_filter,
+                {% endif %}
+                audio_out_enabled=True,
+            ),
+        )
+
+        await run_bot(transport, runner_args)
+
+    except Exception as e:
+        logger.error(f"Error running bot: {e}")
+        raise e
