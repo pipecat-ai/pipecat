@@ -13,10 +13,14 @@ is the only glue needed:
 - **Inbound** (harness → bot): JSON RTVI messages are wrapped in an
   :class:`~pipecat.frames.frames.InputTransportMessageFrame` so the bot's
   ``RTVIProcessor`` parses and routes them (``send-text``, ``raw-audio``,
-  ``client-ready``, ...). The one exception is the eval *reset* control
-  message — a ``client-message`` with ``t = "eval-reset"`` — which is
-  short-circuited into an :class:`LLMMessagesUpdateFrame`, so the bot's context
-  aggregator reseeds without any eval-specific handler.
+  ``client-ready``, ...). Two control messages are the exception: a
+  ``client-message`` with ``t = "eval-reset"`` is short-circuited into an
+  :class:`LLMMessagesUpdateFrame` (reseeding the bot's context), and one with
+  ``t = "eval-configure"`` into an
+  :class:`~pipecat.processors.frameworks.rtvi.frames.RTVIConfigureObserverFrame`
+  (raising the function-call report level for the eval). Both keep eval-specific
+  behavior out of the bot, and the latter is the trust boundary that lets agents
+  keep the secure default report level in production.
 
 - **Outbound** (bot → harness): RTVI server messages (carried as
   ``OutputTransportMessage*Frame`` with the ``rtvi-ai`` label) are emitted as
@@ -41,12 +45,20 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
 )
+from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
+from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
 from pipecat.serializers.base_serializer import FrameSerializer
 
 # A ``client-message`` with this ``t`` is intercepted by the serializer and
 # turned into an ``LLMMessagesUpdateFrame`` instead of being forwarded to the
 # RTVIProcessor. Keeps per-eval context seeding out of the bot.
 EVAL_RESET_MESSAGE_TYPE = "eval-reset"
+
+# A ``client-message`` with this ``t`` is intercepted and turned into an
+# ``RTVIConfigureObserverFrame``. This is the trust boundary for raising the
+# function-call report level: only the eval transport understands it, so a
+# production RTVI serializer can't be elevated by a remote client.
+EVAL_CONFIGURE_MESSAGE_TYPE = "eval-configure"
 
 
 class RTVIEvalSerializer(FrameSerializer):
@@ -110,6 +122,10 @@ class RTVIEvalSerializer(FrameSerializer):
         if reset is not None:
             return reset
 
+        configure = self._maybe_configure_frame(message)
+        if configure is not None:
+            return configure
+
         return InputTransportMessageFrame(message=message)
 
     def _maybe_reset_frame(self, message: dict) -> Frame | None:
@@ -123,3 +139,18 @@ class RTVIEvalSerializer(FrameSerializer):
         messages = payload.get("messages", []) if isinstance(payload, dict) else []
         # run_llm=False: seed the context, don't trigger a response.
         return LLMMessagesUpdateFrame(messages=list(messages), run_llm=False)
+
+    def _maybe_configure_frame(self, message: dict) -> Frame | None:
+        """Return an ``RTVIConfigureObserverFrame`` for the eval-configure message, else None."""
+        if message.get("type") != "client-message":
+            return None
+        data: Any = message.get("data") or {}
+        if not isinstance(data, dict) or data.get("t") != EVAL_CONFIGURE_MESSAGE_TYPE:
+            return None
+        payload = data.get("d") or {}
+        levels = payload.get("function_call_report_level") if isinstance(payload, dict) else None
+        report_level = None
+        if isinstance(levels, dict):
+            # Values arrive as strings ("none"/"name"/"full"); coerce to the enum.
+            report_level = {k: RTVIFunctionCallReportLevel(v) for k, v in levels.items()}
+        return RTVIConfigureObserverFrame(function_call_report_level=report_level)

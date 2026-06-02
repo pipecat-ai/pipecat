@@ -56,6 +56,7 @@ from pipecat.metrics.metrics import (
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
+    RTVIConfigureObserverFrame,
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
     RTVIUICommandFrame,
@@ -278,6 +279,19 @@ class RTVIObserver(BaseObserver):
             return levels[function_name]
         return levels.get("*", RTVIFunctionCallReportLevel.NONE)
 
+    def _apply_config(self, frame: RTVIConfigureObserverFrame):
+        """Apply a dynamic observer-config update (only the fields that are set).
+
+        Args:
+            frame: The config frame; ``None`` fields leave the current value
+                unchanged.
+        """
+        if frame.function_call_report_level is not None:
+            self._params.function_call_report_level = frame.function_call_report_level
+            logger.debug(
+                f"{self}: function_call_report_level set to {frame.function_call_report_level}"
+            )
+
     async def _logger_sink(self, message):
         """Logger sink so we can send system logs to RTVI clients."""
         message = RTVI.SystemLogMessage(data=RTVI.TextMessageData(text=message))
@@ -441,6 +455,8 @@ class RTVIObserver(BaseObserver):
             if frame.data is not None:
                 message = RTVI.UIJobGroupMessage(data=frame.data)
                 await self.send_rtvi_message(message)
+        elif isinstance(frame, RTVIConfigureObserverFrame):
+            self._apply_config(frame)
         elif isinstance(frame, RTVIServerResponseFrame):
             if frame.error is not None:
                 await self._send_error_response(frame)

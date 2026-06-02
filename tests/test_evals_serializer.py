@@ -10,13 +10,19 @@ import json
 import unittest
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
-from pipecat.evals.serializer import EVAL_RESET_MESSAGE_TYPE, RTVIEvalSerializer
+from pipecat.evals.serializer import (
+    EVAL_CONFIGURE_MESSAGE_TYPE,
+    EVAL_RESET_MESSAGE_TYPE,
+    RTVIEvalSerializer,
+)
 from pipecat.frames.frames import (
     InputTransportMessageFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
     OutputTransportMessageUrgentFrame,
 )
+from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
+from pipecat.processors.frameworks.rtvi.observer import RTVIFunctionCallReportLevel
 
 
 class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
@@ -66,6 +72,20 @@ class TestRTVIEvalSerializerDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(frame, LLMMessagesUpdateFrame)
         self.assertEqual(frame.messages, [{"role": "system", "content": "be terse"}])
         self.assertFalse(frame.run_llm)
+
+    async def test_eval_configure_short_circuits_to_observer_config(self):
+        msg = {
+            "label": RTVI.MESSAGE_LABEL,
+            "type": "client-message",
+            "id": "6",
+            "data": {
+                "t": EVAL_CONFIGURE_MESSAGE_TYPE,
+                "d": {"function_call_report_level": {"*": "full"}},
+            },
+        }
+        frame = await self.serializer.deserialize(json.dumps(msg))
+        self.assertIsInstance(frame, RTVIConfigureObserverFrame)
+        self.assertEqual(frame.function_call_report_level, {"*": RTVIFunctionCallReportLevel.FULL})
 
     async def test_non_reset_client_message_is_forwarded(self):
         msg = {
