@@ -32,8 +32,8 @@ def _rtvi(msg_type: str, data: dict | None = None) -> str:
     return json.dumps({"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data})
 
 
-def _session() -> EvalSession:
-    return EvalSession(Scenario(name="t", turns=[]), "ws://localhost:0")
+def _session(bot_audio: bool = False) -> EvalSession:
+    return EvalSession(Scenario(name="t", turns=[], bot_audio=bot_audio), "ws://localhost:0")
 
 
 class TestTranslate(unittest.TestCase):
@@ -58,14 +58,52 @@ class TestTranslate(unittest.TestCase):
             [{"type": "user_transcription", "transcript": "hello"}],
         )
 
-    def test_llm_response_accumulates_text(self):
-        s = _session()
+    def _llm_response(self, result: list[dict]) -> dict:
+        # The llm_response event also carries a non-deterministic `started_at`
+        # timestamp; assert on type/text only.
+        self.assertEqual(len(result), 1)
+        return {"type": result[0]["type"], "text": result[0]["text"]}
+
+    def test_text_mode_accumulates_bot_llm_text(self):
+        # Text mode (bot_audio=False): llm_response comes from bot-llm-text.
+        s = _session(bot_audio=False)
         self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
         self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "Hello "}}), [])
         self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "world"}}), [])
+        # bot-tts-text is ignored in text mode.
+        self.assertEqual(s._translate({"type": "bot-tts-text", "data": {"text": "ignored"}}), [])
         self.assertEqual(
-            s._translate({"type": "bot-llm-stopped"}),
-            [{"type": "llm_response", "text": "Hello world"}],
+            self._llm_response(s._translate({"type": "bot-llm-stopped"})),
+            {"type": "llm_response", "text": "Hello world"},
+        )
+
+    def test_audio_mode_emits_segment_per_bot_tts_text(self):
+        # Audio mode (bot_audio=True): each spoken sentence (bot-tts-text) is its
+        # own llm_response segment, emitted as it arrives (some TTS services emit
+        # the text after bot-tts-stopped, so we don't bound on it). bot-llm-text
+        # and bot-tts-stopped are ignored.
+        s = _session(bot_audio=True)
+        self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
+        self.assertEqual(s._translate({"type": "bot-llm-text", "data": {"text": "ignored"}}), [])
+        self.assertEqual(s._translate({"type": "bot-llm-stopped"}), [])
+        self.assertEqual(
+            self._llm_response(s._translate({"type": "bot-tts-text", "data": {"text": "spoken "}})),
+            {"type": "llm_response", "text": "spoken "},
+        )
+        self.assertEqual(
+            self._llm_response(s._translate({"type": "bot-tts-text", "data": {"text": "words"}})),
+            {"type": "llm_response", "text": "words"},
+        )
+        self.assertEqual(s._translate({"type": "bot-tts-stopped"}), [])
+
+    def test_empty_response_still_emitted(self):
+        # An interrupted response (no text) emits an empty llm_response — the
+        # matcher's aggregation decides whether that should pass or fail.
+        s = _session(bot_audio=False)
+        self.assertEqual(s._translate({"type": "bot-llm-started"}), [{"type": "llm_started"}])
+        self.assertEqual(
+            self._llm_response(s._translate({"type": "bot-llm-stopped"})),
+            {"type": "llm_response", "text": ""},
         )
 
     def test_function_call(self):
@@ -81,6 +119,132 @@ class TestTranslate(unittest.TestCase):
 
     def test_unmapped_message_ignored(self):
         self.assertEqual(_session()._translate({"type": "metrics", "data": {}}), [])
+
+
+class _FakeJudge:
+    """Returns queued verdicts without calling a real LLM."""
+
+    def __init__(self, verdicts: list[str]):
+        self._verdicts = list(verdicts)
+        self.calls: list[tuple[str, str]] = []
+
+    async def evaluate(self, criterion: str, text: str):
+        from pipecat.evals.judge import JudgeVerdict
+
+        self.calls.append((criterion, text))
+        v = self._verdicts.pop(0)
+        return JudgeVerdict(verdict=v, reason=f"({v})", raw_response="")
+
+
+class TestEvaluateAggregate(unittest.IsolatedAsyncioTestCase):
+    """The pass/fail/continue decision over accumulated response text."""
+
+    async def test_text_contains_present_passes(self):
+        s = _session(bot_audio=False)
+        exp = Expectation(event="llm_response", text_contains="Paris")
+        self.assertEqual(await s._evaluate_aggregate("The capital is Paris.", exp), ("pass", ""))
+
+    async def test_text_contains_absent_continues(self):
+        s = _session()
+        exp = Expectation(event="llm_response", text_contains="Paris")
+        status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
+        self.assertEqual(status, "continue")
+
+    async def test_eval_yes_passes(self):
+        s = _session()
+        s._judge = _FakeJudge(["yes"])
+        exp = Expectation(event="llm_response", eval="describes the weather")
+        self.assertEqual(await s._evaluate_aggregate("It's 75 and sunny.", exp), ("pass", ""))
+
+    async def test_eval_no_fails(self):
+        s = _session()
+        s._judge = _FakeJudge(["no"])
+        exp = Expectation(event="llm_response", eval="describes the weather")
+        status, reason = await s._evaluate_aggregate("I like turtles.", exp)
+        self.assertEqual(status, "fail")
+        self.assertIn("judge said no", reason)
+
+    async def test_eval_continue_waits_for_more(self):
+        s = _session()
+        s._judge = _FakeJudge(["continue"])
+        exp = Expectation(event="llm_response", eval="describes the weather")
+        status, _ = await s._evaluate_aggregate("Let me check on that.", exp)
+        self.assertEqual(status, "continue")
+
+    async def test_eval_empty_aggregate_skips_judge(self):
+        s = _session()
+        judge = _FakeJudge([])  # would IndexError if the judge were called
+        s._judge = judge
+        exp = Expectation(event="llm_response", eval="describes the weather")
+        status, _ = await s._evaluate_aggregate("   ", exp)
+        self.assertEqual(status, "continue")
+        self.assertEqual(judge.calls, [])
+
+
+class TestRequiredReportLevel(unittest.TestCase):
+    """The minimal function-call report level the harness asks the bot for."""
+
+    def _level(self, *expects) -> str | None:
+        scenario = Scenario(name="t", bot_audio=False, turns=[Turn(user="x", expect=list(expects))])
+        return EvalSession(scenario, "ws://localhost:0")._required_report_level()
+
+    def test_none_without_function_call(self):
+        self.assertIsNone(self._level(Expectation(event="llm_response")))
+
+    def test_none_for_bare_function_call(self):
+        # Just asserting the call happened needs no name/args, so no elevation.
+        self.assertIsNone(self._level(Expectation(event="function_call")))
+
+    def test_name_when_only_name_asserted(self):
+        self.assertEqual(
+            self._level(Expectation(event="function_call", name="get_weather")), "name"
+        )
+
+    def test_full_when_args_asserted(self):
+        self.assertEqual(
+            self._level(Expectation(event="function_call", name="get_weather", args={"city": "P"})),
+            "full",
+        )
+
+
+class TestConnectURL(unittest.TestCase):
+    """The harness signals skip-TTS via the connect URL in text mode."""
+
+    def _url(self, bot_audio: bool, base: str = "ws://localhost:7860") -> str:
+        scenario = Scenario(name="t", turns=[], bot_audio=bot_audio)
+        return EvalSession(scenario, base)._connect_url()
+
+    def test_text_mode_adds_skip_tts(self):
+        self.assertEqual(self._url(bot_audio=False), "ws://localhost:7860?skip_tts=true")
+
+    def test_audio_mode_is_plain(self):
+        self.assertEqual(self._url(bot_audio=True), "ws://localhost:7860")
+
+    def test_appends_to_existing_query(self):
+        self.assertEqual(
+            self._url(bot_audio=False, base="ws://localhost:7860?x=1"),
+            "ws://localhost:7860?x=1&skip_tts=true",
+        )
+
+
+class TestTextContainsResolution(unittest.TestCase):
+    """text_contains resolves against whichever event carries the text."""
+
+    def _check(self, event: dict, exp: Expectation):
+        return EvalSession._check_payload(event, exp, 0, 0)
+
+    def test_on_llm_response_text(self):
+        exp = Expectation(event="llm_response", text_contains="Paris")
+        self.assertIsNone(self._check({"type": "llm_response", "text": "It's Paris."}, exp))
+        self.assertIsNotNone(self._check({"type": "llm_response", "text": "London."}, exp))
+
+    def test_on_user_transcription_transcript(self):
+        exp = Expectation(event="user_transcription", text_contains="hello")
+        ok = {"type": "user_transcription", "transcript": "hello world"}
+        self.assertIsNone(self._check(ok, exp))
+        failure = self._check({"type": "user_transcription", "transcript": "bye"}, exp)
+        self.assertIsNotNone(failure)
+        self.assertIn("does not contain", failure.reason)
 
 
 def _free_port() -> int:
@@ -147,12 +311,40 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         )
         scenario = Scenario(
             name="capital",
+            bot_audio=False,
             turns=[
                 Turn(
                     user="what is the capital of France?",
                     expect=[
                         Expectation(event="llm_started", within_ms=2000),
                         Expectation(event="llm_response", within_ms=2000, text_contains="Paris"),
+                    ],
+                )
+            ],
+        )
+        result = await run_scenario(scenario, self.server.url)
+        self.assertTrue(result.passed, f"failures: {[str(f) for f in result.failures]}")
+
+    async def test_llm_response_aggregates_past_filler(self):
+        # First bot response is filler; the answer arrives in a second segment.
+        # text_contains aggregates across both and matches.
+        self.server.on_text(
+            "weather?",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "Let me check on that. "}),
+            _rtvi("bot-llm-stopped"),
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "It is sunny in Paris."}),
+            _rtvi("bot-llm-stopped"),
+        )
+        scenario = Scenario(
+            name="filler",
+            bot_audio=False,
+            turns=[
+                Turn(
+                    user="weather?",
+                    expect=[
+                        Expectation(event="llm_response", within_ms=2000, text_contains="Paris")
                     ],
                 )
             ],
@@ -200,6 +392,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         )
         scenario = Scenario(
             name="mismatch",
+            bot_audio=False,
             turns=[
                 Turn(
                     user="hi",
@@ -245,9 +438,15 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_after_delays_run(self):
         self.server.on_text("first", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
-        self.server.on_text("second", _rtvi("bot-llm-started"), _rtvi("bot-llm-stopped"))
+        self.server.on_text(
+            "second",
+            _rtvi("bot-llm-started"),
+            _rtvi("bot-llm-text", {"text": "ok"}),
+            _rtvi("bot-llm-stopped"),
+        )
         scenario = Scenario(
             name="send_after",
+            bot_audio=False,
             turns=[
                 Turn(user="first", expect=[Expectation(event="llm_started", within_ms=2000)]),
                 Turn(

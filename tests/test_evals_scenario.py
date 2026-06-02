@@ -42,6 +42,8 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(s.turns[0].user, "hello")
         self.assertEqual(s.turns[0].expect[0].event, "user_started_speaking")
         self.assertIsNone(s.turns[0].send_after)
+        # bot_audio defaults to False: evals are text/silent unless they opt in.
+        self.assertFalse(s.bot_audio)
 
     def test_all_expectation_fields(self):
         s = load_scenario(
@@ -53,7 +55,6 @@ class TestEvalsScenarioParser(unittest.TestCase):
                     expect:
                       - event: llm_response
                         within_ms: 500
-                        transcript_contains: "foo"
                         text_contains: "bar"
                         name: my_tool
                         args: {a: 1}
@@ -63,7 +64,6 @@ class TestEvalsScenarioParser(unittest.TestCase):
         )
         exp = s.turns[0].expect[0]
         self.assertEqual(exp.within_ms, 500)
-        self.assertEqual(exp.transcript_contains, "foo")
         self.assertEqual(exp.text_contains, "bar")
         self.assertEqual(exp.name, "my_tool")
         self.assertEqual(exp.args, {"a": 1})
@@ -191,7 +191,7 @@ class TestEvalsScenarioParser(unittest.TestCase):
         """Construct Expectation directly to lock its defaults."""
         e = Expectation(event="foo")
         self.assertIsNone(e.within_ms)
-        self.assertIsNone(e.transcript_contains)
+        self.assertIsNone(e.text_contains)
         self.assertIsNone(e.eval)
 
     def test_eval_on_non_bot_event_warns(self):
