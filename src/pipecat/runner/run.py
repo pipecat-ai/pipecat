@@ -118,6 +118,7 @@ try:
     import uvicorn
     from dotenv import load_dotenv
     from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
+    from fastapi.encoders import jsonable_encoder
     from fastapi.exceptions import RequestValidationError
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -384,8 +385,11 @@ def _configure_server_app(args: argparse.Namespace):
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         body = await request.body()
         logger.error(f"422 Validation error on {request.url.path}: {exc.errors()}")
-        logger.error(f"Raw body: {body.decode()}")
-        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+        logger.error(
+            "Raw body: %s",
+            body.decode(errors="replace")[:5000],
+        )
+        return JSONResponse(status_code=422, content=jsonable_encoder({"detail": exc.errors()}))
 
     # Shared session store: session_id -> body data. Used by the WebRTC /start
     # flow and the /sessions/{session_id}/... proxy routes.
