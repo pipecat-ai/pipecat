@@ -20,12 +20,14 @@ from pipecat.evals.scenario import (
     Turn,
     load_scenario,
 )
+from pipecat.evals.transcribe import EvalTranscriber
 from pipecat.evals.voice import EvalVoice
 
 __all__ = [
     "AssertionFailure",
     "EvalResult",
     "EvalSession",
+    "EvalTranscriber",
     "EvalVoice",
     "TurnProgress",
     "Expectation",

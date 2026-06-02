@@ -23,7 +23,12 @@ the bot emits, and asserts on them in order.
 
 Event names are the friendly names the harness maps RTVI server messages onto:
 ``user_started_speaking``, ``user_stopped_speaking``, ``user_transcription``,
-``llm_started``, ``llm_response``, ``function_call``.
+``llm_started``, ``llm_response``, ``tts_response``, ``function_call``.
+
+``tts_response`` is the transcription of the bot's *actual synthesized audio*
+(a local Whisper model run by the harness), as opposed to ``llm_response`` which
+is the text fed to the TTS. It requires audio mode (see ``bot_audio``); a
+scenario that asserts it without audio mode is skipped with a warning.
 
 Supported expectation fields (per event):
     event: <name>              required — event type name
@@ -55,8 +60,13 @@ Top-level optional fields:
 
     bot_audio:  whether the bot produces speech (TTS). Default False: the bot
                 skips TTS and ``llm_response`` is read from the LLM text, which is
-                faster and silent (even an on-connect greeting). Set True for
-                evals that need the bot to actually speak.
+                faster and silent (even an on-connect greeting). Set True (or a
+                mapping) for evals that need the bot to actually speak. A mapping
+                form enables ``tts_response`` and configures the local Whisper
+                model used to transcribe the bot's audio::
+
+                    bot_audio:
+                      model: base   # optional; defaults to distil-medium.en
     user_audio: when present, the harness generates audio for each user turn
                 via this TTS config and streams it to the bot as RTVI
                 ``raw-audio`` chunks, exercising its STT for real. Omit
@@ -83,7 +93,7 @@ except ModuleNotFoundError as e:
 # evaluate. Asserting ``eval:`` on anything else (user transcripts, tool
 # calls, interruption signals) produces a parser warning — the test controls
 # user input deterministically, so judging it adds cost without signal.
-JUDGEABLE_EVENTS = frozenset({"llm_response"})
+JUDGEABLE_EVENTS = frozenset({"llm_response", "tts_response"})
 
 
 @dataclass
@@ -170,12 +180,15 @@ class Scenario:
         judge: Judge LLM configuration dict with keys ``service``, ``model``,
             and optional ``endpoint``. Defaults to
             ``{"service": "ollama", "model": "qwen2.5:3b"}``.
-        bot_audio: Whether the bot produces speech. Default False: the bot skips
-            TTS (``llm_response`` is read from the LLM text), which is faster and
-            avoids audio cost. The harness also configures skip-TTS at connect
-            time so even an on-connect greeting is silent. Set True for evals
-            that need the bot to actually speak (``llm_response`` is then read
-            from the spoken TTS text).
+        bot_audio: Whether the bot produces speech (parsed from a bool or a
+            mapping). Default False: the bot skips TTS, the harness configures
+            skip-TTS at connect, and even an on-connect greeting is silent. True
+            (or a mapping) makes the bot speak. A mapping additionally enables
+            ``tts_response`` and its ``model`` sets the local Whisper model
+            (see :attr:`transcriber`).
+        transcriber: Parsed from a mapping ``bot_audio``; the local-Whisper
+            config used to transcribe the bot's audio for ``tts_response``
+            (``None`` when ``bot_audio`` is a plain bool).
         user_audio: TTS config the harness uses to generate user audio. When
             present, the harness streams RTVI ``raw-audio`` (not ``send-text``)
             to the bot, exercising its STT for real. Mapping with ``service``,
@@ -190,6 +203,7 @@ class Scenario:
     reset: list[dict] = field(default_factory=list)
     judge: dict = field(default_factory=lambda: {"service": "ollama", "model": "qwen2.5:3b"})
     bot_audio: bool = False
+    transcriber: dict | None = None
     user_audio: dict | None = None
     fixtures: dict = field(default_factory=dict)
     source_path: Path | None = None
@@ -237,9 +251,19 @@ def load_scenario(path: str | Path) -> Scenario:
     if not isinstance(judge, dict):
         raise ValueError(f"{path}: 'judge:' must be a mapping")
 
-    bot_audio = data.get("bot_audio", False)
-    if not isinstance(bot_audio, bool):
-        raise ValueError(f"{path}: 'bot_audio:' must be a boolean")
+    # bot_audio is a bool (audio on/off) or a mapping (audio on + transcriber
+    # config for tts_response). Normalize to (bot_audio: bool, transcriber: dict|None).
+    raw_bot_audio = data.get("bot_audio", False)
+    transcriber: dict | None = None
+    if isinstance(raw_bot_audio, bool):
+        bot_audio = raw_bot_audio
+    elif isinstance(raw_bot_audio, dict):
+        bot_audio = True
+        transcriber = raw_bot_audio
+    else:
+        raise ValueError(
+            f"{path}: 'bot_audio:' must be a boolean or a mapping (e.g. {{model: base}})"
+        )
 
     user_audio = data.get("user_audio")
     if user_audio is not None and not isinstance(user_audio, dict):
@@ -254,6 +278,7 @@ def load_scenario(path: str | Path) -> Scenario:
         reset=reset,
         judge=judge,
         bot_audio=bot_audio,
+        transcriber=transcriber,
         user_audio=user_audio,
         fixtures=data.get("fixtures") or {},
         source_path=path,

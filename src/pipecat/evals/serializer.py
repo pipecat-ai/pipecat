@@ -32,6 +32,7 @@ it carries eval-specific behavior (the reset short-circuit, dropping audio) and
 is not a general-purpose RTVI transport serializer.
 """
 
+import base64
 import json
 from typing import Any
 
@@ -42,6 +43,7 @@ from pipecat.frames.frames import (
     Frame,
     InputTransportMessageFrame,
     LLMMessagesUpdateFrame,
+    OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
 )
@@ -59,6 +61,11 @@ EVAL_RESET_MESSAGE_TYPE = "eval-reset"
 # function-call report level: only the eval transport understands it, so a
 # production RTVI serializer can't be elevated by a remote client.
 EVAL_CONFIGURE_MESSAGE_TYPE = "eval-configure"
+
+# Outbound message carrying a chunk of the bot's synthesized audio (base64), used
+# only when a scenario asserts on ``tts_response``. Emitted under the RTVI label
+# so the harness reader sees it; the harness transcribes the audio locally.
+EVAL_BOT_AUDIO_TYPE = "eval-bot-audio"
 
 
 class RTVIEvalSerializer(FrameSerializer):
@@ -78,6 +85,14 @@ class RTVIEvalSerializer(FrameSerializer):
         # Do not ignore RTVI messages: the whole point is to put them on the
         # wire so the harness can observe semantic events.
         super().__init__(params=FrameSerializer.InputParams(ignore_rtvi_messages=False), **kwargs)
+        # Off by default; the eval transport flips this on per connection (from
+        # the ?capture_audio query param) only for tts_response scenarios, so we
+        # don't ship the bot's audio over the wire unless something asserts on it.
+        self._capture_audio = False
+
+    def set_capture_audio(self, capture: bool) -> None:
+        """Enable/disable forwarding the bot's synthesized audio to the harness."""
+        self._capture_audio = capture
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize an outbound frame to JSON for the harness.
@@ -95,6 +110,17 @@ class RTVIEvalSerializer(FrameSerializer):
             message = frame.message
             if isinstance(message, dict) and message.get("label") == RTVI.MESSAGE_LABEL:
                 return json.dumps(message)
+        elif self._capture_audio and isinstance(frame, OutputAudioRawFrame):
+            return json.dumps(
+                {
+                    "label": RTVI.MESSAGE_LABEL,
+                    "type": EVAL_BOT_AUDIO_TYPE,
+                    "data": {
+                        "audio": base64.b64encode(frame.audio).decode("ascii"),
+                        "sampleRate": frame.sample_rate,
+                    },
+                }
+            )
         return None
 
     async def deserialize(self, data: str | bytes) -> Frame | None:

@@ -226,6 +226,30 @@ class TestConnectURL(unittest.TestCase):
             "ws://localhost:7860?x=1&skip_tts=true",
         )
 
+    def test_tts_response_adds_capture_audio(self):
+        scenario = Scenario(
+            name="t",
+            bot_audio=True,
+            turns=[Turn(user="x", expect=[Expectation(event="tts_response", eval="ok")])],
+        )
+        url = EvalSession(scenario, "ws://localhost:7860")._connect_url()
+        self.assertIn("capture_audio=true", url)
+        self.assertNotIn("skip_tts", url)  # audio mode, so no skip
+
+
+class TestTtsResponseSkip(unittest.IsolatedAsyncioTestCase):
+    async def test_skipped_without_audio_mode(self):
+        # tts_response needs the bot's audio; without audio mode, skip (don't run).
+        scenario = Scenario(
+            name="t",
+            bot_audio=False,
+            turns=[Turn(user="x", expect=[Expectation(event="tts_response", eval="ok")])],
+        )
+        result = await EvalSession(scenario, "ws://localhost:0").run()
+        self.assertIsNotNone(result.skipped)
+        self.assertFalse(result.passed)
+        self.assertIn("tts_response", result.skipped)
+
 
 class TestTextContainsResolution(unittest.TestCase):
     """text_contains resolves against whichever event carries the text."""
