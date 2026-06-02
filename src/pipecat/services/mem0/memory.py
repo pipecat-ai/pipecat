@@ -12,6 +12,7 @@ historical information.
 """
 
 import asyncio
+import warnings
 from typing import Any
 
 from loguru import logger
@@ -46,6 +47,11 @@ class Mem0MemoryService(FrameProcessor):
             search_limit: Maximum number of memories to retrieve per query.
             search_threshold: Minimum similarity threshold for memory retrieval.
             api_version: API version to use for Mem0 client operations.
+
+                .. deprecated:: 1.4.0
+                    No longer used. Mem0 2.0.0 removed the ``api_version`` /
+                    ``output_format`` parameters from the client. Will be
+                    removed in a future release.
             system_prompt: Prefix text for memory context messages.
             add_as_system_message: Whether to add memories as system messages.
             position: Position to insert memory messages in context.
@@ -53,7 +59,7 @@ class Mem0MemoryService(FrameProcessor):
 
         search_limit: int = Field(default=10, ge=1)
         search_threshold: float = Field(default=0.1, ge=0.0, le=1.0)
-        api_version: str = Field(default="v2")
+        api_version: str | None = Field(default=None)
         system_prompt: str = Field(default="Based on previous conversations, I recall: \n\n")
         add_as_system_message: bool = Field(default=True)
         position: int = Field(default=1)
@@ -102,7 +108,13 @@ class Mem0MemoryService(FrameProcessor):
         self.run_id = run_id
         self.search_limit = params.search_limit
         self.search_threshold = params.search_threshold
-        self.api_version = params.api_version
+        if params.api_version is not None:
+            warnings.warn(
+                "Mem0MemoryService.InputParams.api_version is deprecated and no longer used; "
+                "Mem0 2.0.0 removed the api_version/output_format parameters.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.system_prompt = params.system_prompt
         self.add_as_system_message = params.add_as_system_message
         self.position = params.position
@@ -123,13 +135,20 @@ class Mem0MemoryService(FrameProcessor):
         """
         try:
             if isinstance(self.memory_client, Memory):
-                params = {
-                    "user_id": self.user_id,
-                    "agent_id": self.agent_id,
-                    "run_id": self.run_id,
+                # Mem0 2.0.0 requires entity IDs inside ``filters`` (as flat
+                # top-level keys for the local client) rather than as kwargs.
+                filters = {
+                    name: value
+                    for name, value in (
+                        ("user_id", self.user_id),
+                        ("agent_id", self.agent_id),
+                        ("run_id", self.run_id),
+                    )
+                    if value is not None
                 }
-                params = {k: v for k, v in params.items() if v is not None}
-                memories = await asyncio.to_thread(lambda: self.memory_client.get_all(**params))
+                memories = await asyncio.to_thread(
+                    lambda: self.memory_client.get_all(filters=filters)
+                )
             else:
                 id_pairs = [
                     ("user_id", self.user_id),
@@ -162,14 +181,11 @@ class Mem0MemoryService(FrameProcessor):
             params = {
                 "messages": messages,
                 "metadata": {"platform": "pipecat"},
-                "output_format": "v1.1",
             }
             for id in ["user_id", "agent_id", "run_id"]:
                 if getattr(self, id):
                     params[id] = getattr(self, id)
 
-            if isinstance(self.memory_client, Memory):
-                del params["output_format"]
             await asyncio.to_thread(lambda: self.memory_client.add(**params))
         except Exception as e:
             logger.error(f"Error storing messages in Mem0: {e}")
@@ -189,15 +205,26 @@ class Mem0MemoryService(FrameProcessor):
         try:
             logger.debug(f"Retrieving memories for query: {query}")
             if isinstance(self.memory_client, Memory):
-                params = {
-                    "query": query,
-                    "user_id": self.user_id,
-                    "agent_id": self.agent_id,
-                    "run_id": self.run_id,
-                    "limit": self.search_limit,
+                # Mem0 2.0.0 requires entity IDs inside ``filters`` (as flat
+                # top-level keys for the local client) and uses ``top_k``
+                # instead of ``limit``.
+                filters = {
+                    name: value
+                    for name, value in (
+                        ("user_id", self.user_id),
+                        ("agent_id", self.agent_id),
+                        ("run_id", self.run_id),
+                    )
+                    if value is not None
                 }
-                params = {k: v for k, v in params.items() if v is not None}
-                results = await asyncio.to_thread(lambda: self.memory_client.search(**params))
+                results = await asyncio.to_thread(
+                    lambda: self.memory_client.search(
+                        query,
+                        filters=filters,
+                        top_k=self.search_limit,
+                        threshold=self.search_threshold,
+                    )
+                )
             else:
                 id_pairs = [
                     ("user_id", self.user_id),
@@ -210,10 +237,8 @@ class Mem0MemoryService(FrameProcessor):
                     lambda: self.memory_client.search(
                         query=query,
                         filters=filters,
-                        version=self.api_version,
                         top_k=self.search_limit,
                         threshold=self.search_threshold,
-                        output_format="v1.1",
                     )
                 )
 

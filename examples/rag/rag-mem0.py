@@ -156,7 +156,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         params=Mem0MemoryService.InputParams(
             search_limit=10,
             search_threshold=0.3,
-            api_version="v2",
             system_prompt="Based on previous conversations, I recall: \n\n",
             add_as_system_message=True,
             position=1,
