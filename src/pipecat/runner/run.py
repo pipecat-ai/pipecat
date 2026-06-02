@@ -118,8 +118,9 @@ try:
     import uvicorn
     from dotenv import load_dotenv
     from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
+    from fastapi.exceptions import RequestValidationError
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse, RedirectResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 except ImportError as e:
     logger.error(f"Runner dependencies not available: {e}")
     logger.error("To use Pipecat runners, install with: pip install pipecat-ai[runner]")
@@ -374,6 +375,17 @@ def _configure_server_app(args: argparse.Namespace):
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # FastAPI returns 422 Unprocessable Entity for Pydantic validation failures by default, but
+    # swallows the raw request body in the error response. This handler overrides that behavior to
+    # log both the validation errors and the raw body, making it much easier to debug malformed
+    # payloads from any transport (WhatsApp, WebRTC, telephony, etc.).
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        body = await request.body()
+        logger.error(f"422 Validation error on {request.url.path}: {exc.errors()}")
+        logger.error(f"Raw body: {body.decode()}")
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
     # Shared session store: session_id -> body data. Used by the WebRTC /start
     # flow and the /sessions/{session_id}/... proxy routes.
@@ -780,7 +792,7 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
 
     try:
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
-        from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
+        from pipecat.transports.whatsapp.api import WhatsAppConnectCall, WhatsAppWebhookRequest
         from pipecat.transports.whatsapp.client import WhatsAppClient
     except ImportError as e:
         logger.error(f"WhatsApp transport dependencies not installed: {e}")
@@ -845,18 +857,22 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
 
         logger.debug(f"Processing WhatsApp webhook: {body.model_dump()}")
 
-        async def connection_callback(connection: SmallWebRTCConnection):
+        async def connection_callback(connection: SmallWebRTCConnection, call: WhatsAppConnectCall):
             """Handle new WebRTC connections from WhatsApp calls.
 
             Called when a WebRTC connection is established for a WhatsApp call.
             Spawns a bot instance to handle the conversation.
 
             Args:
-                connection: The established WebRTC connection
+                connection: The established WebRTC connection.
+                call: The WhatsApp call metadata (caller phone number, call ID,
+                    direction, timestamp, etc.), passed as ``runner_args.body``.
             """
             bot_module = _get_bot_module()
             runner_args = SmallWebRTCRunnerArguments(
-                webrtc_connection=connection, session_id=str(uuid.uuid4())
+                webrtc_connection=connection,
+                session_id=str(uuid.uuid4()),
+                body=call,
             )
             runner_args.cli_args = args
             background_tasks.add_task(bot_module.bot, runner_args)

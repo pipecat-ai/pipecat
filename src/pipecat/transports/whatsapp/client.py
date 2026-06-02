@@ -184,7 +184,8 @@ class WhatsAppClient:
     async def handle_webhook_request(
         self,
         request: WhatsAppWebhookRequest,
-        connection_callback: Callable[[SmallWebRTCConnection], Awaitable[None]] | None = None,
+        connection_callback: Callable[[SmallWebRTCConnection, WhatsAppConnectCall], Awaitable[None]]
+        | None = None,
         raw_body: bytes | None = None,
         sha256_signature: str | None = None,
     ) -> bool:
@@ -199,7 +200,8 @@ class WhatsAppClient:
             request: The webhook request from WhatsApp containing call events
             connection_callback: Optional callback function to invoke when a new
                                WebRTC connection is established. The callback
-                               receives the SmallWebRTCConnection instance.
+                               receives the SmallWebRTCConnection instance and
+                               the WhatsAppConnectCall with caller metadata.
             raw_body: Optional bytes containing the raw request body.
             sha256_signature: Optional X-Hub-Signature-256 header value from the request.
 
@@ -226,7 +228,7 @@ class WhatsAppClient:
                                     # Invoke callback if provided
                                     if connection_callback and connection:
                                         try:
-                                            await connection_callback(connection)
+                                            await connection_callback(connection, call)
                                             logger.debug(
                                                 f"Connection callback executed successfully for call {call.id}"
                                             )
