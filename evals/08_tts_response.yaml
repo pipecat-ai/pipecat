@@ -1,0 +1,14 @@
+name: tts_response_transcribes_spoken_audio
+
+bot_audio:
+  model: base
+
+judge:
+  service: ollama
+  model: llama3:latest
+
+turns:
+  - user: "what is the capital of France? Answer in one short sentence."
+    expect:
+      - event: tts_response
+        eval: "the response states that Paris is the capital of France"
