@@ -204,7 +204,12 @@ class WhatsAppClient:
                                ``(connection, call)`` — preferred, receives the
                                SmallWebRTCConnection and the WhatsAppConnectCall
                                with caller metadata; or the legacy
-                               ``(connection,)`` — still supported but deprecated.
+                               ``(connection,)`` signature.
+
+                               .. deprecated:: 1.3.0
+                                   The single-argument ``(connection,)`` signature is
+                                   deprecated. Use ``(connection, call: WhatsAppConnectCall)``
+                                   instead.
             raw_body: Optional bytes containing the raw request body.
             sha256_signature: Optional X-Hub-Signature-256 header value from the request.
 
