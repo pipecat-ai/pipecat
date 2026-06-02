@@ -48,6 +48,21 @@ class TestTranslate(unittest.TestCase):
             [{"type": "user_stopped_speaking"}],
         )
 
+    def test_user_started_speaking_discards_interrupted_output(self):
+        # An interruption: the bot's in-flight output (buffers + queued events)
+        # is discarded so it can't be matched against this turn.
+        s = _session(bot_audio=True)
+        s._text_buffer = ["greeting"]
+        s._tts_audio = bytearray(b"\x01\x02\x03\x04")
+        s._queue.put_nowait({"type": "llm_response", "text": "greeting", "started_at": 1.0})
+        self.assertEqual(
+            s._translate({"type": "user-started-speaking"}),
+            [{"type": "user_started_speaking"}],
+        )
+        self.assertEqual(s._text_buffer, [])
+        self.assertEqual(len(s._tts_audio), 0)
+        self.assertTrue(s._queue.empty())
+
     def test_user_transcription_final_only(self):
         s = _session()
         interim = {"type": "user-transcription", "data": {"text": "he", "final": False}}

@@ -424,6 +424,22 @@ class EvalSession:
         self._latest_event_times[event["type"]] = time.monotonic()
         await self._queue.put(event)
 
+    def _discard_interrupted_output(self) -> None:
+        """Drop the bot's interrupted, un-matched output (on user interruption).
+
+        Clears the response buffers and drains the unmatched event queue, so a
+        greeting (or any prior bot output) the user just interrupted can't be
+        matched against this turn. Diagnostics (``events_seen``,
+        ``latest_event_times``) are left intact for send_after lookups.
+        """
+        self._text_buffer = []
+        self._tts_audio = bytearray()
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
     async def _handle_tts_audio(self, message: dict) -> None:
         """Accumulate the bot's audio and emit a ``tts_response`` per spoken turn.
 
@@ -460,6 +476,12 @@ class EvalSession:
             case "bot-ready":
                 return [{"type": "bot_ready"}]
             case "user-started-speaking":
+                # The user (re)started speaking — an interruption. Discard
+                # everything the bot was mid-saying so only what it says *after*
+                # the interruption is matched. This keeps audio-mode scenarios
+                # deterministic regardless of greeting / prior-response timing
+                # (a stronger guarantee than the started_at anchor alone).
+                self._discard_interrupted_output()
                 return [{"type": "user_started_speaking"}]
             case "user-stopped-speaking":
                 return [{"type": "user_stopped_speaking"}]
