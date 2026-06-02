@@ -62,11 +62,12 @@ Top-level optional fields:
                 skips TTS and ``llm_response`` is read from the LLM text, which is
                 faster and silent (even an on-connect greeting). Set True (or a
                 mapping) for evals that need the bot to actually speak. A mapping
-                form enables ``tts_response`` and configures the local Whisper
-                model used to transcribe the bot's audio::
+                form enables ``tts_response`` and configures the STT used to
+                transcribe the bot's audio (like ``judge:``)::
 
                     bot_audio:
-                      model: base   # optional; defaults to distil-medium.en
+                      service: whisper   # default; the STT for tts_response
+                      model: base        # optional
     user_audio: when present, the harness generates audio for each user turn
                 via this TTS config and streams it to the bot as RTVI
                 ``raw-audio`` chunks, exercising its STT for real. Omit
@@ -184,11 +185,12 @@ class Scenario:
             mapping). Default False: the bot skips TTS, the harness configures
             skip-TTS at connect, and even an on-connect greeting is silent. True
             (or a mapping) makes the bot speak. A mapping additionally enables
-            ``tts_response`` and its ``model`` sets the local Whisper model
-            (see :attr:`transcriber`).
-        transcriber: Parsed from a mapping ``bot_audio``; the local-Whisper
-            config used to transcribe the bot's audio for ``tts_response``
-            (``None`` when ``bot_audio`` is a plain bool).
+            ``tts_response`` and configures the STT (``service`` / ``model``)
+            used to transcribe the bot's audio (see :attr:`transcriber`).
+        transcriber: Parsed from a mapping ``bot_audio``; the STT config
+            (``service`` defaults to ``whisper``, plus ``model``) used to
+            transcribe the bot's audio for ``tts_response`` (``None`` when
+            ``bot_audio`` is a plain bool).
         user_audio: TTS config the harness uses to generate user audio. When
             present, the harness streams RTVI ``raw-audio`` (not ``send-text``)
             to the bot, exercising its STT for real. Mapping with ``service``,

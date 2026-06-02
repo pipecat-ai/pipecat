@@ -1,6 +1,12 @@
 name: tts_response_transcribes_spoken_audio
 
+# Asserts on tts_response: the transcription of the bot's *actual synthesized
+# audio* (an STT run locally by the harness), not the text fed to the TTS. The
+# mapping form of bot_audio enables it and configures the STT (service + model),
+# like the judge block. Requires audio mode; tested against
+# examples/voice/voice-cartesia.py.
 bot_audio:
+  service: whisper   # local STT used to transcribe the bot's audio
   model: base
 
 judge:
