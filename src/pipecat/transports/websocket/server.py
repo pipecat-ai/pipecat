@@ -56,11 +56,18 @@ class WebsocketServerParams(TransportParams):
         add_wav_header: Whether to add WAV headers to audio frames.
         serializer: Frame serializer for message encoding/decoding.
         session_timeout: Timeout in seconds for client sessions.
+        notify_client_disconnected: Whether to emit ``on_client_disconnected``
+            when a client disconnects. The server keeps running and accepts the
+            next client either way; set this False to suppress the event so a
+            bot that cancels its pipeline in that handler stays alive for
+            subsequent clients (e.g. running multiple evals against one bot).
+            Defaults to True.
     """
 
     add_wav_header: bool = False
     serializer: FrameSerializer | None = None
     session_timeout: int | None = None
+    notify_client_disconnected: bool = True
 
 
 class WebsocketServerCallbacks(BaseModel):
@@ -223,11 +230,18 @@ class WebsocketServerInputTransport(BaseInputTransport):
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
-        # Notify disconnection
-        await self._callbacks.on_client_disconnected(websocket)
+        # Notify disconnection. Suppressed when notify_client_disconnected is
+        # False so a bot that cancels its pipeline in on_client_disconnected
+        # stays alive for the next client (the server keeps running regardless).
+        if self._params.notify_client_disconnected:
+            await self._callbacks.on_client_disconnected(websocket)
 
         await websocket.close()
-        self._websocket = None
+        # Only clear if it's still ours: the next client may have already
+        # connected and replaced it (e.g. back-to-back evals on a kept-alive
+        # server), and we must not null out their connection.
+        if self._websocket is websocket:
+            self._websocket = None
 
         logger.info(f"Client {websocket.remote_address} disconnected")
 
