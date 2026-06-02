@@ -12,8 +12,7 @@ from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 
 import numpy as np
@@ -207,7 +206,7 @@ class SubscriberCallbacks:
     on_connected_cb: Callable[[MockSubscriber], None]
     on_disconnected_cb: Callable[[MockSubscriber], None]
     on_render_frame_cb: Callable[[MockSubscriber, MockVideoFrame], None]
-    on_audio_data_cb: Optional[Callable[[MockSubscriber, MockAudioData], None]] = None
+    on_audio_data_cb: Callable[[MockSubscriber, MockAudioData], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -379,7 +378,7 @@ class TestVonageVideoConnectorTransport:
             on_connected_cb: Callable[[MockSubscriber], None],
             on_disconnected_cb: Callable[[MockSubscriber], None],
             on_render_frame_cb: Callable[[MockSubscriber, MockVideoFrame], None],
-            on_audio_data_cb: Optional[Callable[[MockSubscriber, MockAudioData], None]] = None,
+            on_audio_data_cb: Callable[[MockSubscriber, MockAudioData], None] | None = None,
             **__: Any,
         ) -> bool:
             self._subscriber_callbacks[stream.id] = SubscriberCallbacks(

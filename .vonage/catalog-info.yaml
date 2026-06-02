@@ -1,0 +1,28 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: video-pipecat
+  title: Video Pipecat
+  description: Video Pipecat is an integration of the Vonage Video API connectors into the pipecat framework.
+  annotations:
+    vonage.com/jira-id: VPF
+spec:
+  type: library
+  owner: group:orgdata/vct
+  domain: video-api
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: video-pipecat
+  description: Video Pipecat is an integration of the Vonage Video API connectors into the pipecat framework.
+  annotations:
+    github.com/project-slug: opentok/pipecat 
+spec:
+  type: library
+  owner: group:orgdata/vct
+  system: video-pipecat
+  lifecycle: production
+  dependsOn:
+    - library:github.com/pipecat-ai/pipecat
