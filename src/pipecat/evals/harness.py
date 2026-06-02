@@ -160,6 +160,7 @@ class EvalSession:
         bot_url: str,
         connect_timeout_s: float = 5.0,
         on_progress: Callable[[TurnProgress], None] | None = None,
+        record_path: str | None = None,
     ):
         """Initialize the eval session.
 
@@ -170,11 +171,14 @@ class EvalSession:
                 connection before giving up.
             on_progress: Optional callback invoked with a :class:`TurnProgress`
                 as each turn and expectation resolves (used for verbose output).
+            record_path: When set (and the scenario is audio mode), asks the eval
+                transport to record the conversation audio to this path (bot-side).
         """
         self._scenario = scenario
         self._bot_url = bot_url
         self._connect_timeout_s = connect_timeout_s
         self._on_progress = on_progress
+        self._record_path = record_path
 
         self._ws: Any = None
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -312,13 +316,18 @@ class EvalSession:
         transport must read it at connect time because frames are ordered and a
         later message can't precede an on-connect greeting (see
         :mod:`pipecat.evals.transport`). ``capture_audio`` makes the bot forward
-        its synthesized audio for ``tts_response`` transcription.
+        its synthesized audio for ``tts_response`` transcription. ``record`` asks
+        the eval transport to record the conversation audio (audio mode only).
         """
+        from urllib.parse import quote
+
         flags = []
         if not self._scenario.bot_audio:
             flags.append("skip_tts=true")
         if self._wants_tts_response:
             flags.append("capture_audio=true")
+        if self._record_path and self._scenario.bot_audio:
+            flags.append(f"record={quote(self._record_path, safe='')}")
         if not flags:
             return self._bot_url
         sep = "&" if "?" in self._bot_url else "?"
@@ -890,6 +899,7 @@ async def run_scenario(
     bot_url: str,
     connect_timeout_s: float = 5.0,
     on_progress: Callable[[TurnProgress], None] | None = None,
+    record_path: str | None = None,
 ) -> EvalResult:
     """Run a scenario against a bot at the given WebSocket URL.
 
@@ -901,8 +911,9 @@ async def run_scenario(
         connect_timeout_s: How long to wait for the bot to accept the WS
             connection before giving up.
         on_progress: Optional per-turn/expectation progress callback (verbose).
+        record_path: Optional path to record the conversation audio (audio mode).
 
     Returns:
         The structured outcome.
     """
-    return await EvalSession(scenario, bot_url, connect_timeout_s, on_progress).run()
+    return await EvalSession(scenario, bot_url, connect_timeout_s, on_progress, record_path).run()

@@ -11,8 +11,10 @@ import unittest
 
 from pipecat.evals.transport import (
     CAPTURE_AUDIO_QUERY_PARAM,
+    RECORD_QUERY_PARAM,
     SKIP_TTS_QUERY_PARAM,
     _query_flag,
+    _query_value,
 )
 
 
@@ -46,6 +48,18 @@ class TestQueryFlag(unittest.TestCase):
 
     def test_false_when_no_path_at_all(self):
         self.assertFalse(_query_flag(_ws(), SKIP_TTS_QUERY_PARAM))
+
+
+class TestQueryValue(unittest.TestCase):
+    def test_reads_url_decoded_value(self):
+        ws = _ws(path="/?record=%2Ftmp%2Frec%2Fcap.wav")
+        self.assertEqual(_query_value(ws, RECORD_QUERY_PARAM), "/tmp/rec/cap.wav")
+
+    def test_none_when_absent(self):
+        self.assertIsNone(_query_value(_ws(path="/?skip_tts=true"), RECORD_QUERY_PARAM))
+
+    def test_none_when_empty(self):
+        self.assertIsNone(_query_value(_ws(path="/?record="), RECORD_QUERY_PARAM))
 
 
 if __name__ == "__main__":
