@@ -108,6 +108,8 @@ class VonageVideoConnectorTransportParams(TransportParams):
     video_in_preferred_resolution: tuple[int, int] | None = None
     video_in_preferred_framerate: int | None = None
     clear_buffers_on_interruption: bool = True
+    captions_in_enabled: bool = False
+    captions_in_auto_subscribe: bool = False
 
 
 class SubscribeSettings(BaseModel):
