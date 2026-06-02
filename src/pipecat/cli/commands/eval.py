@@ -102,6 +102,10 @@ def _dim(s: str) -> str:
     return _color(s, "2")
 
 
+def _yellow(s: str) -> str:
+    return _color(s, "33")
+
+
 def _print_progress(p: TurnProgress) -> None:
     """Print a per-turn / per-expectation line (verbose mode)."""
     if p.status == "turn":
@@ -118,6 +122,9 @@ def _print_progress(p: TurnProgress) -> None:
 
 
 def _print_result(result: EvalResult, label: str) -> None:
+    if result.skipped:
+        print(f"  {_yellow('⊘')} {label} {_dim(f'— skipped: {result.skipped}')}")
+        return
     badge = _green("✓") if result.passed else _red("✗")
     print(f"  {badge} {label} {_dim(f'({result.duration_ms}ms)')}")
     if not result.passed:
@@ -141,7 +148,9 @@ def _rich_turn(p: TurnProgress) -> Text:
 
 
 def _rich_header(label: str, result: EvalResult) -> Text:
-    """Render the final (✓/✗) header that replaces the spinner."""
+    """Render the final (✓/✗/⊘) header that replaces the spinner."""
+    if result.skipped:
+        return Text.assemble(("⊘ ", "yellow"), label, (f" — skipped: {result.skipped}", "dim"))
     badge, style = ("✓", "green") if result.passed else ("✗", "red")
     return Text.assemble((f"{badge} ", style), label, (f" ({result.duration_ms}ms)", "dim"))
 
@@ -168,14 +177,15 @@ async def _run_one_live(scenario, url: str, label: str, verbose: bool) -> EvalRe
 
 
 async def _run_all(paths: list[Path], bot_url: str, verbose: bool) -> int:
-    total = 0
     passed = 0
+    failed = 0
+    skipped = 0
     for path in paths:
         try:
             scenario = load_scenario(path)
         except (ValueError, FileNotFoundError) as e:
             print(f"  {_red('✗')} {path.name}: {e}")
-            total += 1
+            failed += 1
             continue
 
         label = f"{path.name}::{scenario.name}"
@@ -186,13 +196,19 @@ async def _run_all(paths: list[Path], bot_url: str, verbose: bool) -> int:
             on_progress = _print_progress if verbose else None
             result = await run_scenario(scenario, url, on_progress=on_progress)
             _print_result(result, label)
-        total += 1
-        if result.passed:
+        if result.skipped:
+            skipped += 1
+        elif result.passed:
             passed += 1
+        else:
+            failed += 1
 
     print()
-    summary = f"{passed}/{total} scenarios passed"
-    if passed == total:
+    ran = passed + failed
+    summary = f"{passed}/{ran} scenarios passed"
+    if skipped:
+        summary += f", {skipped} skipped"
+    if failed == 0:
         print(_green(f"PASS — {summary}"))
         return 0
     print(_red(f"FAIL — {summary}"))
