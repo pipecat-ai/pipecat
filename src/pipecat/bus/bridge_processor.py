@@ -25,9 +25,15 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
+    MetricsFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
     StopFrame,
+    TTSSpeakFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
@@ -36,6 +42,22 @@ if TYPE_CHECKING:
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
 _PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
+
+# Frames that are semantically local to the emitting worker and must not
+# enter a sibling worker's pipeline. The bus has no per-frame scoping —
+# when a child ``LLMWorker`` emits one of these, every other subscribed
+# worker receives it too. The send side is left alone so the main
+# ``PipelineWorker`` (which hosts the ``TTSService``, metrics observer,
+# etc.) still gets these frames; the receive-side filter on
+# ``_BusEdgeProcessor.on_bus_message`` drops them in sibling ``LLMWorker``s.
+_LOCAL_ONLY_FRAMES = (
+    TTSSpeakFrame,
+    FunctionCallsStartedFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallCancelFrame,
+    MetricsFrame,
+)
 
 
 class BusBridgeProcessor(FrameProcessor, BusSubscriber):
@@ -229,5 +251,15 @@ class _BusEdgeProcessor(FrameProcessor, BusSubscriber):
         if message.target and message.target != self._task.name:
             return
         if self._bridges and message.bridge not in self._bridges:
+            return
+        # Emitter-local frames from a sibling worker must never enter
+        # this worker's pipeline (see comment on ``_LOCAL_ONLY_FRAMES``
+        # above). Letting a sibling's ``FunctionCallResultFrame`` reach
+        # this worker's assistant aggregator duplicates the tool result
+        # in the LLM context; letting its ``TTSSpeakFrame`` reach this
+        # worker's TTS service synthesises the audio twice; letting its
+        # ``MetricsFrame`` reach this worker's metrics observer inflates
+        # the counters.
+        if isinstance(message.frame, _LOCAL_ONLY_FRAMES):
             return
         await self.push_frame(message.frame, message.direction)

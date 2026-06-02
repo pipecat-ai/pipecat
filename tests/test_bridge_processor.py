@@ -8,7 +8,16 @@ import asyncio
 import unittest
 
 from pipecat.bus import AsyncQueueBus, BusBridgeProcessor, BusFrameMessage
-from pipecat.frames.frames import TextFrame
+from pipecat.bus.bridge_processor import _LOCAL_ONLY_FRAMES, _BusEdgeProcessor
+from pipecat.frames.frames import (
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
+    MetricsFrame,
+    TextFrame,
+    TTSSpeakFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.tests.utils import run_test
@@ -262,6 +271,148 @@ class TestBusBridgeProcessor(unittest.IsolatedAsyncioTestCase):
         )
         await processor.on_bus_message(msg)
         self.assertEqual(len(injected), 0)
+
+    async def test_local_only_frames_from_bus_dropped_at_edge(self):
+        """A ``_BusEdgeProcessor`` (placed at the edges of a child
+        ``PipelineWorker`` when ``bridged`` is set) must drop
+        emitter-local frames delivered via the bus from a sibling
+        worker. Otherwise a sibling's ``TTSSpeakFrame`` /
+        ``FunctionCall*Frame`` / ``MetricsFrame`` would enter this
+        worker's pipeline and duplicate the assistant context / double
+        the TTS synthesis / inflate the metrics counters.
+
+        The main ``PipelineWorker`` that hosts the TTS service /
+        metrics observer uses ``BusBridgeProcessor`` instead and must
+        still receive these frames — sanity exercised by
+        ``test_local_only_frames_from_bus_pass_at_bridge`` below."""
+        from types import SimpleNamespace
+
+        bus = AsyncQueueBus()
+
+        # Minimal stub task — ``_BusEdgeProcessor`` reads
+        # ``self._task.name`` for source filtering and
+        # ``self._task.active`` to gate inbound frames.
+        fake_task = SimpleNamespace(name="child_task", bus=bus, active=True)
+        edge = _BusEdgeProcessor(worker=fake_task, direction=FrameDirection.DOWNSTREAM)
+
+        injected = []
+        original_push = edge.push_frame
+
+        async def capture_push(frame, direction=FrameDirection.DOWNSTREAM):
+            injected.append(frame)
+            await original_push(frame, direction)
+
+        edge.push_frame = capture_push
+
+        for frame in (
+            TTSSpeakFrame(text="sibling utterance"),
+            FunctionCallsStartedFrame(function_calls=[]),
+            FunctionCallInProgressFrame(function_name="x", tool_call_id="id1", arguments={}),
+            FunctionCallResultFrame(
+                function_name="x",
+                tool_call_id="id1",
+                arguments={},
+                result={"ok": True},
+            ),
+            FunctionCallCancelFrame(function_name="x", tool_call_id="id1"),
+            MetricsFrame(data=[]),
+        ):
+            # Direction must be opposite of the edge's own direction;
+            # otherwise the inbound gate ignores the frame regardless
+            # of the local-only filter.
+            msg = BusFrameMessage(
+                source="sibling_worker",
+                frame=frame,
+                direction=FrameDirection.UPSTREAM,
+            )
+            await edge.on_bus_message(msg)
+
+        self.assertEqual(
+            len(injected),
+            0,
+            f"expected 0 frames injected, got {[type(f).__name__ for f in injected]}",
+        )
+
+    async def test_non_local_only_frames_from_bus_pass_at_edge(self):
+        """Sanity: the edge-side filter doesn't accidentally drop other
+        frame types. A plain ``TextFrame`` from a sibling should still
+        be injected normally."""
+        from types import SimpleNamespace
+
+        bus = AsyncQueueBus()
+        fake_task = SimpleNamespace(name="child_task", bus=bus, active=True)
+        edge = _BusEdgeProcessor(worker=fake_task, direction=FrameDirection.DOWNSTREAM)
+
+        injected = []
+        original_push = edge.push_frame
+
+        async def capture_push(frame, direction=FrameDirection.DOWNSTREAM):
+            injected.append(frame)
+            await original_push(frame, direction)
+
+        edge.push_frame = capture_push
+
+        msg = BusFrameMessage(
+            source="sibling_worker",
+            frame=TextFrame(text="legit cross-worker frame"),
+            direction=FrameDirection.UPSTREAM,
+        )
+        await edge.on_bus_message(msg)
+
+        text_frames = [f for f in injected if isinstance(f, TextFrame)]
+        self.assertEqual(len(text_frames), 1)
+        self.assertEqual(text_frames[0].text, "legit cross-worker frame")
+
+    async def test_local_only_frames_from_bus_pass_at_bridge(self):
+        """Sanity: ``BusBridgeProcessor`` (placed in the main
+        ``PipelineWorker`` that hosts the TTS service / metrics
+        observer) MUST still receive emitter-local frames from sibling
+        ``LLMWorker``s — that's how a sub-bot's ``TTSSpeakFrame``
+        reaches the main's ``TTSService`` for synthesis. The
+        local-only filter is intentionally edge-side only."""
+        bus = AsyncQueueBus()
+        processor = BusBridgeProcessor(bus=bus, worker_name="main")
+
+        injected = []
+        original_push = processor.push_frame
+
+        async def capture_push(frame, direction=FrameDirection.DOWNSTREAM):
+            injected.append(frame)
+            await original_push(frame, direction)
+
+        processor.push_frame = capture_push
+
+        msg = BusFrameMessage(
+            source="child_worker",
+            frame=TTSSpeakFrame(text="from child for main TTS"),
+            direction=FrameDirection.DOWNSTREAM,
+        )
+        await processor.on_bus_message(msg)
+
+        tts_frames = [f for f in injected if isinstance(f, TTSSpeakFrame)]
+        self.assertEqual(
+            len(tts_frames),
+            1,
+            "BusBridgeProcessor must let TTSSpeakFrame through — "
+            "the main PipelineWorker is the legit destination",
+        )
+
+    def test_local_only_frames_tuple_pin(self):
+        """Pin the exact contents of ``_LOCAL_ONLY_FRAMES``. Adding a
+        new emitter-local frame type or removing one is a behaviour
+        change that downstream multi-worker deployments depend on —
+        make it intentional by updating this test in the same commit."""
+        self.assertEqual(
+            set(_LOCAL_ONLY_FRAMES),
+            {
+                TTSSpeakFrame,
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+                FunctionCallCancelFrame,
+                MetricsFrame,
+            },
+        )
 
 
 if __name__ == "__main__":
