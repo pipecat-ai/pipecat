@@ -37,6 +37,7 @@ jobs:
           uv sync --group dev \
             --extra anthropic \
             --extra aws \
+            --extra azure \
             --extra deepgram \
             --extra google \
             --extra langchain \
