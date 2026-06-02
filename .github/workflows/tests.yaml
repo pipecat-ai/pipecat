@@ -42,6 +42,7 @@ jobs:
             --extra anthropic \
             --extra aws \
             --extra azure \
+            --extra daily \
             --extra deepgram \
             --extra google \
             --extra langchain \

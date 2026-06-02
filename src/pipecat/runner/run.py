@@ -1227,7 +1227,8 @@ def main(parser: argparse.ArgumentParser | None = None):
        - -x/--proxy: Public proxy hostname for telephony webhooks
        - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
        - -f/--folder: Path to downloads folder
-       - --dialin: Enable Daily PSTN dial-in webhook handling
+       - --dialin/--no-dialin: Mount the Daily PSTN dial-in webhook for -t daily
+         (on by default; --no-dialin disables it)
        - --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
        - --whatsapp: Ensure required WhatsApp environment variables are present
        - -v/--verbose: Increase logging verbosity
@@ -1270,9 +1271,12 @@ def main(parser: argparse.ArgumentParser | None = None):
     )
     parser.add_argument(
         "--dialin",
-        action="store_true",
-        default=False,
-        help="Enable Daily PSTN dial-in webhook handling",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Mount the Daily PSTN dial-in webhook for -t daily. On by default (a local "
+            "stand-in for Pipecat Cloud's dial-in handler); use --no-dialin to disable."
+        ),
     )
     parser.add_argument(
         "--esp32",
@@ -1306,10 +1310,8 @@ def main(parser: argparse.ArgumentParser | None = None):
         logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
         return
 
-    # Validate dial-in requirements
-    if args.dialin and args.transport is not None and args.transport != "daily":
-        logger.error("--dialin flag only works with Daily transport (-t daily)")
-        return
+    # The dial-in webhook is mounted only inside _setup_daily_routes, so --dialin is a
+    # no-op for non-Daily transports; nothing to validate here.
 
     # Log level
     logger.remove()
