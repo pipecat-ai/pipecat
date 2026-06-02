@@ -221,7 +221,11 @@ class WebsocketServerInputTransport(BaseInputTransport):
         await self._callbacks.on_client_disconnected(websocket)
 
         await websocket.close()
-        self._websocket = None
+        # Only clear if it's still ours: the next client may have already
+        # connected and replaced it (e.g. back-to-back evals on a kept-alive
+        # server), and we must not null out their connection.
+        if self._websocket is websocket:
+            self._websocket = None
 
         logger.info(f"Client {websocket.remote_address} disconnected")
 
