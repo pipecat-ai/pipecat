@@ -73,7 +73,6 @@ Each scenario picks a mode by whether it has a `user_audio:` block.
     service: cartesia
     voice: 71a7ad14-091c-4e8e-a314-022ece01c121
     model: sonic-2
-    api_key_env: CARTESIA_API_KEY
     sample_rate: 16000
   ```
 

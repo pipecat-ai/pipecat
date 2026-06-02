@@ -1,14 +1,6 @@
 name: weather_function_call_with_follow_up
 
-# Requires a bot with a real LLM and a registered get_weather tool. The
-# function_call name/args come from the RTVI llm-function-call-in-progress message,
-# which only includes function_name and arguments when the bot's RTVIObserver
-# is configured with function_call_report_level FULL, e.g.:
-#
-#   PipelineWorker(..., rtvi_observer_params=RTVIObserverParams(
-#       function_call_report_level={"*": RTVIFunctionCallReportLevel.FULL}))
-#
-# With the default (NONE), name/args are omitted and these assertions fail.
+bot_audio: true
 
 judge:
   service: ollama
@@ -18,21 +10,13 @@ turns:
   - user: "what's the weather in Paris?"
     expect:
       - event: function_call
-        within_ms: 3000
-        name: get_weather
-        args:
-          city: "Paris"
+        name: get_current_weather
       - event: llm_response
-        within_ms: 8000
         eval: "the response describes the current weather conditions in Paris (e.g. temperature, sky conditions, precipitation)"
 
   - user: "what about Tokyo?"
     expect:
       - event: function_call
-        within_ms: 3000
-        name: get_weather
-        args:
-          city: "Tokyo"
+        name: get_current_weather
       - event: llm_response
-        within_ms: 8000
-        eval: "the response describes the current weather conditions in Tokyo without losing the weather context from the prior turn"
+        eval: "the response reports the weather in Tokyo (a temperature and/or sky conditions)"

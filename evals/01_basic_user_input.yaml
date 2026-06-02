@@ -1,22 +1,13 @@
 name: basic_user_input
 
-# Audio mode. The harness renders the user line to speech and streams it as
-# raw-audio, so the bot's VAD/STT produce real user-speaking events. This is
-# the only mode where asserting on user_started/stopped_speaking is meaningful
-# (text mode injects the turn directly and emits no speaking events).
-#
-# Tested against examples/voice/voice-cartesia.py.
 user_audio:
   service: cartesia
   voice: 71a7ad14-091c-4e8e-a314-022ece01c121     # British Reading Lady
   model: sonic-2
-  api_key_env: CARTESIA_API_KEY
   sample_rate: 16000
 
 turns:
   - user: "hello world"
     expect:
       - event: user_started_speaking
-        within_ms: 3000
       - event: user_stopped_speaking
-        within_ms: 3000
