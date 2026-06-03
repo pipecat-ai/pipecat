@@ -140,19 +140,15 @@ class WebsocketService(ABC):
             await self._websocket.send(message)
         except Exception as e:
             # A ConnectionClosedOK (code 1000) is a normal server-initiated
-            # teardown — log at warning, not error. All other failures also log
-            # at warning here so the error level is reserved for unrecoverable
-            # situations reported below.
+            # teardown — log at warning, not error.
             logger.warning(f"{self} send failed: {e}, will try to reconnect")
             success = await self._try_reconnect(report_error=report_error)
             if success and self._websocket is not None:
                 logger.info(f"{self} reconnected successfully, retrying send")
-                try:
-                    await self._websocket.send(message)
-                except Exception as retry_e:
-                    msg = f"{self} send failed after reconnect: {retry_e}"
-                    logger.error(msg)
-                    await report_error(ErrorFrame(msg))
+                # Let any exception here propagate to the caller. report_error
+                # is for connection errors only; send failures are the caller's
+                # responsibility to handle (see kompfner's review on #4608).
+                await self._websocket.send(message)
             else:
                 msg = f"{self} send failed; unable to reconnect"
                 logger.error(msg)
