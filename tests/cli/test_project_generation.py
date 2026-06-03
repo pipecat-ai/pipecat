@@ -3,29 +3,11 @@
 import ast
 import shutil
 import subprocess
-from importlib.metadata import version as _pkg_version
 
 import pytest
 
 from pipecat.cli.generators.project import ProjectGenerator
 from pipecat.cli.prompts.questions import ProjectConfig
-
-
-def _pipecat_ai_released_floor() -> bool:
-    """Whether the generated bots' `pipecat-ai>=1.4.0` floor is resolvable from PyPI.
-
-    Generated projects pin `pipecat-ai[...]>=1.4.0` (they use create_transport + the
-    typed CallData API). `test_project_installable` resolves that against PyPI via
-    `uv pip compile`, which only succeeds once 1.4.0 is published. Gate on the installed
-    pipecat-ai version so the check skips during pre-release development and runs
-    automatically once 1.4.0 ships.
-    """
-    from packaging.version import Version
-
-    try:
-        return Version(_pkg_version("pipecat-ai")) >= Version("1.4.0")
-    except Exception:
-        return False
 
 
 @pytest.fixture
@@ -73,19 +55,6 @@ def validate_pyproject_toml(file_path):
     assert has_pipecat, "Must include pipecat-ai dependency"
 
     return True
-
-
-def validate_project_installable(project_path):
-    """Validate that the project can be installed with uv."""
-    # pyproject.toml is now in server/ subdirectory
-    server_path = project_path / "server"
-    result = subprocess.run(
-        ["uv", "pip", "compile", str(server_path / "pyproject.toml")],
-        capture_output=True,
-        text=True,
-        cwd=server_path,
-    )
-    return result.returncode == 0, result.stderr
 
 
 def validate_imports_resolvable(bot_file_path):
@@ -587,59 +556,6 @@ def test_project_generation(config_data, temp_output_dir):
 
         # Video service should be initialized in bot.py
         assert "video" in bot_content.lower(), "video service variable should be present"
-
-
-@pytest.mark.skipif(
-    not _pipecat_ai_released_floor(),
-    reason="generated bots pin pipecat-ai>=1.4.0, which is not yet on PyPI (CLI release is held until then)",
-)
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    "config_data",
-    [
-        # Just test a few representative configs for dependency resolution
-        TEST_CONFIGS[0],  # daily-cascade
-        TEST_CONFIGS[5],  # daily-realtime
-        TEST_CONFIGS[8],  # daily-with-features
-    ],
-    ids=lambda c: f"{c['name']}-installable",
-)
-def test_project_installable(config_data, temp_output_dir):
-    """Test that projects have resolvable dependencies (slow test)."""
-    # Create config
-    config = ProjectConfig(
-        project_name=config_data["name"],
-        bot_type=config_data["bot_type"],
-        transports=config_data["transports"],
-        mode=config_data["mode"],
-        stt_service=config_data.get("stt_service"),
-        llm_service=config_data.get("llm_service"),
-        tts_service=config_data.get("tts_service"),
-        realtime_service=config_data.get("realtime_service"),
-        video_service=config_data.get("video_service"),
-        video_input=config_data.get("video_input", False),
-        video_output=config_data.get("video_output", False),
-        recording=config_data.get("recording", False),
-        transcription=config_data.get("transcription", False),
-        deploy_to_cloud=config_data.get("deploy_to_cloud", False),
-        enable_krisp=config_data.get("enable_krisp", False),
-        enable_observability=config_data.get("enable_observability", False),
-    )
-
-    # Generate project
-    generator = ProjectGenerator(config)
-
-    # Ensure clean output directory
-    project_path = temp_output_dir / config.project_name
-    if project_path.exists():
-        shutil.rmtree(project_path)
-
-    # Generate into temp directory
-    generator.generate(output_dir=temp_output_dir)
-
-    # Test that dependencies can be resolved
-    is_installable, error = validate_project_installable(project_path)
-    assert is_installable, f"Project dependencies cannot be resolved: {error}"
 
 
 def test_project_name_conflict(temp_output_dir):

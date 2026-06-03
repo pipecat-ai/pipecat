@@ -204,9 +204,6 @@ addopts = "--verbose"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
-markers = [
-    "slow: marks slow tests (deselect with '-m \"not slow\"')",
-]
 filterwarnings = [
     "ignore:'audioop' is deprecated:DeprecationWarning",
 ]
