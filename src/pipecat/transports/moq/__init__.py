@@ -15,6 +15,8 @@ from pipecat.transports.moq.transport import (
     MOQInputTransport,
     MOQOutputTransport,
     MOQParams,
+    MOQTrack,
+    MOQTrackType,
     MOQTransport,
 )
 
@@ -22,5 +24,7 @@ __all__ = [
     "MOQInputTransport",
     "MOQOutputTransport",
     "MOQParams",
+    "MOQTrack",
+    "MOQTrackType",
     "MOQTransport",
 ]
