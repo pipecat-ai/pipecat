@@ -260,6 +260,13 @@ def validate_and_build_config(
         elif t == "twilio_daily_sip_dialout":
             resolved_twilio_daily_sip_mode = "dial-out"
 
+    # Validation above raises ConfigValidationError on any collected error before
+    # reaching here, so these required fields are present and valid; assert to narrow
+    # the Optional CLI parameters for the type checker.
+    assert name is not None
+    assert bot_type in ("web", "telephony")
+    assert mode is not None
+
     config = ProjectConfig(
         project_name=name,
         bot_type=bot_type,
