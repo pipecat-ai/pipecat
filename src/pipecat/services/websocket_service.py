@@ -45,9 +45,6 @@ class WebsocketService(ABC):
         self._websocket: websockets.WebSocketClientProtocol | None = None  # pyright: ignore[reportAttributeAccessIssue]
         self._reconnect_on_error = reconnect_on_error
         self._reconnect_in_progress: bool = False
-        # Set initially so that waiters on a "not reconnecting" state return immediately.
-        self._reconnect_complete: asyncio.Event = asyncio.Event()
-        self._reconnect_complete.set()
         self._disconnecting: bool = False
         self._quick_failure_count: int = 0
         self._last_connect_time: float = 0.0
@@ -88,18 +85,12 @@ class WebsocketService(ABC):
         max_retries: int = 3,
         report_error: Callable[[ErrorFrame], Awaitable[None]] | None = None,
     ) -> bool:
-        # If a reconnect is already running, wait for it to finish and report
-        # its outcome rather than starting a second concurrent attempt or
-        # returning False immediately (which callers treat as a hard failure).
-        # This is safe in asyncio: there is no await between the check and the
-        # flag assignment below, so no other coroutine can slip in between.
+        # Prevent concurrent reconnection attempts
         if self._reconnect_in_progress:
-            logger.warning(f"{self} reconnect already in progress, waiting for completion")
-            await self._reconnect_complete.wait()
-            return self._websocket is not None
+            logger.warning(f"{self} reconnect attempt aborted: already in progress")
+            return False
 
         self._reconnect_in_progress = True
-        self._reconnect_complete.clear()
         last_exception: Exception | None = None
         try:
             for attempt in range(1, max_retries + 1):
@@ -127,7 +118,6 @@ class WebsocketService(ABC):
             return False
         finally:
             self._reconnect_in_progress = False
-            self._reconnect_complete.set()
 
     async def send_with_retry(self, message, report_error: Callable[[ErrorFrame], Awaitable[None]]):
         """Attempt to send a message, retrying after reconnect if necessary."""
@@ -139,20 +129,15 @@ class WebsocketService(ABC):
                 raise ConnectionError(f"{self} no websocket connected")
             await self._websocket.send(message)
         except Exception as e:
-            # A ConnectionClosedOK (code 1000) is a normal server-initiated
-            # teardown — log at warning, not error.
-            logger.warning(f"{self} send failed: {e}, will try to reconnect")
+            logger.error(f"{self} send failed: {e}, will try to reconnect")
+            # Try to reconnect before retrying
             success = await self._try_reconnect(report_error=report_error)
             if success and self._websocket is not None:
-                logger.info(f"{self} reconnected successfully, retrying send")
-                # Let any exception here propagate to the caller. report_error
-                # is for connection errors only; send failures are the caller's
-                # responsibility to handle (see kompfner's review on #4608).
+                logger.info(f"{self} reconnected successfully, will retry send the message")
+                # trying to send the message one more time
                 await self._websocket.send(message)
             else:
-                msg = f"{self} send failed; unable to reconnect"
-                logger.error(msg)
-                await report_error(ErrorFrame(msg))
+                logger.error(f"{self} send failed; unable to reconnect")
 
     async def _maybe_try_reconnect(
         self,
