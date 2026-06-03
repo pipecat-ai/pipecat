@@ -101,8 +101,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         realtime_service_mode=True,
         user_params=LLMUserAggregatorParams(
             # stop_secs is intentionally longer than Pipecat's 0.2s default:
-            # Gemini Live's manual-VAD mode wants end-of-speech to be confirmed
-            # with more silence.
+            # manual-VAD mode seems to do a bit better when end-of-speech is
+            # padded with a bit more silence.
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
         ),
     )

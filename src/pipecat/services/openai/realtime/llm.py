@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
+    SpeechControlParamsFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -72,6 +73,16 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
     raise ImportError(f"Missing module: {e}") from e
+
+
+# Pre-roll cushion added on top of the auto-sized duration (start_secs), to
+# absorb small timing slop between start_secs and the audio actually clipped,
+# and to give a bit of extra audio context for the model.
+# Not applied to an explicit user_audio_preroll_secs override.
+AUTOSIZED_USER_AUDIO_PREROLL_MARGIN_SECS = 0.3
+# Pre-roll used before start_secs is known (no SpeechControlParamsFrame yet, or
+# no upstream VAD) and no override is given.
+DEFAULT_USER_AUDIO_PREROLL_SECS = 0.5
 
 
 @dataclass
@@ -242,6 +253,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         video_frame_detail: str = "auto",
+        user_audio_preroll_secs: float | None = None,
         **kwargs,
     ):
         """Initialize the OpenAI Realtime LLM service.
@@ -270,6 +282,16 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 This sets the image_detail parameter in the OpenAI Realtime API.
                 "auto" lets the model decide, "low" is faster and uses fewer tokens,
                 "high" provides more detail. Defaults to "auto".
+            user_audio_preroll_secs: In manual turn-detection mode
+                (``turn_detection=False``, locally-driven turns), how much recent
+                audio to replay after an interruption clears the input audio
+                buffer, so the speech onset isn't lost. Defaults to None:
+                auto-sized to the upstream VAD's ``start_secs`` plus a small
+                margin, falling back to ``DEFAULT_USER_AUDIO_PREROLL_SECS`` when
+                no VAD is present. Auto-sizing assumes VAD drives turn starts
+                (the default ``VADUserTurnStartStrategy``); set this explicitly
+                if you use a non-VAD turn-start strategy. No effect when
+                server-side turn detection is enabled.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         # 1. Initialize default_settings with hardcoded defaults
@@ -339,6 +361,16 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         self._current_assistant_response = None
         self._current_audio_response = None
+
+        self._user_audio_preroll_buffer = bytearray()
+        # When set, pins the pre-roll duration; otherwise auto-sized from the
+        # upstream VAD's start_secs (see _handle_speech_control_params).
+        self._user_audio_preroll_secs_override = user_audio_preroll_secs
+        self._user_audio_preroll_secs = (
+            user_audio_preroll_secs
+            if user_audio_preroll_secs is not None
+            else DEFAULT_USER_AUDIO_PREROLL_SECS
+        )
 
         self._messages_added_manually = {}
         self._pending_function_calls = {}  # Track function calls by call_id
@@ -515,6 +547,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     async def _handle_interruption(self):
         if self._is_turn_detection_disabled():
             await self.send_client_event(events.InputAudioBufferClearEvent())
+            # The clear wipes the speech onset appended before local turn
+            # detection fired this interruption; replay it so it isn't lost.
+            await self._replay_user_audio_preroll()
             await self.send_client_event(events.ResponseCancelEvent())
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
@@ -614,6 +649,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking()
+        elif isinstance(frame, SpeechControlParamsFrame):
+            self._handle_speech_control_params(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
@@ -1208,8 +1245,56 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         if sent_new_result:
             await self._create_response()
 
+    def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
+        """Auto-size the pre-roll from the upstream VAD's start_secs.
+
+        ``VADController`` broadcasts the current ``VADParams`` at pipeline start
+        (and on any runtime change), so the pre-roll tracks ``start_secs`` — the
+        leading speech local turn detection consumes before confirming the turn
+        — plus a margin.
+
+        This assumes VAD drives turn starts (the default
+        ``VADUserTurnStartStrategy``). With a non-VAD turn-start strategy the
+        onset-to-turn-start gap isn't governed by ``start_secs``; in that case
+        the developer should pin a pre-roll duration via
+        ``user_audio_preroll_secs`` (which short-circuits this).
+
+        This mechanism is harmless when server-side turn detection is enabled
+        (the buffer is simply unused).
+        """
+        if self._user_audio_preroll_secs_override is not None:
+            return
+        if frame.vad_params is not None:
+            self._user_audio_preroll_secs = (
+                frame.vad_params.start_secs + AUTOSIZED_USER_AUDIO_PREROLL_MARGIN_SECS
+            )
+
     async def _send_user_audio(self, frame):
         payload = base64.b64encode(frame.audio).decode("utf-8")
+        await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
+
+        # In manual turn-detection mode, keep a rolling pre-roll buffer of the
+        # most recent audio so _handle_interruption can replay the speech onset
+        # after clearing the input buffer. (Server-side turn detection never
+        # clears it, so no buffer is needed.)
+        if self._is_turn_detection_disabled():
+            self._user_audio_preroll_buffer.extend(frame.audio)
+            preroll_len = int(
+                frame.sample_rate * frame.num_channels * 2 * self._user_audio_preroll_secs
+            )
+            self._user_audio_preroll_buffer = self._user_audio_preroll_buffer[-preroll_len:]
+
+    async def _replay_user_audio_preroll(self):
+        """Re-append the buffered pre-roll audio to the input buffer.
+
+        Called right after ``InputAudioBufferClearEvent`` so the speech onset
+        (appended before local turn detection fired the interruption) survives
+        the clear. The buffer is left intact — it's a rolling window, so a later
+        interruption can restore the onset again.
+        """
+        if not self._user_audio_preroll_buffer:
+            return
+        payload = base64.b64encode(bytes(self._user_audio_preroll_buffer)).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
     async def _send_user_video(self, frame: InputImageRawFrame):
