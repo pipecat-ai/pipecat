@@ -24,7 +24,11 @@ sys.path.insert(0, str(project_root / "scripts" / "cli" / "imports"))
 from import_generator import find_class_in_directory  # type: ignore
 
 from pipecat.cli.registry import ServiceRegistry
-from pipecat.cli.registry.service_metadata import DEFAULT_SYSTEM_INSTRUCTION, MANUAL_SERVICE_CONFIGS
+from pipecat.cli.registry.service_metadata import (
+    DEFAULT_SYSTEM_INSTRUCTION,
+    MANUAL_SERVICE_CONFIGS,
+    ServiceDefinition,
+)
 
 # Parameter name -> environment variable suffix mapping
 # Handles special cases where parameter names don't match env var conventions
@@ -110,7 +114,7 @@ def get_service_class(service_value: str):
         return None
 
 
-def get_service_metadata(service_value: str) -> dict | None:
+def get_service_metadata(service_value: str) -> ServiceDefinition | None:
     """Get metadata for a service from the registry."""
     all_services = (
         ServiceRegistry.STT_SERVICES
