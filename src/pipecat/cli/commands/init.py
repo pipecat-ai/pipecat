@@ -116,8 +116,7 @@ def init_command(
         False, "--dry-run", help="Print resolved config as JSON without generating files"
     ),
 ):
-    """
-    Initialize a new Pipecat project.
+    r"""Initialize a new Pipecat project.
 
     Creates a complete project structure with bot.py, dependencies, and configuration files.
 
@@ -125,11 +124,12 @@ def init_command(
     In non-interactive mode (when --name or --config is provided), all configuration
     is taken from flags or a config file.
 
-    Examples:
+    Examples::
+
         pc init                                          # Interactive wizard
-        pc init --name my-bot --bot-type web \\
-          --transport daily --mode cascade \\
-          --stt deepgram_stt --llm openai_llm \\
+        pc init --name my-bot --bot-type web \
+          --transport daily --mode cascade \
+          --stt deepgram_stt --llm openai_llm \
           --tts cartesia_tts                             # Non-interactive
         pc init --config project-config.json             # From config file
         pc init --name my-bot ... --dry-run              # Preview config as JSON
@@ -248,8 +248,7 @@ def quickstart_command(
         None, "--output", "-o", help="Output directory (defaults to current directory)"
     ),
 ):
-    """
-    Create a new Pipecat project with quickstart defaults.
+    """Create a new Pipecat project with quickstart defaults.
 
     Sets up a project with SmallWebRTC, Deepgram STT, OpenAI LLM, and Cartesia TTS
     — the fastest way to get a voice agent running.

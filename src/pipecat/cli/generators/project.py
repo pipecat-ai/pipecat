@@ -25,8 +25,7 @@ class ProjectGenerator:
     """Generates a complete Pipecat project from configuration."""
 
     def __init__(self, config: ProjectConfig):
-        """
-        Initialize the project generator.
+        """Initialize the project generator.
 
         Args:
             config: Project configuration from user prompts
@@ -40,8 +39,7 @@ class ProjectGenerator:
         )
 
     def _prompt_for_new_name(self, output_dir: Path) -> str:
-        """
-        Prompt user for a new project name if the current one already exists.
+        """Prompt user for a new project name if the current one already exists.
 
         Args:
             output_dir: The output directory where projects are created
@@ -70,8 +68,7 @@ class ProjectGenerator:
             # If still exists, loop will continue and prompt again
 
     def generate(self, output_dir: Path | None = None, non_interactive: bool = False) -> Path:
-        """
-        Generate the complete project structure.
+        """Generate the complete project structure.
 
         Args:
             output_dir: Optional directory to create project in (defaults to current dir)
@@ -557,8 +554,7 @@ class ProjectGenerator:
         self._copy_and_render_directory(source_template_dir, client_path)
 
     def _copy_and_render_directory(self, source_dir: Path, dest_dir: Path) -> None:
-        """
-        Recursively copy directory contents, rendering .jinja2 templates.
+        """Recursively copy directory contents, rendering .jinja2 templates.
 
         Args:
             source_dir: Source template directory
@@ -592,8 +588,7 @@ class ProjectGenerator:
                     shutil.copy2(item, dest_file)
 
     def _render_client_template(self, template_file: Path, dest_file: Path) -> None:
-        """
-        Render a Jinja2 template file with client-specific context.
+        """Render a Jinja2 template file with client-specific context.
 
         Only used for config.ts and package.json templates.
         Most TypeScript files are static and copied directly.

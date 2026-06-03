@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""
-SERVICE METADATA REGISTRY - SOURCE OF TRUTH
+"""SERVICE METADATA REGISTRY - SOURCE OF TRUTH.
 
 ⭐ THIS IS THE SOURCE OF TRUTH FOR ALL PIPECAT SERVICES ⭐
 
@@ -117,8 +116,7 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
 
 
 class ServiceRegistry:
-    """
-    Central registry for all Pipecat services and their configurations.
+    """Central registry for all Pipecat services and their configurations.
 
     This class contains only DATA - service definitions, import mappings,
     and feature configurations. All logic for querying and working with

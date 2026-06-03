@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""
-Service loading and validation logic.
+"""Service loading and validation logic.
 
 This module handles loading services, validating configurations,
 and providing utilities for working with the service registry.
@@ -16,8 +15,7 @@ from .service_metadata import BotType, ServiceDefinition, ServiceRegistry, Servi
 
 
 def extract_package_extra(package: str) -> list[str]:
-    """
-    Extract the extra names from a package string.
+    """Extract the extra names from a package string.
 
     Args:
         package: Package string like "pipecat-ai[deepgram]", "pipecat-ai[deepgram,sagemaker]",
@@ -48,8 +46,7 @@ class ServiceLoader:
     def get_service_by_value(
         service_list: list[ServiceDefinition], value: str
     ) -> ServiceDefinition | None:
-        """
-        Find a service definition by its value.
+        """Find a service definition by its value.
 
         Args:
             service_list: List of service definitions to search
@@ -65,8 +62,7 @@ class ServiceLoader:
 
     @staticmethod
     def get_all_services_by_type(service_type: ServiceType) -> list[ServiceDefinition]:
-        """
-        Get all services of a specific type.
+        """Get all services of a specific type.
 
         Args:
             service_type: Type of service to retrieve
@@ -85,8 +81,7 @@ class ServiceLoader:
 
     @staticmethod
     def get_service_config(service_value: str) -> str | None:
-        """
-        Get the initialization code for a service.
+        """Get the initialization code for a service.
 
         Args:
             service_value: Service identifier (e.g., "deepgram_stt")
@@ -98,8 +93,7 @@ class ServiceLoader:
 
     @staticmethod
     def get_service_import(service_value: str) -> list[str]:
-        """
-        Get import statements for a service.
+        """Get import statements for a service.
 
         Args:
             service_value: Service identifier
@@ -111,8 +105,7 @@ class ServiceLoader:
 
     @staticmethod
     def uses_external_turn_detection(stt_value: str | None) -> bool:
-        """
-        Check whether an STT service performs its own end-of-turn detection.
+        """Check whether an STT service performs its own end-of-turn detection.
 
         Such services (e.g. Deepgram Flux, Cartesia Turns) drive turn taking
         themselves, so the generated bot uses ExternalUserTurnStrategies() instead
@@ -131,8 +124,7 @@ class ServiceLoader:
 
     @staticmethod
     def extract_extras_for_services(services: dict[str, str | list[str]]) -> set[str]:
-        """
-        Extract all package extras needed for selected services.
+        """Extract all package extras needed for selected services.
 
         Args:
             services: Dict mapping service type to service value(s)
@@ -185,8 +177,7 @@ class ServiceLoader:
 
     @staticmethod
     def validate_service_exists(service_value: str) -> bool:
-        """
-        Check if a service exists in the registry.
+        """Check if a service exists in the registry.
 
         Args:
             service_value: Service identifier to check
@@ -207,8 +198,7 @@ class ServiceLoader:
 
     @staticmethod
     def get_transport_options(bot_type: BotType) -> list[ServiceDefinition]:
-        """
-        Get transport options based on bot type.
+        """Get transport options based on bot type.
 
         Args:
             bot_type: Type of bot ("web" or "telephony")
@@ -226,8 +216,7 @@ class ServiceLoader:
     def get_imports_for_services(
         services: dict[str, str | list[str]], features: dict[str, bool], bot_type: str = "web"
     ) -> list[str]:
-        """
-        Get all necessary import statements for selected services and features.
+        """Get all necessary import statements for selected services and features.
 
         Args:
             services: Dict mapping service type to service value(s)
@@ -299,8 +288,7 @@ class ServiceLoader:
 
     @staticmethod
     def get_missing_services() -> dict[str, list[str]]:
-        """
-        Find services that are defined but missing configs or imports.
+        """Find services that are defined but missing configs or imports.
 
         Returns:
             Dict with 'missing_configs' and 'missing_imports' lists

@@ -35,8 +35,8 @@ custom_style = Style(
 
 
 def replace_question_with_answer(question: str, answer: str | list[str] | None):
-    """
-    Replace the questionary output line with a checkmark version.
+    """Replace the questionary output line with a checkmark version.
+
     Uses ANSI escape codes to move cursor up and overwrite the line.
     """
     if isinstance(answer, list):
@@ -108,8 +108,7 @@ class ProjectConfig:
 
 
 def ask_project_questions() -> ProjectConfig:
-    """
-    Ask user for project configuration through interactive prompts.
+    """Ask user for project configuration through interactive prompts.
 
     Returns:
         ProjectConfig with user's selections

@@ -20,6 +20,11 @@ class ConfigValidationError(Exception):
     """
 
     def __init__(self, errors: list[str]):
+        """Initialize a ConfigValidationError.
+
+        Args:
+            errors: List of validation errors
+        """
         self.errors = errors
         msg = "Configuration validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         super().__init__(msg)

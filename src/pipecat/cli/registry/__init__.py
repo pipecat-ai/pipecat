@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""
-Service registry for Pipecat services.
+"""Service registry for Pipecat services.
 
 The registry consists of:
 - service_metadata.py: SOURCE OF TRUTH - All service definitions

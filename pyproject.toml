@@ -232,8 +232,6 @@ ignore = [
 "tests/**/*.py" = ["D"]
 "scripts/**/*.py" = ["D"]
 "docs/**/*.py" = ["D"]
-# Ported CLI code did not enforce Google-style docstrings; relax D for now (tighten later).
-"src/pipecat/cli/**/*.py" = ["D"]
 # Skip D104 (missing docstring in public package) for __init__.py files
 "**/__init__.py" = ["D104"]
 # Skip specific rules for generated protobuf files
