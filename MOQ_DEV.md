@@ -1,16 +1,19 @@
 # MoQ local dev setup
 
-End-to-end instructions for running the MoQ pipeline locally — a Rust
-moq-relay, a pipecat MoQ bot, and the prebuilt React client talking to
-both through the locally-built `voice-ui-kit` + `@pipecat-ai/moq-transport`.
+End-to-end instructions for running the MoQ pipeline locally — a pipecat
+MoQ bot (acting as its own MOQ server) and the prebuilt React client
+talking to it through the locally-built `voice-ui-kit` +
+`@pipecat-ai/moq-transport`.
 
-The MoQ wire bits are unpublished, so a few `npm link` chains are needed.
-Most of the friction is handled by `./scripts/moq-dev-setup.sh` in this
-repo.
+The pipecat MoQ transport uses the [`moq-rs`](https://pypi.org/project/moq-rs/)
+Python library, so the bot can bind its own UDP socket via `--moq-serve`
+and mint a self-signed cert in-process. No separate `moq-relay` process,
+no `openssl` cert dance. The only friction left is the `npm link` chain
+for the still-unpublished MoQ packages, which `./scripts/moq-dev-setup.sh`
+handles.
 
 ## The short, short version
 ```bash
-export PATH_TO_MOQ= # git clone github.com//moq-dev/moq
 for repo in . ../pipecat-client-web-transports ../pipecat-prebuilt ../voice-ui-kit; do
   ( cd "$repo" && git fetch origin vp-add-moq-transport \
                 && git checkout vp-add-moq-transport )
@@ -20,12 +23,12 @@ uv sync --extra moq --extra daily --extra silero --extra deepgram \
 ( cd ../pipecat-client-web-transports && npm install --ignore-scripts )
 ( cd ../pipecat-prebuilt/client       && npm install )
 ( cd ../voice-ui-kit                  && pnpm install )
-./scripts/moq-dev-setup.sh $PATH_TO_MOQ
+./scripts/moq-dev-setup.sh
 ```
 
 ## 0. Layout
 
-Clone all five repos as siblings under one parent directory. The setup
+Clone all four repos as siblings under one parent directory. The setup
 script assumes this layout:
 
 ```
@@ -33,13 +36,11 @@ script assumes this layout:
 ├── pipecat/                          # github.com/pipecat-ai/pipecat
 ├── pipecat-client-web-transports/    # github.com/pipecat-ai/pipecat-client-web-transports
 ├── pipecat-prebuilt/                 # internal
-├── voice-ui-kit/                     # github.com/pipecat-ai/voice-ui-kit
-└── moq-relay/                        # github.com//moq-dev/moq
+└── voice-ui-kit/                     # github.com/pipecat-ai/voice-ui-kit
 ```
 
-The four pipecat repos all live on the **`vp-add-moq-transport`**
-branch for this work. `moq-relay` is whichever revision builds —
-`main` has worked.
+All four repos live on the **`vp-add-moq-transport`** branch for this
+work.
 
 ```bash
 for repo in pipecat pipecat-client-web-transports pipecat-prebuilt voice-ui-kit; do
@@ -59,8 +60,6 @@ checked-out tip is.
   issues — if `pnpm install` fails with a corepack error, install it
   globally instead: `npm install -g --force pnpm@10.14.0`)
 - `uv` for the Python side
-- `cargo` / Rust toolchain for the relay
-- `openssl` (macOS ships with LibreSSL — that works)
 
 ## 2. Install everything
 
@@ -91,9 +90,10 @@ uv sync --extra moq --extra daily --extra silero --extra deepgram \
 The Python extras come from `transports-moq.py`'s pipeline: `silero` for
 VAD, `deepgram` for STT, `cartesia` for TTS, `openai` for the LLM, and
 `runner` for the FastAPI server that hosts `/start` + the prebuilt UI.
-`moq` is the transport itself. `daily` is along for the ride — the
-example unconditionally imports `DailyParams` at the top of the file
-so it can also run under `-t daily`, even though we're using `-t moq`.
+`moq` is the transport itself (pulls in `moq-rs` + `cryptography`).
+`daily` is along for the ride — the example unconditionally imports
+`DailyParams` at the top of the file so it can also run under `-t daily`,
+even though we're using `-t moq`.
 
 You'll also need API keys for those three services. Drop them in a
 `.env` at the repo root (loaded automatically by the example):
@@ -123,19 +123,12 @@ A couple of things to know:
 From this `pipecat/` repo root:
 
 ```bash
-export PATH_TO_MOQ=<path/to/moq-relay-clone>
-./scripts/moq-dev-setup.sh $PATH_TO_MOQ
+./scripts/moq-dev-setup.sh
 ```
 
-The script does five things, in order:
+The script does three things, in order:
 
-1. Generates a self-signed cert (`localhost`, 14 days — the WebTransport
-   limit) into `pipecat/.moq-certs/`.
-2. Symlinks `moq-cert.pem` and `moq-key.pem` into both `pipecat/` and
-   the relay dir so each side can find them by relative path.
-3. Prints the cert SHA-256 (the bot threads it back through `/start`
-   so the browser can pin WebTransport against it).
-4. Sets up the `npm link` chain so the prebuilt client picks up the
+1. Sets up the `npm link` chain so the prebuilt client picks up the
    local moq-transport + the local voice-ui-kit, and so
    `@pipecat-ai/client-js` is a single physical instance across all
    three packages (prebuilt, voice-ui-kit, moq-transport). Without that
@@ -145,13 +138,13 @@ The script does five things, in order:
    pipecat-client-web-transports's hoisted client-js@1.10.x, which
    collides with voice-ui-kit's pnpm-locked 1.8.x), and at runtime the
    React `PipecatClientProvider` context breaks across the duplicates.
-5. Builds `moq-transport` + `voice-ui-kit` so their `dist/` reflects
+2. Builds `moq-transport` + `voice-ui-kit` so their `dist/` reflects
    local source — now that the link chain is in place, tsc resolves a
    single `Transport` type and the dts build passes.
+3. Prints the two terminal commands from §4.
 
-The final output prints the three terminal commands from §4 — that's
-what to do next. (`pipecat-prebuilt/client` doesn't need an explicit
-build; Vite compiles on demand.)
+(`pipecat-prebuilt/client` doesn't need an explicit build; Vite compiles
+on demand.)
 
 The link chain + auto-build is temporary — delete those blocks from the
 script once both packages ship to npm.
@@ -159,35 +152,26 @@ script once both packages ship to npm.
 ## 4. Run the stack
 
 The setup script prints these at the end; they're listed here for
-reference. Three terminals.
+reference. Two terminals.
 
-### Terminal 1 — moq-relay
-
-```bash
-cd ../moq-relay
-cargo run --bin moq-relay -- \
-  --server-bind '[::]:4080' \
-  --tls-cert moq-cert.pem \
-  --tls-key moq-key.pem \
-  --auth-public ''
-```
-
-### Terminal 2 — pipecat bot
+### Terminal 1 — pipecat bot
 
 From this `pipecat/` repo:
 
 ```bash
-uv run python examples/transports/transports-moq.py \
-  -t moq \
-  --moq-cert moq-cert.pem \
-  --moq-insecure \
-  --moq-path /
+uv run python examples/transports/transports-moq.py -t moq --moq-serve
 ```
 
-`--moq-insecure` tells the bot to accept the self-signed cert; the
-fingerprint is still pinned on the browser side.
+`--moq-serve` makes the bot bind its own UDP socket (default `[::]:4080`)
+and mint a self-signed cert in-process. The fingerprint goes back to the
+browser via `/start`, which pins it via WebTransport's
+`serverCertificateHashes`. No separate relay process needed.
 
-### Terminal 3 — prebuilt client dev server
+For production-style setups (CA-signed cert, real hostname) you'd pass
+`--moq-cert /path/to/cert.pem --moq-key /path/to/key.pem` and skip
+`--moq-serve` (point at an external relay via `--moq-host`).
+
+### Terminal 2 — prebuilt client dev server
 
 ```bash
 cd ../pipecat-prebuilt/client
@@ -221,12 +205,12 @@ transcript, mic device picker, SessionInfo showing "MoQ".
   caveat for the consumer.
 - **Edited `pipecat-prebuilt/client/src/*`?** Vite hot-reloads
   automatically.
-- **Edited the pipecat bot?** Restart terminal 2.
-- **Cert expired?** Re-run `./scripts/moq-dev-setup.sh ../moq-relay`.
-  The script is idempotent.
+- **Edited the pipecat bot?** Restart terminal 1. The self-signed cert
+  is fresh on every bot start (in-process generation), so no extra
+  cleanup is needed.
 - **Re-ran `pnpm install` in voice-ui-kit?** pnpm restores its own
-  symlink for `@pipecat-ai/client-js`, undoing the dedupe. Re-run the
-  setup script before the next `voice-ui-kit` build.
+  symlink for `@pipecat-ai/client-js`, undoing the dedupe. Re-run
+  `./scripts/moq-dev-setup.sh` before the next `voice-ui-kit` build.
 
 ## 6. Troubleshooting
 
@@ -238,7 +222,7 @@ transcript, mic device picker, SessionInfo showing "MoQ".
 | `Property '_options' is protected` during voice-ui-kit build | Two copies of `@pipecat-ai/client-js` (1.8.x in voice-ui-kit, 1.10.x hoisted in pipecat-client-web-transports). Re-run the setup script before re-trying the build. If you re-ran `pnpm install` in voice-ui-kit after the script, run the script again — pnpm undoes the dedupe symlink. |
 | `npm install` in pipecat-client-web-transports fails with `@parcel/core: Failed to resolve '@pipecat-ai/client-js' from './lib/media-mgmt/mediaManager.ts'` | The workspace's `prepare` scripts try to build every transport, and `small-webrtc-transport` is broken on this branch independently. Add `--ignore-scripts` to the install command (per §2). We only need `moq-transport`'s build, and §3's script does that explicitly. |
 | Browser: "MoqTransport requires `relayUrl`" | `/start` didn't return the `moq` block. Bot probably isn't running with `-t moq`. |
-| WebTransport handshake fails with `net::ERR_QUIC_PROTOCOL_ERROR` | Cert expired (14-day limit) or the fingerprint pinned in the browser doesn't match the cert the relay loaded. Re-run the setup script. |
+| WebTransport handshake fails with `net::ERR_QUIC_PROTOCOL_ERROR` | The fingerprint pinned in the browser doesn't match the cert the bot is presenting. Bot probably restarted (in-process certs are minted fresh each start). Reload the browser tab — `/start` will return the new fingerprint. |
 | `pnpm install` errors with corepack signing-key complaint | Install pnpm globally: `npm install -g --force pnpm@10.14.0`. |
 | Bot crashes with `ModuleNotFoundError: No module named 'websockets'` (or similar) at import time | The Python extras in §2 were incomplete. `uv sync --extra moq` alone isn't enough — the example uses Silero VAD, Deepgram STT, Cartesia TTS, and OpenAI LLM; each of those has its own extra. Re-run the full `uv sync` command from §2. |
 | Stale voice-ui-kit code after editing | `pnpm -F @pipecat-ai/voice-ui-kit build` was skipped or failed. |
