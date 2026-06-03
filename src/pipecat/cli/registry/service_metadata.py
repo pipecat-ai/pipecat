@@ -1039,7 +1039,8 @@ class ServiceRegistry:
             include_params=["api_key"],
             manual_config=True,
             additional_imports=[
-                "from pipecat.services.heygen.api import AvatarQuality, NewSessionRequest"
+                "from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest",
+                "from pipecat.services.heygen.client import ServiceType",
             ],
         ),
         ServiceDefinition(
@@ -1173,9 +1174,10 @@ MANUAL_SERVICE_CONFIGS = {
     "heygen_video": (
         "HeyGenVideoService(\n"
         '    api_key=os.getenv("HEYGEN_API_KEY"),\n'
+        "    service_type=ServiceType.LIVE_AVATAR,\n"
         "    session=session,\n"
-        "    session_request=NewSessionRequest(\n"
-        '        avatar_id="HEYGEN_AVATAR_ID", version="v2", quality=AvatarQuality.high\n'
+        "    session_request=LiveAvatarNewSessionRequest(\n"
+        '        avatar_id="HEYGEN_AVATAR_ID",\n'
         "    ),\n"
         ")"
     ),

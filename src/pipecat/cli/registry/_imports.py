@@ -173,7 +173,8 @@ IMPORTS = {
     # Video Services
     "heygen_video": [
         "from pipecat.services.heygen.video import HeyGenVideoService",
-        "from pipecat.services.heygen.api import AvatarQuality, NewSessionRequest",
+        "from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest",
+        "from pipecat.services.heygen.client import ServiceType",
     ],
     "tavus_video": ["from pipecat.services.tavus.video import TavusVideoService"],
     "simli_video": ["from pipecat.services.simli.video import SimliVideoService"],

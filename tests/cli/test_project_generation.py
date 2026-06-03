@@ -577,10 +577,10 @@ def test_project_generation(config_data, temp_output_dir):
         elif config.video_service == "heygen_video":
             assert "HeyGenVideoService" in bot_content, "HeyGenVideoService should be imported"
             assert "heygen" in pyproject_content, "heygen extra should be in dependencies"
-            assert "NewSessionRequest" in bot_content, (
-                "NewSessionRequest should be imported for HeyGen"
+            assert "LiveAvatarNewSessionRequest" in bot_content, (
+                "LiveAvatarNewSessionRequest should be imported for HeyGen"
             )
-            assert "AvatarQuality" in bot_content, "AvatarQuality should be imported for HeyGen"
+            assert "ServiceType" in bot_content, "ServiceType should be imported for HeyGen"
         elif config.video_service == "simli_video":
             assert "SimliVideoService" in bot_content, "SimliVideoService should be imported"
             assert "simli" in pyproject_content, "simli extra should be in dependencies"
