@@ -873,5 +873,63 @@ def test_run_bot_signature_uniform_across_modes(temp_output_dir):
     assert sig in dout
 
 
+def _gen_websocket_bot(temp_output_dir, name="ws"):
+    """Generate a web cascade bot over the websocket transport and return its path."""
+    path = temp_output_dir / name
+    if path.exists():
+        shutil.rmtree(path)
+    ProjectGenerator(
+        ProjectConfig(
+            project_name=name,
+            bot_type="web",
+            transports=["websocket"],
+            mode="cascade",
+            stt_service="deepgram_stt",
+            llm_service="openai_llm",
+            tts_service="cartesia_tts",
+        )
+    ).generate(output_dir=temp_output_dir)
+    return path
+
+
+def test_websocket_transport_generation(temp_output_dir):
+    """The websocket transport builds via create_transport with the FastAPI websocket
+    params and a Protobuf serializer (set by the factory), on the unified collapsed path."""
+    path = _gen_websocket_bot(temp_output_dir)
+    assert_server_ruff_clean(path / "server")
+    assert_server_ruff_lint_clean(path / "server")
+    bot = (path / "server" / "bot.py").read_text()
+
+    # Imports: params class + serializer + create_transport (not the transport class).
+    assert "from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams" in bot
+    assert "from pipecat.serializers.protobuf import ProtobufFrameSerializer" in bot
+    assert "from pipecat.runner.utils import create_transport" in bot
+
+    # Collapsed path: a transport_params dict keyed by "websocket" + create_transport.
+    assert "transport_params = {" in bot
+    assert '"websocket": lambda: FastAPIWebsocketParams(' in bot
+    assert "serializer=ProtobufFrameSerializer()" in bot
+    assert "await create_transport(runner_args, transport_params)" in bot
+    assert "match runner_args" not in bot
+
+    ast.parse(bot)
+
+
+def test_env_example_lists_selected_service_keys(temp_output_dir):
+    """server/.env.example documents the env vars for exactly the selected services."""
+    path = _gen_websocket_bot(temp_output_dir, "wsenv")
+    env_example = (path / "server" / ".env.example").read_text()
+
+    # Header + the API keys for the chosen STT/LLM/TTS providers.
+    assert "Environment Variables" in env_example
+    assert "DEEPGRAM_API_KEY=" in env_example
+    assert "OPENAI_API_KEY=" in env_example
+    assert "CARTESIA_API_KEY=" in env_example
+
+    # No env vars for providers we didn't pick.
+    assert "ELEVENLABS_API_KEY" not in env_example
+    assert "ANTHROPIC_API_KEY" not in env_example
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

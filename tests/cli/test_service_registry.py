@@ -320,3 +320,85 @@ class TestServiceLoader:
             assert "api_key" in video_service.include_params, (
                 f"{video_service.value} should include api_key param"
             )
+
+
+class TestExternalTurnDetection:
+    """Test uses_external_turn_detection and its effect on generated imports."""
+
+    def test_standard_stt_does_not_use_external_turn(self):
+        assert ServiceLoader.uses_external_turn_detection("deepgram_stt") is False
+
+    def test_external_turn_stt_services(self):
+        # Services that drive their own end-of-turn detection.
+        assert ServiceLoader.uses_external_turn_detection("deepgram_flux_stt") is True
+        assert ServiceLoader.uses_external_turn_detection("cartesia_turns_stt") is True
+
+    def test_none_and_unknown_stt(self):
+        assert ServiceLoader.uses_external_turn_detection(None) is False
+        assert ServiceLoader.uses_external_turn_detection("nonexistent_stt") is False
+
+    def test_external_turn_strategies_import_branch(self):
+        """ExternalUserTurnStrategies is imported only for external-turn STT services."""
+        base = {"llm": "openai_llm", "tts": "cartesia_tts"}
+
+        standard = "\n".join(
+            ServiceLoader.get_imports_for_services(
+                {"transports": ["daily"], "stt": "deepgram_stt", **base}, {}, "web"
+            )
+        )
+        assert "ExternalUserTurnStrategies" not in standard
+
+        external = "\n".join(
+            ServiceLoader.get_imports_for_services(
+                {"transports": ["daily"], "stt": "deepgram_flux_stt", **base}, {}, "web"
+            )
+        )
+        assert "ExternalUserTurnStrategies" in external
+
+
+class TestTransportImportBranching:
+    """Test the dial-out / SIP branching in get_imports_for_services.
+
+    Most transports build via create_transport() and queue an LLMRunFrame on
+    connect. Dial-out and Twilio+Daily SIP keep a bespoke hand-built transport,
+    and dial-out additionally waits for the callee instead of kicking off the LLM.
+    """
+
+    BASE = {"stt": "deepgram_stt", "llm": "openai_llm", "tts": "cartesia_tts"}
+
+    def _imports(self, transport):
+        services = {"transports": [transport], **self.BASE}
+        return "\n".join(ServiceLoader.get_imports_for_services(services, {}, "web"))
+
+    @pytest.mark.parametrize(
+        "transport,expects_create_transport",
+        [
+            ("daily", True),
+            ("daily_pstn_dialin", True),  # dial-in is collapsed onto create_transport
+            ("daily_pstn_dialout", False),  # bespoke hand-built transport
+            ("twilio_daily_sip_dialin", False),
+            ("twilio_daily_sip_dialout", False),
+        ],
+    )
+    def test_create_transport_import_branch(self, transport, expects_create_transport):
+        imports = self._imports(transport)
+        # create_transport is imported as a bare symbol; check the import line.
+        has_import = any(
+            line.strip().endswith("create_transport") or "import create_transport" in line
+            for line in imports.splitlines()
+        )
+        assert has_import is expects_create_transport
+
+    @pytest.mark.parametrize(
+        "transport,expects_llm_run_frame",
+        [
+            ("daily", True),
+            ("daily_pstn_dialin", True),
+            ("twilio_daily_sip_dialin", True),  # dial-in still kicks off the LLM
+            ("daily_pstn_dialout", False),  # dial-out waits for the callee
+            ("twilio_daily_sip_dialout", False),
+        ],
+    )
+    def test_llm_run_frame_import_branch(self, transport, expects_llm_run_frame):
+        imports = self._imports(transport)
+        assert ("LLMRunFrame" in imports) is expects_llm_run_frame
